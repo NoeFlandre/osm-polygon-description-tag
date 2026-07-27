@@ -1,9 +1,20 @@
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from shapely.geometry import Polygon
 
-from osm_polygon_description_tag.cli import create_parser, run
+from osm_polygon_description_tag.cli import (
+    create_parser,
+    handle_inspect,
+    handle_publish_plan,
+    handle_validate,
+    run,
+)
 from osm_polygon_description_tag.config import DEFAULT_SOURCE_ROOT
+from osm_polygon_description_tag.storage import write_geoparquet
+from tests.conftest import make_record_dict
 
 
 def test_subcommands_are_frozen() -> None:
@@ -60,3 +71,150 @@ def test_failure_exits_non_zero_with_actionable_stderr(
     assert exit_code != 0
     assert captured.err.strip() != ""
     assert captured.err.startswith("error:")
+
+
+def test_inspect_handler_prints_json_summary(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "raw"
+    source.mkdir()
+    (source / "a.osm.pbf").write_bytes(b"x")
+    data = tmp_path / "generated"
+    args = SimpleNamespace(
+        source_root=source,
+        data_root=data,
+        osmium="osmium",
+        export_config=Path("config/osmium-export.json"),
+    )
+
+    exit_code = handle_inspect(args)
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["source_count"] == 1
+    assert payload["sources"][0]["name"] == "a.osm.pbf"
+    assert payload["sources"][0]["output_name"] == "a.parquet"
+
+
+def test_validate_handler_sums_rows(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    source = tmp_path / "raw"
+    data = tmp_path / "generated"
+    (data / "data").mkdir(parents=True)
+    record = make_record_dict(
+        Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+        {"description": "x"},
+        osm_id=1,
+    )
+    write_geoparquet(iter([record]), data / "data" / "a.parquet", batch_size=10)
+    args = SimpleNamespace(
+        source_root=source,
+        data_root=data,
+        osmium="osmium",
+        export_config=Path("config/osmium-export.json"),
+    )
+
+    exit_code = handle_validate(args)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["files"] == 1
+    assert payload["rows"] == 1
+
+
+def test_publish_plan_handler_reports_identity(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    data = tmp_path / "generated"
+    (data / "data").mkdir(parents=True)
+    (data / "manifests").mkdir(parents=True)
+    (data / "README.md").write_text("# Card\n", encoding="utf-8")
+    (data / "stats.json").write_text("{}\n", encoding="utf-8")
+    args = SimpleNamespace(
+        source_root=tmp_path / "raw",
+        data_root=data,
+        osmium="osmium",
+        export_config=Path("config/osmium-export.json"),
+    )
+
+    exit_code = handle_publish_plan(args)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["repo_id"] == "NoeFlandre/osm-polygon-description-tag"
+    assert len(payload["identity_sha256"]) == 64
+    assert any(item["relative_path"] == "README.md" for item in payload["files"])
+
+
+def test_handle_build_one_invokes_pipeline(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "raw"
+    source.mkdir()
+    (source / "region.osm.pbf").write_bytes(b"x")
+    data = tmp_path / "generated"
+
+    fake_result = SimpleNamespace(
+        source_name="region.osm.pbf",
+        output_name="region.parquet",
+        status="built",
+        emitted_features=1,
+        included_rows=1,
+        rejections={"no_nonempty_description": 0},
+        output_path=data / "data" / "region.parquet",
+        manifest_path=data / "manifests" / "region.manifest.json",
+    )
+
+    import osm_polygon_description_tag.cli as cli
+
+    monkeypatch.setattr(cli, "build_one", lambda *args, **kwargs: fake_result)
+
+    args = SimpleNamespace(
+        basename="region.osm.pbf",
+        source_root=source,
+        data_root=data,
+        osmium="osmium",
+        export_config=Path("config/osmium-export.json"),
+    )
+
+    exit_code = cli.handle_build_one(args)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["source_name"] == "region.osm.pbf"
+    assert payload["status"] == "built"
+
+
+def test_handle_publish_invokes_execute_upload(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    data = tmp_path / "generated"
+    (data / "data").mkdir(parents=True)
+    (data / "manifests").mkdir(parents=True)
+    (data / "README.md").write_text("# Card\n", encoding="utf-8")
+    (data / "stats.json").write_text("{}\n", encoding="utf-8")
+
+    import osm_polygon_description_tag.cli as cli
+
+    captured: list[list[str]] = []
+
+    def fake_execute(plan, *, confirmation, runner=None):  # type: ignore[no-untyped-def]
+        captured.append([plan.repo_id, confirmation])
+
+    monkeypatch.setattr(cli, "execute_upload", fake_execute)
+
+    args = SimpleNamespace(
+        plan="abc",
+        confirm="abc",
+        source_root=tmp_path / "raw",
+        data_root=data,
+        osmium="osmium",
+        export_config=Path("config/osmium-export.json"),
+    )
+
+    exit_code = cli.handle_publish(args)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert captured == [["NoeFlandre/osm-polygon-description-tag", "abc"]]
+    assert payload["repo_id"] == "NoeFlandre/osm-polygon-description-tag"

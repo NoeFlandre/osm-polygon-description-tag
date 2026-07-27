@@ -7,7 +7,7 @@ from shapely.geometry import Polygon
 
 from osm_polygon_description_tag.config import Paths
 from osm_polygon_description_tag.discovery import Source, discover_sources
-from osm_polygon_description_tag.extraction import ExportRecord
+from osm_polygon_description_tag.extraction import ExportRecord, OsmiumExportError
 from osm_polygon_description_tag.manifest import read_manifest
 from osm_polygon_description_tag.pipeline import BuildResult, build_all, build_one
 from osm_polygon_description_tag.storage import write_geoparquet
@@ -216,3 +216,89 @@ def test_build_all_stops_on_first_failure(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="infrastructure failure"):
         build_all(sources, build=build)
     assert calls == ["a.osm.pbf", "b.osm.pbf"]
+
+
+def test_build_one_default_exporter_attempts_real_osmium(tmp_path: Path) -> None:
+    paths, source = _setup(tmp_path)
+
+    with pytest.raises(OsmiumExportError):
+        # No injected exporter: the default closure invokes stream_export, which
+        # fails because the real osmium binary is not installed in the test env.
+        build_one(
+            source,
+            paths,
+            export_config=Path("config/osmium-export.json"),
+            writer=_FakeWriter(),
+            clock=_frozen_clock,
+        )
+
+
+def test_build_one_rejects_symlink_source(tmp_path: Path) -> None:
+    source_root = tmp_path / "raw"
+    data_root = tmp_path / "generated"
+    source_root.mkdir()
+    target = tmp_path / "external.osm.pbf"
+    target.write_bytes(b"x")
+    link = source_root / "region.osm.pbf"
+    link.symlink_to(target)
+    paths = Paths(source_root=source_root, data_root=data_root)
+    source = Source(
+        link,
+        "region.osm.pbf",
+        "region.parquet",
+        link.stat().st_size,
+        link.stat().st_mtime_ns,
+    )
+
+    with pytest.raises(Exception, match="symlink|regular"):
+        build_one(
+            source,
+            paths,
+            export_config=Path("config/osmium-export.json"),
+            exporter=lambda *_: iter([_described()]),
+            writer=_FakeWriter(),
+            clock=_frozen_clock,
+        )
+
+
+def test_build_one_rejects_source_outside_root(tmp_path: Path) -> None:
+    source_root = tmp_path / "raw"
+    data_root = tmp_path / "generated"
+    source_root.mkdir()
+    foreign = tmp_path / "elsewhere.osm.pbf"
+    foreign.write_bytes(b"x")
+    paths = Paths(source_root=source_root, data_root=data_root)
+    source = Source(foreign, "elsewhere.osm.pbf", "elsewhere.parquet", 1, 1)
+
+    with pytest.raises(Exception, match="inside|source root"):
+        build_one(
+            source,
+            paths,
+            export_config=Path("config/osmium-export.json"),
+            exporter=lambda *_: iter([_described()]),
+            writer=_FakeWriter(),
+            clock=_frozen_clock,
+        )
+
+
+def test_build_one_records_osmium_version_when_provided(tmp_path: Path) -> None:
+    paths, source = _setup(tmp_path)
+    fake_writer = _FakeWriter()
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            "osm_polygon_description_tag.pipeline.safe_osmium_version",
+            lambda executable: f"osmium version test ({executable})",
+        )
+        result = build_one(
+            source,
+            paths,
+            export_config=Path("config/osmium-export.json"),
+            executable="my-osmium",
+            exporter=lambda *_: iter([_described()]),
+            writer=fake_writer,
+            clock=_frozen_clock,
+        )
+
+    manifest = read_manifest(result.manifest_path)
+    assert manifest.osmium_version == "osmium version test (my-osmium)"

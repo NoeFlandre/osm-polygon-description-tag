@@ -8,7 +8,7 @@ from shapely import to_wkb
 from shapely.geometry import Polygon
 
 from osm_polygon_description_tag.schema import SCHEMA
-from osm_polygon_description_tag.storage import validate_geoparquet, write_geoparquet
+from osm_polygon_description_tag.storage import StorageError, validate_geoparquet, write_geoparquet
 from tests.conftest import make_record_dict
 
 _POLYGON_WKB = to_wkb(Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]), output_dimension=2)
@@ -127,6 +127,179 @@ def test_validate_rejects_wrong_schema(tmp_path: Path) -> None:
 def test_validate_rejects_missing_file(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="missing"):
         validate_geoparquet(tmp_path / "nope.parquet")
+
+
+def test_validate_detects_bbox_mismatch(tmp_path: Path) -> None:
+    target = tmp_path / "bbox.parquet"
+    base_row = {
+        "source_pbf": "r.osm.pbf",
+        "osm_type": "way",
+        "osm_id": 1,
+        "osm_url": "https://www.openstreetmap.org/way/1",
+        "version": 1,
+        "changeset": 1,
+        "timestamp": None,
+        "description": "x",
+        "localized_descriptions": {},
+        "tags": {"description": "x"},
+        "geometry_type": "Polygon",
+        "area_m2": 1.0,
+        "bbox_min_x": 0.0,
+        "bbox_min_y": 0.0,
+        "bbox_max_x": 1.0,
+        "bbox_max_y": 1.0,
+        "geometry": _POLYGON_WKB,
+    }
+    _write_raw_with_meta(target, [base_row], metadata_bbox=[10.0, 10.0, 11.0, 11.0])
+
+    with pytest.raises(StorageError, match="bbox mismatch"):
+        validate_geoparquet(target)
+
+
+def test_validate_detects_geometry_type_drift(tmp_path: Path) -> None:
+    target = tmp_path / "drift.parquet"
+    base_row = {
+        "source_pbf": "r.osm.pbf",
+        "osm_type": "way",
+        "osm_id": 1,
+        "osm_url": "https://www.openstreetmap.org/way/1",
+        "version": 1,
+        "changeset": 1,
+        "timestamp": None,
+        "description": "x",
+        "localized_descriptions": {},
+        "tags": {"description": "x"},
+        "geometry_type": "Polygon",
+        "area_m2": 1.0,
+        "bbox_min_x": 0.0,
+        "bbox_min_y": 0.0,
+        "bbox_max_x": 1.0,
+        "bbox_max_y": 1.0,
+        "geometry": _POLYGON_WKB,
+    }
+    _write_raw_with_meta(target, [base_row], metadata_types=["MultiPolygon"])
+
+    with pytest.raises(StorageError, match="geometry_types mismatch"):
+        validate_geoparquet(target)
+
+
+def test_validate_detects_unordered_bbox(tmp_path: Path) -> None:
+    target = tmp_path / "order.parquet"
+    row = {
+        "source_pbf": "r.osm.pbf",
+        "osm_type": "way",
+        "osm_id": 1,
+        "osm_url": "https://www.openstreetmap.org/way/1",
+        "version": 1,
+        "changeset": 1,
+        "timestamp": None,
+        "description": "x",
+        "localized_descriptions": {},
+        "tags": {"description": "x"},
+        "geometry_type": "Polygon",
+        "area_m2": 1.0,
+        "bbox_min_x": 5.0,
+        "bbox_min_y": 0.0,
+        "bbox_max_x": 1.0,
+        "bbox_max_y": 1.0,
+        "geometry": _POLYGON_WKB,
+    }
+    _write_raw(target, [row])
+
+    with pytest.raises(StorageError, match="bbox min"):
+        validate_geoparquet(target)
+
+
+def test_validate_detects_undecodable_wkb(tmp_path: Path) -> None:
+    target = tmp_path / "badwkb.parquet"
+    row = {
+        "source_pbf": "r.osm.pbf",
+        "osm_type": "way",
+        "osm_id": 1,
+        "osm_url": "https://www.openstreetmap.org/way/1",
+        "version": 1,
+        "changeset": 1,
+        "timestamp": None,
+        "description": "x",
+        "localized_descriptions": {},
+        "tags": {"description": "x"},
+        "geometry_type": "Polygon",
+        "area_m2": 1.0,
+        "bbox_min_x": 0.0,
+        "bbox_min_y": 0.0,
+        "bbox_max_x": 1.0,
+        "bbox_max_y": 1.0,
+        "geometry": b"not-a-wkb",
+    }
+    _write_raw(target, [row])
+
+    with pytest.raises(StorageError, match="undecodable"):
+        validate_geoparquet(target)
+
+
+def test_validate_detects_mixed_source_pbf(tmp_path: Path) -> None:
+    target = tmp_path / "mixed.parquet"
+    base = {
+        "osm_type": "way",
+        "osm_url": "https://www.openstreetmap.org/way/",
+        "version": 1,
+        "changeset": 1,
+        "timestamp": None,
+        "description": "x",
+        "localized_descriptions": {},
+        "tags": {"description": "x"},
+        "geometry_type": "Polygon",
+        "area_m2": 1.0,
+        "bbox_min_x": 0.0,
+        "bbox_min_y": 0.0,
+        "bbox_max_x": 1.0,
+        "bbox_max_y": 1.0,
+        "geometry": _POLYGON_WKB,
+    }
+    _write_raw(
+        target,
+        [
+            {
+                **base,
+                "osm_id": 1,
+                "osm_url": "https://www.openstreetmap.org/way/1",
+                "source_pbf": "a.osm.pbf",
+            },
+            {
+                **base,
+                "osm_id": 2,
+                "osm_url": "https://www.openstreetmap.org/way/2",
+                "source_pbf": "b.osm.pbf",
+            },
+        ],
+    )
+
+    with pytest.raises(StorageError, match="mixed source_pbf"):
+        validate_geoparquet(target)
+
+
+def _write_raw_with_meta(
+    target: Path,
+    rows: list[dict[str, object]],
+    *,
+    metadata_types: list[str] | None = None,
+    metadata_bbox: list[float] | None = None,
+) -> None:
+    table = pa.Table.from_pylist(rows, schema=SCHEMA)
+    geo = {
+        "version": "1.1.0",
+        "primary_column": "geometry",
+        "columns": {
+            "geometry": {
+                "encoding": "WKB",
+                "geometry_types": metadata_types or ["Polygon"],
+                "bbox": metadata_bbox if metadata_bbox is not None else [0.0, 0.0, 1.0, 1.0],
+            }
+        },
+    }
+    schema_geo = SCHEMA.with_metadata({b"geo": json.dumps(geo).encode("utf-8")})
+    with pq.ParquetWriter(target, schema_geo, compression="zstd") as writer:
+        writer.write_table(table)
 
 
 def _write_raw(target: Path, rows: list[dict[str, object]]) -> None:
