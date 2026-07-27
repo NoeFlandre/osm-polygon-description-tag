@@ -1,0 +1,80 @@
+[project]
+name = "osm-polygon-description-tag"
+version = "0.1.0"
+description = "Reproducible GeoParquet of OpenStreetMap polygons with description tags."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "Noé Flandre" }]
+license = "Apache-2.0"
+keywords = ["openstreetmap", "geoparquet", "geospatial", "dataset"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Typing :: Typed",
+]
+dependencies = [
+    "pyarrow>=20,<22",
+    "pyproj>=3.7,<4",
+    "pyyaml>=6,<7",
+    "shapely>=2.1,<3",
+]
+
+[project.scripts]
+osm-polygon-description-tag = "osm_polygon_description_tag.cli:run"
+
+[project.urls]
+Source = "https://github.com/NoeFlandre/osm-polygon-description-tag"
+Issues = "https://github.com/NoeFlandre/osm-polygon-description-tag/issues"
+Dataset = "https://huggingface.co/datasets/NoeFlandre/osm-polygon-description-tag"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/osm_polygon_description_tag"]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.17,<2",
+    "pytest>=8.4,<9",
+    "pytest-cov>=6.2,<7",
+    "ruff>=0.12,<0.13",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = ["integration: requires the external osmium binary"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "S", "TID"]
+ignore = ["S101"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["osm_polygon_description_tag"]
+
+[tool.coverage.run]
+branch = true
+source = ["osm_polygon_description_tag"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+
