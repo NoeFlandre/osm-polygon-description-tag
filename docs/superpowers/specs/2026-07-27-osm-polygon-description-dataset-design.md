@@ -4,7 +4,7 @@
 
 Build a public, reproducible dataset of OpenStreetMap polygons carrying at least
 one non-empty `description` or `description:<suffix>` tag. The dataset contains
-closed ways selected by standard OSM area rules and successfully assembled
+closed ways selected by a public, versioned OSM area policy and successfully assembled
 `type=multipolygon` or `type=boundary` relations. Nodes, open ways, and closed
 linear ways are out of scope.
 
@@ -52,19 +52,31 @@ must disclose this.
 
 ## Chosen Architecture
 
-The pipeline streams `osmium export` GeoJSON Text Sequences into Python.
-`osmium export` is responsible for standard OSM area classification and
-assembly of polygon and multipolygon geometries. Python is responsible for
+The pipeline streams `osmium export` PostgreSQL COPY records into Python. This
+format keeps geometry, OSM metadata, and the complete tag JSON in separate
+fields, avoiding collisions between arbitrary OSM tag keys and exported
+attribute names. `osmium export` is responsible for area assembly. Python is
+responsible for applying the repository's versioned area-policy configuration,
 description filtering, normalized fields, geodesic area, bounded Arrow
 batches, GeoParquet output, validation, manifests, statistics, and generated
 documentation.
 
 This architecture was selected over:
 
-1. Pure PyOsmium, which would require this project to own and maintain the
-   standard closed-way area rule set.
+1. Pure PyOsmium, which would require custom area assembly in addition to the
+   closed-way classification policy.
 2. A full intermediate GeoJSON export, which would add unnecessary disk usage
    and I/O for the current source inventory.
+
+OSM does not publish one exhaustive machine-readable list that unambiguously
+classifies every closed way as polygonal or linear. The repository therefore
+pins and tests an explicit policy based on the official `osmium-tool` export
+example: `area=yes` is polygonal, `area=no` is linear, common linear keys such
+as `highway`, `barrier`, and `natural=coastline` are linear, and common area
+keys such as `aeroway`, `amenity`, `building`, `landuse`, `leisure`,
+`man_made`, and non-coastline `natural` are polygonal. Polygon/boundary
+relations remain areas by OSM convention. The exact policy is public dataset
+provenance and changes to it require a schema/policy version change and tests.
 
 The external `osmium-tool` binary is an explicit preflight dependency. Python
 dependencies and developer tooling are managed with `uv`. Shell pipelines and
@@ -74,7 +86,7 @@ shell interpolation are not part of the implementation.
 
 A record is included only when all of the following are true:
 
-1. It comes from a closed way classified as an area by standard OSM rules, or
+1. It comes from a closed way classified as an area by the versioned policy, or
    from a `type=multipolygon` or `type=boundary` relation.
 2. `osmium export` successfully emits Polygon or MultiPolygon geometry.
 3. At least one tag key is exactly `description` or begins with
@@ -129,10 +141,11 @@ writing and rejects any output path contained by the source directory.
 
 ### Extraction
 
-Extraction invokes a checked `osmium` executable with an explicit export
-configuration. It consumes stdout as a bounded stream, captures stderr
-separately, checks the exit status, and terminates cleanly on downstream
-failure. No command is assembled through a shell.
+Extraction invokes a checked `osmium` executable with the versioned export
+configuration. It consumes PostgreSQL COPY text from stdout as a bounded
+stream, preserving tags as their own JSON field, captures stderr separately,
+checks the exit status, and terminates cleanly on downstream failure. No
+command is assembled through a shell.
 
 ### Transformation
 
