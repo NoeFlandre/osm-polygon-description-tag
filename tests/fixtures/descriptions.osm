@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synthetic OSM fixture for the end-to-end integration test.
+  This file is committed as documentation/provenance only. The integration
+  test that exercises the real osmium binary currently skips in environments
+  where osmium is not installed.
+-->
+<osm version="0.6" generator="osm-polygon-description-tag-synthetic">
+  <node id="1" lat="0.0" lon="0.0"/>
+  <node id="2" lat="0.0" lon="0.001"/>
+  <node id="3" lat="0.001" lon="0.001"/>
+  <node id="4" lat="0.001" lon="0.0"/>
+  <node id="5" lat="2.0" lon="2.0"/>
+  <node id="6" lat="2.0" lon="2.001"/>
+  <node id="7" lat="2.001" lon="2.001"/>
+  <node id="8" lat="2.001" lon="2.0"/>
+  <node id="9" lat="10.0" lon="10.0"/>
+  <node id="10" lat="10.0" lon="10.002"/>
+  <node id="11" lat="10.002" lon="10.002"/>
+  <node id="12" lat="10.002" lon="10.0"/>
+  <node id="13" lat="10.0005" lon="10.0005"/>
+  <node id="14" lat="10.0005" lon="10.0015"/>
+  <node id="15" lat="10.0015" lon="10.0015"/>
+  <node id="16" lat="10.0015" lon="10.0005"/>
+  <node id="17" lat="20.0" lon="20.0"/>
+  <node id="18" lat="20.0" lon="20.001"/>
+  <node id="19" lat="20.001" lon="20.001"/>
+  <node id="20" lat="20.001" lon="20.0"/>
+  <node id="21" lat="5.0" lon="5.0"/>
+  <node id="22" lat="5.001" lon="5.0"/>
+  <node id="23" lat="5.001" lon="5.001"/>
+  <node id="24" lat="5.0" lon="5.001"/>
+
+  <!-- Eligible closed way: building polygon with description -->
+  <way id="100">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <nd ref="3"/>
+    <nd ref="4"/>
+    <nd ref="1"/>
+    <tag k="building" v="yes"/>
+    <tag k="description" v="Eligible building"/>
+  </way>
+
+  <!-- Closed linear way (barrier) WITH description: included by area policy? No, barrier is linear -->
+  <way id="101">
+    <nd ref="5"/>
+    <nd ref="6"/>
+    <nd ref="7"/>
+    <nd ref="8"/>
+    <nd ref="5"/>
+    <tag k="barrier" v="fence"/>
+    <tag k="description" v="A fence (linear)"/>
+  </way>
+
+  <!-- Closed way with area=no: linear despite being closed -->
+  <way id="102">
+    <nd ref="17"/>
+    <nd ref="18"/>
+    <nd ref="19"/>
+    <nd ref="20"/>
+    <nd ref="17"/>
+    <tag k="area" v="no"/>
+    <tag k="highway" v="pedestrian"/>
+    <tag k="description" v="Closed but area=no"/>
+  </way>
+
+  <!-- Open described way: excluded (not closed) -->
+  <way id="103">
+    <nd ref="21"/>
+    <nd ref="22"/>
+    <nd ref="23"/>
+    <tag k="highway" v="residential"/>
+    <tag k="description" v="Open road"/>
+  </way>
+
+  <!-- Multipolygon relation with inner ring -->
+  <way id="200">
+    <nd ref="9"/>
+    <nd ref="10"/>
+    <nd ref="11"/>
+    <nd ref="12"/>
+    <nd ref="9"/>
+    <tag k="natural" v="water"/>
+  </way>
+  <way id="201">
+    <nd ref="13"/>
+    <nd ref="14"/>
+    <nd ref="15"/>
+    <nd ref="16"/>
+    <nd ref="13"/>
+  </way>
+  <relation id="500">
+    <member type="way" ref="200" role="outer"/>
+    <member type="way" ref="201" role="inner"/>
+    <tag k="type" v="multipolygon"/>
+    <tag k="description:en" v="Lake with island"/>
+  </relation>
+
+  <!-- Whitespace-only description: excluded by non-empty rule -->
+  <way id="300">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <nd ref="3"/>
+    <nd ref="4"/>
+    <nd ref="1"/>
+    <tag k="building" v="yes"/>
+    <tag k="description" v="   "/>
+    <tag k="description:pt-BR" v="Com espaço"/>
+  </way>
+
+  <!-- Irrelevant node -->
+  <node id="999" lat="30.0" lon="30.0"/>
+</osm>
