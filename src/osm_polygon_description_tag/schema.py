@@ -33,23 +33,26 @@ SCHEMA = pa.schema(
 
 
 def geo_metadata(geometry_types: list[str], bbox: list[float]) -> dict[str, object]:
-    """Build the GeoParquet 1.1 ``geo`` metadata block for the ``geometry`` column."""
+    """Build the GeoParquet 1.1 ``geo`` metadata block for the ``geometry`` column.
+
+    ``bbox`` is omitted when empty (e.g. an empty file) since there is no extent.
+    """
+    column: dict[str, object] = {
+        "encoding": "WKB",
+        "geometry_types": sorted(set(geometry_types)),
+        "covering": {
+            "bbox": {
+                "xmin": ["bbox_min_x"],
+                "ymin": ["bbox_min_y"],
+                "xmax": ["bbox_max_x"],
+                "ymax": ["bbox_max_y"],
+            }
+        },
+    }
+    if bbox:
+        column["bbox"] = bbox
     return {
         "version": "1.1.0",
         "primary_column": "geometry",
-        "columns": {
-            "geometry": {
-                "encoding": "WKB",
-                "geometry_types": sorted(set(geometry_types)),
-                "bbox": bbox,
-                "covering": {
-                    "bbox": {
-                        "xmin": ["bbox_min_x"],
-                        "ymin": ["bbox_min_y"],
-                        "xmax": ["bbox_max_x"],
-                        "ymax": ["bbox_max_y"],
-                    }
-                },
-            }
-        },
+        "columns": {"geometry": column},
     }
