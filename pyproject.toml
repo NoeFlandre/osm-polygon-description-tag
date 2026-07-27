@@ -71,7 +71,7 @@ strict = true
 packages = ["osm_polygon_description_tag"]
 
 [[tool.mypy.overrides]]
-module = "shapely.*"
+module = ["shapely.*", "pyarrow.*"]
 ignore_missing_imports = true
 
 [tool.coverage.run]
