@@ -95,10 +95,6 @@ def test_cli_uses_packaged_resources_from_unrelated_cwd(tmp_path: Path) -> None:
                 "run-and-publish",
                 "--confirm-repo",
                 "NoeFlandre/osm-polygon-description-tag",
-                "--preflight",
-                "stub",
-                "--upload-runner",
-                "stub",
             ]
         )
         # Argument parsing succeeds from an unrelated cwd; resources resolve.

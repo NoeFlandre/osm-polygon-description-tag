@@ -38,7 +38,13 @@ from osm_polygon_description_tag.manifest import (
 from osm_polygon_description_tag.storage import StorageError, validate_geoparquet
 
 REPO_ID = "NoeFlandre/osm-polygon-description-tag"
-_ALLOWED_TOP_LEVEL = {"README.md", "stats.json", "data", "manifests", "publication-plans"}
+_ALLOWED_TOP_LEVEL = {
+    "README.md",
+    "stats.json",
+    "data",
+    "manifests",
+    "publication-state.json",
+}
 _UPLOAD_COMMAND_TEMPLATE: tuple[str, ...] = (
     "hf",
     "upload-large-folder",
@@ -255,18 +261,39 @@ def _default_runner_with_retry(
     backoff_seconds: float = DEFAULT_BACKOFF_SECONDS,
     backoff_factor: float = DEFAULT_BACKOFF_FACTOR,
     backoff_cap_seconds: float = DEFAULT_BACKOFF_CAP_SECONDS,
+    timeout: float | None = None,
+    _runner: Callable[[list[str], float | None], None] | None = None,
 ) -> None:
-    """Default ``hf`` runner with bounded exponential backoff on retryable errors."""
+    """Default ``hf`` runner with bounded exponential backoff on retryable errors.
+
+    ``timeout`` defaults to ``None`` (no overall timeout) so healthy resumable
+    uploads are not killed at five minutes. Callers may pass a positive value
+    for explicit termination.
+
+    ``_runner`` is a private hook for tests; production code uses
+    :func:`subprocess.run`.
+    """
     attempt = 0
     delay = backoff_seconds
-    while True:
-        try:
+
+    def _invoke() -> None:
+        if _runner is None:
             subprocess.run(  # noqa: S603 - controlled argument array, no shell
                 command,
                 check=True,
                 shell=False,
+                timeout=timeout,
             )
             return
+        _runner(command, timeout)
+
+    while True:
+        try:
+            _invoke()
+            return
+        except KeyboardInterrupt:
+            # Ctrl-C must never be retried.
+            raise
         except subprocess.CalledProcessError as error:
             retryable, exit_code, kind = _classify_failure(error)
             if not retryable or attempt >= max_retries:
@@ -274,6 +301,13 @@ def _default_runner_with_retry(
             attempt += 1
             time.sleep(min(delay, backoff_cap_seconds))
             delay *= backoff_factor
+        except subprocess.TimeoutExpired as error:
+            if attempt >= max_retries:
+                raise
+            attempt += 1
+            time.sleep(min(delay, backoff_cap_seconds))
+            delay *= backoff_factor
+            _ = error
 
 
 def execute_upload(

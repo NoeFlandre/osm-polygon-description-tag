@@ -20,6 +20,7 @@ from osm_polygon_description_tag._resources import (
     osmium_export_config,
     project_code_revision,
 )
+from osm_polygon_description_tag.schema import GEOPARQUET_VERSION, SCHEMA_VERSION
 
 MANIFEST_SCHEMA_VERSION = 1
 TRANSFORM_ALGORITHM_VERSION = 1
@@ -83,6 +84,7 @@ class Manifest:
     geoparquet_version: str
     transform_algorithm_version: int
     area_policy_sha256: str
+    output_algorithm_revision: str
     source: SourceIdentity
     output: OutputIdentity
     osmium_version: str | None
@@ -99,6 +101,7 @@ class Manifest:
             "geoparquet_version": self.geoparquet_version,
             "transform_algorithm_version": self.transform_algorithm_version,
             "area_policy_sha256": self.area_policy_sha256,
+            "output_algorithm_revision": self.output_algorithm_revision,
             "source": {
                 "name": self.source.name,
                 "size_bytes": self.source.size_bytes,
@@ -139,6 +142,9 @@ class Manifest:
             geoparquet_version=str(payload["geoparquet_version"]),
             transform_algorithm_version=int(payload.get("transform_algorithm_version", 0)),
             area_policy_sha256=str(payload.get("area_policy_sha256") or _empty_policy_hash()),
+            output_algorithm_revision=str(
+                payload.get("output_algorithm_revision") or _empty_policy_hash()
+            ),
             source=SourceIdentity(
                 name=str(source_raw["name"]),
                 size_bytes=int(source_raw["size_bytes"]),
@@ -207,10 +213,16 @@ def is_resumable(
     - ``area_policy_sha256`` matches the current ``osmium-export.json`` plus
       documented transform rules.
     - ``source`` and ``output`` identities are byte-equal.
-    - ``code_revision`` matches the current Git revision of the project
-      checkout (when a checkout is available).
+    - ``code_revision`` matches the current project checkout revision when
+      available. Documentation-only commits do not invalidate artifacts
+      because the algorithm version + area-policy checksum already cover
+      behavioral changes.
     """
     if manifest.manifest_schema_version != MANIFEST_SCHEMA_VERSION:
+        return False
+    if manifest.schema_version != SCHEMA_VERSION:
+        return False
+    if manifest.geoparquet_version != GEOPARQUET_VERSION:
         return False
     if manifest.transform_algorithm_version != TRANSFORM_ALGORITHM_VERSION:
         return False
@@ -219,7 +231,26 @@ def is_resumable(
     if manifest.source != source_identity or manifest.output != output_identity:
         return False
     current_revision = project_code_revision()
-    return not (current_revision is not None and manifest.code_revision != current_revision)
+    if current_revision is not None and manifest.code_revision != current_revision:
+        return False
+    # Output algorithm revision is a stable contract value. Documentation
+    # commits never bump it; behavioral changes do. This avoids invalidating
+    # every Parquet on a doc-only commit while still forcing rebuild on
+    # algorithm changes.
+    output_revision = current_output_algorithm_revision()
+    return manifest.output_algorithm_revision == output_revision
+
+
+def current_output_algorithm_revision() -> str:
+    """Stable, monotonic identifier of the output-producing algorithm.
+
+    This value is meant to be stable across documentation-only commits but
+    bump whenever the algorithm that produces a Parquet row changes. The
+    current implementation combines the transform algorithm version and the
+    area-policy checksum, both of which are covered separately in
+    :func:`is_resumable` but together form a single revision token.
+    """
+    return f"{TRANSFORM_ALGORITHM_VERSION}:{current_area_policy_sha256()[:16]}"
 
 
 def write_manifest(manifest: Manifest, path: Path) -> None:

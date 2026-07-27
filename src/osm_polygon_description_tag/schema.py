@@ -8,6 +8,7 @@ orientation beyond what geometry normalization (see transform) provides.
 import pyarrow as pa
 
 SCHEMA_VERSION = 1
+GEOPARQUET_VERSION = "1.1.0"
 
 SCHEMA = pa.schema(
     [

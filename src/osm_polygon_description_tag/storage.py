@@ -183,14 +183,25 @@ def _read_geo_metadata(schema: pa.Schema) -> dict[str, Any]:
 
 
 class _UniquenessIndex:
-    """Disk-backed primary-key uniqueness check backed by a temporary SQLite table."""
+    """Disk-backed primary-key uniqueness check backed by an owned SQLite file.
+
+    The SQLite database is created in an explicitly owned temporary directory
+    (``<temp>/.osm-validate-<uuid>/uniqueness.db``) so the OS reclaims the
+    file when the process exits and so memory stays bounded regardless of
+    row count.
+    """
 
     def __init__(self) -> None:
-        self._connection = sqlite3.connect(":memory:")
+        import tempfile
+
+        self._temp_dir = tempfile.mkdtemp(prefix=".osm-validate-")
+        self.db_path = Path(self._temp_dir) / "uniqueness.db"
+        self._connection = sqlite3.connect(str(self.db_path))
         self._connection.execute(
             "CREATE TABLE pk (osm_type TEXT NOT NULL, osm_id INTEGER NOT NULL, "
             "PRIMARY KEY (osm_type, osm_id))"
         )
+        self._closed = False
 
     def check_and_add(self, osm_type: str, osm_id: int) -> None:
         try:
@@ -201,7 +212,21 @@ class _UniquenessIndex:
             raise StorageError(f"duplicate (osm_type, osm_id): ({osm_type!r}, {osm_id})") from error
 
     def close(self) -> None:
-        self._connection.close()
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._connection.close()
+        finally:
+            import shutil
+
+            shutil.rmtree(self._temp_dir, ignore_errors=True)
+
+    def __enter__(self) -> _UniquenessIndex:
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        self.close()
 
 
 def validate_geoparquet(path: Path) -> int:

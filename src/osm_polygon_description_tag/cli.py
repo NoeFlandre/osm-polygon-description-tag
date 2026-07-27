@@ -190,7 +190,7 @@ def handle_publish_plan(args: argparse.Namespace) -> int:
 def handle_publish(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
     plan = create_upload_plan(paths.data_root)
-    execute_upload(plan, confirmation=args.plan, runner=args.publisher)
+    execute_upload(plan, confirmation=args.plan)
     _print_json({"repo_id": plan.repo_id, "identity_sha256": plan.identity_sha256})
     return 0
 
@@ -200,9 +200,6 @@ def handle_run_and_publish(args: argparse.Namespace) -> int:
     report = run_and_publish(
         paths=paths,
         confirm_repo=args.confirm_repo,
-        preflight=args.preflight,
-        upload_runner=args.upload_runner,
-        clock=args.clock,
     )
     _print_json(report.to_payload())
     return 0
@@ -246,11 +243,6 @@ def create_parser() -> argparse.ArgumentParser:
     sub.add_argument(
         "--plan", required=True, help="Plan identity SHA-256 (must match freshly computed identity)"
     )
-    sub.add_argument(
-        "--publisher",
-        default=None,
-        help="Test hook: callable receiving [command list] (executed in-process)",
-    )
     sub.set_defaults(handler=handle_publish)
 
     sub = subparsers.add_parser(
@@ -263,17 +255,6 @@ def create_parser() -> argparse.ArgumentParser:
         required=True,
         help="Exact dataset repo id (must equal NoeFlandre/osm-polygon-description-tag)",
     )
-    sub.add_argument(
-        "--preflight",
-        default=None,
-        help="Test hook: callable returning a structured preflight report",
-    )
-    sub.add_argument(
-        "--upload-runner",
-        default=None,
-        help="Test hook: callable receiving [command list] and returning remote revision",
-    )
-    sub.add_argument("--clock", default=None, help="Test hook: callable returning an ISO timestamp")
     sub.set_defaults(handler=handle_run_and_publish)
 
     return parser

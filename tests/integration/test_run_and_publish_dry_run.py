@@ -97,6 +97,7 @@ def test_run_and_publish_resume_after_interrupt(tmp_path: Path) -> None:
             upload_runner=fail_on_b,
             clock=_frozen_clock,
             exporter=exporter,
+            verifier=lambda repo_id, files: "verified-rev",
         )
 
     # State should record "a.osm.pbf" as published; "b" should still be missing.
@@ -120,6 +121,7 @@ def test_run_and_publish_resume_after_interrupt(tmp_path: Path) -> None:
         upload_runner=succeed_all,
         clock=_frozen_clock,
         exporter=exporter,
+        verifier=lambda repo_id, files: "verified-rev",
     )
 
     state = read_publication_state(data_root)
@@ -129,7 +131,7 @@ def test_run_and_publish_resume_after_interrupt(tmp_path: Path) -> None:
     assert (data_root / "data" / "a.parquet").is_file()
     assert (data_root / "data" / "b.parquet").is_file()
     assert (data_root / PUBLICATION_STATE_FILENAME).is_file()
-    assert report.final_remote_revision == "r-b-restart"
+    assert report.final_remote_revision == "verified-rev"
 
 
 def test_run_and_publish_safe_upload_retry_after_interrupt(
@@ -170,6 +172,7 @@ def test_run_and_publish_safe_upload_retry_after_interrupt(
             upload_runner=upload_succeeds,
             clock=_frozen_clock,
             exporter=exporter,
+            verifier=lambda repo_id, files: "verified-rev",
         )
 
     # After simulated crash, the local publication state has not been updated.
@@ -185,10 +188,11 @@ def test_run_and_publish_safe_upload_retry_after_interrupt(
         upload_runner=upload_succeeds,
         clock=_frozen_clock,
         exporter=exporter,
+        verifier=lambda repo_id, files: "verified-rev",
     )
     state = read_publication_state(data_root)
     assert "a.osm.pbf" in state["published"]
-    assert report.final_remote_revision == "r-a"
+    assert report.final_remote_revision == "verified-rev"
 
 
 def test_run_and_publish_handles_interrupt_before_publish_state(
@@ -217,6 +221,7 @@ def test_run_and_publish_handles_interrupt_before_publish_state(
             upload_runner=interrupted_upload,
             clock=_frozen_clock,
             exporter=_fake_exporter_factory({"a": 1}),
+            verifier=lambda repo_id, files: "verified-rev",
         )
 
     # Parquet and manifest were created by build_one, but publication state is empty.

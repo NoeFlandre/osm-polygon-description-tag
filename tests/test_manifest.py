@@ -9,6 +9,7 @@ from osm_polygon_description_tag.manifest import (
     OutputIdentity,
     RunCounts,
     SourceIdentity,
+    current_output_algorithm_revision,
     file_sha256,
     is_resumable,
     output_identity_for,
@@ -53,7 +54,10 @@ def test_source_and_output_identity_capture_checksums(tmp_path: Path) -> None:
 
 
 def _manifest() -> Manifest:
-    from osm_polygon_description_tag.manifest import current_area_policy_sha256
+    from osm_polygon_description_tag.manifest import (
+        current_area_policy_sha256,
+        current_output_algorithm_revision,
+    )
 
     return Manifest(
         manifest_schema_version=MANIFEST_SCHEMA_VERSION,
@@ -61,6 +65,7 @@ def _manifest() -> Manifest:
         geoparquet_version="1.1.0",
         transform_algorithm_version=1,
         area_policy_sha256=current_area_policy_sha256(),
+        output_algorithm_revision=current_output_algorithm_revision(),
         source=SourceIdentity("region.osm.pbf", 128, 1000, "a" * 64),
         output=OutputIdentity("region.parquet", 4096, "b" * 64),
         osmium_version="osmium version 1.16.0",
@@ -86,6 +91,7 @@ def test_resumption_requires_matching_source_and_output() -> None:
         schema_version=manifest.schema_version,
         geoparquet_version=manifest.geoparquet_version,
         transform_algorithm_version=manifest.transform_algorithm_version,
+        output_algorithm_revision=current_output_algorithm_revision(),
         area_policy_sha256=manifest.area_policy_sha256,
         source=manifest.source,
         output=manifest.output,
@@ -115,6 +121,7 @@ def test_resumption_rejects_unsupported_manifest_version() -> None:
         schema_version=manifest.schema_version,
         geoparquet_version=manifest.geoparquet_version,
         transform_algorithm_version=manifest.transform_algorithm_version,
+        output_algorithm_revision=current_output_algorithm_revision(),
         area_policy_sha256=manifest.area_policy_sha256,
         source=manifest.source,
         output=manifest.output,
@@ -158,6 +165,7 @@ def test_write_and_read_manifest_roundtrip(tmp_path: Path) -> None:
         geoparquet_version=restored.geoparquet_version,
         transform_algorithm_version=restored.transform_algorithm_version,
         area_policy_sha256=restored.area_policy_sha256,
+        output_algorithm_revision=restored.output_algorithm_revision,
         source=restored.source,
         output=restored.output,
         osmium_version=restored.osmium_version,

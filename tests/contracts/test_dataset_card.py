@@ -55,6 +55,7 @@ def _populate(tmp_path: Path) -> Path:
             schema_version=1,
             geoparquet_version="1.1.0",
             transform_algorithm_version=1,
+            output_algorithm_revision="x" * 64,
             area_policy_sha256="0" * 64,
             source=source_identity_for(source),
             output=output_identity_for(output),
