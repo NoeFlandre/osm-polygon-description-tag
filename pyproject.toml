@@ -70,6 +70,10 @@ python_version = "3.12"
 strict = true
 packages = ["osm_polygon_description_tag"]
 
+[[tool.mypy.overrides]]
+module = "shapely.*"
+ignore_missing_imports = true
+
 [tool.coverage.run]
 branch = true
 source = ["osm_polygon_description_tag"]
