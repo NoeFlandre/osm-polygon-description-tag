@@ -53,10 +53,14 @@ def test_source_and_output_identity_capture_checksums(tmp_path: Path) -> None:
 
 
 def _manifest() -> Manifest:
+    from osm_polygon_description_tag.manifest import current_area_policy_sha256
+
     return Manifest(
         manifest_schema_version=MANIFEST_SCHEMA_VERSION,
         schema_version=1,
         geoparquet_version="1.1.0",
+        transform_algorithm_version=1,
+        area_policy_sha256=current_area_policy_sha256(),
         source=SourceIdentity("region.osm.pbf", 128, 1000, "a" * 64),
         output=OutputIdentity("region.parquet", 4096, "b" * 64),
         osmium_version="osmium version 1.16.0",
@@ -72,6 +76,26 @@ def _manifest() -> Manifest:
 
 def test_resumption_requires_matching_source_and_output() -> None:
     manifest = _manifest()
+
+    # Ensure the project checkout revision is treated as either matching or
+    # unavailable in the test environment.
+    from osm_polygon_description_tag._resources import project_code_revision
+
+    manifest = Manifest(
+        manifest_schema_version=manifest.manifest_schema_version,
+        schema_version=manifest.schema_version,
+        geoparquet_version=manifest.geoparquet_version,
+        transform_algorithm_version=manifest.transform_algorithm_version,
+        area_policy_sha256=manifest.area_policy_sha256,
+        source=manifest.source,
+        output=manifest.output,
+        osmium_version=manifest.osmium_version,
+        dependency_versions=manifest.dependency_versions,
+        code_revision=project_code_revision(),
+        started_at=manifest.started_at,
+        completed_at=manifest.completed_at,
+        counts=manifest.counts,
+    )
 
     assert is_resumable(manifest, manifest.source, manifest.output)
 
@@ -90,6 +114,8 @@ def test_resumption_rejects_unsupported_manifest_version() -> None:
         manifest_schema_version=MANIFEST_SCHEMA_VERSION + 1,
         schema_version=manifest.schema_version,
         geoparquet_version=manifest.geoparquet_version,
+        transform_algorithm_version=manifest.transform_algorithm_version,
+        area_policy_sha256=manifest.area_policy_sha256,
         source=manifest.source,
         output=manifest.output,
         osmium_version=manifest.osmium_version,
@@ -123,7 +149,25 @@ def test_write_and_read_manifest_roundtrip(tmp_path: Path) -> None:
     restored = read_manifest(path)
 
     assert restored == manifest
-    assert is_resumable(restored, manifest.source, manifest.output)
+    # Rebuild with the project checkout revision so resumption agrees.
+    from osm_polygon_description_tag._resources import project_code_revision
+
+    aligned = Manifest(
+        manifest_schema_version=restored.manifest_schema_version,
+        schema_version=restored.schema_version,
+        geoparquet_version=restored.geoparquet_version,
+        transform_algorithm_version=restored.transform_algorithm_version,
+        area_policy_sha256=restored.area_policy_sha256,
+        source=restored.source,
+        output=restored.output,
+        osmium_version=restored.osmium_version,
+        dependency_versions=restored.dependency_versions,
+        code_revision=project_code_revision(),
+        started_at=restored.started_at,
+        completed_at=restored.completed_at,
+        counts=restored.counts,
+    )
+    assert is_resumable(aligned, aligned.source, aligned.output)
 
 
 def test_read_manifest_rejects_corrupt_json(tmp_path: Path) -> None:

@@ -1,0 +1,27 @@
+{
+  "attributes": {
+    "type": "__osm_type",
+    "id": "__osm_id",
+    "version": "__osm_version",
+    "changeset": "__osm_changeset",
+    "timestamp": "__osm_timestamp",
+    "uid": false,
+    "user": false,
+    "way_nodes": false
+  },
+  "format_options": {
+    "tags_type": "json"
+  },
+  "linear_tags": ["highway", "barrier", "natural=coastline"],
+  "area_tags": [
+    "aeroway",
+    "amenity",
+    "building",
+    "landuse",
+    "leisure",
+    "man_made",
+    "natural!=coastline"
+  ],
+  "exclude_tags": [],
+  "include_tags": []
+}

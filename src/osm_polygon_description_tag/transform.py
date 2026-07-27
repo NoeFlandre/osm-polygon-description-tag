@@ -61,7 +61,7 @@ def geodesic_area_m2(geometry: BaseGeometry) -> float:
 
 
 def _optional_timestamp(value: str | None) -> datetime | None:
-    if value is None:
+    if value is None or not value.strip():
         return None
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None:

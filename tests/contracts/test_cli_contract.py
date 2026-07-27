@@ -8,11 +8,13 @@ from shapely.geometry import Polygon
 from osm_polygon_description_tag.cli import (
     create_parser,
     handle_inspect,
+    handle_publish,
     handle_publish_plan,
     handle_validate,
     run,
 )
 from osm_polygon_description_tag.config import DEFAULT_SOURCE_ROOT
+from osm_polygon_description_tag.publication import PublicationError
 from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
 
@@ -28,6 +30,7 @@ def test_subcommands_are_frozen() -> None:
         "generate-card",
         "publish-plan",
         "publish",
+        "run-and-publish",
     }
 
 
@@ -46,13 +49,31 @@ def test_build_one_requires_basename() -> None:
     assert info.value.code != 0
 
 
-def test_publish_requires_plan_and_confirm() -> None:
+def test_publish_requires_plan_argument() -> None:
     with pytest.raises(SystemExit) as info:
         run(["publish"])
     assert info.value.code != 0
-    with pytest.raises(SystemExit) as info2:
-        run(["publish", "--plan", "abc"])
-    assert info2.value.code != 0
+
+
+def test_publish_rejects_wrong_plan_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    data = tmp_path / "generated"
+    (data / "data").mkdir(parents=True)
+    (data / "manifests").mkdir(parents=True)
+    (data / "README.md").write_text("# Card\n", encoding="utf-8")
+    (data / "stats.json").write_text("{}\n", encoding="utf-8")
+
+    args = SimpleNamespace(
+        plan="deadbeef",  # wrong on purpose
+        publisher=None,
+        source_root=tmp_path / "raw",
+        data_root=data,
+        osmium="osmium",
+    )
+
+    with pytest.raises(PublicationError, match="does not match"):
+        handle_publish(args)
 
 
 def test_failure_exits_non_zero_with_actionable_stderr(
@@ -205,11 +226,10 @@ def test_handle_publish_invokes_execute_upload(
 
     args = SimpleNamespace(
         plan="abc",
-        confirm="abc",
+        publisher=None,
         source_root=tmp_path / "raw",
         data_root=data,
         osmium="osmium",
-        export_config=Path("config/osmium-export.json"),
     )
 
     exit_code = cli.handle_publish(args)
@@ -218,3 +238,47 @@ def test_handle_publish_invokes_execute_upload(
     assert exit_code == 0
     assert captured == [["NoeFlandre/osm-polygon-description-tag", "abc"]]
     assert payload["repo_id"] == "NoeFlandre/osm-polygon-description-tag"
+
+
+def test_handle_run_and_publish_invokes_orchestrator(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import osm_polygon_description_tag.cli as cli
+
+    fake_report = {
+        "preflight": {"source_count": 1},
+        "source_count": 1,
+        "outcomes": [
+            {
+                "source_name": "a.osm.pbf",
+                "status": "published",
+                "included_rows": 1,
+                "output_bytes": 100,
+                "remote_revision": "rev-1",
+                "note": None,
+            }
+        ],
+        "final_remote_revision": "rev-1",
+    }
+
+    monkeypatch.setattr(
+        cli,
+        "run_and_publish",
+        lambda **kwargs: type("R", (), {"to_payload": lambda self: fake_report})(),
+    )
+
+    args = SimpleNamespace(
+        confirm_repo="NoeFlandre/osm-polygon-description-tag",
+        preflight=None,
+        upload_runner=None,
+        clock=None,
+        source_root=None,
+        data_root=None,
+        osmium="osmium",
+    )
+
+    exit_code = cli.handle_run_and_publish(args)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["final_remote_revision"] == "rev-1"

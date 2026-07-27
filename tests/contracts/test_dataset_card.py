@@ -54,6 +54,8 @@ def _populate(tmp_path: Path) -> Path:
             manifest_schema_version=1,
             schema_version=1,
             geoparquet_version="1.1.0",
+            transform_algorithm_version=1,
+            area_policy_sha256="0" * 64,
             source=source_identity_for(source),
             output=output_identity_for(output),
             osmium_version="osmium version 1.16.0",

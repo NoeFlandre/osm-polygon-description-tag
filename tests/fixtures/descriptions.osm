@@ -1,9 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   Synthetic OSM fixture for the end-to-end integration test.
-  This file is committed as documentation/provenance only. The integration
-  test that exercises the real osmium binary currently skips in environments
-  where osmium is not installed.
+  Ordered: nodes (by id), ways (by id), relations (by id).
 -->
 <osm version="0.6" generator="osm-polygon-description-tag-synthetic">
   <node id="1" lat="0.0" lon="0.0"/>
@@ -30,8 +28,8 @@
   <node id="22" lat="5.001" lon="5.0"/>
   <node id="23" lat="5.001" lon="5.001"/>
   <node id="24" lat="5.0" lon="5.001"/>
+  <node id="999" lat="30.0" lon="30.0"/>
 
-  <!-- Eligible closed way: building polygon with description -->
   <way id="100">
     <nd ref="1"/>
     <nd ref="2"/>
@@ -41,8 +39,6 @@
     <tag k="building" v="yes"/>
     <tag k="description" v="Eligible building"/>
   </way>
-
-  <!-- Closed linear way (barrier) WITH description: included by area policy? No, barrier is linear -->
   <way id="101">
     <nd ref="5"/>
     <nd ref="6"/>
@@ -52,8 +48,6 @@
     <tag k="barrier" v="fence"/>
     <tag k="description" v="A fence (linear)"/>
   </way>
-
-  <!-- Closed way with area=no: linear despite being closed -->
   <way id="102">
     <nd ref="17"/>
     <nd ref="18"/>
@@ -64,8 +58,6 @@
     <tag k="highway" v="pedestrian"/>
     <tag k="description" v="Closed but area=no"/>
   </way>
-
-  <!-- Open described way: excluded (not closed) -->
   <way id="103">
     <nd ref="21"/>
     <nd ref="22"/>
@@ -73,8 +65,6 @@
     <tag k="highway" v="residential"/>
     <tag k="description" v="Open road"/>
   </way>
-
-  <!-- Multipolygon relation with inner ring -->
   <way id="200">
     <nd ref="9"/>
     <nd ref="10"/>
@@ -90,14 +80,6 @@
     <nd ref="16"/>
     <nd ref="13"/>
   </way>
-  <relation id="500">
-    <member type="way" ref="200" role="outer"/>
-    <member type="way" ref="201" role="inner"/>
-    <tag k="type" v="multipolygon"/>
-    <tag k="description:en" v="Lake with island"/>
-  </relation>
-
-  <!-- Whitespace-only description: excluded by non-empty rule -->
   <way id="300">
     <nd ref="1"/>
     <nd ref="2"/>
@@ -109,6 +91,10 @@
     <tag k="description:pt-BR" v="Com espaço"/>
   </way>
 
-  <!-- Irrelevant node -->
-  <node id="999" lat="30.0" lon="30.0"/>
+  <relation id="500">
+    <member type="way" ref="200" role="outer"/>
+    <member type="way" ref="201" role="inner"/>
+    <tag k="type" v="multipolygon"/>
+    <tag k="description:en" v="Lake with island"/>
+  </relation>
 </osm>

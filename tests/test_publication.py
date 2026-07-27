@@ -4,6 +4,13 @@ from pathlib import Path
 import pytest
 from shapely.geometry import Polygon
 
+from osm_polygon_description_tag.manifest import (
+    Manifest,
+    RunCounts,
+    output_identity_for,
+    source_identity_for,
+    write_manifest,
+)
 from osm_polygon_description_tag.publication import (
     PublicationError,
     create_upload_plan,
@@ -18,14 +25,34 @@ def _make_dataset(data_root: Path) -> None:
     (data_root / "manifests").mkdir(parents=True)
     (data_root / "README.md").write_text("# Card\n", encoding="utf-8")
     (data_root / "stats.json").write_text("{}\n", encoding="utf-8")
+    source_root = data_root.parent / "raw"
+    source_root.mkdir(exist_ok=True)
+    source = source_root / "a-latest.osm.pbf"
+    source.write_bytes(b"a-latest-bytes")
     record = make_record_dict(
         Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
         {"description": "x"},
         osm_id=1,
         source_pbf="a-latest.osm.pbf",
     )
-    write_geoparquet(iter([record]), data_root / "data" / "a-latest.parquet", batch_size=10)
-    (data_root / "manifests" / "a-latest.manifest.json").write_text("{}\n", encoding="utf-8")
+    output = data_root / "data" / "a-latest.parquet"
+    write_geoparquet(iter([record]), output, batch_size=10)
+    manifest = Manifest(
+        manifest_schema_version=1,
+        schema_version=1,
+        geoparquet_version="1.1.0",
+        transform_algorithm_version=1,
+        area_policy_sha256="0" * 64,
+        source=source_identity_for(source),
+        output=output_identity_for(output),
+        osmium_version="osmium version 1.16.0",
+        dependency_versions={"pyarrow": "20.0.0"},
+        code_revision="abc123",
+        started_at="2026-07-27T00:00:00+00:00",
+        completed_at="2026-07-27T00:01:00+00:00",
+        counts=RunCounts(emitted_features=1, included_rows=1, rejections={}),
+    )
+    write_manifest(manifest, data_root / "manifests" / "a-latest.manifest.json")
 
 
 def test_create_upload_plan_lists_allowlisted_files(tmp_path: Path) -> None:

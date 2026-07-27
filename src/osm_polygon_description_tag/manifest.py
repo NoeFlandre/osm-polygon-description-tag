@@ -1,21 +1,35 @@
 """Versioned manifests, artifact identity, and resumption decisions.
 
 A manifest is canonical UTF-8 JSON recording source/output identity, tool and
-library versions, timing, and factual feature/rejection counts. Resumption
-trusts an output only when its manifest still matches the current source and
-output identities.
+library versions, area-policy checksum, transformation algorithm version,
+timing, and factual feature/rejection counts. Resumption trusts an output
+only when the manifest version, area-policy checksum, transformation
+algorithm version, source identity, output identity, and current code revision
+all agree.
 """
 
 import hashlib
 import json
 import os
-import subprocess
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from osm_polygon_description_tag._resources import (
+    osmium_export_config,
+    project_code_revision,
+)
+
 MANIFEST_SCHEMA_VERSION = 1
+TRANSFORM_ALGORITHM_VERSION = 1
+_AREA_POLICY_SOURCE: tuple[str, ...] = (
+    "linear_tags:highway,barrier,natural=coastline",
+    "area_tags:aeroway,amenity,building,landuse,leisure,man_made,natural!=coastline",
+    "geometry:orient-then-geodesic-area",
+    "key:description+description:<suffix>",
+    "require:non-empty-trimmed-value",
+)
 _SHA256_CHUNK = 8 * 1024 * 1024
 
 
@@ -67,6 +81,8 @@ class Manifest:
     manifest_schema_version: int
     schema_version: int
     geoparquet_version: str
+    transform_algorithm_version: int
+    area_policy_sha256: str
     source: SourceIdentity
     output: OutputIdentity
     osmium_version: str | None
@@ -81,6 +97,8 @@ class Manifest:
             "manifest_schema_version": self.manifest_schema_version,
             "schema_version": self.schema_version,
             "geoparquet_version": self.geoparquet_version,
+            "transform_algorithm_version": self.transform_algorithm_version,
+            "area_policy_sha256": self.area_policy_sha256,
             "source": {
                 "name": self.source.name,
                 "size_bytes": self.source.size_bytes,
@@ -119,6 +137,8 @@ class Manifest:
             manifest_schema_version=int(payload["manifest_schema_version"]),
             schema_version=int(payload["schema_version"]),
             geoparquet_version=str(payload["geoparquet_version"]),
+            transform_algorithm_version=int(payload.get("transform_algorithm_version", 0)),
+            area_policy_sha256=str(payload.get("area_policy_sha256") or _empty_policy_hash()),
             source=SourceIdentity(
                 name=str(source_raw["name"]),
                 size_bytes=int(source_raw["size_bytes"]),
@@ -143,6 +163,26 @@ class Manifest:
         )
 
 
+def _empty_policy_hash() -> str:
+    return hashlib.sha256(b"").hexdigest()
+
+
+def current_area_policy_sha256() -> str:
+    """Return the SHA-256 of the live osmium export policy plus documented rules.
+
+    Both the live ``osmium-export.json`` and the documented transform rules
+    must match for an existing artifact to remain reusable.
+    """
+    hasher = hashlib.sha256()
+    config_path = osmium_export_config()
+    hasher.update(config_path.read_bytes())
+    hasher.update(b"\n")
+    for line in _AREA_POLICY_SOURCE:
+        hasher.update(line.encode("utf-8"))
+        hasher.update(b"\n")
+    return hasher.hexdigest()
+
+
 def source_identity_for(path: Path) -> SourceIdentity:
     stat = path.stat()
     return SourceIdentity(path.name, stat.st_size, stat.st_mtime_ns, file_sha256(path))
@@ -158,10 +198,28 @@ def is_resumable(
     source_identity: SourceIdentity,
     output_identity: OutputIdentity,
 ) -> bool:
-    """True only when the manifest version, source, and output identities all agree."""
+    """True only when every agreement field matches the live values.
+
+    Agreements:
+
+    - ``manifest_schema_version`` matches the constant.
+    - ``transform_algorithm_version`` matches the constant.
+    - ``area_policy_sha256`` matches the current ``osmium-export.json`` plus
+      documented transform rules.
+    - ``source`` and ``output`` identities are byte-equal.
+    - ``code_revision`` matches the current Git revision of the project
+      checkout (when a checkout is available).
+    """
     if manifest.manifest_schema_version != MANIFEST_SCHEMA_VERSION:
         return False
-    return manifest.source == source_identity and manifest.output == output_identity
+    if manifest.transform_algorithm_version != TRANSFORM_ALGORITHM_VERSION:
+        return False
+    if manifest.area_policy_sha256 != current_area_policy_sha256():
+        return False
+    if manifest.source != source_identity or manifest.output != output_identity:
+        return False
+    current_revision = project_code_revision()
+    return not (current_revision is not None and manifest.code_revision != current_revision)
 
 
 def write_manifest(manifest: Manifest, path: Path) -> None:
@@ -197,7 +255,7 @@ def current_dependency_versions() -> dict[str, str]:
     from importlib.metadata import PackageNotFoundError, version
 
     versions: dict[str, str] = {}
-    for package in ("pyarrow", "pyproj", "shapely", "pyyaml"):
+    for package in ("duckdb", "pyarrow", "pyproj", "shapely", "pyyaml"):
         try:
             versions[package] = version(package)
         except PackageNotFoundError:
@@ -205,20 +263,6 @@ def current_dependency_versions() -> dict[str, str]:
     return versions
 
 
-def current_code_revision(cwd: Path | None = None) -> str | None:
-    """Return the current Git revision, or ``None`` if unavailable."""
-    try:
-        completed = subprocess.run(
-            ["git", "rev-parse", "HEAD"],  # noqa: S607 - read-only git query, controlled args
-            cwd=str(cwd) if cwd else None,
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if completed.returncode != 0:
-        return None
-    revision = completed.stdout.strip()
-    return revision or None
+def current_code_revision() -> str | None:
+    """Return the current Git revision of the project checkout."""
+    return project_code_revision()

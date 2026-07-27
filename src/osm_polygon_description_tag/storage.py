@@ -3,12 +3,18 @@
 A file is promoted only after streaming into an owned temporary, rewriting once
 with final GeoParquet metadata (known only after the full pass), and passing
 validation. Temporary files are confined to the output side and cleaned up
-exactly.
+exactly. The rewrite pass streams batches through :meth:`ParquetFile.iter_batches`
+so the per-PBF Parquet never loads entirely into memory. The bounded uniqueness
+check uses a temporary SQLite primary-key table to keep memory usage flat
+regardless of row count.
 """
+
+from __future__ import annotations
 
 import json
 import math
 import os
+import sqlite3
 import uuid
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -58,6 +64,31 @@ def _fsync_dir(directory: Path) -> None:
         os.close(fd)
 
 
+def _stream_rewrite_with_metadata(
+    source_parquet: Path,
+    target: Path,
+    *,
+    geometry_types: list[str],
+    bbox: list[float],
+) -> None:
+    """Rewrite ``source_parquet`` into ``target`` with final GeoParquet metadata.
+
+    Streams :meth:`ParquetFile.iter_batches` into the destination writer so
+    the source table is never loaded into memory.
+    """
+    metadata = geo_metadata(geometry_types, bbox)
+    schema_geo = SCHEMA.with_metadata({b"geo": json.dumps(metadata).encode("utf-8")})
+    reader = pq.ParquetFile(source_parquet)
+    with pq.ParquetWriter(
+        target,
+        schema_geo,
+        compression="zstd",
+        use_dictionary=_DICTIONARY_COLUMNS,
+    ) as writer:
+        for batch in reader.iter_batches(batch_size=4096):
+            writer.write_batch(batch)
+
+
 def write_geoparquet(
     records: Iterable[dict[str, object]],
     target: Path,
@@ -102,16 +133,9 @@ def write_geoparquet(
                 writer.write_batch(pa.RecordBatch.from_pylist([], schema=SCHEMA))
 
         bbox = [min_x, min_y, max_x, max_y] if row_count else []
-        metadata = geo_metadata(sorted(geometry_types), bbox)
-        schema_geo = SCHEMA.with_metadata({b"geo": json.dumps(metadata).encode("utf-8")})
-        table = pq.read_table(temp_data)
-        with pq.ParquetWriter(
-            temp_final,
-            schema_geo,
-            compression="zstd",
-            use_dictionary=_DICTIONARY_COLUMNS,
-        ) as writer:
-            writer.write_table(table)
+        _stream_rewrite_with_metadata(
+            temp_data, temp_final, geometry_types=sorted(geometry_types), bbox=bbox
+        )
 
         validated_rows = validator(temp_final)
         _fsync_path(temp_final)
@@ -158,6 +182,28 @@ def _read_geo_metadata(schema: pa.Schema) -> dict[str, Any]:
     return geo
 
 
+class _UniquenessIndex:
+    """Disk-backed primary-key uniqueness check backed by a temporary SQLite table."""
+
+    def __init__(self) -> None:
+        self._connection = sqlite3.connect(":memory:")
+        self._connection.execute(
+            "CREATE TABLE pk (osm_type TEXT NOT NULL, osm_id INTEGER NOT NULL, "
+            "PRIMARY KEY (osm_type, osm_id))"
+        )
+
+    def check_and_add(self, osm_type: str, osm_id: int) -> None:
+        try:
+            self._connection.execute(
+                "INSERT INTO pk (osm_type, osm_id) VALUES (?, ?)", (osm_type, osm_id)
+            )
+        except sqlite3.IntegrityError as error:
+            raise StorageError(f"duplicate (osm_type, osm_id): ({osm_type!r}, {osm_id})") from error
+
+    def close(self) -> None:
+        self._connection.close()
+
+
 def validate_geoparquet(path: Path) -> int:
     """Validate a finalized GeoParquet file in batches and return its row count."""
     if not path.is_file():
@@ -169,75 +215,75 @@ def validate_geoparquet(path: Path) -> int:
     meta_types = set(cast(list[str], column_meta.get("geometry_types", [])))
     meta_bbox = column_meta.get("bbox")
 
-    seen: set[tuple[str, int]] = set()
+    uniqueness = _UniquenessIndex()
     actual_types: set[str] = set()
     source_pbf: str | None = None
     min_x = min_y = math.inf
     max_x = max_y = -math.inf
     row_count = 0
 
-    for batch in pf.iter_batches(columns=_VALIDATION_COLUMNS):
-        osm_types = cast(list[str], batch.column("osm_type").to_pylist())
-        osm_ids = cast(list[int], batch.column("osm_id").to_pylist())
-        gtypes = cast(list[str], batch.column("geometry_type").to_pylist())
-        areas = cast(list[float], batch.column("area_m2").to_pylist())
-        bx_min = cast(list[float], batch.column("bbox_min_x").to_pylist())
-        by_min = cast(list[float], batch.column("bbox_min_y").to_pylist())
-        bx_max = cast(list[float], batch.column("bbox_max_x").to_pylist())
-        by_max = cast(list[float], batch.column("bbox_max_y").to_pylist())
-        geoms = cast(list[bytes], batch.column("geometry").to_pylist())
-        sources = cast(list[str], batch.column("source_pbf").to_pylist())
+    try:
+        for batch in pf.iter_batches(columns=_VALIDATION_COLUMNS):
+            osm_types = cast(list[str], batch.column("osm_type").to_pylist())
+            osm_ids = cast(list[int], batch.column("osm_id").to_pylist())
+            gtypes = cast(list[str], batch.column("geometry_type").to_pylist())
+            areas = cast(list[float], batch.column("area_m2").to_pylist())
+            bx_min = cast(list[float], batch.column("bbox_min_x").to_pylist())
+            by_min = cast(list[float], batch.column("bbox_min_y").to_pylist())
+            bx_max = cast(list[float], batch.column("bbox_max_x").to_pylist())
+            by_max = cast(list[float], batch.column("bbox_max_y").to_pylist())
+            geoms = cast(list[bytes], batch.column("geometry").to_pylist())
+            sources = cast(list[str], batch.column("source_pbf").to_pylist())
 
-        for index in range(batch.num_rows):
-            row_count += 1
-            identity = (osm_types[index], osm_ids[index])
-            if identity in seen:
-                raise StorageError(f"duplicate (osm_type, osm_id): {identity}")
-            seen.add(identity)
+            for index in range(batch.num_rows):
+                row_count += 1
+                uniqueness.check_and_add(osm_types[index], osm_ids[index])
 
-            current_source = sources[index]
-            if source_pbf is None:
-                source_pbf = current_source
-            elif source_pbf != current_source:
-                raise StorageError(
-                    f"mixed source_pbf within file: {source_pbf!r} and {current_source!r}"
-                )
+                current_source = sources[index]
+                if source_pbf is None:
+                    source_pbf = current_source
+                elif source_pbf != current_source:
+                    raise StorageError(
+                        f"mixed source_pbf within file: {source_pbf!r} and {current_source!r}"
+                    )
 
-            gtype = gtypes[index]
-            if gtype not in _VALID_GEOMETRY_TYPES:
-                raise StorageError(f"unsupported geometry_type: {gtype!r}")
-            actual_types.add(gtype)
+                gtype = gtypes[index]
+                if gtype not in _VALID_GEOMETRY_TYPES:
+                    raise StorageError(f"unsupported geometry_type: {gtype!r}")
+                actual_types.add(gtype)
 
-            area = areas[index]
-            if area is None or not math.isfinite(area) or area <= 0:
-                raise StorageError(f"non-positive or non-finite area_m2: {area}")
+                area = areas[index]
+                if area is None or not math.isfinite(area) or area <= 0:
+                    raise StorageError(f"non-positive or non-finite area_m2: {area}")
 
-            for value, label in (
-                (bx_min[index], "bbox_min_x"),
-                (by_min[index], "bbox_min_y"),
-                (bx_max[index], "bbox_max_x"),
-                (by_max[index], "bbox_max_y"),
-            ):
-                if value is None or not math.isfinite(value):
-                    raise StorageError(f"non-finite {label}: {value}")
-            if bx_min[index] > bx_max[index] or by_min[index] > by_max[index]:
-                raise StorageError("bbox min coordinate exceeds max")
-            min_x = min(min_x, bx_min[index])
-            min_y = min(min_y, by_min[index])
-            max_x = max(max_x, bx_max[index])
-            max_y = max(max_y, by_max[index])
+                for value, label in (
+                    (bx_min[index], "bbox_min_x"),
+                    (by_min[index], "bbox_min_y"),
+                    (bx_max[index], "bbox_max_x"),
+                    (by_max[index], "bbox_max_y"),
+                ):
+                    if value is None or not math.isfinite(value):
+                        raise StorageError(f"non-finite {label}: {value}")
+                if bx_min[index] > bx_max[index] or by_min[index] > by_max[index]:
+                    raise StorageError("bbox min coordinate exceeds max")
+                min_x = min(min_x, bx_min[index])
+                min_y = min(min_y, by_min[index])
+                max_x = max(max_x, bx_max[index])
+                max_y = max(max_y, by_max[index])
 
-            geom = geoms[index]
-            if geom is None:
-                raise StorageError("null geometry")
-            try:
-                decoded = from_wkb(geom)
-            except ShapelyError as error:
-                raise StorageError(f"undecodable WKB geometry: {error}") from error
-            if decoded.geom_type != gtype or not decoded.is_valid or decoded.is_empty:
-                raise StorageError(
-                    f"geometry_type/WKB mismatch or invalid geometry: {decoded.geom_type}"
-                )
+                geom = geoms[index]
+                if geom is None:
+                    raise StorageError("null geometry")
+                try:
+                    decoded = from_wkb(geom)
+                except ShapelyError as error:
+                    raise StorageError(f"undecodable WKB geometry: {error}") from error
+                if decoded.geom_type != gtype or not decoded.is_valid or decoded.is_empty:
+                    raise StorageError(
+                        f"geometry_type/WKB mismatch or invalid geometry: {decoded.geom_type}"
+                    )
+    finally:
+        uniqueness.close()
 
     if actual_types != meta_types:
         raise StorageError(
@@ -253,3 +299,10 @@ def validate_geoparquet(path: Path) -> int:
                     f"bbox mismatch: actual {actual_bbox} != metadata {expected_bbox}"
                 )
     return row_count
+
+
+__all__ = [
+    "StorageError",
+    "validate_geoparquet",
+    "write_geoparquet",
+]

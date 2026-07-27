@@ -319,3 +319,116 @@ def _write_raw(target: Path, rows: list[dict[str, object]]) -> None:
     schema_geo = SCHEMA.with_metadata({b"geo": json.dumps(geo).encode("utf-8")})
     with pq.ParquetWriter(target, schema_geo, compression="zstd") as writer:
         writer.write_table(table)
+
+
+def test_validate_rejects_wrong_field_type(tmp_path: Path) -> None:
+    """Validation rejects a file whose column type does not match the frozen schema."""
+    target = tmp_path / "wrong_type.parquet"
+    # Build a new schema with osm_id=Int32 but otherwise match SCHEMA.
+    fields = [
+        pa.field(name, SCHEMA.field(name).type)
+        if name != "osm_id"
+        else pa.field("osm_id", pa.int32(), nullable=False)
+        for name in SCHEMA.names
+    ]
+    wrong_schema = pa.schema(fields)
+    table = pa.Table.from_pylist([], schema=wrong_schema)
+    geo = {
+        "version": "1.1.0",
+        "primary_column": "geometry",
+        "columns": {"geometry": {"encoding": "WKB", "geometry_types": []}},
+    }
+    schema_meta = wrong_schema.with_metadata({b"geo": json.dumps(geo).encode("utf-8")})
+    with pq.ParquetWriter(target, schema_meta, compression="zstd") as writer:
+        writer.write_table(table)
+
+    with pytest.raises(StorageError, match="type mismatch|field type|nullability"):
+        validate_geoparquet(target)
+
+
+def test_validate_rejects_missing_geo_metadata(tmp_path: Path) -> None:
+    target = tmp_path / "no_geo.parquet"
+    row = {
+        "source_pbf": "r.osm.pbf",
+        "osm_type": "way",
+        "osm_id": 1,
+        "osm_url": "https://www.openstreetmap.org/way/1",
+        "version": 1,
+        "changeset": 1,
+        "timestamp": None,
+        "description": "x",
+        "localized_descriptions": [],
+        "tags": [("description", "x")],
+        "geometry_type": "Polygon",
+        "area_m2": 1.0,
+        "bbox_min_x": 0.0,
+        "bbox_min_y": 0.0,
+        "bbox_max_x": 1.0,
+        "bbox_max_y": 1.0,
+        "geometry": _POLYGON_WKB,
+    }
+    table = pa.Table.from_pylist([row], schema=SCHEMA)
+    with pq.ParquetWriter(target, SCHEMA, compression="zstd") as writer:
+        writer.write_table(table)
+
+    with pytest.raises(StorageError, match="missing GeoParquet"):
+        validate_geoparquet(target)
+
+
+def test_validate_rejects_corrupt_geo_metadata(tmp_path: Path) -> None:
+    target = tmp_path / "corrupt.parquet"
+    table = pa.Table.from_pylist([], schema=SCHEMA)
+    schema_meta = SCHEMA.with_metadata({b"geo": b"{not json"})
+    with pq.ParquetWriter(target, schema_meta, compression="zstd") as writer:
+        writer.write_table(table)
+
+    with pytest.raises(StorageError, match="invalid GeoParquet"):
+        validate_geoparquet(target)
+
+
+def test_validate_rejects_wrong_geoparquet_version(tmp_path: Path) -> None:
+    target = tmp_path / "version.parquet"
+    table = pa.Table.from_pylist([], schema=SCHEMA)
+    geo = {
+        "version": "1.0.0",
+        "primary_column": "geometry",
+        "columns": {"geometry": {"encoding": "WKB", "geometry_types": []}},
+    }
+    schema_meta = SCHEMA.with_metadata({b"geo": json.dumps(geo).encode("utf-8")})
+    with pq.ParquetWriter(target, schema_meta, compression="zstd") as writer:
+        writer.write_table(table)
+
+    with pytest.raises(StorageError, match="version"):
+        validate_geoparquet(target)
+
+
+def test_validate_rejects_wrong_primary_column(tmp_path: Path) -> None:
+    target = tmp_path / "primary.parquet"
+    table = pa.Table.from_pylist([], schema=SCHEMA)
+    geo = {
+        "version": "1.1.0",
+        "primary_column": "geom",
+        "columns": {"geometry": {"encoding": "WKB", "geometry_types": []}},
+    }
+    schema_meta = SCHEMA.with_metadata({b"geo": json.dumps(geo).encode("utf-8")})
+    with pq.ParquetWriter(target, schema_meta, compression="zstd") as writer:
+        writer.write_table(table)
+
+    with pytest.raises(StorageError, match="primary"):
+        validate_geoparquet(target)
+
+
+def test_validate_rejects_wrong_encoding(tmp_path: Path) -> None:
+    target = tmp_path / "encoding.parquet"
+    table = pa.Table.from_pylist([], schema=SCHEMA)
+    geo = {
+        "version": "1.1.0",
+        "primary_column": "geometry",
+        "columns": {"geometry": {"encoding": "WKT", "geometry_types": []}},
+    }
+    schema_meta = SCHEMA.with_metadata({b"geo": json.dumps(geo).encode("utf-8")})
+    with pq.ParquetWriter(target, schema_meta, compression="zstd") as writer:
+        writer.write_table(table)
+
+    with pytest.raises(StorageError, match="WKB"):
+        validate_geoparquet(target)

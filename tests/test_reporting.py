@@ -36,6 +36,8 @@ def _build_pair(
         manifest_schema_version=1,
         schema_version=1,
         geoparquet_version="1.1.0",
+        transform_algorithm_version=1,
+        area_policy_sha256="0" * 64,
         source=source_identity_for(source_path),
         output=output_identity_for(output_path),
         osmium_version="osmium version 1.16.0",

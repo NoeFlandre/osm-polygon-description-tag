@@ -1,4 +1,21 @@
-"""Public CLI mapping arguments to the pipeline's public module functions."""
+"""Public CLI mapping arguments to the pipeline's public module functions.
+
+Subcommands:
+
+- ``inspect``: read-only source discovery and preflight.
+- ``build-one``: build one named PBF output.
+- ``build-all``: deterministic, resumable orchestration.
+- ``validate``: validate selected or all finalized outputs.
+- ``generate-card``: regenerate ``stats.json`` and the dataset card.
+- ``publish-plan``: validate and show the exact prospective upload.
+- ``publish``: separately confirmed execution of an unchanged plan.
+- ``run-and-publish``: stoppable, resumable build + publish for every PBF.
+
+All file-path defaults are resolved against the installed package, not the
+caller's working directory.
+"""
+
+from __future__ import annotations
 
 import argparse
 import json
@@ -7,10 +24,19 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from osm_polygon_description_tag._resources import (
+    dataset_card_template,
+    osmium_export_config,
+)
 from osm_polygon_description_tag.config import Paths
 from osm_polygon_description_tag.discovery import discover_sources
 from osm_polygon_description_tag.extraction import OsmiumExportError
 from osm_polygon_description_tag.manifest import ManifestError
+from osm_polygon_description_tag.orchestrator import (
+    OrchestratorError,
+    PreflightError,
+    run_and_publish,
+)
 from osm_polygon_description_tag.pipeline import BuildResult, build_all, build_one
 from osm_polygon_description_tag.publication import (
     PublicationError,
@@ -19,9 +45,6 @@ from osm_polygon_description_tag.publication import (
 )
 from osm_polygon_description_tag.reporting import ReportingError, generate_dataset_docs
 from osm_polygon_description_tag.storage import StorageError, validate_geoparquet
-
-_DEFAULT_EXPORT_CONFIG = Path("config/osmium-export.json")
-_DEFAULT_CARD_TEMPLATE = Path("docs/dataset-card-template.md")
 
 
 def _resolve_paths(args: argparse.Namespace) -> Paths:
@@ -48,9 +71,7 @@ def handle_inspect(args: argparse.Namespace) -> int:
             "source_root": str(paths.source_root),
             "data_root": str(paths.data_root),
             "osmium_executable": args.osmium,
-            "export_config": str(args.export_config)
-            if getattr(args, "export_config", None)
-            else None,
+            "export_config": str(osmium_export_config()),
             "source_count": len(sources),
             "sources": [
                 {
@@ -68,14 +89,14 @@ def handle_inspect(args: argparse.Namespace) -> int:
 
 def _build_paths_and_executor(
     args: argparse.Namespace,
-) -> tuple[Paths, "Callable[[Any], BuildResult]"]:
+) -> tuple[Paths, Callable[[Any], BuildResult]]:
     paths = _resolve_paths(args)
 
     def executor(source: Any) -> BuildResult:
         return build_one(
             source,
             paths,
-            export_config=args.export_config,
+            export_config=osmium_export_config(),
             executable=args.osmium,
         )
 
@@ -140,7 +161,7 @@ def handle_validate(args: argparse.Namespace) -> int:
 
 def handle_card(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
-    stats = generate_dataset_docs(paths.data_root, args.template)
+    stats = generate_dataset_docs(paths.data_root, dataset_card_template())
     _print_json(
         {
             "output_files": stats["output_files"],
@@ -169,8 +190,21 @@ def handle_publish_plan(args: argparse.Namespace) -> int:
 def handle_publish(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
     plan = create_upload_plan(paths.data_root)
-    execute_upload(plan, confirmation=args.confirm)
+    execute_upload(plan, confirmation=args.plan, runner=args.publisher)
     _print_json({"repo_id": plan.repo_id, "identity_sha256": plan.identity_sha256})
+    return 0
+
+
+def handle_run_and_publish(args: argparse.Namespace) -> int:
+    paths = _resolve_paths(args)
+    report = run_and_publish(
+        paths=paths,
+        confirm_repo=args.confirm_repo,
+        preflight=args.preflight,
+        upload_runner=args.upload_runner,
+        clock=args.clock,
+    )
+    _print_json(report.to_payload())
     return 0
 
 
@@ -180,7 +214,6 @@ def create_parser() -> argparse.ArgumentParser:
     common.add_argument("--source-root", type=Path, default=None)
     common.add_argument("--data-root", type=Path, default=None)
     common.add_argument("--osmium", default="osmium")
-    common.add_argument("--export-config", type=Path, default=_DEFAULT_EXPORT_CONFIG)
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -200,7 +233,6 @@ def create_parser() -> argparse.ArgumentParser:
     sub = subparsers.add_parser(
         "generate-card", parents=[common], help="Regenerate stats.json and README.md"
     )
-    sub.add_argument("--template", type=Path, default=_DEFAULT_CARD_TEMPLATE)
     sub.set_defaults(handler=handle_card)
 
     sub = subparsers.add_parser(
@@ -211,9 +243,38 @@ def create_parser() -> argparse.ArgumentParser:
     sub = subparsers.add_parser(
         "publish", parents=[common], help="Upload after exact plan confirmation"
     )
-    sub.add_argument("--plan", required=True, help="Plan identity SHA-256 (required)")
-    sub.add_argument("--confirm", required=True, help="Confirmation SHA-256 (must equal plan)")
+    sub.add_argument(
+        "--plan", required=True, help="Plan identity SHA-256 (must match freshly computed identity)"
+    )
+    sub.add_argument(
+        "--publisher",
+        default=None,
+        help="Test hook: callable receiving [command list] (executed in-process)",
+    )
     sub.set_defaults(handler=handle_publish)
+
+    sub = subparsers.add_parser(
+        "run-and-publish",
+        parents=[common],
+        help="Stoppable, resumable build+publish for every discovered PBF",
+    )
+    sub.add_argument(
+        "--confirm-repo",
+        required=True,
+        help="Exact dataset repo id (must equal NoeFlandre/osm-polygon-description-tag)",
+    )
+    sub.add_argument(
+        "--preflight",
+        default=None,
+        help="Test hook: callable returning a structured preflight report",
+    )
+    sub.add_argument(
+        "--upload-runner",
+        default=None,
+        help="Test hook: callable receiving [command list] and returning remote revision",
+    )
+    sub.add_argument("--clock", default=None, help="Test hook: callable returning an ISO timestamp")
+    sub.set_defaults(handler=handle_run_and_publish)
 
     return parser
 
@@ -226,6 +287,8 @@ _ERROR_TYPES = (
     StorageError,
     ReportingError,
     PublicationError,
+    PreflightError,
+    OrchestratorError,
 )
 
 
@@ -234,6 +297,19 @@ def run(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.handler(args))
+    except KeyboardInterrupt:
+        return 130
     except _ERROR_TYPES as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
+
+
+__all__ = [
+    "create_parser",
+    "handle_inspect",
+    "handle_publish",
+    "handle_publish_plan",
+    "handle_run_and_publish",
+    "handle_validate",
+    "run",
+]

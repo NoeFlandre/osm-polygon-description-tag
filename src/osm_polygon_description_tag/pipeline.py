@@ -21,9 +21,11 @@ from osm_polygon_description_tag.extraction import (
 )
 from osm_polygon_description_tag.manifest import (
     MANIFEST_SCHEMA_VERSION,
+    TRANSFORM_ALGORITHM_VERSION,
     Manifest,
     ManifestError,
     RunCounts,
+    current_area_policy_sha256,
     current_code_revision,
     current_dependency_versions,
     is_resumable,
@@ -170,6 +172,8 @@ def build_one(
         manifest_schema_version=MANIFEST_SCHEMA_VERSION,
         schema_version=SCHEMA_VERSION,
         geoparquet_version=_GEOPARQUET_VERSION,
+        transform_algorithm_version=TRANSFORM_ALGORITHM_VERSION,
+        area_policy_sha256=current_area_policy_sha256(),
         source=source_identity_for(source.path),
         output=output_identity_for(output_path),
         osmium_version=safe_osmium_version(executable),
