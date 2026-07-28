@@ -7,8 +7,13 @@ card. Handwritten numeric claims inside generated sections are prohibited.
 Bounded memory: aggregate statistics are computed by streaming each Parquet
 file into an in-memory DuckDB instance using ``read_parquet`` and per-batch
 ``ArrowTable`` ingestion. Exact area quantiles use ``quantile_cont`` on the
-DuckDB-backed ``area_m2`` column, so peak memory is bounded regardless of
-the total row count.
+DuckDB-backed ``area_m2`` column, so peak memory is bounded regardless of the
+total row count.
+
+Amendment 2: ``stats.json`` and the regenerated README are pure functions
+of the validated Parquets, the matching manifests, and the card template.
+Wall-clock values are not serialized. Atomic, write-if-changed writes
+preserve mtimes when bytes are byte-identical.
 """
 
 from __future__ import annotations
@@ -19,7 +24,6 @@ import os
 import re
 import uuid
 from collections.abc import Callable
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,16 +32,28 @@ import pyarrow.parquet as pq
 
 from osm_polygon_description_tag.manifest import (
     ManifestError,
+    file_sha256,
     output_identity_for,
     read_manifest,
 )
 from osm_polygon_description_tag.schema import SCHEMA_VERSION
 
-_STATS_SCHEMA_VERSION = 1
+_STATS_SCHEMA_VERSION = 2
 _QUANTILE_PROBABILITIES = [0.25, 0.5, 0.75]
 _GENERATED_PATTERN = re.compile(
     r"(<!-- GENERATED:STATS:START -->\n)(.*?)(<!-- GENERATED:STATS:END -->)", re.DOTALL
 )
+_FEATURE_COLUMNS = [
+    "osm_type",
+    "osm_id",
+    "geometry_type",
+    "area_m2",
+    "timestamp",
+    "name",
+    "localized_names",
+    "description",
+    "localized_descriptions",
+]
 
 
 class ReportingError(ValueError):
@@ -45,17 +61,35 @@ class ReportingError(ValueError):
 
 
 def utc_now_iso() -> str:
+    from datetime import UTC, datetime
+
     return datetime.now(UTC).isoformat()
 
 
-def _atomic_write_text(path: Path, text: str) -> None:
+def _write_if_changed(path: Path, text: str) -> bool:
+    """Atomically write ``text`` to ``path`` only when bytes differ.
+
+    Returns True if a write occurred, False when the file was already
+    byte-identical. Identical regeneration preserves mtime.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_file() and path.read_text(encoding="utf-8") == text:
+        return False
     temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         temp.write_text(text, encoding="utf-8")
         with open(temp, "rb") as handle:
             os.fsync(handle.fileno())
+        try:
+            dir_fd = os.open(str(path.parent), os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            pass
         os.replace(temp, path)
+        return True
     finally:
         if temp.exists():
             temp.unlink()
@@ -81,7 +115,37 @@ def _quantile_or_none(
     return float(result[0])
 
 
-def collect_stats(data_root: Path, *, clock: Callable[[], str] = utc_now_iso) -> dict[str, Any]:
+def _safe_map(value: object) -> dict[str, int]:
+    """Convert DuckDB map output into a deterministic string-to-int dict."""
+    if value is None:
+        return {}
+    items = value.items() if isinstance(value, dict) else []
+    cleaned: dict[str, int] = {}
+    for key, count in items:
+        if key is None:
+            continue
+        cleaned[str(key)] = int(count)
+    return cleaned
+
+
+def _suffix_counts(connection: duckdb.DuckDBPyConnection, map_column: str) -> dict[str, int]:
+    if rows := connection.execute(
+        f"""
+        SELECT entry.key AS suffix, COUNT(*) AS value FROM (
+            SELECT unnest(map_entries({map_column})) AS entry FROM features
+            WHERE cardinality({map_column}) > 0
+        ) GROUP BY entry.key ORDER BY entry.key
+        """  # noqa: S608 - map_column is allowlisted by the caller
+    ).fetchall():
+        return {key: int(value) for key, value in rows}
+    return {}
+
+
+def collect_stats(
+    data_root: Path,
+    *,
+    clock: Callable[[], str] = utc_now_iso,
+) -> dict[str, Any]:
     """Aggregate factual statistics from validated artifacts and matching manifests."""
     data_dir = data_root / "data"
     manifests_dir = data_root / "manifests"
@@ -118,6 +182,8 @@ def collect_stats(data_root: Path, *, clock: Callable[[], str] = utc_now_iso) ->
                 geometry_type VARCHAR NOT NULL,
                 area_m2 DOUBLE NOT NULL,
                 timestamp TIMESTAMP,
+                name VARCHAR,
+                localized_names MAP(VARCHAR, VARCHAR) NOT NULL,
                 description VARCHAR,
                 localized_descriptions MAP(VARCHAR, VARCHAR) NOT NULL,
                 source VARCHAR NOT NULL
@@ -129,15 +195,7 @@ def collect_stats(data_root: Path, *, clock: Callable[[], str] = utc_now_iso) ->
         for parquet in parquets:
             file_reader = pq.ParquetFile(parquet)
             for batch in file_reader.iter_batches(
-                columns=[
-                    "osm_type",
-                    "osm_id",
-                    "geometry_type",
-                    "area_m2",
-                    "timestamp",
-                    "description",
-                    "localized_descriptions",
-                ],
+                columns=_FEATURE_COLUMNS,
                 batch_size=4096,
             ):
                 connection.register("batch", batch)
@@ -150,6 +208,8 @@ def collect_stats(data_root: Path, *, clock: Callable[[], str] = utc_now_iso) ->
                         geometry_type,
                         area_m2,
                         timestamp,
+                        name,
+                        CASE WHEN localized_names IS NULL THEN MAP() ELSE localized_names END,
                         description,
                         CASE WHEN localized_descriptions IS NULL
                              THEN MAP() ELSE localized_descriptions END,
@@ -165,10 +225,12 @@ def collect_stats(data_root: Path, *, clock: Callable[[], str] = utc_now_iso) ->
         if rows == 0:
             osm_types: dict[str, int] = {}
             geometry_types: dict[str, int] = {}
-            suffixes: dict[str, int] = {}
-            base_rows = 0
-            localized_rows = 0
-            areas_count = 0
+            description_suffixes: dict[str, int] = {}
+            name_suffixes: dict[str, int] = {}
+            base_description_rows = 0
+            localized_description_rows = 0
+            base_name_rows = 0
+            localized_name_rows = 0
             area_min: float | None = None
             area_max: float | None = None
             area_p25: float | None = None
@@ -190,24 +252,24 @@ def collect_stats(data_root: Path, *, clock: Callable[[], str] = utc_now_iso) ->
                     "ORDER BY geometry_type"
                 ).fetchall()
             )
-            suffix_rows = connection.execute(
-                """
-                SELECT entry.key AS suffix, COUNT(*) AS value FROM (
-                    SELECT unnest(map_entries(localized_descriptions)) AS entry FROM features
-                    WHERE cardinality(localized_descriptions) > 0
-                ) GROUP BY entry.key ORDER BY entry.key
-                """
-            ).fetchall()
-            suffixes = {key: int(value) for key, value in suffix_rows}
+            description_suffixes = _suffix_counts(connection, "localized_descriptions")
+            name_suffixes = _suffix_counts(connection, "localized_names")
             base_count = connection.execute(
                 "SELECT COUNT(*) FROM features WHERE description IS NOT NULL"
             ).fetchone()
-            base_rows = int(base_count[0] if base_count else 0)
+            base_description_rows = int(base_count[0] if base_count else 0)
             localized_count = connection.execute(
                 "SELECT COUNT(*) FROM features WHERE cardinality(localized_descriptions) > 0"
             ).fetchone()
-            localized_rows = int(localized_count[0] if localized_count else 0)
-            areas_count = rows
+            localized_description_rows = int(localized_count[0] if localized_count else 0)
+            base_name_count = connection.execute(
+                "SELECT COUNT(*) FROM features WHERE name IS NOT NULL"
+            ).fetchone()
+            base_name_rows = int(base_name_count[0] if base_name_count else 0)
+            localized_name_count = connection.execute(
+                "SELECT COUNT(*) FROM features WHERE cardinality(localized_names) > 0"
+            ).fetchone()
+            localized_name_rows = int(localized_name_count[0] if localized_name_count else 0)
             area_min = _quantile_or_none(connection, "area_m2", 0.0)
             area_max = _quantile_or_none(connection, "area_m2", 1.0)
             area_p25 = _quantile_or_none(connection, "area_m2", _QUANTILE_PROBABILITIES[0])
@@ -225,6 +287,7 @@ def collect_stats(data_root: Path, *, clock: Callable[[], str] = utc_now_iso) ->
     emitted_features = 0
     source_bytes = 0
     output_bytes = 0
+    file_records: list[dict[str, Any]] = []
     for parquet in parquets:
         stem = parquet.name.removesuffix(".parquet")
         manifest = read_manifest(manifests_dir / f"{stem}.manifest.json")
@@ -233,23 +296,40 @@ def collect_stats(data_root: Path, *, clock: Callable[[], str] = utc_now_iso) ->
         emitted_features += manifest.counts.emitted_features
         for reason, count in manifest.counts.rejections.items():
             rejections[reason] = rejections.get(reason, 0) + count
+        rows_in_file = int(
+            pq.ParquetFile(parquet).metadata.num_rows if pq.ParquetFile(parquet).metadata else 0
+        )
+        file_records.append(
+            {
+                "source_pbf": manifest.source.name,
+                "parquet": parquet.name,
+                "rows": rows_in_file,
+                "source_bytes": manifest.source.size_bytes,
+                "output_bytes": parquet.stat().st_size,
+                "source_sha256": manifest.source.sha256,
+                "output_sha256": file_sha256(parquet),
+            }
+        )
+    file_records.sort(key=lambda record: record["parquet"])
 
     return {
         "stats_schema_version": _STATS_SCHEMA_VERSION,
         "schema_version": SCHEMA_VERSION,
-        "generation_timestamp_utc": clock(),
         "output_files": len(parquets),
         "rows": rows,
         "emitted_features": emitted_features,
         "osm_types": osm_types,
         "geometry_types": geometry_types,
-        "description_suffixes": suffixes,
-        "base_description_rows": base_rows,
-        "localized_description_rows": localized_rows,
+        "description_suffixes": description_suffixes,
+        "name_suffixes": name_suffixes,
+        "base_description_rows": base_description_rows,
+        "localized_description_rows": localized_description_rows,
+        "base_name_rows": base_name_rows,
+        "localized_name_rows": localized_name_rows,
         "rejections": dict(sorted(rejections.items())),
         "source_bytes_total": source_bytes,
         "output_bytes_total": output_bytes,
-        "area_m2_count": areas_count,
+        "area_m2_count": rows,
         "area_m2_min_m2": area_min,
         "area_m2_p25_m2": area_p25,
         "area_m2_median_m2": area_median,
@@ -257,11 +337,20 @@ def collect_stats(data_root: Path, *, clock: Callable[[], str] = utc_now_iso) ->
         "area_m2_max_m2": area_max,
         "data_min_timestamp_utc": min_ts,
         "data_max_timestamp_utc": max_ts,
+        "files": file_records,
     }
 
 
 def _fmt_int(value: int) -> str:
     return f"{value:,}"
+
+
+def _count_table(title: str, counts: dict[str, int]) -> list[str]:
+    lines: list[str] = [f"**{title}**", "", "| Key | Count |", "| --- | --- |"]
+    for key, count in counts.items():
+        lines.append(f"| {key} | {_fmt_int(count)} |")
+    lines.append("")
+    return lines
 
 
 def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
@@ -275,29 +364,29 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
         f"| Output files | {_fmt_int(stats['output_files'])} |",
         f"| Rows | {_fmt_int(stats['rows'])} |",
         f"| Emitted features | {_fmt_int(stats['emitted_features'])} |",
+        f"| Base name rows | {_fmt_int(stats['base_name_rows'])} |",
+        f"| Localized name rows | {_fmt_int(stats['localized_name_rows'])} |",
         f"| Base description rows | {_fmt_int(stats['base_description_rows'])} |",
         f"| Localized description rows | {_fmt_int(stats['localized_description_rows'])} |",
         f"| Source bytes total | {_fmt_int(stats['source_bytes_total'])} |",
         f"| Output bytes total | {_fmt_int(stats['output_bytes_total'])} |",
         "",
     ]
-
-    def _count_table(title: str, counts: dict[str, int]) -> None:
-        lines.append(f"**{title}**")
-        lines.append("")
-        lines.append("| Key | Count |")
-        lines.append("| --- | --- |")
-        for key, count in counts.items():
-            lines.append(f"| {key} | {_fmt_int(count)} |")
-        lines.append("")
-
-    _count_table("Counts by OSM type", stats["osm_types"])
-    _count_table("Counts by geometry type", stats["geometry_types"])
-    _count_table(
-        "Description suffix frequencies (exact suffix, not validated as a language code)",
-        stats["description_suffixes"],
+    lines.extend(_count_table("Counts by OSM type", stats["osm_types"]))
+    lines.extend(_count_table("Counts by geometry type", stats["geometry_types"]))
+    lines.extend(
+        _count_table(
+            "Description suffix frequencies (exact suffix, not validated as a language code)",
+            stats["description_suffixes"],
+        )
     )
-    _count_table("Transformation rejections by reason", stats["rejections"])
+    lines.extend(
+        _count_table(
+            "Name suffix frequencies (exact suffix, not validated as a language code)",
+            stats["name_suffixes"],
+        )
+    )
+    lines.extend(_count_table("Transformation rejections by reason", stats["rejections"]))
 
     lines.append("**Area distribution (square metres)**")
     lines.append("")
@@ -312,7 +401,38 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
     ):
         lines.append(f"| {label} | {stats[key]} |")
     lines.append("")
-    lines.append(f"Generated at {stats['generation_timestamp_utc']} (UTC).")
+
+    if stats["data_min_timestamp_utc"] and stats["data_max_timestamp_utc"]:
+        lines.append("**OSM data timestamp range (UTC)**")
+        lines.append("")
+        lines.append(
+            f"Minimum: {stats['data_min_timestamp_utc']}<br/>"
+            f"Maximum: {stats['data_max_timestamp_utc']}"
+        )
+        lines.append("")
+
+    lines.append("**Files (deterministic, sorted by parquet filename)**")
+    lines.append("")
+    lines.append(
+        "| Source PBF | Parquet | Rows | Source bytes | Output bytes | Source SHA-256 | Output SHA-256 |"  # noqa: E501
+    )
+    lines.append("| --- | --- | --- | --- | --- | --- | --- |")
+    for record in stats["files"]:
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    record["source_pbf"],
+                    record["parquet"],
+                    _fmt_int(record["rows"]),
+                    _fmt_int(record["source_bytes"]),
+                    _fmt_int(record["output_bytes"]),
+                    f"`{record['source_sha256']}`",
+                    f"`{record['output_sha256']}`",
+                ]
+            )
+            + " |"
+        )
     lines.append("")
     return "\n".join(lines)
 
@@ -323,7 +443,12 @@ def generate_dataset_docs(
     *,
     clock: Callable[[], str] = utc_now_iso,
 ) -> dict[str, Any]:
-    """Write canonical ``stats.json`` and regenerate the dataset card's stats block."""
+    """Write canonical ``stats.json`` and regenerate the dataset card's stats block.
+
+    The outputs are pure functions of the validated Parquets, the matching
+    manifests, and the card template. Wall-clock values are never serialized.
+    Identical regeneration is a no-op for file bytes and mtimes.
+    """
     stats = collect_stats(data_root, clock=clock)
     stats_json = json.dumps(stats, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     stats_sha256 = hashlib.sha256(stats_json.encode("utf-8")).hexdigest()
@@ -334,8 +459,8 @@ def generate_dataset_docs(
     readme = _GENERATED_PATTERN.sub(
         lambda match: match.group(1) + rendered_block + match.group(3), template
     )
-    _atomic_write_text(data_root / "stats.json", stats_json)
-    _atomic_write_text(data_root / "README.md", readme)
+    _write_if_changed(data_root / "stats.json", stats_json)
+    _write_if_changed(data_root / "README.md", readme)
     return stats
 
 

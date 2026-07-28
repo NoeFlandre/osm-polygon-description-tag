@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synthetic OSM fixture proving osmium's documented area handling and the
+  Python description filter combine to produce the exact final IDs.
+
+  Osmium requires a strict file order: nodes first, then ways, then
+  relations, each in ascending ID order. The fixture uses unique integer
+  IDs grouped in ranges so assertions can target each behavioural case
+  unambiguously.
+-->
+<osm version="0.6" generator="osm-polygon-description-tag-synthetic-amendment">
+  <node id="1001" lat="0.000" lon="0.000"/>
+  <node id="1002" lat="0.000" lon="0.001"/>
+  <node id="1003" lat="0.001" lon="0.001"/>
+  <node id="1004" lat="0.001" lon="0.000"/>
+  <node id="1005" lat="0.0015" lon="0.000"/>
+  <node id="1006" lat="0.0015" lon="0.0015"/>
+  <node id="1007" lat="0.003" lon="0.0015"/>
+  <node id="1008" lat="0.003" lon="0.000"/>
+  <node id="2001" lat="0.005" lon="0.005"/>
+  <node id="2002" lat="0.005" lon="0.006"/>
+  <node id="2003" lat="0.006" lon="0.006"/>
+  <node id="2004" lat="0.006" lon="0.005"/>
+  <node id="3001" lat="0.010" lon="0.010"/>
+  <node id="3002" lat="0.010" lon="0.011"/>
+  <node id="3003" lat="0.011" lon="0.011"/>
+  <node id="3004" lat="0.011" lon="0.010"/>
+  <node id="4001" lat="0.020" lon="0.020"/>
+  <node id="4002" lat="0.020" lon="0.021"/>
+  <node id="4003" lat="0.021" lon="0.021"/>
+  <node id="5001" lat="0.030" lon="0.030"/>
+  <node id="5002" lat="0.030" lon="0.031"/>
+  <node id="5003" lat="0.031" lon="0.031"/>
+  <node id="5004" lat="0.031" lon="0.030"/>
+  <node id="6001" lat="0.040" lon="0.040"/>
+  <node id="6002" lat="0.040" lon="0.042"/>
+  <node id="6003" lat="0.042" lon="0.042"/>
+  <node id="6004" lat="0.042" lon="0.040"/>
+  <node id="6005" lat="0.0405" lon="0.0405"/>
+  <node id="6006" lat="0.0405" lon="0.0408"/>
+  <node id="6007" lat="0.0408" lon="0.0408"/>
+  <node id="6008" lat="0.0408" lon="0.0405"/>
+  <node id="7001" lat="0.050" lon="0.050"/>
+  <node id="7002" lat="0.050" lon="0.052"/>
+  <node id="7003" lat="0.052" lon="0.052"/>
+  <node id="7004" lat="0.052" lon="0.050"/>
+  <node id="8001" lat="0.060" lon="0.060">
+    <tag k="description" v="Node description (rejected: not a polygon)"/>
+  </node>
+  <way id="1100">
+    <nd ref="1001"/>
+    <nd ref="1002"/>
+    <nd ref="1003"/>
+    <nd ref="1004"/>
+    <nd ref="1001"/>
+    <tag k="description" v="Closed way with description only"/>
+  </way>
+  <way id="1101">
+    <nd ref="1005"/>
+    <nd ref="1006"/>
+    <nd ref="1007"/>
+    <nd ref="1008"/>
+    <nd ref="1005"/>
+    <tag k="name" v="Polygons Building"/>
+    <tag k="description" v="Name plus description"/>
+    <tag k="name:pt-BR" v="Prédio dos Polígonos"/>
+  </way>
+  <way id="1102">
+    <nd ref="1001"/>
+    <nd ref="1002"/>
+    <nd ref="1003"/>
+    <nd ref="1004"/>
+    <nd ref="1001"/>
+    <tag k="shop" v="bakery"/>
+    <tag k="name" v="Bakery"/>
+    <tag k="description" v="Closed shop polygon"/>
+  </way>
+  <way id="1103">
+    <nd ref="1005"/>
+    <nd ref="1006"/>
+    <nd ref="1007"/>
+    <nd ref="1008"/>
+    <nd ref="1005"/>
+    <tag k="tourism" v="museum"/>
+    <tag k="name" v="Museum"/>
+    <tag k="description" v="Closed tourism polygon"/>
+  </way>
+  <way id="1104">
+    <nd ref="1001"/>
+    <nd ref="1002"/>
+    <nd ref="1003"/>
+    <nd ref="1004"/>
+    <nd ref="1001"/>
+    <tag k="place" v="square"/>
+    <tag k="name" v="Old Square"/>
+    <tag k="description" v="Closed place polygon"/>
+  </way>
+  <way id="1105">
+    <nd ref="1005"/>
+    <nd ref="1006"/>
+    <nd ref="1007"/>
+    <nd ref="1008"/>
+    <nd ref="1005"/>
+    <tag k="power" v="substation"/>
+    <tag k="name" v="Substation"/>
+    <tag k="description" v="Closed power polygon"/>
+  </way>
+  <way id="1106">
+    <nd ref="2001"/>
+    <nd ref="2002"/>
+    <nd ref="2003"/>
+    <nd ref="2004"/>
+    <nd ref="2001"/>
+    <tag k="highway" v="pedestrian"/>
+    <tag k="area" v="yes"/>
+    <tag k="name" v="Square"/>
+    <tag k="description" v="area=yes pedestrian square"/>
+  </way>
+  <way id="1107">
+    <nd ref="3001"/>
+    <nd ref="3002"/>
+    <nd ref="3003"/>
+    <nd ref="3004"/>
+    <nd ref="3001"/>
+    <tag k="highway" v="pedestrian"/>
+    <tag k="area" v="no"/>
+    <tag k="description" v="area=no closed way (rejected)"/>
+  </way>
+  <way id="1108">
+    <nd ref="4001"/>
+    <nd ref="4002"/>
+    <nd ref="4003"/>
+    <tag k="highway" v="residential"/>
+    <tag k="description" v="Open way (rejected)"/>
+  </way>
+  <way id="1109">
+    <nd ref="5001"/>
+    <nd ref="5002"/>
+    <nd ref="5003"/>
+    <nd ref="5004"/>
+    <nd ref="5001"/>
+    <tag k="building" v="yes"/>
+    <tag k="name" v="Undescribed"/>
+  </way>
+  <way id="1200">
+    <nd ref="6001"/>
+    <nd ref="6002"/>
+    <nd ref="6003"/>
+    <nd ref="6004"/>
+    <nd ref="6001"/>
+    <tag k="natural" v="water"/>
+  </way>
+  <way id="1201">
+    <nd ref="6005"/>
+    <nd ref="6006"/>
+    <nd ref="6007"/>
+    <nd ref="6008"/>
+    <nd ref="6005"/>
+    <tag k="place" v="islet"/>
+  </way>
+  <way id="1400">
+    <nd ref="7001"/>
+    <nd ref="7002"/>
+    <nd ref="7003"/>
+    <nd ref="7004"/>
+    <nd ref="7001"/>
+    <tag k="boundary" v="protected_area"/>
+  </way>
+  <relation id="1300">
+    <member type="way" ref="1200" role="outer"/>
+    <member type="way" ref="1201" role="inner"/>
+    <tag k="type" v="multipolygon"/>
+    <tag k="name" v="Lake with island"/>
+    <tag k="description" v="Multipolygon lake"/>
+    <tag k="description:en" v="Lake with island"/>
+  </relation>
+  <relation id="1500">
+    <member type="way" ref="1400" role="outer"/>
+    <tag k="type" v="boundary"/>
+    <tag k="boundary" v="protected_area"/>
+    <tag k="description" v="Protected boundary area"/>
+  </relation>
+  <relation id="1600">
+    <member type="way" ref="1400" role="outer"/>
+    <tag k="type" v="multipolygon"/>
+    <tag k="name" v="No description"/>
+  </relation>
+</osm>

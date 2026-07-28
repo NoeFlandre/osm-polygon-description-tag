@@ -49,6 +49,25 @@ def descriptions_from_tags(
     return base, localized
 
 
+def names_from_tags(tags: dict[str, str]) -> tuple[str | None, dict[str, str]]:
+    """Return ``(base, localized)`` name values.
+
+    ``base`` is the exact ``name`` value, or ``None`` when missing or
+    whitespace-only. ``localized`` maps every exact ``name:<suffix>`` key
+    (excluding the empty suffix) with a non-empty value to its suffix.
+    Suffixes are preserved verbatim and are never validated as language codes.
+    """
+    base = tags.get("name")
+    if base is not None and not base.strip():
+        base = None
+    localized = {
+        key.removeprefix("name:"): value
+        for key, value in sorted(tags.items())
+        if key.startswith("name:") and key != "name:" and value.strip()
+    }
+    return base, localized
+
+
 def geodesic_area_m2(geometry: BaseGeometry) -> float:
     """Positive WGS84 geodesic area in square metres.
 
@@ -84,6 +103,8 @@ def transform_record(record: ExportRecord, source_pbf: str) -> dict[str, object]
     if base is None and not localized:
         raise RejectedFeature("no_nonempty_description")
 
+    name, localized_names = names_from_tags(record.tags)
+
     try:
         geometry = from_wkb(bytes.fromhex(record.geometry_ewkb_hex))
     except (ValueError, ShapelyError) as error:
@@ -110,6 +131,8 @@ def transform_record(record: ExportRecord, source_pbf: str) -> dict[str, object]
         "version": record.version,
         "changeset": record.changeset,
         "timestamp": _optional_timestamp(record.timestamp),
+        "name": name,
+        "localized_names": localized_names,
         "description": base,
         "localized_descriptions": localized,
         "tags": record.tags,

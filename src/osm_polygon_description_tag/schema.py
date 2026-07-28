@@ -3,11 +3,15 @@
 The geometry column is OGC:CRS84 longitude/latitude. Omitting ``crs`` in the
 GeoParquet metadata deliberately signals CRS84; no claim is made about ring
 orientation beyond what geometry normalization (see transform) provides.
+
+The schema is versioned. Amendment 2 adds first-class ``name`` and
+``localized_names`` columns. The original ``tags`` map remains the
+authoritative source of every original OSM tag.
 """
 
 import pyarrow as pa
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 GEOPARQUET_VERSION = "1.1.0"
 
 SCHEMA = pa.schema(
@@ -19,6 +23,8 @@ SCHEMA = pa.schema(
         pa.field("version", pa.int32()),
         pa.field("changeset", pa.int64()),
         pa.field("timestamp", pa.timestamp("ms", tz="UTC")),
+        pa.field("name", pa.string()),
+        pa.field("localized_names", pa.map_(pa.string(), pa.string()), nullable=False),
         pa.field("description", pa.string()),
         pa.field("localized_descriptions", pa.map_(pa.string(), pa.string()), nullable=False),
         pa.field("tags", pa.map_(pa.string(), pa.string()), nullable=False),

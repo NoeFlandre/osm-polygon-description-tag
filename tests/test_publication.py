@@ -38,10 +38,10 @@ def _make_dataset(data_root: Path) -> None:
     output = data_root / "data" / "a-latest.parquet"
     write_geoparquet(iter([record]), output, batch_size=10)
     manifest = Manifest(
-        manifest_schema_version=1,
-        schema_version=1,
+        manifest_schema_version=2,
+        schema_version=2,
         geoparquet_version="1.1.0",
-        transform_algorithm_version=1,
+        transform_algorithm_version=2,
         output_algorithm_revision="x" * 64,
         area_policy_sha256="0" * 64,
         source=source_identity_for(source),

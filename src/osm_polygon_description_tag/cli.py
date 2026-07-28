@@ -166,7 +166,7 @@ def handle_card(args: argparse.Namespace) -> int:
         {
             "output_files": stats["output_files"],
             "rows": stats["rows"],
-            "generation_timestamp_utc": stats["generation_timestamp_utc"],
+            "name_suffixes": stats.get("name_suffixes", {}),
         }
     )
     return 0

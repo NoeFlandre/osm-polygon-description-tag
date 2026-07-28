@@ -49,7 +49,13 @@ class ExportRecord:
 def export_command(
     source: object, config: object, *, executable: str = "osmium"
 ) -> tuple[str, ...]:
-    """Return the argument array for ``osmium export`` in PostgreSQL COPY mode."""
+    """Return the argument array for ``osmium export`` in PostgreSQL COPY mode.
+
+    The amendment relies on osmium's documented ``area_tags: true`` and
+    ``linear_tags: true`` general handling. We additionally restrict
+    output to polygon geometries so nodes, line outputs, and open
+    ways never enter the COPY stream.
+    """
     return (
         executable,
         "export",
@@ -58,6 +64,8 @@ def export_command(
         "pg",
         "--config",
         str(config),
+        "--geometry-types",
+        "polygon",
         "--output",
         "-",
     )

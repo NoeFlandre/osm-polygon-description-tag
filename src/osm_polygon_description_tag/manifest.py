@@ -19,13 +19,15 @@ from typing import Any, cast
 from osm_polygon_description_tag._resources import osmium_export_config, project_code_revision
 from osm_polygon_description_tag.schema import GEOPARQUET_VERSION, SCHEMA_VERSION
 
-MANIFEST_SCHEMA_VERSION = 1
-TRANSFORM_ALGORITHM_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2
+TRANSFORM_ALGORITHM_VERSION = 2
 _AREA_POLICY_SOURCE: tuple[str, ...] = (
-    "linear_tags:highway,barrier,natural=coastline",
-    "area_tags:aeroway,amenity,building,landuse,leisure,man_made,natural!=coastline",
+    "linear_tags:true",
+    "area_tags:true",
+    "geometry-types:polygon",
     "geometry:orient-then-geodesic-area",
     "key:description+description:<suffix>",
+    "name:exact-base-and-suffix-values",
     "require:non-empty-trimmed-value",
 )
 _SHA256_CHUNK = 8 * 1024 * 1024

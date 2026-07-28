@@ -26,6 +26,8 @@ def test_export_command_has_no_shell_and_uses_pg_copy() -> None:
         "pg",
         "--config",
         "/repo/config/osmium-export.json",
+        "--geometry-types",
+        "polygon",
         "--output",
         "-",
     )
@@ -104,5 +106,5 @@ def test_config_policy_is_versioned_provenance() -> None:
     assert config["attributes"]["id"] == "__osm_id"
     assert config["attributes"]["way_nodes"] is False
     assert config["format_options"]["tags_type"] == "json"
-    assert "natural=coastline" in config["linear_tags"]
-    assert "building" in config["area_tags"]
+    assert config["linear_tags"] is True
+    assert config["area_tags"] is True

@@ -194,9 +194,11 @@ def test_preflight_denial_prevents_any_subprocess_or_filesystem_mutation(
     )
     assert exit_code != 0
 
-    # No file was created or removed in the data root.
+    # No PBF or generated artifact file was created or removed in the data root.
+    # The persistent log directory may exist to record the preflight denial.
     files_after = sorted(p.name for p in data_root.iterdir())
-    assert files_after == files_before
+    new_dirs = sorted(set(files_after) - set(files_before))
+    assert new_dirs == ["logs"], f"unexpected new entries: {new_dirs}"
     # No publication state was written.
     assert not (data_root / "publication-state.json").exists()
     # The orchestrator failed because of preflight denial.

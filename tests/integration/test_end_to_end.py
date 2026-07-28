@@ -165,6 +165,8 @@ def test_synthetic_end_to_end(tmp_path: Path) -> None:
         "version",
         "changeset",
         "timestamp",
+        "name",
+        "localized_names",
         "description",
         "localized_descriptions",
         "tags",
@@ -182,8 +184,8 @@ def test_synthetic_end_to_end(tmp_path: Path) -> None:
     osm_ids = {(row["osm_type"], row["osm_id"]) for row in rows}
 
     # 9. Exact included and excluded OSM IDs.
-    expected_included = {("way", 100), ("relation", 500), ("way", 300)}
-    expected_excluded = {("way", 101), ("way", 102), ("way", 103)}
+    expected_included = {("way", 100), ("way", 101), ("way", 300), ("relation", 500)}
+    expected_excluded = {("way", 102), ("way", 103), ("way", 200), ("way", 201)}
     assert expected_included == osm_ids, (
         f"unexpected included ids: osm_ids={osm_ids}, "
         f"missing={expected_included - osm_ids}, "

@@ -39,6 +39,7 @@ _ALLOWED_TOP_LEVEL = {
     "data",
     "manifests",
     "publication-state.json",
+    "logs",
 }
 
 # The exact uploader-owned cache directory layout. ``hf upload-large-folder``

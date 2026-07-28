@@ -33,10 +33,10 @@ def _build_pair(
     manifest_path = data_root / "manifests" / f"{name}.manifest.json"
     included = write_geoparquet(iter(records), output_path, batch_size=10)
     manifest = Manifest(
-        manifest_schema_version=1,
-        schema_version=1,
+        manifest_schema_version=2,
+        schema_version=2,
         geoparquet_version="1.1.0",
-        transform_algorithm_version=1,
+        transform_algorithm_version=2,
         output_algorithm_revision="x" * 64,
         area_policy_sha256="0" * 64,
         source=source_identity_for(source_path),
@@ -104,9 +104,10 @@ def test_collect_stats_aggregates_from_validated_artifacts(tmp_path: Path) -> No
     assert stats["emitted_features"] == 7
     assert stats["base_description_rows"] == 0
     assert stats["localized_description_rows"] == 3
-    assert stats["generation_timestamp_utc"] == "2026-07-27T00:00:00+00:00"
+    assert "generation_timestamp_utc" not in stats
     assert stats["area_m2_min_m2"] is not None and stats["area_m2_min_m2"] > 0
     assert stats["area_m2_max_m2"] >= stats["area_m2_min_m2"]
+    assert stats["stats_schema_version"] == 2
 
 
 def test_collect_stats_rejects_missing_manifest(tmp_path: Path) -> None:

@@ -86,6 +86,36 @@ Behavior:
   + `description:<suffix>`; every original OSM tag; immutable raw source;
   bounded-memory processing.
 
+## Output schema
+
+The output GeoParquet is `SCHEMA_VERSION = 2` with the following columns in
+order:
+
+- `source_pbf`, `osm_type`, `osm_id`, `osm_url`
+- `version`, `changeset`, `timestamp` (OSM provenance)
+- `name` (nullable), `localized_names` (`name:<suffix>` to value map)
+- `description` (nullable), `localized_descriptions` (`description:<suffix>` to value map)
+- `tags` (full original OSM tag map, byte-faithful)
+- `geometry_type`, `area_m2`, `bbox_min_x`, `bbox_min_y`, `bbox_max_x`, `bbox_max_y`, `geometry`
+
+The `tags` column is authoritative. `name` and `description` are derived from
+`tags` for query convenience and stay in lock-step with the source map for
+every record.
+
+Closed-way selection uses osmium's general area handling: `area_tags: true`,
+`linear_tags: true`, plus `--geometry-types polygon` on the export command.
+The exact policy is versioned in `config/osmium-export.json` and pinned in
+each manifest as a SHA-256 provenance.
+
+## Operational logs and progress
+
+`run-and-publish` writes a typed event stream to
+`<data-root>/logs/run-and-publish.jsonl` (redacted JSONL) and a human
+line on stderr. The log file rotates atomically at 10 MiB with five
+backups, using same-directory hard-link staging and `os.replace`. The
+logs directory is allowlisted locally but never included in any upload
+plan.
+
 ## Usage
 
 The project uses Python 3.12 and [`uv`](https://docs.astral.sh/uv/).

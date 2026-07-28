@@ -42,6 +42,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, cast
 
+from osm_polygon_description_tag._logging import RunLogger
 from osm_polygon_description_tag._resources import (
     dataset_card_template,
     osmium_export_config,
@@ -571,6 +572,10 @@ def _process_one(
     *,
     clock: Callable[[], str],
     exporter: Callable[..., Iterable[ExportRecordLike]] | None = None,
+    progress_interval: int = 100_000,
+    logger: RunLogger | None = None,
+    source_index: int = 0,
+    source_total: int = 0,
 ) -> SourceOutcome:
     """Build or reuse one PBF and return the resulting per-source state."""
     complete, manifest = _local_artifact_is_complete(paths, source)
@@ -584,6 +589,15 @@ def _process_one(
         and manifest is not None
         and _published_state_matches(existing, manifest, source, output_path)
     ):
+        if logger is not None:
+            logger.event(
+                "source_decision",
+                level="INFO",
+                source=source.name,
+                source_index=source_index,
+                source_total=source_total,
+                decision="already-published",
+            )
         return SourceOutcome(
             source_name=source.name,
             status=STATUS_PUBLISHED,
@@ -594,6 +608,15 @@ def _process_one(
         )
 
     if complete and manifest is not None:
+        if logger is not None:
+            logger.event(
+                "source_decision",
+                level="INFO",
+                source=source.name,
+                source_index=source_index,
+                source_total=source_total,
+                decision="reuse-local",
+            )
         generate_dataset_docs(paths.data_root, dataset_card_template(), clock=clock)
         return SourceOutcome(
             source_name=source.name,
@@ -604,13 +627,58 @@ def _process_one(
             note="local artifact reused; upload required",
         )
 
+    if logger is not None:
+        logger.event(
+            "source_decision",
+            level="INFO",
+            source=source.name,
+            source_index=source_index,
+            source_total=source_total,
+            decision="build",
+        )
+        logger.event(
+            "build_start",
+            level="INFO",
+            source=source.name,
+            source_index=source_index,
+            source_total=source_total,
+        )
+    if logger is not None:
+
+        def _on_progress(emitted: int, included: int) -> None:
+            assert logger is not None
+            logger.event(
+                "build_progress",
+                level="INFO",
+                source=source.name,
+                source_index=source_index,
+                source_total=source_total,
+                emitted=emitted,
+                included=included,
+            )
+
+        progress_callback = _on_progress
+    else:
+        progress_callback = None
     result = build_one(
         source,
         paths,
         export_config=osmium_export_config(),
         executable="osmium",
         exporter=exporter,
+        progress_interval=progress_interval,
+        progress_callback=progress_callback,
     )
+    if logger is not None:
+        logger.event(
+            "build_complete",
+            level="INFO",
+            source=source.name,
+            source_index=source_index,
+            source_total=source_total,
+            rows=result.included_rows,
+            bytes=result.output_path.stat().st_size,
+        )
     generate_dataset_docs(paths.data_root, dataset_card_template(), clock=clock)
     return SourceOutcome(
         source_name=source.name,
@@ -666,6 +734,7 @@ def _execute_publication(
     verifier: HubVerifier | None,
     timeout: float | None,
     upload_runner: Callable[[list[str]], str] | None,
+    logger: RunLogger | None = None,
 ) -> str:
     """Build the per-PBF plan, execute the upload, verify remote, return the SHA.
 
@@ -677,6 +746,12 @@ def _execute_publication(
     # Revalidate the dataset-wide upload plan immediately before upload to
     # catch in-place mutations between build and upload.
     create_upload_plan(paths.data_root)
+    if logger is not None:
+        logger.event(
+            "verification_start",
+            level="INFO",
+            source=source.name,
+        )
     try:
         if upload_runner is None:
             execute_upload(plan, confirmation=plan.identity_sha256, timeout=timeout)
@@ -702,6 +777,13 @@ def _execute_publication(
         raise OrchestratorError(
             f"Hub verifier returned no revision for {source.name}; refusing to record 'unknown'"
         )
+    if logger is not None:
+        logger.event(
+            "verification_complete",
+            level="INFO",
+            source=source.name,
+            verified_revision=verified,
+        )
     return verified
 
 
@@ -724,6 +806,8 @@ def run_and_publish(
     verifier_factory: Callable[[], HubVerifier] | None = None,
     upload_timeout: float | None = None,
     subprocess_runner: Callable[[list[str]], None] | None = None,
+    progress_interval: int = 100_000,
+    logger: RunLogger | None = None,
 ) -> OrchestrationReport:
     """Stoppable, resumable build + publish for every discovered PBF.
 
@@ -735,6 +819,18 @@ def run_and_publish(
     """
     if clock is None:
         clock = _default_clock
+    if logger is None:
+        if paths is None:
+            if data_root is None:
+                raise OrchestratorError("logger requires paths or data_root")
+            data_root_path = data_root
+        else:
+            data_root_path = paths.data_root
+        logger = RunLogger(
+            data_root=data_root_path,
+            run_id=str(uuid.uuid4()),
+            clock=clock,
+        )
     if subprocess_runner is not None:
         # Tests may redirect the production subprocess boundary; install it
         # by monkeypatching the default runner used inside execute_upload.
@@ -760,6 +856,8 @@ def run_and_publish(
                 verifier=verifier,
                 verifier_factory=verifier_factory,
                 upload_timeout=upload_timeout,
+                progress_interval=progress_interval,
+                logger=logger,
             )
         finally:
             pub._default_runner_with_retry = original_runner
@@ -776,6 +874,8 @@ def run_and_publish(
         verifier=verifier,
         verifier_factory=verifier_factory,
         upload_timeout=upload_timeout,
+        progress_interval=progress_interval,
+        logger=logger,
     )
 
 
@@ -792,6 +892,8 @@ def _run_and_publish(
     verifier: HubVerifier | None,
     verifier_factory: Callable[[], HubVerifier] | None,
     upload_timeout: float | None,
+    progress_interval: int,
+    logger: RunLogger,
 ) -> OrchestrationReport:
     if paths is None:
         if source_root is None or data_root is None:
@@ -799,17 +901,37 @@ def _run_and_publish(
         paths = Paths(source_root=source_root, data_root=data_root)
 
     if preflight is None:
-        preflight_report = default_preflight(
-            paths,
-            confirm_repo=confirm_repo,
-            osmium_executable="osmium",
-            hf_executable="hf",
-        )
+        try:
+            preflight_report = default_preflight(
+                paths,
+                confirm_repo=confirm_repo,
+                osmium_executable="osmium",
+                hf_executable="hf",
+            )
+        except Exception as error:
+            logger.event("preflight_denied", level="ERROR", reason=str(error))
+            logger.deny_preflight()
+            raise
     else:
         preflight_report = preflight()
+    logger.event(
+        "preflight",
+        level="INFO",
+        osmium_executable=preflight_report.get("osmium_executable", "osmium"),
+        osmium_version=preflight_report.get("osmium_version", ""),
+        hub_repo_sha=preflight_report.get("hub_repo_sha", ""),
+        source_count=preflight_report.get("source_count", 0),
+    )
+    logger.approve_preflight()
 
     sources = discover_sources(paths.source_root)
     report = OrchestrationReport(source_count=len(sources), preflight=preflight_report)
+    total_sources = len(sources)
+    logger.event(
+        "sources_discovered",
+        level="INFO",
+        total=total_sources,
+    )
 
     # Resolve the verifier exactly once so a single HfApi instance is used.
     active_verifier: HubVerifier | None = verifier
@@ -820,12 +942,28 @@ def _run_and_publish(
         active_verifier = default_hub_verifier_factory()
 
     per_pbf_upload_count = 0
-    for source in sources:
-        outcome = _process_one(source, paths, clock=clock, exporter=exporter)
+    for index, source in enumerate(sources, start=1):
+        outcome = _process_one(
+            source,
+            paths,
+            clock=clock,
+            exporter=exporter,
+            progress_interval=progress_interval,
+            logger=logger,
+            source_index=index,
+            source_total=total_sources,
+        )
         if outcome.status == STATUS_PUBLISHED:
             report.outcomes.append(outcome)
             continue
         if outcome.status in {STATUS_BUILT, STATUS_REUSED}:
+            logger.event(
+                "upload_start",
+                level="INFO",
+                source=source.name,
+                source_index=index,
+                source_total=total_sources,
+            )
             try:
                 revision = _execute_publication(
                     paths,
@@ -833,11 +971,20 @@ def _run_and_publish(
                     verifier=active_verifier,
                     timeout=upload_timeout,
                     upload_runner=upload_runner,
+                    logger=logger,
                 )
             except OrchestratorError as error:
                 outcome.status = STATUS_FAILED
                 outcome.note = str(error)
                 report.outcomes.append(outcome)
+                logger.event(
+                    "upload_failed",
+                    level="ERROR",
+                    source=source.name,
+                    source_index=index,
+                    source_total=total_sources,
+                    reason=str(error),
+                )
                 raise
             output_path = paths.data_root / "data" / source.output_name
             output_identity = output_identity_for(output_path)
@@ -851,6 +998,13 @@ def _run_and_publish(
                 remote_revision=revision,
                 artifact_identity=plan_identity,
                 completed_at=clock(),
+            )
+            logger.event(
+                "state_written",
+                level="INFO",
+                source=source.name,
+                source_index=index,
+                source_total=total_sources,
             )
             outcome.remote_revision = revision
             outcome.note = "published after verified upload"
@@ -869,9 +1023,18 @@ def _run_and_publish(
         upload_runner=upload_runner,
         upload_timeout=upload_timeout,
         clock=clock,
+        logger=logger,
     )
     if final_metadata_revision is not None:
         report.final_remote_revision = final_metadata_revision
+    logger.event(
+        "run_summary",
+        level="INFO",
+        result="completed",
+        source_count=total_sources,
+        per_pbf_uploads=per_pbf_upload_count,
+    )
+    logger.flush()
     return report
 
 
@@ -922,6 +1085,7 @@ def _upload_final_metadata(
     upload_runner: Callable[[list[str]], str] | None,
     upload_timeout: float | None = None,
     clock: Callable[[], str] | None = None,
+    logger: RunLogger | None = None,
 ) -> str | None:
     """Upload README.md + stats.json and verify the result via Hub API.
 
@@ -948,8 +1112,16 @@ def _upload_final_metadata(
         state_payload = read_publication_state(paths.data_root)
         metadata_state = cast_dict(state_payload.get("metadata", {}))
         revision = metadata_state.get("verified_revision")
+        if logger is not None:
+            logger.event(
+                "metadata_skip",
+                level="INFO",
+                verified_revision=str(revision) if revision else "",
+            )
         return str(revision) if revision else None
 
+    if logger is not None:
+        logger.event("metadata_upload_start", level="INFO")
     try:
         if upload_runner is None:
             execute_upload(
@@ -992,6 +1164,12 @@ def _upload_final_metadata(
         verified_revision=verified,
         completed_at=clock(),
     )
+    if logger is not None:
+        logger.event(
+            "metadata_state_written",
+            level="INFO",
+            verified_revision=verified,
+        )
     return verified
 
 

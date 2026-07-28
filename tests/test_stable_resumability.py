@@ -47,10 +47,10 @@ def test_is_resumable_with_mismatched_code_revision(tmp_path: Path) -> None:
     out_identity = output_identity_for(output)
 
     manifest = Manifest(
-        manifest_schema_version=1,
-        schema_version=1,
+        manifest_schema_version=2,
+        schema_version=2,
         geoparquet_version="1.1.0",
-        transform_algorithm_version=1,
+        transform_algorithm_version=2,
         area_policy_sha256=current_area_policy_sha256(),
         output_algorithm_revision=current_output_algorithm_revision(),
         source=src_identity,
@@ -75,10 +75,10 @@ def test_is_resumable_with_missing_code_revision(tmp_path: Path) -> None:
     output.write_bytes(b"out")
 
     manifest = Manifest(
-        manifest_schema_version=1,
-        schema_version=1,
+        manifest_schema_version=2,
+        schema_version=2,
         geoparquet_version="1.1.0",
-        transform_algorithm_version=1,
+        transform_algorithm_version=2,
         area_policy_sha256=current_area_policy_sha256(),
         output_algorithm_revision=current_output_algorithm_revision(),
         source=source_identity_for(source),
@@ -100,10 +100,10 @@ def test_behavioral_change_invalidates_resume(tmp_path: Path) -> None:
     source.write_bytes(b"a")
     output.write_bytes(b"out")
     manifest = Manifest(
-        manifest_schema_version=1,
-        schema_version=1,
+        manifest_schema_version=2,
+        schema_version=2,
         geoparquet_version="1.1.0",
-        transform_algorithm_version=1,
+        transform_algorithm_version=2,
         area_policy_sha256=current_area_policy_sha256(),
         output_algorithm_revision="old:0000",
         source=source_identity_for(source),
@@ -157,23 +157,26 @@ def test_full_run_no_rebuild_on_doc_only_commit(
 
     from osm_polygon_description_tag.manifest import write_manifest
 
-    manifest = Manifest(
-        manifest_schema_version=1,
-        schema_version=1,
-        geoparquet_version="1.1.0",
-        transform_algorithm_version=1,
-        area_policy_sha256=current_area_policy_sha256(),
-        output_algorithm_revision=current_output_algorithm_revision(),
-        source=source_identity_for(source_root / "a.osm.pbf"),
-        output=output_identity_for(paths.data_root / "data" / "a.parquet"),
-        osmium_version="osmium version 1.19.1",
-        dependency_versions={"pyarrow": "20.0.0"},
-        code_revision="DOC-ONLY-COMMIT",
-        started_at="2026-07-27T00:00:00+00:00",
-        completed_at="2026-07-27T00:01:00+00:00",
-        counts=RunCounts(emitted_features=1, included_rows=1, rejections={}),
+    write_manifest(
+        Manifest(
+            manifest_schema_version=2,
+            schema_version=2,
+            geoparquet_version="1.1.0",
+            transform_algorithm_version=2,
+            area_policy_sha256=current_area_policy_sha256(),
+            output_algorithm_revision=current_output_algorithm_revision(),
+            source=source_identity_for(source_root / "a.osm.pbf"),
+            output=output_identity_for(paths.data_root / "data" / "a.parquet"),
+            osmium_version="osmium version 1.19.1",
+            dependency_versions={"pyarrow": "20.0.0"},
+            code_revision="DOC-ONLY-COMMIT",
+            started_at="2026-07-27T00:00:00+00:00",
+            completed_at="2026-07-27T00:01:00+00:00",
+            counts=RunCounts(emitted_features=1, included_rows=1, rejections={}),
+        ),
+        paths.data_root / "manifests" / "a.manifest.json",
     )
-    write_manifest(manifest, paths.data_root / "manifests" / "a.manifest.json")
+    # Defensive double-write for tests that follow before this edit.
 
     (paths.data_root / "README.md").write_text("stub")
     (paths.data_root / "stats.json").write_text("{}")

@@ -131,10 +131,10 @@ def test_process_one_returns_reused_local_needs_upload_when_state_missing(
     write_geoparquet(iter([record]), data_root / "data" / "a.parquet", batch_size=10)
     write_manifest(
         Manifest(
-            manifest_schema_version=1,
-            schema_version=1,
+            manifest_schema_version=2,
+            schema_version=2,
             geoparquet_version="1.1.0",
-            transform_algorithm_version=1,
+            transform_algorithm_version=2,
             area_policy_sha256=current_area_policy_sha256(),
             output_algorithm_revision=current_output_algorithm_revision(),
             source=source_identity_for(source_root / "a.osm.pbf"),
@@ -179,10 +179,10 @@ def test_process_one_returns_already_published_when_state_matches(
     write_geoparquet(iter([record]), data_root / "data" / "a.parquet", batch_size=10)
     write_manifest(
         Manifest(
-            manifest_schema_version=1,
-            schema_version=1,
+            manifest_schema_version=2,
+            schema_version=2,
             geoparquet_version="1.1.0",
-            transform_algorithm_version=1,
+            transform_algorithm_version=2,
             area_policy_sha256=current_area_policy_sha256(),
             output_algorithm_revision=current_output_algorithm_revision(),
             source=source_identity_for(source_root / "a.osm.pbf"),
@@ -299,10 +299,10 @@ def test_run_and_publish_complete_check_rejects_extra_artifact(tmp_path: Path) -
     write_geoparquet(iter([record]), data_root / "data" / "stray.parquet", batch_size=10)
     write_manifest(
         Manifest(
-            manifest_schema_version=1,
-            schema_version=1,
+            manifest_schema_version=2,
+            schema_version=2,
             geoparquet_version="1.1.0",
-            transform_algorithm_version=1,
+            transform_algorithm_version=2,
             output_algorithm_revision="x" * 64,
             area_policy_sha256="x" * 64,
             source=source_identity_for(source_root / "a.osm.pbf"),
@@ -360,10 +360,10 @@ def test_run_and_publish_local_artifact_uploaded_without_rebuild(tmp_path: Path)
     write_geoparquet(iter([record]), data_root / "data" / "a.parquet", batch_size=10)
     write_manifest(
         Manifest(
-            manifest_schema_version=1,
-            schema_version=1,
+            manifest_schema_version=2,
+            schema_version=2,
             geoparquet_version="1.1.0",
-            transform_algorithm_version=1,
+            transform_algorithm_version=2,
             area_policy_sha256=current_area_policy_sha256(),
             output_algorithm_revision=current_output_algorithm_revision(),
             source=source_identity_for(source_root / "a.osm.pbf"),

@@ -91,13 +91,24 @@ def _transform_stream(
     records: Iterable[ExportRecord],
     source_name: str,
     counts: _Counts,
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+    progress_interval: int = 100_000,
 ) -> Iterator[dict[str, object]]:
+    included = 0
+    last_emitted = 0
+    interval = max(int(progress_interval), 1)
     for record in records:
         counts.emitted += 1
         try:
             yield transform_record(record, source_name)
         except RejectedFeature as rejection:
             counts.rejections[rejection.reason] = counts.rejections.get(rejection.reason, 0) + 1
+        else:
+            included += 1
+        if progress_callback is not None and counts.emitted - last_emitted >= interval:
+            last_emitted = counts.emitted
+            progress_callback(counts.emitted, included)
 
 
 def build_one(
@@ -110,6 +121,8 @@ def build_one(
     writer: Writer | None = None,
     clock: Clock | None = None,
     batch_size: int = 1024,
+    progress_interval: int = 100_000,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> BuildResult:
     """Build (or resume) one source's GeoParquet output and manifest."""
 
@@ -165,7 +178,13 @@ def build_one(
 
     started_at = clock()
     counts = _Counts()
-    transformed = _transform_stream(exporter(source.path, export_config), source.name, counts)
+    transformed = _transform_stream(
+        exporter(source.path, export_config),
+        source.name,
+        counts,
+        progress_callback=progress_callback,
+        progress_interval=progress_interval,
+    )
     included_rows = writer(transformed, output_path, batch_size=batch_size)
     completed_at = clock()
 

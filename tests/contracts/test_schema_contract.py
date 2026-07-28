@@ -12,6 +12,8 @@ def test_arrow_schema_is_frozen() -> None:
         "version",
         "changeset",
         "timestamp",
+        "name",
+        "localized_names",
         "description",
         "localized_descriptions",
         "tags",
@@ -37,12 +39,14 @@ def test_arrow_field_types_and_nullability() -> None:
     assert SCHEMA.field("tags").type.item_type == pa.string()
     assert SCHEMA.field("tags").nullable is False
     assert SCHEMA.field("localized_descriptions").nullable is False
+    assert SCHEMA.field("localized_names").nullable is False
     assert SCHEMA.field("description").nullable is True
+    assert SCHEMA.field("name").nullable is True
     assert SCHEMA.field("version").nullable is True
 
 
 def test_schema_version_is_pinned() -> None:
-    assert SCHEMA_VERSION == 1
+    assert SCHEMA_VERSION == 2
 
 
 def test_geo_metadata_is_geoparquet_1_1() -> None:

@@ -12,16 +12,8 @@
   "format_options": {
     "tags_type": "json"
   },
-  "linear_tags": ["highway", "barrier", "natural=coastline"],
-  "area_tags": [
-    "aeroway",
-    "amenity",
-    "building",
-    "landuse",
-    "leisure",
-    "man_made",
-    "natural!=coastline"
-  ],
+  "linear_tags": true,
+  "area_tags": true,
   "exclude_tags": [],
   "include_tags": []
 }
