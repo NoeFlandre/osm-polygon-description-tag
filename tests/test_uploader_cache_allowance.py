@@ -131,6 +131,30 @@ def test_uploader_cache_directory_is_accepted_in_collect(tmp_path: Path) -> None
     assert not any(item.relative_path.startswith(".cache") for item in items)
 
 
+def test_macos_ds_store_is_ignored_locally_and_never_uploaded(tmp_path: Path) -> None:
+    """Finder metadata must not abort or enter a dataset upload plan."""
+    data_root = _setup_data_root(tmp_path)
+    (data_root / ".DS_Store").write_bytes(b"Finder metadata")
+
+    items = _collect_allowlisted_files(data_root)
+
+    assert {item.relative_path for item in items} == {"README.md", "stats.json"}
+
+
+def test_macos_ds_store_symlink_is_rejected(tmp_path: Path) -> None:
+    """The exception is limited to a regular local file."""
+    data_root = _setup_data_root(tmp_path)
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"outside")
+    try:
+        (data_root / ".DS_Store").symlink_to(outside)
+    except OSError:
+        pytest.skip("filesystem does not support symlinks")
+
+    with pytest.raises(PublicationError, match="regular file"):
+        _collect_allowlisted_files(data_root)
+
+
 def test_uploader_cache_never_in_per_pbf_plan(tmp_path: Path) -> None:
     """The per-PBF plan never contains anything from ``.cache/huggingface``."""
     data_root = _setup_data_root(tmp_path)

@@ -165,6 +165,10 @@ def _collect_allowlisted_files(data_root: Path) -> tuple[UploadItem, ...]:
             if entry.is_symlink() or not entry.is_dir():
                 raise PublicationError(f"local work path must be a real directory: {entry}")
             continue
+        if entry.name == ".DS_Store":
+            if entry.is_symlink() or not entry.is_file():
+                raise PublicationError(f".DS_Store must be a regular file: {entry}")
+            continue
         raise PublicationError(f"unknown top-level entry: {entry}")
 
     items: list[UploadItem] = []
