@@ -134,7 +134,7 @@ def test_execute_upload_refuses_wrong_confirmation(tmp_path: Path) -> None:
         execute_upload(plan, confirmation="deadbeef", runner=runner)
 
 
-def test_execute_upload_passes_exact_command_to_runner(tmp_path: Path) -> None:
+def test_execute_upload_passes_allowlisted_exact_includes(tmp_path: Path) -> None:
     data_root = tmp_path / "generated"
     _make_dataset(data_root)
     plan = create_upload_plan(data_root)
@@ -147,22 +147,17 @@ def test_execute_upload_passes_exact_command_to_runner(tmp_path: Path) -> None:
     execute_upload(plan, confirmation=plan.identity_sha256, runner=runner)
 
     assert len(captured) == 1
-    assert captured[0] == [
+    expected_command = [
         "hf",
         "upload-large-folder",
         "NoeFlandre/osm-polygon-description-tag",
         str(data_root.resolve(strict=False)),
         "--repo-type",
         "dataset",
-        "--include",
-        "README.md",
-        "--include",
-        "stats.json",
-        "--include",
-        "data/*.parquet",
-        "--include",
-        "manifests/*.manifest.json",
     ]
+    for item in sorted(plan.files, key=lambda i: i.relative_path):
+        expected_command.extend(["--include", item.relative_path])
+    assert captured[0] == expected_command
 
 
 def test_execute_upload_detects_checksum_drift(tmp_path: Path) -> None:

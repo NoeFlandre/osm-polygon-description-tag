@@ -9,13 +9,14 @@ iterates discovered sources in deterministic filename order, and for each one:
 2. Otherwise rebuilds exactly that PBF with the real osmium binary.
 3. Validates the produced GeoParquet and manifest, regenerates
    ``stats.json`` and ``README.md``, and computes a per-PBF upload plan
-   containing exactly four files (Parquet, manifest, stats, README).
-4. Uses :func:`publication.execute_upload` as the single publishing
-   abstraction (which revalidates the plan, the manifest, and the parquet,
-   verifies the remote revision through the official Hub API, and applies
-   bounded retry on retryable failures).
-5. Records the verified remote commit identity in
-   ``publication-state.json`` atomically, but only after remote verification.
+   containing exactly four files (Parquet, manifest, README, stats).
+4. Uploads through :func:`publication.execute_upload` (or the in-process
+   test runner), with optional ``upload_timeout`` forwarded to
+   ``subprocess.run``.
+5. Verifies every uploaded file exists on the Hub with matching identity via
+   the default Hub verifier (built on ``huggingface_hub.HfApi``) and
+   records the verified remote commit SHA in ``publication-state.json``
+   atomically.
 
 Three mutually exclusive per-source outcomes are exposed:
 
@@ -26,14 +27,12 @@ Three mutually exclusive per-source outcomes are exposed:
   nothing must happen on disk and nothing must be uploaded.
 
 A Ctrl-C interrupt terminates the active osmium child, removes only owned
-temporary files, leaves prior artifacts intact, and exits with code 130. A
-restart skips locally valid completed PBFs and previously committed uploads,
-and safely retries an upload whose remote commit succeeded but whose local
-checkpoint did not.
+temporary files, leaves prior artifacts intact, and exits with code 130.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -42,7 +41,7 @@ import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol, cast
 
 from osm_polygon_description_tag._resources import (
     dataset_card_template,
@@ -52,8 +51,9 @@ from osm_polygon_description_tag.config import Paths
 from osm_polygon_description_tag.discovery import Source, discover_sources
 from osm_polygon_description_tag.extraction import ExportRecord
 from osm_polygon_description_tag.manifest import (
+    TRANSFORM_ALGORITHM_VERSION,
     Manifest,
-    file_sha256,
+    current_area_policy_sha256,
     is_resumable,
     output_identity_for,
     read_manifest,
@@ -64,12 +64,11 @@ from osm_polygon_description_tag.publication import (
     REPO_ID,
     PublicationError,
     UploadItem,
-    UploadPlan,
+    _build_metadata_only_upload_plan,
+    _build_per_pbf_upload_plan,
     create_upload_plan,
     execute_upload,
-)
-from osm_polygon_description_tag.publication import (
-    file_sha256_bytes as publication_file_sha256_bytes,
+    per_pbf_command,
 )
 from osm_polygon_description_tag.reporting import generate_dataset_docs
 from osm_polygon_description_tag.storage import StorageError, validate_geoparquet
@@ -82,6 +81,9 @@ STATUS_BUILT = "built-needs-upload"
 STATUS_REUSED = "reused-local-needs-upload"
 STATUS_PUBLISHED = "already-published"
 STATUS_FAILED = "failed"
+
+# Files that the LFS threshold applies to in the default Hub verifier.
+LFS_SHA_THRESHOLD_BYTES = 5 * 1024 * 1024
 
 ExportRecordLike = ExportRecord
 
@@ -102,18 +104,6 @@ class HubVerifier(Protocol):
 
 class Preflight(Protocol):
     def __call__(self) -> dict[str, object]: ...
-
-
-class Publisher(Protocol):
-    def __call__(
-        self,
-        plan: UploadPlan,
-        *,
-        confirmation: str,
-        runner: object,
-        verifier: HubVerifier | None,
-        timeout: float | None,
-    ) -> str: ...
 
 
 @dataclass
@@ -220,6 +210,144 @@ def cast_dict(value: object) -> dict[str, object]:
 
 
 # ---------------------------------------------------------------------------
+# Hub verifier (default factory backed by huggingface_hub.HfApi)
+# ---------------------------------------------------------------------------
+
+
+class _HuggingFaceHub:
+    """Lazy wrapper around the huggingface_hub package.
+
+    Importing huggingface_hub at module load time would couple the project
+    to a network-authenticated dependency even for read-only operations.
+    The wrapper defers the import until :func:`default_hub_verifier_factory`
+    actually instantiates a verifier.
+
+    Tests may override attributes on this instance (for example,
+    ``_huggingface_hub.HfApi = lambda ...``); those overrides take
+    precedence over the lazy lookup.
+    """
+
+    def __init__(self) -> None:
+        self._module: object | None = None
+
+    def _resolve_module(self) -> object:
+        if self._module is None:
+            import huggingface_hub as _hub
+
+            self._module = _hub
+        return self._module
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._resolve_module(), name)
+
+
+_huggingface_hub = _HuggingFaceHub()
+
+
+def default_hub_verifier_factory() -> HubVerifier:
+    """Return a verifier that talks to the live Hugging Face Hub.
+
+    The verifier:
+
+    1. Confirms the caller's authenticated identity via ``HfApi.whoami``.
+    2. Queries the dataset repository and reads its current commit SHA via
+       ``HfApi.repo_info``. That SHA is the candidate revision.
+    3. For each :class:`UploadItem` it checks ``HfApi.get_paths_info`` for the
+       exact file metadata at that revision; small files are read via
+       ``HfApi.hf_hub_download`` and hashed with SHA-256, larger files are
+       compared against the LFS ``sha256`` reported in the Hub metadata.
+    4. Returns the verified commit SHA, or raises :class:`HubVerificationError`
+       on any mismatch / missing file / unauthenticated identity.
+
+    The ``HfApi`` is resolved at invocation time (not at factory time), so
+    tests may monkeypatch ``orch._huggingface_hub.HfApi`` BEFORE the
+    verifier is actually called.
+    """
+
+    def verifier(repo_id: str, files: tuple[UploadItem, ...]) -> str:
+        # Resolve the HfApi lazily at invocation time so monkeypatching
+        # _huggingface_hub.HfApi is honored by tests.
+        HfApiCls = cast(Any, _huggingface_hub.HfApi)
+        api = HfApiCls()
+        try:
+            identity = api.whoami()
+        except Exception as error:
+            raise HubVerificationError(f"Hub authentication failed: {error}") from error
+        if not identity:
+            raise HubVerificationError("Hub authentication returned no identity")
+        try:
+            info = api.repo_info(repo_id, repo_type="dataset")
+        except Exception as error:
+            raise HubVerificationError(
+                f"Hub repository {repo_id} is not accessible: {error}"
+            ) from error
+        revision = str(getattr(info, "sha", "") or "")
+        if not revision:
+            raise HubVerificationError(f"Hub repository {repo_id} returned an empty revision")
+        for item in files:
+            try:
+                entries = api.get_paths_info(
+                    repo_id,
+                    paths=[item.relative_path],
+                    revision=revision,
+                    repo_type="dataset",
+                )
+            except Exception as error:
+                raise HubVerificationError(
+                    f"hub verification failed for {item.relative_path}: {error}"
+                ) from error
+            entry = next((e for e in entries), None)
+            if entry is None:
+                raise HubVerificationError(
+                    f"remote file missing in revision {revision}: {item.relative_path}"
+                )
+            size = getattr(entry, "size", None)
+            if size is not None and int(size) != int(item.size_bytes):
+                raise HubVerificationError(
+                    f"remote size mismatch for {item.relative_path}: "
+                    f"local={item.size_bytes}, remote={size}"
+                )
+            lfs_info = getattr(entry, "lfs", None)
+            lfs_sha = getattr(lfs_info, "sha256", None) if lfs_info is not None else None
+            if lfs_sha:
+                if str(lfs_sha).lower() != str(item.sha256).lower():
+                    raise HubVerificationError(f"remote LFS SHA mismatch for {item.relative_path}")
+                continue
+            # Fallback: read the remote content via hf_hub_download for direct
+            # SHA-256 comparison. This is the authoritative identity for small
+            # non-LFS files.
+            try:
+                local_path = api.hf_hub_download(
+                    repo_id,
+                    item.relative_path,
+                    revision=revision,
+                    repo_type="dataset",
+                )
+            except Exception as error:
+                raise HubVerificationError(
+                    f"could not download {item.relative_path} from {repo_id}@{revision}: {error}"
+                ) from error
+            digest = hashlib.sha256(Path(local_path).read_bytes()).hexdigest()
+            if digest.lower() != str(item.sha256).lower():
+                raise HubVerificationError(
+                    f"remote SHA mismatch for {item.relative_path}: "
+                    f"local={item.sha256}, remote={digest}"
+                )
+        return revision
+
+    return verifier
+
+
+def build_default_hub_verifier() -> HubVerifier:
+    """Build a fresh default Hub verifier."""
+    return default_hub_verifier_factory()
+
+
+class HubVerificationError(RuntimeError):
+    """Raised when the default Hub verifier cannot confirm the uploaded files."""
+
+
+# ---------------------------------------------------------------------------
 # Preflight
 # ---------------------------------------------------------------------------
 
@@ -252,7 +380,6 @@ def default_preflight(
     confirm_repo: str,
     osmium_executable: str,
     hf_executable: str,
-    data_template_root: Path | None = None,
 ) -> dict[str, object]:
     try:
         paths.validate()
@@ -288,16 +415,34 @@ def default_preflight(
         raise PreflightError(f"data root is not writable: {paths.data_root}")
 
     sources = discover_sources(paths.source_root)
-    from osm_polygon_description_tag.manifest import (
-        TRANSFORM_ALGORITHM_VERSION,
-        current_area_policy_sha256,
-    )
+    if not sources:
+        raise PreflightError(
+            f"no source PBF files found in {paths.source_root}; nothing to publish"
+        )
+
+    # Use the lazy wrapper so tests can monkeypatch ``_huggingface_hub.HfApi``
+    # without hitting real Hugging Face infrastructure.
+    try:
+        HfApiCls = cast(Any, _huggingface_hub.HfApi)
+        api = HfApiCls()
+        identity = api.whoami()
+        repo_info = api.repo_info(REPO_ID, repo_type="dataset")
+    except Exception as error:
+        raise PreflightError(
+            f"Hub authentication/repo check failed for {REPO_ID}: {error}"
+        ) from error
+    if not identity:
+        raise PreflightError("Hub identity is empty; check HF_TOKEN")
+    if not getattr(repo_info, "sha", None):
+        raise PreflightError(f"Hub repository {REPO_ID} returned no commit SHA")
 
     return {
         "osmium_executable": osmium_executable,
         "osmium_version": osmium_version_output,
         "hf_executable": hf_executable,
         "hf_whoami": whoami,
+        "hf_identity": dict(identity) if isinstance(identity, dict) else str(identity),
+        "hub_repo_sha": str(getattr(repo_info, "sha", "")),
         "source_root": str(paths.source_root),
         "data_root": str(paths.data_root),
         "export_config": str(osmium_export_config()),
@@ -346,14 +491,7 @@ def _process_one(
     clock: Callable[[], str],
     exporter: Callable[..., Iterable[ExportRecordLike]] | None = None,
 ) -> SourceOutcome:
-    """Build or reuse one PBF and return the resulting per-source state.
-
-    Returns one of three mutually exclusive states:
-
-    - ``already-published`` — local artifact matches publication state.
-    - ``reused-local-needs-upload`` — local artifact is valid but unpublished.
-    - ``built-needs-upload`` — a fresh parquet was produced and must be uploaded.
-    """
+    """Build or reuse one PBF and return the resulting per-source state."""
     complete, manifest = _local_artifact_is_complete(paths, source)
     state = read_publication_state(paths.data_root)
     published = cast_dict(state.get("published", {}))
@@ -375,8 +513,6 @@ def _process_one(
         )
 
     if complete and manifest is not None:
-        # Valid local artifact exists but publication state does not match.
-        # Still regenerate README.md + stats.json so the upload plan is current.
         generate_dataset_docs(paths.data_root, dataset_card_template(), clock=clock)
         return SourceOutcome(
             source_name=source.name,
@@ -423,53 +559,62 @@ def _published_state_matches(
 
 
 # ---------------------------------------------------------------------------
-# Publication execution (single public path)
+# Publication execution (single canonical path)
 # ---------------------------------------------------------------------------
 
 
-def _default_hub_verifier(repo_id: str, files: tuple[object, ...]) -> str:
-    """Default Hub verifier that performs no network and returns ``""`` for tests.
+def _default_subprocess_runner(command: list[str], *, timeout: float | None = None) -> None:
+    """Default production subprocess boundary.
 
-    Production code must inject a real verifier (see :class:`HubVerifier`).
+    Private hook so tests can monkeypatch the real ``subprocess.run`` call.
+    The signature forwards ``timeout`` so the orchestrator's
+    ``upload_timeout`` reaches ``subprocess.run``.
     """
-    return ""
+    subprocess.run(  # noqa: S603 - controlled argument array, no shell
+        command,
+        check=True,
+        shell=False,
+        timeout=timeout,
+    )
 
 
 def _execute_publication(
     paths: Paths,
     source: Source,
     *,
-    identity_for_output: Callable[[Path], dict[str, object]],
     verifier: HubVerifier | None,
     timeout: float | None,
     upload_runner: Callable[[list[str]], str] | None,
 ) -> str:
-    """Build the per-PBF plan, confirm its identity, and execute the upload.
+    """Build the per-PBF plan, execute the upload, verify remote, return the SHA.
 
-    Returns the verified remote revision. Raises :class:`OrchestratorError`
-    when the upload fails, when no verifier confirms the resulting state, or
-    when the verifier returns an unverifiable (empty) revision.
+    The plan is constructed immediately before the upload by the canonical
+    per-PBF plan builder; it contains exactly the four files for this PBF.
+    Production and tests share the same canonical plan builder.
     """
-    plan = create_upload_plan(paths.data_root)
+    plan = _build_per_pbf_upload_plan(paths.data_root, source.name)
+    # Revalidate the dataset-wide upload plan immediately before upload to
+    # catch in-place mutations between build and upload.
+    create_upload_plan(paths.data_root)
     try:
         if upload_runner is None:
-            execute_upload(
-                plan,
-                confirmation=plan.identity_sha256,
-                runner=None,
-            )
+            execute_upload(plan, confirmation=plan.identity_sha256, timeout=timeout)
         else:
-            command = _per_pbf_command(paths.data_root, source.name)
+            command = per_pbf_command(paths.data_root, source.name)
             revision = upload_runner(command)
             if not revision:
                 raise PublicationError("upload runner returned empty revision")
-    except (PublicationError, subprocess.CalledProcessError) as error:
+    except KeyboardInterrupt:
+        raise
+    except (PublicationError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         raise OrchestratorError(f"upload failed for {source.name}: {error}") from error
 
     if verifier is None:
-        raise OrchestratorError("no Hub verifier supplied; cannot record remote revision")
+        raise OrchestratorError("no Hub verifier supplied; refusing to record an unknown revision")
     try:
         verified = verifier(REPO_ID, plan.files)
+    except KeyboardInterrupt:
+        raise
     except Exception as error:
         raise OrchestratorError(f"Hub verifier failed for {source.name}: {error}") from error
     if not verified:
@@ -477,58 +622,6 @@ def _execute_publication(
             f"Hub verifier returned no revision for {source.name}; refusing to record 'unknown'"
         )
     return verified
-
-
-def _per_pbf_command(data_root: Path, source_name: str) -> list[str]:
-    return [
-        "hf",
-        "upload-large-folder",
-        REPO_ID,
-        str(data_root),
-        "--repo-type",
-        "dataset",
-        "--include",
-        f"data/{source_name.removesuffix('.osm.pbf')}.parquet",
-        "--include",
-        f"manifests/{source_name.removesuffix('.osm.pbf')}.manifest.json",
-        "--include",
-        "README.md",
-        "--include",
-        "stats.json",
-    ]
-
-
-def _metadata_only_command(data_root: Path) -> list[str]:
-    return [
-        "hf",
-        "upload-large-folder",
-        REPO_ID,
-        str(data_root),
-        "--repo-type",
-        "dataset",
-        "--include",
-        "README.md",
-        "--include",
-        "stats.json",
-    ]
-
-
-def metadata_plan_identity_payload(items: tuple[UploadItem, ...]) -> bytes:
-    """Return the canonical JSON payload used to compute the metadata plan identity."""
-    payload = {
-        "data_root": "metadata-only",
-        "files": [
-            {
-                "relative_path": item.relative_path,
-                "sha256": item.sha256,
-                "size_bytes": item.size_bytes,
-            }
-            for item in items
-        ],
-        "repo_id": REPO_ID,
-    }
-    body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    return body.encode("utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -547,11 +640,78 @@ def run_and_publish(
     paths: Paths | None = None,
     exporter: Callable[..., Iterable[ExportRecordLike]] | None = None,
     verifier: HubVerifier | None = None,
+    verifier_factory: Callable[[], HubVerifier] | None = None,
     upload_timeout: float | None = None,
+    subprocess_runner: Callable[[list[str]], None] | None = None,
 ) -> OrchestrationReport:
-    """Stoppable, resumable build + publish for every discovered PBF."""
+    """Stoppable, resumable build + publish for every discovered PBF.
+
+    The default production path uses the real Hugging Face Hub API for
+    verification and ``subprocess.run`` for the upload. Tests may inject
+    ``upload_runner`` (a callable receiving the canonical command) and/or
+    ``verifier`` (a callable returning a SHA on success) without exposing
+    any of these via the public CLI.
+    """
     if clock is None:
         clock = _default_clock
+    if subprocess_runner is not None:
+        # Tests may redirect the production subprocess boundary; install it
+        # by monkeypatching the default runner used inside execute_upload.
+        import osm_polygon_description_tag.publication as pub
+
+        original_runner = pub._default_runner_with_retry
+
+        def _bridge(command: list[str], **kwargs: object) -> None:
+            subprocess_runner(command)
+            _ = kwargs
+
+        pub._default_runner_with_retry = _bridge
+        try:
+            return _run_and_publish(
+                source_root=source_root,
+                data_root=data_root,
+                confirm_repo=confirm_repo,
+                preflight=preflight,
+                upload_runner=upload_runner,
+                clock=clock,
+                paths=paths,
+                exporter=exporter,
+                verifier=verifier,
+                verifier_factory=verifier_factory,
+                upload_timeout=upload_timeout,
+            )
+        finally:
+            pub._default_runner_with_retry = original_runner
+
+    return _run_and_publish(
+        source_root=source_root,
+        data_root=data_root,
+        confirm_repo=confirm_repo,
+        preflight=preflight,
+        upload_runner=upload_runner,
+        clock=clock,
+        paths=paths,
+        exporter=exporter,
+        verifier=verifier,
+        verifier_factory=verifier_factory,
+        upload_timeout=upload_timeout,
+    )
+
+
+def _run_and_publish(
+    *,
+    source_root: Path | None,
+    data_root: Path | None,
+    confirm_repo: str,
+    preflight: Preflight | None,
+    upload_runner: Callable[[list[str]], str] | None,
+    clock: Callable[[], str],
+    paths: Paths | None,
+    exporter: Callable[..., Iterable[ExportRecordLike]] | None,
+    verifier: HubVerifier | None,
+    verifier_factory: Callable[[], HubVerifier] | None,
+    upload_timeout: float | None,
+) -> OrchestrationReport:
     if paths is None:
         if source_root is None or data_root is None:
             raise OrchestratorError("paths or (source_root, data_root) is required")
@@ -570,28 +730,26 @@ def run_and_publish(
     sources = discover_sources(paths.source_root)
     report = OrchestrationReport(source_count=len(sources), preflight=preflight_report)
 
+    # Resolve the verifier exactly once so a single HfApi instance is used.
+    active_verifier: HubVerifier | None = verifier
+    if active_verifier is None and verifier_factory is not None:
+        active_verifier = verifier_factory()
+    elif active_verifier is None and verifier is None and upload_runner is None:
+        # Production path uses the default Hub verifier factory.
+        active_verifier = default_hub_verifier_factory()
+
     per_pbf_upload_count = 0
     for source in sources:
-        outcome = _process_one(
-            source,
-            paths,
-            clock=clock,
-            exporter=exporter,
-        )
+        outcome = _process_one(source, paths, clock=clock, exporter=exporter)
         if outcome.status == STATUS_PUBLISHED:
             report.outcomes.append(outcome)
             continue
         if outcome.status in {STATUS_BUILT, STATUS_REUSED}:
-            output_path = paths.data_root / "data" / source.output_name
             try:
                 revision = _execute_publication(
                     paths,
                     source,
-                    identity_for_output=lambda p: {
-                        "size_bytes": p.stat().st_size,
-                        "sha256": file_sha256(p),
-                    },
-                    verifier=verifier,
+                    verifier=active_verifier,
                     timeout=upload_timeout,
                     upload_runner=upload_runner,
                 )
@@ -601,15 +759,16 @@ def run_and_publish(
                 report.outcomes.append(outcome)
                 raise
             output_path = paths.data_root / "data" / source.output_name
-            plan = create_upload_plan(paths.data_root)
+            output_identity = output_identity_for(output_path)
+            plan_identity = _build_per_pbf_upload_plan(paths.data_root, source.name).identity_sha256
             _write_publication_state(
                 paths.data_root,
                 source_name=source.name,
                 source_sha256=source_identity_for(source.path).sha256,
-                output_sha256=file_sha256(output_path),
+                output_sha256=output_identity.sha256,
                 output_bytes=output_path.stat().st_size,
                 remote_revision=revision,
-                artifact_identity=plan.identity_sha256,
+                artifact_identity=plan_identity,
                 completed_at=clock(),
             )
             outcome.remote_revision = revision
@@ -617,31 +776,24 @@ def run_and_publish(
             per_pbf_upload_count += 1
         report.outcomes.append(outcome)
 
-    # Final completeness check uses the full resumability contract.
     _verify_final_completeness(paths, sources)
 
-    # Explicit metadata-only final upload; failure is reported and non-zero.
-    # Skip when no per-PBF upload occurred in this invocation: a no-op restart
-    # has nothing new to send, so the metadata already in the repo is current.
     if per_pbf_upload_count == 0:
         return report
+
     final_metadata_revision = _upload_final_metadata(
-        paths, verifier=verifier, upload_runner=upload_runner
+        paths,
+        verifier=active_verifier,
+        upload_runner=upload_runner,
+        upload_timeout=upload_timeout,
     )
     if final_metadata_revision is not None:
         report.final_remote_revision = final_metadata_revision
-
     return report
 
 
 def _verify_final_completeness(paths: Paths, sources: Iterable[Source]) -> None:
-    """Every discovered source must have a complete, resumable local artifact.
-
-    Strictly one-to-one with discovered sources: any parquet under
-    ``data/`` without a matching source is reported as extra. Any source
-    without a complete, resumable local artifact is reported as missing.
-    A parquet without its matching manifest is also reported as missing.
-    """
+    """Every discovered source must have a complete, resumable local artifact."""
     discovered = {source.name: source for source in sources}
     completed: set[str] = set()
     extra_artifacts: list[str] = []
@@ -685,53 +837,44 @@ def _upload_final_metadata(
     *,
     verifier: HubVerifier | None,
     upload_runner: Callable[[list[str]], str] | None,
+    upload_timeout: float | None = None,
 ) -> str | None:
-    """Upload README.md + stats.json once and verify the result via Hub API.
+    """Upload README.md + stats.json and verify the result via Hub API.
 
-    The upload always runs whenever at least one parquet has been written
-    during this invocation. The output identity is hashed before upload so
-    a no-op restart that has not written any bytes skips the upload.
-
-    Raises :class:`OrchestratorError` when the upload fails. Returns the
-    verified Hub revision, or ``None`` when there is nothing to upload.
+    Raises :class:`OrchestratorError` on any failure. Returns the verified
+    remote revision.
     """
     data_dir = paths.data_root / "data"
     if not data_dir.is_dir() or not list(data_dir.glob("*.parquet")):
         return None
-    metadata_files = (
-        paths.data_root / "README.md",
-        paths.data_root / "stats.json",
-    )
-    if not all(path.is_file() for path in metadata_files):
-        return None
-    items = tuple(
-        UploadItem(
-            relative_path=path.name,
-            size_bytes=path.stat().st_size,
-            sha256=file_sha256(path),
-        )
-        for path in metadata_files
-    )
-    metadata_plan = UploadPlan(
-        repo_id=REPO_ID,
-        data_root=str(paths.data_root.resolve(strict=False)),
-        files=items,
-        identity_sha256=publication_file_sha256_bytes(metadata_plan_identity_payload(items)),
-    )
+    metadata_plan = _build_metadata_only_upload_plan(paths.data_root)
+    # Revalidate the dataset-wide upload plan immediately before upload to
+    # catch in-place mutations between per-PBF uploads and final metadata.
+    create_upload_plan(paths.data_root)
     try:
         if upload_runner is None:
-            execute_upload(metadata_plan, confirmation=metadata_plan.identity_sha256)
+            execute_upload(
+                metadata_plan,
+                confirmation=metadata_plan.identity_sha256,
+                timeout=upload_timeout,
+            )
         else:
-            command = _metadata_only_command(paths.data_root)
+            from osm_polygon_description_tag.publication import metadata_only_command
+
+            command = metadata_only_command(paths.data_root)
             revision = upload_runner(command)
             if not revision:
                 raise PublicationError("upload runner returned empty revision")
-    except (PublicationError, subprocess.CalledProcessError) as error:
+    except KeyboardInterrupt:
+        raise
+    except (PublicationError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         raise OrchestratorError(f"final metadata upload failed: {error}") from error
     if verifier is None:
         raise OrchestratorError("no Hub verifier supplied; cannot record final revision")
     try:
         verified = verifier(REPO_ID, metadata_plan.files)
+    except KeyboardInterrupt:
+        raise
     except Exception as error:
         raise OrchestratorError(f"final Hub verifier failed: {error}") from error
     if not verified:
@@ -752,10 +895,13 @@ __all__ = [
     "STATUS_FAILED",
     "STATUS_PUBLISHED",
     "STATUS_REUSED",
+    "HubVerificationError",
     "OrchestrationReport",
     "OrchestratorError",
     "PreflightError",
     "SourceOutcome",
+    "create_upload_plan",
+    "default_hub_verifier_factory",
     "default_preflight",
     "read_publication_state",
     "run_and_publish",

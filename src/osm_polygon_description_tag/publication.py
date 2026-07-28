@@ -1,22 +1,17 @@
 """Non-destructive Hugging Face publication planning and execution gate.
 
-The allowlist explicitly enumerates the four artifact categories uploaded to
-the public dataset repository. Symlinks, temporary files, unknown top-level
+The allowlist explicitly enumerates the artifact categories uploaded to the
+public dataset repository. Symlinks, temporary files, unknown top-level
 paths, stale manifests, identity-mismatching manifests, and missing card or
-statistics are rejected at plan time. Execution requires the caller to confirm
-the exact plan identity and re-verifies every file checksum before invoking
-the ``hf`` CLI.
+statistics are rejected at plan time. Execution requires the caller to
+confirm the exact plan identity and re-verifies every file checksum before
+invoking the ``hf`` CLI.
 
-The default runner executes a single ``hf upload-large-folder`` command whose
-``--include`` flags restrict the upload to:
-
-- ``README.md``
-- ``stats.json``
-- ``data/*.parquet``
-- ``manifests/*.manifest.json``
-
-A custom runner may be injected for tests. Retries with bounded exponential
-backoff are applied only to retryable network failures returned by ``hf``.
+The default runner executes a single ``hf upload-large-folder`` command
+whose ``--include`` flags are derived strictly from the plan's items (no
+wildcards). Retries with bounded exponential backoff are applied only to
+retryable network failures returned by ``hf``. ``KeyboardInterrupt``
+escapes immediately without retry.
 """
 
 from __future__ import annotations
@@ -45,25 +40,8 @@ _ALLOWED_TOP_LEVEL = {
     "manifests",
     "publication-state.json",
 }
-_UPLOAD_COMMAND_TEMPLATE: tuple[str, ...] = (
-    "hf",
-    "upload-large-folder",
-    REPO_ID,
-    "{data_root}",
-    "--repo-type",
-    "dataset",
-    "--include",
-    "README.md",
-    "--include",
-    "stats.json",
-    "--include",
-    "data/*.parquet",
-    "--include",
-    "manifests/*.manifest.json",
-)
 
 RETRYABLE_EXIT_CODES: frozenset[int] = frozenset({5, 429, 502, 503, 504})
-RETRYABLE_TIMEOUT = frozenset({"timeout"})
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_BACKOFF_SECONDS = 1.0
 DEFAULT_BACKOFF_FACTOR = 2.0
@@ -115,6 +93,12 @@ class UploadPlan:
 
     def to_json(self) -> str:
         return json.dumps(self.to_payload(), ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def file_sha256_bytes(data: bytes) -> str:
+    import hashlib
+
+    return hashlib.sha256(data).hexdigest()
 
 
 def _build_item(path: Path, relative_path: str) -> UploadItem:
@@ -216,12 +200,6 @@ def create_upload_plan(data_root: Path) -> UploadPlan:
     )
 
 
-def file_sha256_bytes(data: bytes) -> str:
-    import hashlib
-
-    return hashlib.sha256(data).hexdigest()
-
-
 def _verify_identity(plan: UploadPlan) -> None:
     for item in plan.files:
         path = Path(plan.data_root) / item.relative_path
@@ -235,7 +213,23 @@ def _verify_identity(plan: UploadPlan) -> None:
 
 
 def _build_command(plan: UploadPlan) -> list[str]:
-    return [piece.format(data_root=plan.data_root) for piece in _UPLOAD_COMMAND_TEMPLATE]
+    """Build an ``hf upload-large-folder`` command from the plan's exact items.
+
+    ``--include`` flags are derived strictly from ``plan.files`` (in
+    deterministic order). No wildcards are used; previously uploaded
+    artifacts are not re-sent.
+    """
+    command = [
+        "hf",
+        "upload-large-folder",
+        plan.repo_id,
+        plan.data_root,
+        "--repo-type",
+        "dataset",
+    ]
+    for item in plan.files:
+        command.extend(["--include", item.relative_path])
+    return command
 
 
 def _classify_failure(
@@ -271,7 +265,8 @@ def _default_runner_with_retry(
     for explicit termination.
 
     ``_runner`` is a private hook for tests; production code uses
-    :func:`subprocess.run`.
+    :func:`subprocess.run`. KeyboardInterrupt always escapes immediately
+    without retry.
     """
     attempt = 0
     delay = backoff_seconds
@@ -292,7 +287,6 @@ def _default_runner_with_retry(
             _invoke()
             return
         except KeyboardInterrupt:
-            # Ctrl-C must never be retried.
             raise
         except subprocess.CalledProcessError as error:
             retryable, exit_code, kind = _classify_failure(error)
@@ -301,13 +295,12 @@ def _default_runner_with_retry(
             attempt += 1
             time.sleep(min(delay, backoff_cap_seconds))
             delay *= backoff_factor
-        except subprocess.TimeoutExpired as error:
+        except subprocess.TimeoutExpired:
             if attempt >= max_retries:
                 raise
             attempt += 1
             time.sleep(min(delay, backoff_cap_seconds))
             delay *= backoff_factor
-            _ = error
 
 
 def execute_upload(
@@ -315,12 +308,17 @@ def execute_upload(
     *,
     confirmation: str | None = None,
     runner: Runner | None = None,
+    timeout: float | None = None,
 ) -> None:
     """Execute the upload only after the exact plan identity is confirmed.
 
     ``confirmation`` is compared to the freshly computed plan identity from
-    :func:`create_upload_plan`. A wrong or missing confirmation is refused
-    before any command is executed.
+    the same plan instance. A wrong or missing confirmation is refused
+    before any command is executed. ``timeout`` is forwarded to the default
+    runner; callers that inject ``runner`` are responsible for honoring it.
+
+    The ``--include`` list is derived strictly from the plan's items (no
+    wildcards), so previously uploaded artifacts are not re-sent.
     """
     if confirmation is None:
         raise PublicationError("confirmation required (must match freshly computed plan identity)")
@@ -329,9 +327,91 @@ def execute_upload(
     _verify_identity(plan)
     command = _build_command(plan)
     if runner is None:
-        _default_runner_with_retry(command)
+        _default_runner_with_retry(command, timeout=timeout)
     else:
         runner(command)
+
+
+def _build_per_pbf_upload_plan(data_root: Path, source_name: str) -> UploadPlan:
+    """Build an :class:`UploadPlan` for one PBF containing exactly 4 files.
+
+    The plan items are always:
+
+    - ``data/<stem>.parquet``
+    - ``manifests/<stem>.manifest.json``
+    - ``README.md``
+    - ``stats.json``
+
+    This is the single source of truth for the production and test runner
+    paths. Production and tests must not diverge.
+    """
+    if not source_name.endswith(".osm.pbf"):
+        raise PublicationError(f"invalid source name: {source_name!r}")
+    stem = source_name.removesuffix(".osm.pbf")
+    required = (
+        data_root / "data" / f"{stem}.parquet",
+        data_root / "manifests" / f"{stem}.manifest.json",
+        data_root / "README.md",
+        data_root / "stats.json",
+    )
+    for path in required:
+        if not path.is_file():
+            raise PublicationError(f"required file missing for per-PBF plan: {path}")
+    items = tuple(_build_item(path, path.relative_to(data_root).as_posix()) for path in required)
+    resolved_root = data_root.resolve(strict=False)
+    provisional = UploadPlan(
+        repo_id=REPO_ID,
+        data_root=str(resolved_root),
+        files=items,
+        identity_sha256="",
+    )
+    identity = file_sha256_bytes(provisional.to_json().encode("utf-8"))
+    return UploadPlan(
+        repo_id=REPO_ID,
+        data_root=str(resolved_root),
+        files=items,
+        identity_sha256=identity,
+    )
+
+
+def _build_metadata_only_upload_plan(data_root: Path) -> UploadPlan:
+    """Build an :class:`UploadPlan` containing only README.md and stats.json."""
+    required = (data_root / "README.md", data_root / "stats.json")
+    for path in required:
+        if not path.is_file():
+            raise PublicationError(f"required file missing for metadata plan: {path}")
+    items = tuple(_build_item(path, path.relative_to(data_root).as_posix()) for path in required)
+    resolved_root = data_root.resolve(strict=False)
+    provisional = UploadPlan(
+        repo_id=REPO_ID,
+        data_root=str(resolved_root),
+        files=items,
+        identity_sha256="",
+    )
+    identity = file_sha256_bytes(provisional.to_json().encode("utf-8"))
+    return UploadPlan(
+        repo_id=REPO_ID,
+        data_root=str(resolved_root),
+        files=items,
+        identity_sha256=identity,
+    )
+
+
+def per_pbf_command(data_root: Path, source_name: str) -> list[str]:
+    """Build the canonical per-PBF ``hf upload-large-folder`` command.
+
+    This is the single canonical function used by both the production
+    default runner and any injected test runner. Production and tests
+    must not diverge on the upload contents.
+    """
+    plan = _build_per_pbf_upload_plan(data_root, source_name)
+    return _build_command(plan)
+
+
+def metadata_only_command(data_root: Path) -> list[str]:
+    """Build the canonical metadata-only ``hf upload-large-folder`` command."""
+    plan = _build_metadata_only_upload_plan(data_root)
+    return _build_command(plan)
 
 
 __all__ = [
@@ -340,7 +420,11 @@ __all__ = [
     "Runner",
     "UploadItem",
     "UploadPlan",
+    "_build_metadata_only_upload_plan",
+    "_build_per_pbf_upload_plan",
     "create_upload_plan",
     "execute_upload",
     "file_sha256_bytes",
+    "metadata_only_command",
+    "per_pbf_command",
 ]

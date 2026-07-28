@@ -19,6 +19,7 @@ classifiers = [
 ]
 dependencies = [
     "duckdb>=1.0,<2",
+    "huggingface_hub>=0.24,<2",
     "pyarrow>=20,<22",
     "pyproj>=3.7,<4",
     "pyyaml>=6,<7",

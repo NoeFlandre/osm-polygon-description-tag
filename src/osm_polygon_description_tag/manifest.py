@@ -16,10 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from osm_polygon_description_tag._resources import (
-    osmium_export_config,
-    project_code_revision,
-)
+from osm_polygon_description_tag._resources import osmium_export_config, project_code_revision
 from osm_polygon_description_tag.schema import GEOPARQUET_VERSION, SCHEMA_VERSION
 
 MANIFEST_SCHEMA_VERSION = 1
@@ -204,19 +201,24 @@ def is_resumable(
     source_identity: SourceIdentity,
     output_identity: OutputIdentity,
 ) -> bool:
-    """True only when every agreement field matches the live values.
+    """True only when every behavioral agreement field matches the live values.
 
-    Agreements:
+    Behavioral agreements:
 
     - ``manifest_schema_version`` matches the constant.
+    - ``schema_version`` matches the current Arrow schema version.
+    - ``geoparquet_version`` matches the current GeoParquet version.
     - ``transform_algorithm_version`` matches the constant.
     - ``area_policy_sha256`` matches the current ``osmium-export.json`` plus
       documented transform rules.
     - ``source`` and ``output`` identities are byte-equal.
-    - ``code_revision`` matches the current project checkout revision when
-      available. Documentation-only commits do not invalidate artifacts
-      because the algorithm version + area-policy checksum already cover
-      behavioral changes.
+    - ``output_algorithm_revision`` matches the live output algorithm
+      revision (covers the transform+policy pair as a single token).
+
+    ``code_revision`` is recorded as provenance but is not used to invalidate
+    a correct Parquet: documentation-only commits must not force a rebuild,
+    because the algorithm version + area-policy checksum + output algorithm
+    revision already capture every behavioral change.
     """
     if manifest.manifest_schema_version != MANIFEST_SCHEMA_VERSION:
         return False
@@ -230,13 +232,6 @@ def is_resumable(
         return False
     if manifest.source != source_identity or manifest.output != output_identity:
         return False
-    current_revision = project_code_revision()
-    if current_revision is not None and manifest.code_revision != current_revision:
-        return False
-    # Output algorithm revision is a stable contract value. Documentation
-    # commits never bump it; behavioral changes do. This avoids invalidating
-    # every Parquet on a doc-only commit while still forcing rebuild on
-    # algorithm changes.
     output_revision = current_output_algorithm_revision()
     return manifest.output_algorithm_revision == output_revision
 
