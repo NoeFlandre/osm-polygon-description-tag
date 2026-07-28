@@ -157,7 +157,12 @@ class _PathInfoStub:
 class _BlobInfoStub:
     def __init__(self, size: int, *, lfs_sha256: str | None):
         self.size = size
-        self.lfs = {"sha256": lfs_sha256} if lfs_sha256 is not None else {}
+        if lfs_sha256 is not None:
+            import types as _types
+
+            self.lfs = _types.SimpleNamespace(sha256=lfs_sha256)
+        else:
+            self.lfs = None
 
 
 def _setup_workspace(tmp_path: Path) -> tuple[Paths, Path, Path]:
@@ -336,6 +341,9 @@ def test_cli_run_and_publish_invokes_default_verifier(
         class _Stub:
             def whoami(self) -> object:
                 return {"name": "fake"}
+
+            def auth_check(self, *_a: Any, **_kw: Any) -> None:
+                return None
 
             def repo_info(self, *_a: Any, **_kw: Any) -> _RepoInfoStub:
                 sentry["ran"] = True
@@ -550,3 +558,199 @@ def test_no_state_written_before_verifier_succeeds(
     assert exit_code != 0
     assert calls["count"] >= 1
     assert not (data_root / PUBLICATION_STATE_FILENAME).is_file()
+
+
+def test_default_verifier_fails_closed_on_empty_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If ``whoami()`` returns an empty identity, the verifier fails closed."""
+    factory = default_hub_verifier_factory()
+    items = (UploadItem(relative_path="README.md", size_bytes=2, sha256="a" * 64),)
+
+    class _Bad:
+        def whoami(self) -> object:
+            return {}
+
+        def repo_info(self, *_a: object, **_kw: object) -> object:
+            raise AssertionError("should not be reached")
+
+    import osm_polygon_description_tag.orchestrator as orch
+
+    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
+
+    from osm_polygon_description_tag.orchestrator import HubVerificationError
+
+    with pytest.raises(HubVerificationError, match="identity"):
+        factory(REPO_ID, items)
+
+
+def test_default_verifier_fails_closed_on_repo_info_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If ``repo_info()`` raises, the verifier fails closed."""
+    factory = default_hub_verifier_factory()
+    items = (UploadItem(relative_path="README.md", size_bytes=2, sha256="a" * 64),)
+
+    class _Bad:
+        def whoami(self) -> object:
+            return {"name": "fake"}
+
+        def repo_info(self, *_a: object, **_kw: object) -> object:
+            raise RuntimeError("repo not found")
+
+    import osm_polygon_description_tag.orchestrator as orch
+
+    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
+
+    from osm_polygon_description_tag.orchestrator import HubVerificationError
+
+    with pytest.raises(HubVerificationError, match="not accessible"):
+        factory(REPO_ID, items)
+
+
+def test_default_verifier_fails_closed_on_empty_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If ``repo_info()`` returns no SHA, the verifier fails closed."""
+    factory = default_hub_verifier_factory()
+    items = (UploadItem(relative_path="README.md", size_bytes=2, sha256="a" * 64),)
+
+    class _Bad:
+        def whoami(self) -> object:
+            return {"name": "fake"}
+
+        def repo_info(self, *_a: object, **_kw: object) -> object:
+            class _Info:
+                sha = ""
+
+            return _Info()
+
+    import osm_polygon_description_tag.orchestrator as orch
+
+    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
+
+    from osm_polygon_description_tag.orchestrator import HubVerificationError
+
+    with pytest.raises(HubVerificationError, match="empty revision"):
+        factory(REPO_ID, items)
+
+
+def test_default_verifier_fails_closed_on_size_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the remote size differs from the local size, the verifier fails closed."""
+    factory = default_hub_verifier_factory()
+    items = (UploadItem(relative_path="README.md", size_bytes=2, sha256="a" * 64),)
+
+    class _Bad:
+        def whoami(self) -> object:
+            return {"name": "fake"}
+
+        def repo_info(self, *_a: object, **_kw: object) -> object:
+            class _Info:
+                sha = "r"
+
+            return _Info()
+
+        def get_paths_info(
+            self,
+            repo_id: str,
+            paths: list[str],
+            *,
+            revision: str,
+            repo_type: str = "dataset",
+        ) -> list[Any]:
+            return [_PathInfoStub(path=paths[0], size=999, sha=("a" * 64))]
+
+    import osm_polygon_description_tag.orchestrator as orch
+
+    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
+
+    from osm_polygon_description_tag.orchestrator import HubVerificationError
+
+    with pytest.raises(HubVerificationError, match="size mismatch"):
+        factory(REPO_ID, items)
+
+
+def test_default_verifier_fails_closed_on_lfs_sha_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the remote LFS SHA differs from the local SHA, the verifier fails closed."""
+    factory = default_hub_verifier_factory()
+    items = (UploadItem(relative_path="data/big.parquet", size_bytes=4, sha256="a" * 64),)
+
+    class _Bad:
+        def whoami(self) -> object:
+            return {"name": "fake"}
+
+        def repo_info(self, *_a: object, **_kw: object) -> object:
+            class _Info:
+                sha = "r"
+
+            return _Info()
+
+        def get_paths_info(
+            self,
+            repo_id: str,
+            paths: list[str],
+            *,
+            revision: str,
+            repo_type: str = "dataset",
+        ) -> list[Any]:
+            return [_BlobInfoStub(size=4, lfs_sha256="b" * 64)]
+
+    import osm_polygon_description_tag.orchestrator as orch
+
+    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
+
+    from osm_polygon_description_tag.orchestrator import HubVerificationError
+
+    with pytest.raises(HubVerificationError, match="LFS SHA mismatch"):
+        factory(REPO_ID, items)
+
+
+def test_default_verifier_fails_closed_on_download_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If ``hf_hub_download`` fails, the verifier fails closed."""
+    factory = default_hub_verifier_factory()
+    items = (UploadItem(relative_path="README.md", size_bytes=2, sha256="a" * 64),)
+
+    class _Bad:
+        def whoami(self) -> object:
+            return {"name": "fake"}
+
+        def repo_info(self, *_a: object, **_kw: object) -> object:
+            class _Info:
+                sha = "r"
+
+            return _Info()
+
+        def get_paths_info(
+            self,
+            repo_id: str,
+            paths: list[str],
+            *,
+            revision: str,
+            repo_type: str = "dataset",
+        ) -> list[Any]:
+            return [_PathInfoStub(path=paths[0], size=2, sha="a" * 64)]
+
+        def hf_hub_download(
+            self,
+            repo_id: str,
+            filename: str,
+            *,
+            revision: str,
+            repo_type: str = "dataset",
+        ) -> str:
+            raise RuntimeError("download failed")
+
+    import osm_polygon_description_tag.orchestrator as orch
+
+    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
+
+    from osm_polygon_description_tag.orchestrator import HubVerificationError
+
+    with pytest.raises(HubVerificationError, match="could not download"):
+        factory(REPO_ID, items)

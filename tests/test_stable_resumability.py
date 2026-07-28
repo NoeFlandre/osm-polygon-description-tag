@@ -175,7 +175,15 @@ def test_full_run_no_rebuild_on_doc_only_commit(
     )
     write_manifest(manifest, paths.data_root / "manifests" / "a.manifest.json")
 
-    # Mark a.osm.pbf as already published.
+    (paths.data_root / "README.md").write_text("stub")
+    (paths.data_root / "stats.json").write_text("{}")
+
+    # Mark a.osm.pbf as already published AND mark the metadata as
+    # already published so the fully-completed run is a no-op.
+    from osm_polygon_description_tag.manifest import file_sha256
+    from osm_polygon_description_tag.publication import _build_metadata_only_upload_plan
+
+    metadata_plan = _build_metadata_only_upload_plan(paths.data_root)
     state = {
         "schema_version": 1,
         "published": {
@@ -187,6 +195,15 @@ def test_full_run_no_rebuild_on_doc_only_commit(
                 "artifact_identity": "00" * 32,
                 "completed_at": "2026-07-27T00:00:00+00:00",
             }
+        },
+        "metadata": {
+            "identity_sha256": metadata_plan.identity_sha256,
+            "readme_sha256": file_sha256(paths.data_root / "README.md"),
+            "stats_sha256": file_sha256(paths.data_root / "stats.json"),
+            "readme_size_bytes": (paths.data_root / "README.md").stat().st_size,
+            "stats_size_bytes": (paths.data_root / "stats.json").stat().st_size,
+            "verified_revision": "rev-meta",
+            "completed_at": "2026-07-27T00:00:00+00:00",
         },
     }
     (paths.data_root / PUBLICATION_STATE_FILENAME).write_text(

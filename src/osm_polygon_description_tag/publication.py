@@ -41,6 +41,12 @@ _ALLOWED_TOP_LEVEL = {
     "publication-state.json",
 }
 
+# The exact uploader-owned cache directory layout. ``hf upload-large-folder``
+# creates ``<data-root>/.cache/huggingface`` while it runs to enable
+# resumable uploads; this directory must be permitted locally but it must
+# NEVER appear in any upload plan or include flag.
+_UPLOADER_CACHE_RELATIVE = ".cache/huggingface"
+
 RETRYABLE_EXIT_CODES: frozenset[int] = frozenset({5, 429, 502, 503, 504})
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_BACKOFF_SECONDS = 1.0
@@ -137,8 +143,23 @@ def _collect_allowlisted_files(data_root: Path) -> tuple[UploadItem, ...]:
     if not data_root.is_dir() or data_root.is_symlink():
         raise PublicationError(f"data root is not a regular directory: {data_root}")
     for entry in data_root.iterdir():
-        if entry.name not in _ALLOWED_TOP_LEVEL:
-            raise PublicationError(f"unknown top-level entry: {entry}")
+        if entry.name in _ALLOWED_TOP_LEVEL:
+            continue
+        if entry.name == ".cache":
+            # The exact uploader-owned layout ``.cache/huggingface`` is
+            # permitted locally; it's checked below. Any other hidden
+            # top-level entry is rejected.
+            if entry.is_symlink():
+                raise PublicationError(
+                    f"uploader cache must be a real directory, not a symlink: {entry}"
+                )
+            if not entry.is_dir():
+                raise PublicationError(f"uploader cache must be a directory: {entry}")
+            child = entry / "huggingface"
+            if not child.is_dir() or child.is_symlink():
+                raise PublicationError(f"expected {child} to be a real huggingface cache directory")
+            continue
+        raise PublicationError(f"unknown top-level entry: {entry}")
 
     items: list[UploadItem] = []
 

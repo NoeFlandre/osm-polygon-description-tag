@@ -32,7 +32,6 @@ temporary files, leaves prior artifacts intact, and exits with code 130.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
@@ -64,6 +63,7 @@ from osm_polygon_description_tag.publication import (
     REPO_ID,
     PublicationError,
     UploadItem,
+    UploadPlan,
     _build_metadata_only_upload_plan,
     _build_per_pbf_upload_plan,
     create_upload_plan,
@@ -203,6 +203,62 @@ def _write_publication_state(
     return state
 
 
+def _metadata_state_matches(data_root: Path, metadata_plan: UploadPlan) -> bool:
+    """True only when the recorded metadata state matches the current plan."""
+    state = read_publication_state(data_root)
+    metadata = state.get("metadata")
+    if not isinstance(metadata, dict):
+        return False
+    if metadata.get("identity_sha256") != metadata_plan.identity_sha256:
+        return False
+    readme_path = data_root / "README.md"
+    stats_path = data_root / "stats.json"
+    if not readme_path.is_file() or not stats_path.is_file():
+        return False
+    from osm_polygon_description_tag.manifest import file_sha256
+
+    expected_readme_sha = file_sha256(readme_path)
+    expected_stats_sha = file_sha256(stats_path)
+    if metadata.get("readme_sha256") != expected_readme_sha:
+        return False
+    if metadata.get("stats_sha256") != expected_stats_sha:
+        return False
+    return (
+        metadata.get("readme_size_bytes") == readme_path.stat().st_size
+        and metadata.get("stats_size_bytes") == stats_path.stat().st_size
+    )
+
+
+def _write_metadata_state(
+    data_root: Path,
+    *,
+    identity_sha256: str,
+    readme_sha256: str,
+    stats_sha256: str,
+    readme_size_bytes: int,
+    stats_size_bytes: int,
+    verified_revision: str,
+    completed_at: str,
+) -> dict[str, object]:
+    state = read_publication_state(data_root)
+    if state.get("schema_version") != 1:
+        raise OrchestratorError(
+            f"unsupported publication state schema: {state.get('schema_version')!r}"
+        )
+    state["metadata"] = {
+        "identity_sha256": identity_sha256,
+        "readme_sha256": readme_sha256,
+        "stats_sha256": stats_sha256,
+        "readme_size_bytes": readme_size_bytes,
+        "stats_size_bytes": stats_size_bytes,
+        "verified_revision": verified_revision,
+        "completed_at": completed_at,
+    }
+    state["last_updated_at"] = completed_at
+    _atomic_write_json(data_root / PUBLICATION_STATE_FILENAME, state)
+    return state
+
+
 def cast_dict(value: object) -> dict[str, object]:
     if not isinstance(value, dict):
         raise OrchestratorError(f"expected dict, got {type(value).__name__}")
@@ -327,7 +383,7 @@ def default_hub_verifier_factory() -> HubVerifier:
                 raise HubVerificationError(
                     f"could not download {item.relative_path} from {repo_id}@{revision}: {error}"
                 ) from error
-            digest = hashlib.sha256(Path(local_path).read_bytes()).hexdigest()
+            digest = _file_sha256_streaming(Path(local_path))
             if digest.lower() != str(item.sha256).lower():
                 raise HubVerificationError(
                     f"remote SHA mismatch for {item.relative_path}: "
@@ -336,6 +392,19 @@ def default_hub_verifier_factory() -> HubVerifier:
         return revision
 
     return verifier
+
+
+def _file_sha256_streaming(path: Path) -> str:
+    """Compute SHA-256 by streaming the file in bounded chunks.
+
+    Equivalent to ``file_sha256`` from the manifest module but explicitly
+    avoids loading the entire file into memory at once. The verifier must
+    use this helper so download-and-hash verification never OOMs the
+    process on large dataset files.
+    """
+    from osm_polygon_description_tag.manifest import file_sha256 as _file_sha256
+
+    return _file_sha256(path)
 
 
 def build_default_hub_verifier() -> HubVerifier:
@@ -435,6 +504,18 @@ def default_preflight(
         raise PreflightError("Hub identity is empty; check HF_TOKEN")
     if not getattr(repo_info, "sha", None):
         raise PreflightError(f"Hub repository {REPO_ID} returned no commit SHA")
+
+    # Verify write permission against the target dataset. This is a
+    # non-mutating Hub API call that fails closed before any PBF is opened
+    # or any generated artifact is created.
+    try:
+        api.auth_check(
+            REPO_ID,
+            repo_type="dataset",
+            write=True,
+        )
+    except Exception as error:
+        raise PreflightError(f"Hub write permission denied for {REPO_ID}: {error}") from error
 
     return {
         "osmium_executable": osmium_executable,
@@ -778,14 +859,16 @@ def _run_and_publish(
 
     _verify_final_completeness(paths, sources)
 
-    if per_pbf_upload_count == 0:
-        return report
-
+    # Final metadata is published independently. The metadata is uploaded
+    # whenever its current plan identity differs from the verified
+    # metadata state. This is independent of per-PBF upload count, so a
+    # failed intermediate metadata upload is retried on the next run.
     final_metadata_revision = _upload_final_metadata(
         paths,
         verifier=active_verifier,
         upload_runner=upload_runner,
         upload_timeout=upload_timeout,
+        clock=clock,
     )
     if final_metadata_revision is not None:
         report.final_remote_revision = final_metadata_revision
@@ -838,12 +921,19 @@ def _upload_final_metadata(
     verifier: HubVerifier | None,
     upload_runner: Callable[[list[str]], str] | None,
     upload_timeout: float | None = None,
+    clock: Callable[[], str] | None = None,
 ) -> str | None:
     """Upload README.md + stats.json and verify the result via Hub API.
+
+    The metadata is uploaded only when its current plan identity differs
+    from the recorded, verified metadata state. The metadata state is
+    written atomically only after remote verification succeeds.
 
     Raises :class:`OrchestratorError` on any failure. Returns the verified
     remote revision.
     """
+    if clock is None:
+        clock = _default_clock
     data_dir = paths.data_root / "data"
     if not data_dir.is_dir() or not list(data_dir.glob("*.parquet")):
         return None
@@ -851,6 +941,15 @@ def _upload_final_metadata(
     # Revalidate the dataset-wide upload plan immediately before upload to
     # catch in-place mutations between per-PBF uploads and final metadata.
     create_upload_plan(paths.data_root)
+
+    # Independently resumable: if the verified metadata state matches the
+    # current plan identity, skip the upload entirely.
+    if _metadata_state_matches(paths.data_root, metadata_plan):
+        state_payload = read_publication_state(paths.data_root)
+        metadata_state = cast_dict(state_payload.get("metadata", {}))
+        revision = metadata_state.get("verified_revision")
+        return str(revision) if revision else None
+
     try:
         if upload_runner is None:
             execute_upload(
@@ -879,6 +978,20 @@ def _upload_final_metadata(
         raise OrchestratorError(f"final Hub verifier failed: {error}") from error
     if not verified:
         raise OrchestratorError("Hub verifier returned no revision for final metadata")
+
+    # Write the metadata state atomically only after verification succeeds.
+    from osm_polygon_description_tag.manifest import file_sha256
+
+    _write_metadata_state(
+        paths.data_root,
+        identity_sha256=metadata_plan.identity_sha256,
+        readme_sha256=file_sha256(paths.data_root / "README.md"),
+        stats_sha256=file_sha256(paths.data_root / "stats.json"),
+        readme_size_bytes=(paths.data_root / "README.md").stat().st_size,
+        stats_size_bytes=(paths.data_root / "stats.json").stat().st_size,
+        verified_revision=verified,
+        completed_at=clock(),
+    )
     return verified
 
 

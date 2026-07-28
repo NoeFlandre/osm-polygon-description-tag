@@ -123,6 +123,9 @@ def _stub_hf_api_factory():
 
             return _Info()
 
+        def auth_check(self, *_a: object, **_kw: object) -> None:
+            return None
+
     def _factory(*_a: object, **_kw: object) -> object:
         return _Stub()
 

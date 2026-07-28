@@ -110,6 +110,138 @@ def test_default_preflight_rejects_missing_hf(tmp_path: Path) -> None:
         )
 
 
+def test_default_preflight_rejects_empty_hf_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Default preflight refuses if the Hub identity is empty."""
+    import osm_polygon_description_tag.orchestrator as orch
+
+    paths = _setup_paths(tmp_path)
+    (paths.source_root / "a.osm.pbf").write_bytes(b"x")
+
+    fake_osmium = tmp_path / "fake-osmium"
+    fake_osmium.write_text("#!/bin/sh\necho 'osmium version 1.19.1'\n", encoding="utf-8")
+    fake_osmium.chmod(0o755)
+    fake_hf = tmp_path / "fake-hf"
+    fake_hf.write_text("#!/bin/sh\necho 'fake-user'\n", encoding="utf-8")
+    fake_hf.chmod(0o755)
+
+    name_map = {"osmium": str(fake_osmium), "hf": str(fake_hf)}
+
+    def fake_which(name: str) -> str | None:
+        return name_map.get(name)
+
+    monkeypatch.setattr("shutil.which", fake_which)
+
+    class _Bad:
+        def whoami(self) -> object:
+            return {}
+
+        def repo_info(self, *_a: object, **_kw: object) -> object:
+            class _Info:
+                sha = "abc"
+
+            return _Info()
+
+        def auth_check(self, *_a: object, **_kw: object) -> None:
+            return None
+
+    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
+
+    with pytest.raises(PreflightError, match="identity"):
+        default_preflight(
+            paths,
+            confirm_repo=REPO_ID,
+            osmium_executable="osmium",
+            hf_executable="hf",
+        )
+
+
+def test_default_preflight_rejects_missing_sha(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Default preflight refuses if the Hub repository returns no SHA."""
+    import osm_polygon_description_tag.orchestrator as orch
+
+    paths = _setup_paths(tmp_path)
+    (paths.source_root / "a.osm.pbf").write_bytes(b"x")
+
+    fake_osmium = tmp_path / "fake-osmium"
+    fake_osmium.write_text("#!/bin/sh\necho 'osmium version 1.19.1'\n", encoding="utf-8")
+    fake_osmium.chmod(0o755)
+    fake_hf = tmp_path / "fake-hf"
+    fake_hf.write_text("#!/bin/sh\necho 'fake-user'\n", encoding="utf-8")
+    fake_hf.chmod(0o755)
+
+    name_map = {"osmium": str(fake_osmium), "hf": str(fake_hf)}
+
+    def fake_which(name: str) -> str | None:
+        return name_map.get(name)
+
+    monkeypatch.setattr("shutil.which", fake_which)
+
+    class _Empty:
+        def whoami(self) -> object:
+            return {"name": "fake"}
+
+        def repo_info(self, *_a: object, **_kw: object) -> object:
+            class _Info:
+                sha = ""
+
+            return _Info()
+
+        def auth_check(self, *_a: object, **_kw: object) -> None:
+            return None
+
+    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Empty())
+
+    with pytest.raises(PreflightError, match="SHA"):
+        default_preflight(
+            paths,
+            confirm_repo=REPO_ID,
+            osmium_executable="osmium",
+            hf_executable="hf",
+        )
+
+
+def test_default_preflight_rejects_hf_api_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Default preflight refuses if the HfApi raises."""
+    import osm_polygon_description_tag.orchestrator as orch
+
+    paths = _setup_paths(tmp_path)
+    (paths.source_root / "a.osm.pbf").write_bytes(b"x")
+
+    fake_osmium = tmp_path / "fake-osmium"
+    fake_osmium.write_text("#!/bin/sh\necho 'osmium version 1.19.1'\n", encoding="utf-8")
+    fake_osmium.chmod(0o755)
+    fake_hf = tmp_path / "fake-hf"
+    fake_hf.write_text("#!/bin/sh\necho 'fake-user'\n", encoding="utf-8")
+    fake_hf.chmod(0o755)
+
+    name_map = {"osmium": str(fake_osmium), "hf": str(fake_hf)}
+
+    def fake_which(name: str) -> str | None:
+        return name_map.get(name)
+
+    monkeypatch.setattr("shutil.which", fake_which)
+
+    class _Fail:
+        def whoami(self) -> object:
+            raise RuntimeError("hub is down")
+
+    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Fail())
+
+    with pytest.raises(PreflightError, match="Hub authentication"):
+        default_preflight(
+            paths,
+            confirm_repo=REPO_ID,
+            osmium_executable="osmium",
+            hf_executable="hf",
+        )
+
+
 def test_atomic_state_write_raises_orchestrator_error(tmp_path: Path) -> None:
     """State writer raises OrchestratorError on invalid schema_version."""
     from osm_polygon_description_tag.orchestrator import _write_publication_state
