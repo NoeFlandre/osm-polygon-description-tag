@@ -261,11 +261,13 @@ def test_handle_run_and_publish_invokes_orchestrator(
         "final_remote_revision": "rev-1",
     }
 
-    monkeypatch.setattr(
-        cli,
-        "run_and_publish",
-        lambda **kwargs: type("R", (), {"to_payload": lambda self: fake_report})(),
-    )
+    captured: dict[str, object] = {}
+
+    def fake_run_and_publish(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return type("R", (), {"to_payload": lambda self: fake_report})()
+
+    monkeypatch.setattr(cli, "run_and_publish", fake_run_and_publish)
 
     args = SimpleNamespace(
         confirm_repo="NoeFlandre/osm-polygon-description-tag",
@@ -282,3 +284,4 @@ def test_handle_run_and_publish_invokes_orchestrator(
 
     assert exit_code == 0
     assert payload["final_remote_revision"] == "rev-1"
+    assert captured["osmium_executable"] == "osmium"

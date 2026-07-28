@@ -138,15 +138,29 @@ def test_run_logger_redacts_credential_values(tmp_path: Path, logger_factory) ->
         assert "eyJhbGciOiJI" not in str(value)
         assert "SECRET" not in str(value)
     assert record["safe_value"] == "visible"
+
+
+def test_run_logger_drops_non_allowlisted_context(tmp_path: Path, logger_factory) -> None:
+    RunLogger, _ = logger_factory
+    data_root = tmp_path / "generated"
+    data_root.mkdir()
+    logger = RunLogger(
+        data_root=data_root,
+        run_id="allowlist",
+        clock=lambda: "2026-07-28T00:00:00+00:00",
+    )
+    logger.event(
+        "upload_retry",
+        attempt=2,
+        delay_seconds=1.0,
+        arbitrary_context="must-not-persist",
+        hf_api_key="Bearer secret-value",
+    )
     logger.flush()
-    jsonl = (data_root / "logs" / "run-and-publish.jsonl").read_text(encoding="utf-8")
-    record = json.loads(jsonl.splitlines()[-1])
-    for field in ("token", "bearer", "authorization"):
-        value = record.get(field, "")
-        assert "hf_abc123def456ghi789" not in str(value)
-        assert "eyJhbGciOiJI" not in str(value)
-        assert "SECRET" not in str(value)
-    assert record["safe_value"] == "visible"
+    record = json.loads((data_root / "logs" / "run-and-publish.jsonl").read_text().splitlines()[-1])
+    assert record["attempt"] == 2
+    assert "arbitrary_context" not in record
+    assert "hf_api_key" not in record
 
 
 def test_run_logger_emits_failure_and_interruption_events(tmp_path: Path, logger_factory) -> None:
@@ -295,18 +309,18 @@ def test_run_logger_scrubs_non_string_value_branches(tmp_path: Path, logger_fact
     logger.event(
         "build_progress",
         level="INFO",
-        integer_count=42,
-        none_value=None,
+        rows=42,
+        result=None,
         token=sentinel_token,
         hf_api_key="Bearer eyJhbGciOiJI",
     )
     logger.flush()
     jsonl = (data_root / "logs" / "run-and-publish.jsonl").read_text(encoding="utf-8")
     record = json.loads(jsonl.splitlines()[-1])
-    assert record["integer_count"] == 42
-    assert record["none_value"] is None
+    assert record["rows"] == 42
+    assert record["result"] is None
     assert record["token"] == "[REDACTED]"  # noqa: S105 - sentinel redacted value
-    assert record["hf_api_key"] == "[REDACTED]"
+    assert "hf_api_key" not in record
 
 
 def test_run_logger_reconfigure_rotation_rejects_invalid_values(

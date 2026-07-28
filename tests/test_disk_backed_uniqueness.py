@@ -21,9 +21,9 @@ from osm_polygon_description_tag.storage import (
 from tests.conftest import make_record_dict
 
 
-def test_uniqueness_index_uses_file_database_not_memory() -> None:
+def test_uniqueness_index_uses_file_database_not_memory(tmp_path: Path) -> None:
     """The connection must not be an in-memory database."""
-    with _UniquenessIndex() as index:
+    with _UniquenessIndex(work_root=tmp_path / ".work") as index:
         connection = index._connection  # type: ignore[attr-defined]
         # The SQLite connection exposes the path it was opened with via
         # ``db_name`` after open. A ``:memory:`` connection returns ``:memory:``.
@@ -36,7 +36,7 @@ def test_uniqueness_index_uses_file_database_not_memory() -> None:
 
 def test_uniqueness_index_uses_owned_temp_path(tmp_path: Path) -> None:
     """The temp SQLite file lives under an owned temp directory."""
-    with _UniquenessIndex() as index:
+    with _UniquenessIndex(work_root=tmp_path / ".work") as index:
         db_path = Path(index.db_path)  # type: ignore[attr-defined]
         assert db_path.is_file()
         # The directory must be created explicitly by us, not by SQLite's tempdir.
@@ -49,7 +49,7 @@ def test_uniqueness_index_uses_owned_temp_path(tmp_path: Path) -> None:
 
 def test_uniqueness_index_closes_and_removes_db_on_exit(tmp_path: Path) -> None:
     """The SQLite file is removed after context exit."""
-    index = _UniquenessIndex()
+    index = _UniquenessIndex(work_root=tmp_path / ".work")
     with index:
         db_path = Path(index.db_path)  # type: ignore[attr-defined]
     assert not db_path.exists()
@@ -57,7 +57,7 @@ def test_uniqueness_index_closes_and_removes_db_on_exit(tmp_path: Path) -> None:
 
 def test_uniqueness_index_cleans_up_on_keyboard_interrupt(tmp_path: Path) -> None:
     """A Ctrl-C during validation removes the temp SQLite file."""
-    index = _UniquenessIndex()
+    index = _UniquenessIndex(work_root=tmp_path / ".work")
     db_path = Path(index.db_path)  # type: ignore[attr-defined]
     try:
         raise KeyboardInterrupt()
@@ -68,7 +68,7 @@ def test_uniqueness_index_cleans_up_on_keyboard_interrupt(tmp_path: Path) -> Non
 
 def test_uniqueness_index_cleans_up_on_storage_error(tmp_path: Path) -> None:
     """A StorageError during validation removes the temp SQLite file."""
-    index = _UniquenessIndex()
+    index = _UniquenessIndex(work_root=tmp_path / ".work")
     db_path = Path(index.db_path)  # type: ignore[attr-defined]
     try:
         raise StorageError("validation failed")

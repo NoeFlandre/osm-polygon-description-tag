@@ -45,6 +45,9 @@ _REDACTED = "[REDACTED]"
 # passing the value through :meth:`RunLogger.event` as kwarg).
 _ALLOWED_FIELDS: frozenset[str] = frozenset(
     {
+        "ts",
+        "event",
+        "run_id",
         "source",
         "source_index",
         "source_total",
@@ -69,6 +72,12 @@ _ALLOWED_FIELDS: frozenset[str] = frozenset(
         "path",
         "operation",
         "safe_value",
+        "total",
+        "source_count",
+        "per_pbf_uploads",
+        "osmium_executable",
+        "osmium_version",
+        "hub_repo_sha",
     }
 )
 
@@ -109,8 +118,6 @@ def _scrub(payload: dict[str, object]) -> dict[str, object]:
             cleaned[key] = _REDACTED
             continue
         if key in _ALLOWED_FIELDS:
-            cleaned[key] = _scrub_value(value)
-        else:
             cleaned[key] = _scrub_value(value)
     return cleaned
 

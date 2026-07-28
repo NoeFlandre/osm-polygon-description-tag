@@ -95,8 +95,12 @@ def _write_if_changed(path: Path, text: str) -> bool:
             temp.unlink()
 
 
-def _new_connection() -> duckdb.DuckDBPyConnection:
-    return duckdb.connect(":memory:")
+def _new_connection(data_root: Path) -> duckdb.DuckDBPyConnection:
+    work_root = data_root / ".work" / "duckdb"
+    work_root.mkdir(parents=True, exist_ok=True)
+    connection = duckdb.connect(":memory:")
+    connection.execute("SET temp_directory = ?", [str(work_root)])
+    return connection
 
 
 def _quantile_or_none(
@@ -172,7 +176,7 @@ def collect_stats(
         if manifest.output != actual_output:
             raise ReportingError(f"stale output identity for {parquet.name}")
 
-    connection = _new_connection()
+    connection = _new_connection(data_root)
     try:
         connection.execute(
             """

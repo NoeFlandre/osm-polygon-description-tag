@@ -200,6 +200,7 @@ def handle_run_and_publish(args: argparse.Namespace) -> int:
     report = run_and_publish(
         paths=paths,
         confirm_repo=args.confirm_repo,
+        osmium_executable=args.osmium,
     )
     _print_json(report.to_payload())
     return 0

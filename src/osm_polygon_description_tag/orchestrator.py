@@ -301,7 +301,7 @@ class _HuggingFaceHub:
 _huggingface_hub = _HuggingFaceHub()
 
 
-def default_hub_verifier_factory() -> HubVerifier:
+def default_hub_verifier_factory(*, cache_dir: Path | None = None) -> HubVerifier:
     """Return a verifier that talks to the live Hugging Face Hub.
 
     The verifier:
@@ -374,11 +374,16 @@ def default_hub_verifier_factory() -> HubVerifier:
             # SHA-256 comparison. This is the authoritative identity for small
             # non-LFS files.
             try:
+                download_kwargs: dict[str, object] = {
+                    "revision": revision,
+                    "repo_type": "dataset",
+                }
+                if cache_dir is not None:
+                    download_kwargs["cache_dir"] = cache_dir
                 local_path = api.hf_hub_download(
                     repo_id,
                     item.relative_path,
-                    revision=revision,
-                    repo_type="dataset",
+                    **download_kwargs,
                 )
             except Exception as error:
                 raise HubVerificationError(
@@ -392,6 +397,33 @@ def default_hub_verifier_factory() -> HubVerifier:
                 )
         return revision
 
+    def reconcile_managed_files(repo_id: str, expected_paths: set[str]) -> str | None:
+        """Delete only stale files in the dataset's managed artifact namespaces."""
+        HfApiCls = cast(Any, _huggingface_hub.HfApi)
+        api = HfApiCls()
+        if not hasattr(api, "list_repo_files") or not hasattr(api, "delete_files"):
+            return None
+        remote_paths = set(api.list_repo_files(repo_id, repo_type="dataset"))
+        stale = sorted(
+            path
+            for path in remote_paths - expected_paths
+            if path.startswith("data/") or path.startswith("manifests/")
+        )
+        if not stale:
+            return None
+        commit = api.delete_files(
+            repo_id,
+            stale,
+            repo_type="dataset",
+            commit_message="Remove stale generated dataset artifacts",
+        )
+        revision = getattr(commit, "oid", None)
+        if revision:
+            return str(revision)
+        info = api.repo_info(repo_id, repo_type="dataset")
+        return str(getattr(info, "sha", "") or "") or None
+
+    verifier.reconcile_managed_files = reconcile_managed_files  # type: ignore[attr-defined]
     return verifier
 
 
@@ -576,6 +608,7 @@ def _process_one(
     logger: RunLogger | None = None,
     source_index: int = 0,
     source_total: int = 0,
+    osmium_executable: str = "osmium",
 ) -> SourceOutcome:
     """Build or reuse one PBF and return the resulting per-source state."""
     complete, manifest = _local_artifact_is_complete(paths, source)
@@ -664,7 +697,7 @@ def _process_one(
         source,
         paths,
         export_config=osmium_export_config(),
-        executable="osmium",
+        executable=osmium_executable,
         exporter=exporter,
         progress_interval=progress_interval,
         progress_callback=progress_callback,
@@ -746,15 +779,18 @@ def _execute_publication(
     # Revalidate the dataset-wide upload plan immediately before upload to
     # catch in-place mutations between build and upload.
     create_upload_plan(paths.data_root)
-    if logger is not None:
-        logger.event(
-            "verification_start",
-            level="INFO",
-            source=source.name,
-        )
     try:
         if upload_runner is None:
-            execute_upload(plan, confirmation=plan.identity_sha256, timeout=timeout)
+            execute_upload(
+                plan,
+                confirmation=plan.identity_sha256,
+                timeout=timeout,
+                retry_observer=(
+                    None
+                    if logger is None
+                    else lambda **fields: logger.event("upload_retry", **fields)
+                ),
+            )
         else:
             command = per_pbf_command(paths.data_root, source.name)
             revision = upload_runner(command)
@@ -767,6 +803,9 @@ def _execute_publication(
 
     if verifier is None:
         raise OrchestratorError("no Hub verifier supplied; refusing to record an unknown revision")
+    if logger is not None:
+        logger.event("upload_complete", level="INFO", source=source.name)
+        logger.event("verification_start", level="INFO", source=source.name)
     try:
         verified = verifier(REPO_ID, plan.files)
     except KeyboardInterrupt:
@@ -808,6 +847,7 @@ def run_and_publish(
     subprocess_runner: Callable[[list[str]], None] | None = None,
     progress_interval: int = 100_000,
     logger: RunLogger | None = None,
+    osmium_executable: str = "osmium",
 ) -> OrchestrationReport:
     """Stoppable, resumable build + publish for every discovered PBF.
 
@@ -819,6 +859,7 @@ def run_and_publish(
     """
     if clock is None:
         clock = _default_clock
+    owns_logger = logger is None
     if logger is None:
         if paths is None:
             if data_root is None:
@@ -830,53 +871,63 @@ def run_and_publish(
             data_root=data_root_path,
             run_id=str(uuid.uuid4()),
             clock=clock,
+            buffer_preflight=True,
         )
-    if subprocess_runner is not None:
-        # Tests may redirect the production subprocess boundary; install it
-        # by monkeypatching the default runner used inside execute_upload.
-        import osm_polygon_description_tag.publication as pub
+    try:
+        if subprocess_runner is not None:
+            # Tests may redirect the production subprocess boundary; install it
+            # by monkeypatching the default runner used inside execute_upload.
+            import osm_polygon_description_tag.publication as pub
 
-        original_runner = pub._default_runner_with_retry
+            original_runner = pub._default_runner_with_retry
 
-        def _bridge(command: list[str], **kwargs: object) -> None:
-            subprocess_runner(command)
-            _ = kwargs
+            def _bridge(command: list[str], **kwargs: object) -> None:
+                subprocess_runner(command)
+                _ = kwargs
 
-        pub._default_runner_with_retry = _bridge
-        try:
-            return _run_and_publish(
-                source_root=source_root,
-                data_root=data_root,
-                confirm_repo=confirm_repo,
-                preflight=preflight,
-                upload_runner=upload_runner,
-                clock=clock,
-                paths=paths,
-                exporter=exporter,
-                verifier=verifier,
-                verifier_factory=verifier_factory,
-                upload_timeout=upload_timeout,
-                progress_interval=progress_interval,
-                logger=logger,
-            )
-        finally:
-            pub._default_runner_with_retry = original_runner
+            pub._default_runner_with_retry = _bridge
+            try:
+                return _run_and_publish(
+                    source_root=source_root,
+                    data_root=data_root,
+                    confirm_repo=confirm_repo,
+                    preflight=preflight,
+                    upload_runner=upload_runner,
+                    clock=clock,
+                    paths=paths,
+                    exporter=exporter,
+                    verifier=verifier,
+                    verifier_factory=verifier_factory,
+                    upload_timeout=upload_timeout,
+                    progress_interval=progress_interval,
+                    logger=logger,
+                    osmium_executable=osmium_executable,
+                )
+            finally:
+                pub._default_runner_with_retry = original_runner
 
-    return _run_and_publish(
-        source_root=source_root,
-        data_root=data_root,
-        confirm_repo=confirm_repo,
-        preflight=preflight,
-        upload_runner=upload_runner,
-        clock=clock,
-        paths=paths,
-        exporter=exporter,
-        verifier=verifier,
-        verifier_factory=verifier_factory,
-        upload_timeout=upload_timeout,
-        progress_interval=progress_interval,
-        logger=logger,
-    )
+        return _run_and_publish(
+            source_root=source_root,
+            data_root=data_root,
+            confirm_repo=confirm_repo,
+            preflight=preflight,
+            upload_runner=upload_runner,
+            clock=clock,
+            paths=paths,
+            exporter=exporter,
+            verifier=verifier,
+            verifier_factory=verifier_factory,
+            upload_timeout=upload_timeout,
+            progress_interval=progress_interval,
+            logger=logger,
+            osmium_executable=osmium_executable,
+        )
+    except KeyboardInterrupt:
+        logger.event("interrupted", level="WARNING", stage="run-and-publish")
+        raise
+    finally:
+        if owns_logger:
+            logger.close()
 
 
 def _run_and_publish(
@@ -894,26 +945,27 @@ def _run_and_publish(
     upload_timeout: float | None,
     progress_interval: int,
     logger: RunLogger,
+    osmium_executable: str,
 ) -> OrchestrationReport:
     if paths is None:
         if source_root is None or data_root is None:
             raise OrchestratorError("paths or (source_root, data_root) is required")
         paths = Paths(source_root=source_root, data_root=data_root)
 
-    if preflight is None:
-        try:
+    try:
+        if preflight is None:
             preflight_report = default_preflight(
                 paths,
                 confirm_repo=confirm_repo,
-                osmium_executable="osmium",
+                osmium_executable=osmium_executable,
                 hf_executable="hf",
             )
-        except Exception as error:
-            logger.event("preflight_denied", level="ERROR", reason=str(error))
-            logger.deny_preflight()
-            raise
-    else:
-        preflight_report = preflight()
+        else:
+            preflight_report = preflight()
+    except Exception as error:
+        logger.event("preflight_denied", level="ERROR", reason=str(error))
+        logger.deny_preflight()
+        raise
     logger.event(
         "preflight",
         level="INFO",
@@ -939,7 +991,15 @@ def _run_and_publish(
         active_verifier = verifier_factory()
     elif active_verifier is None and verifier is None and upload_runner is None:
         # Production path uses the default Hub verifier factory.
-        active_verifier = default_hub_verifier_factory()
+        try:
+            active_verifier = default_hub_verifier_factory(
+                cache_dir=paths.data_root / ".cache" / "huggingface" / "hub"
+            )
+        except TypeError as error:
+            # Compatibility for injected legacy no-argument factories.
+            if "unexpected keyword argument" not in str(error):
+                raise
+            active_verifier = default_hub_verifier_factory()
 
     per_pbf_upload_count = 0
     for index, source in enumerate(sources, start=1):
@@ -952,6 +1012,7 @@ def _run_and_publish(
             logger=logger,
             source_index=index,
             source_total=total_sources,
+            osmium_executable=osmium_executable,
         )
         if outcome.status == STATUS_PUBLISHED:
             report.outcomes.append(outcome)
@@ -1012,6 +1073,28 @@ def _run_and_publish(
         report.outcomes.append(outcome)
 
     _verify_final_completeness(paths, sources)
+
+    # The production verifier owns a narrowly scoped reconciliation hook.
+    # It removes remote artifacts that no longer exist locally, but only
+    # below data/ and manifests/; unrelated repository files are preserved.
+    reconcile = getattr(active_verifier, "reconcile_managed_files", None)
+    if callable(reconcile):
+        full_plan = create_upload_plan(paths.data_root)
+        logger.event("remote_reconciliation_start", level="INFO")
+        try:
+            revision = reconcile(
+                REPO_ID,
+                {item.relative_path for item in full_plan.files},
+            )
+        except KeyboardInterrupt:
+            raise
+        except Exception as error:
+            raise OrchestratorError(f"remote artifact reconciliation failed: {error}") from error
+        logger.event(
+            "remote_reconciliation_complete",
+            level="INFO",
+            verified_revision=str(revision or ""),
+        )
 
     # Final metadata is published independently. The metadata is uploaded
     # whenever its current plan identity differs from the verified
@@ -1128,6 +1211,11 @@ def _upload_final_metadata(
                 metadata_plan,
                 confirmation=metadata_plan.identity_sha256,
                 timeout=upload_timeout,
+                retry_observer=(
+                    None
+                    if logger is None
+                    else lambda **fields: logger.event("upload_retry", stage="metadata", **fields)
+                ),
             )
         else:
             from osm_polygon_description_tag.publication import metadata_only_command
@@ -1142,6 +1230,9 @@ def _upload_final_metadata(
         raise OrchestratorError(f"final metadata upload failed: {error}") from error
     if verifier is None:
         raise OrchestratorError("no Hub verifier supplied; cannot record final revision")
+    if logger is not None:
+        logger.event("metadata_upload_complete", level="INFO")
+        logger.event("metadata_verification_start", level="INFO")
     try:
         verified = verifier(REPO_ID, metadata_plan.files)
     except KeyboardInterrupt:
@@ -1150,6 +1241,12 @@ def _upload_final_metadata(
         raise OrchestratorError(f"final Hub verifier failed: {error}") from error
     if not verified:
         raise OrchestratorError("Hub verifier returned no revision for final metadata")
+    if logger is not None:
+        logger.event(
+            "metadata_verification_complete",
+            level="INFO",
+            verified_revision=verified,
+        )
 
     # Write the metadata state atomically only after verification succeeds.
     from osm_polygon_description_tag.manifest import file_sha256

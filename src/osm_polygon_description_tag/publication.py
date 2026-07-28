@@ -47,6 +47,7 @@ _ALLOWED_TOP_LEVEL = {
 # resumable uploads; this directory must be permitted locally but it must
 # NEVER appear in any upload plan or include flag.
 _UPLOADER_CACHE_RELATIVE = ".cache/huggingface"
+_LOCAL_WORK_RELATIVE = ".work"
 
 RETRYABLE_EXIT_CODES: frozenset[int] = frozenset({5, 429, 502, 503, 504})
 DEFAULT_MAX_RETRIES = 3
@@ -160,6 +161,10 @@ def _collect_allowlisted_files(data_root: Path) -> tuple[UploadItem, ...]:
             if not child.is_dir() or child.is_symlink():
                 raise PublicationError(f"expected {child} to be a real huggingface cache directory")
             continue
+        if entry.name == _LOCAL_WORK_RELATIVE:
+            if entry.is_symlink() or not entry.is_dir():
+                raise PublicationError(f"local work path must be a real directory: {entry}")
+            continue
         raise PublicationError(f"unknown top-level entry: {entry}")
 
     items: list[UploadItem] = []
@@ -259,6 +264,8 @@ def _classify_failure(
 ) -> tuple[bool, int | None, str]:
     """Return (retryable, exit_code, kind) for a subprocess error."""
     completed = getattr(error, "completed", None)
+    if completed is None and isinstance(error, subprocess.CalledProcessError):
+        completed = error
     if completed is None:
         return False, None, "exception"
     returncode = getattr(completed, "returncode", None)
@@ -279,6 +286,7 @@ def _default_runner_with_retry(
     backoff_cap_seconds: float = DEFAULT_BACKOFF_CAP_SECONDS,
     timeout: float | None = None,
     _runner: Callable[[list[str], float | None], None] | None = None,
+    retry_observer: Callable[..., None] | None = None,
 ) -> None:
     """Default ``hf`` runner with bounded exponential backoff on retryable errors.
 
@@ -315,13 +323,29 @@ def _default_runner_with_retry(
             if not retryable or attempt >= max_retries:
                 raise
             attempt += 1
-            time.sleep(min(delay, backoff_cap_seconds))
+            bounded_delay = min(delay, backoff_cap_seconds)
+            if retry_observer is not None:
+                retry_observer(
+                    attempt=attempt,
+                    kind=kind,
+                    exit_code=exit_code,
+                    delay_seconds=bounded_delay,
+                )
+            time.sleep(bounded_delay)
             delay *= backoff_factor
         except subprocess.TimeoutExpired:
             if attempt >= max_retries:
                 raise
             attempt += 1
-            time.sleep(min(delay, backoff_cap_seconds))
+            bounded_delay = min(delay, backoff_cap_seconds)
+            if retry_observer is not None:
+                retry_observer(
+                    attempt=attempt,
+                    kind="timeout",
+                    exit_code=None,
+                    delay_seconds=bounded_delay,
+                )
+            time.sleep(bounded_delay)
             delay *= backoff_factor
 
 
@@ -331,6 +355,7 @@ def execute_upload(
     confirmation: str | None = None,
     runner: Runner | None = None,
     timeout: float | None = None,
+    retry_observer: Callable[..., None] | None = None,
 ) -> None:
     """Execute the upload only after the exact plan identity is confirmed.
 
@@ -349,7 +374,17 @@ def execute_upload(
     _verify_identity(plan)
     command = _build_command(plan)
     if runner is None:
-        _default_runner_with_retry(command, timeout=timeout)
+        try:
+            _default_runner_with_retry(
+                command,
+                timeout=timeout,
+                retry_observer=retry_observer,
+            )
+        except TypeError as error:
+            # Compatibility for injected legacy runners used by embedders.
+            if "unexpected keyword argument 'retry_observer'" not in str(error):
+                raise
+            _default_runner_with_retry(command, timeout=timeout)
     else:
         runner(command)
 

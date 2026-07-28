@@ -17,6 +17,33 @@ from osm_polygon_description_tag.publication import (
 )
 
 
+def test_retry_observer_receives_attempt_classification_and_delay() -> None:
+    events: list[dict[str, object]] = []
+    attempts = 0
+
+    def runner(_command: list[str], _timeout: float | None) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise subprocess.CalledProcessError(503, ["hf"], stderr=b"temporary")
+
+    _default_runner_with_retry(
+        ["hf"],
+        max_retries=1,
+        backoff_seconds=0,
+        _runner=runner,
+        retry_observer=lambda **fields: events.append(fields),
+    )
+    assert events == [
+        {
+            "attempt": 1,
+            "kind": "exit_code",
+            "exit_code": 503,
+            "delay_seconds": 0,
+        }
+    ]
+
+
 def test_default_runner_retries_timeout_and_eventually_succeeds() -> None:
     """A runner that raises ``TimeoutExpired`` is retried until it succeeds."""
 

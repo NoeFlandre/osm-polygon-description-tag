@@ -54,11 +54,12 @@ Behavior:
   `manifests/<stem>.manifest.json`, `README.md`, and `stats.json`. Each
   PBF is individually verified against the Hub before its state is
   recorded.
-- **Local resumable cache**: the uploader may create
-  `<data-root>/.cache/huggingface/upload/...` during a run. This directory
-  is local uploader state, is required for resumable uploads, is never
-  included in any upload plan or upload command, and is never deleted by
-  the orchestrator. The allowlist accepts the exact
+- **Local state boundary**: uploader resume metadata and Hub verification
+  downloads live below `<data-root>/.cache/huggingface/`; validation SQLite
+  files and DuckDB spill files live below `<data-root>/.work/`; operational
+  logs live below `<data-root>/logs/`. These directories are local state,
+  are never included in any upload plan or upload command, and raw source
+  files remain read-only. The allowlist accepts the exact
   `.cache/huggingface` layout (real directory, not a symlink) and rejects
   any unrelated hidden top-level entry.
 - **Final metadata**: `README.md` and `stats.json` are uploaded as a
@@ -71,6 +72,10 @@ Behavior:
   third run finds both per-PBF and metadata state complete and current,
   it performs zero builds, zero uploads, and zero verifier calls and
   preserves all local bytes.
+- **Remote reconciliation**: after all local PBF artifacts validate, the
+  production Hub verifier removes only stale remote files below `data/` and
+  `manifests/`. Unrelated repository files are preserved. This keeps resumed
+  publication from retaining synthetic or obsolete dataset shards.
 - **Hardened preflight**: the command refuses to start if any of the
   following fails:
   - source root is readable, data root is writable;
@@ -150,7 +155,7 @@ uv run osm-polygon-description-tag run-and-publish \
   --confirm-repo NoeFlandre/osm-polygon-description-tag
 
 # Lower-level publish (requires exact plan identity confirmation and pre-existing hf auth)
-uv run osm-polygon-description-tag publish --plan <identity_sha256> --confirm <identity_sha256>
+uv run osm-polygon-description-tag publish --plan <identity_sha256>
 ```
 
 These commands are exposed for documentation. Real-source builds, real-data

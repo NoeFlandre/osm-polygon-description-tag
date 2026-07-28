@@ -11,6 +11,7 @@ regardless of row count.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import os
@@ -191,11 +192,12 @@ class _UniquenessIndex:
     row count.
     """
 
-    def __init__(self) -> None:
-        import tempfile
-
-        self._temp_dir = tempfile.mkdtemp(prefix=".osm-validate-")
-        self.db_path = Path(self._temp_dir) / "uniqueness.db"
+    def __init__(self, *, work_root: Path) -> None:
+        self._work_root = work_root
+        self._work_root.mkdir(parents=True, exist_ok=True)
+        self._temp_dir = self._work_root / f".osm-validate-{uuid.uuid4().hex}"
+        self._temp_dir.mkdir()
+        self.db_path = self._temp_dir / "uniqueness.db"
         self._connection = sqlite3.connect(str(self.db_path))
         self._connection.execute(
             "CREATE TABLE pk (osm_type TEXT NOT NULL, osm_id INTEGER NOT NULL, "
@@ -221,6 +223,8 @@ class _UniquenessIndex:
             import shutil
 
             shutil.rmtree(self._temp_dir, ignore_errors=True)
+            with contextlib.suppress(OSError):
+                self._work_root.rmdir()
 
     def __enter__(self) -> _UniquenessIndex:
         return self
@@ -240,7 +244,8 @@ def validate_geoparquet(path: Path) -> int:
     meta_types = set(cast(list[str], column_meta.get("geometry_types", [])))
     meta_bbox = column_meta.get("bbox")
 
-    uniqueness = _UniquenessIndex()
+    data_root = path.parent.parent
+    uniqueness = _UniquenessIndex(work_root=data_root / ".work" / "validation")
     actual_types: set[str] = set()
     source_pbf: str | None = None
     min_x = min_y = math.inf
