@@ -19,7 +19,7 @@ from shapely.geometry import Polygon
 from osm_polygon_description_tag._resources import dataset_card_template
 from osm_polygon_description_tag.cli import run as cli_run
 from osm_polygon_description_tag.config import Paths
-from osm_polygon_description_tag.manifest import (
+from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     RunCounts,
     current_area_policy_sha256,
@@ -29,9 +29,9 @@ from osm_polygon_description_tag.manifest import (
     source_identity_for,
     write_manifest,
 )
+from osm_polygon_description_tag.dataset.reporting import collect_stats, generate_dataset_docs
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import REPO_ID
-from osm_polygon_description_tag.reporting import collect_stats, generate_dataset_docs
-from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
 
 

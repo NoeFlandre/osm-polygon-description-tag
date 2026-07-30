@@ -16,7 +16,7 @@ from pyproj import Geod
 from shapely import from_wkb
 from shapely.geometry import MultiPolygon, Polygon
 
-from osm_polygon_description_tag.storage import write_geoparquet
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from tests.conftest import make_record_dict
 
 GEOD = Geod(ellps="WGS84")

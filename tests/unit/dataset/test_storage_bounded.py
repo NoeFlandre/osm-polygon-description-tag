@@ -15,7 +15,7 @@ import pytest
 from shapely import to_wkb
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag.storage import (
+from osm_polygon_description_tag.dataset.storage import (
     StorageError,
     validate_geoparquet,
     write_geoparquet,
@@ -35,7 +35,7 @@ def test_write_geoparquet_never_loads_full_table_into_memory(tmp_path: Path) -> 
         osm_id=1,
     )
 
-    with patch("osm_polygon_description_tag.storage.pq.read_table") as mock_read:
+    with patch("osm_polygon_description_tag.dataset.storage.pq.read_table") as mock_read:
         write_geoparquet(iter([record]), target, batch_size=1)
         mock_read.assert_not_called()
 

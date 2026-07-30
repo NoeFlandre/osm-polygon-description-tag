@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from osm_polygon_description_tag.manifest import (
+from osm_polygon_description_tag.dataset.manifest import (
     MANIFEST_SCHEMA_VERSION,
     Manifest,
     OutputIdentity,
@@ -54,7 +54,7 @@ def test_source_and_output_identity_capture_checksums(tmp_path: Path) -> None:
 
 
 def _manifest() -> Manifest:
-    from osm_polygon_description_tag.manifest import (
+    from osm_polygon_description_tag.dataset.manifest import (
         current_area_policy_sha256,
         current_output_algorithm_revision,
     )

@@ -4,15 +4,15 @@ from pathlib import Path
 import pytest
 from shapely.geometry import MultiPolygon, Polygon
 
-from osm_polygon_description_tag.manifest import (
+from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     RunCounts,
     output_identity_for,
     source_identity_for,
     write_manifest,
 )
-from osm_polygon_description_tag.reporting import collect_stats, generate_dataset_docs
-from osm_polygon_description_tag.storage import write_geoparquet
+from osm_polygon_description_tag.dataset.reporting import collect_stats, generate_dataset_docs
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from tests.conftest import make_record_dict
 
 

@@ -23,14 +23,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from osm_polygon_description_tag.manifest import (
+from osm_polygon_description_tag.dataset.manifest import (
     MANIFEST_SCHEMA_VERSION,
     ManifestError,
     file_sha256,
     output_identity_for,
     read_manifest,
 )
-from osm_polygon_description_tag.storage import StorageError, validate_geoparquet
+from osm_polygon_description_tag.dataset.storage import StorageError, validate_geoparquet
 
 REPO_ID = "NoeFlandre/osm-polygon-description-tag"
 _ALLOWED_TOP_LEVEL = {

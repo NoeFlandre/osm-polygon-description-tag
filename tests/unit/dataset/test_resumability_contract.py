@@ -24,9 +24,7 @@ from shapely import to_wkb
 from shapely.geometry import Polygon
 
 from osm_polygon_description_tag.config import Paths
-from osm_polygon_description_tag.discovery import Source
-from osm_polygon_description_tag.extraction import ExportRecord
-from osm_polygon_description_tag.manifest import (
+from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     RunCounts,
     current_area_policy_sha256,
@@ -36,13 +34,15 @@ from osm_polygon_description_tag.manifest import (
     source_identity_for,
     write_manifest,
 )
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
+from osm_polygon_description_tag.discovery import Source
+from osm_polygon_description_tag.extraction import ExportRecord
 from osm_polygon_description_tag.orchestrator import (
     PUBLICATION_STATE_FILENAME,
     OrchestratorError,
     _process_one,
     run_and_publish,
 )
-from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
 
 _CLOCK = "2026-07-27T00:00:00+00:00"

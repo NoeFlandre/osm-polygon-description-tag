@@ -18,12 +18,12 @@ import pyarrow as pa
 from shapely import to_wkb
 from shapely.geometry import MultiPolygon, Polygon
 
-from osm_polygon_description_tag.extraction import ExportRecord
-from osm_polygon_description_tag.schema import SCHEMA, SCHEMA_VERSION
-from osm_polygon_description_tag.transform import (
+from osm_polygon_description_tag.dataset.schema import SCHEMA, SCHEMA_VERSION
+from osm_polygon_description_tag.dataset.transform import (
     names_from_tags,
     transform_record,
 )
+from osm_polygon_description_tag.extraction import ExportRecord
 
 
 def _record(
@@ -196,7 +196,7 @@ def test_arrow_map_array_round_trip() -> None:
 def test_e2e_parquet_round_trip_preserves_name_columns(tmp_path) -> None:
     import pyarrow.parquet as pq
 
-    from osm_polygon_description_tag.storage import write_geoparquet
+    from osm_polygon_description_tag.dataset.storage import write_geoparquet
 
     polygon = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
     record = _record(

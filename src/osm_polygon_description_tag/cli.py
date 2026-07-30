@@ -24,7 +24,9 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from osm_polygon_description_tag.manifest import ManifestError
+from osm_polygon_description_tag.dataset.manifest import ManifestError
+from osm_polygon_description_tag.dataset.reporting import ReportingError, generate_dataset_docs
+from osm_polygon_description_tag.dataset.storage import StorageError, validate_geoparquet
 from osm_polygon_description_tag.orchestrator import (
     OrchestratorError,
     PreflightError,
@@ -38,13 +40,11 @@ from osm_polygon_description_tag.publication import (
     create_upload_plan,
     execute_upload,
 )
-from osm_polygon_description_tag.reporting import ReportingError, generate_dataset_docs
 from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.runtime.resources import (
     dataset_card_template,
     osmium_export_config,
 )
-from osm_polygon_description_tag.storage import StorageError, validate_geoparquet
 
 
 def _resolve_paths(args: argparse.Namespace) -> Paths:

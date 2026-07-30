@@ -1,3 +1,79 @@
 """Canonical dataset artifact APIs."""
 
-__all__: list[str] = []
+from osm_polygon_description_tag.dataset.manifest import (
+    MANIFEST_SCHEMA_VERSION,
+    TRANSFORM_ALGORITHM_VERSION,
+    Manifest,
+    ManifestError,
+    OutputIdentity,
+    RunCounts,
+    SourceIdentity,
+    current_area_policy_sha256,
+    current_code_revision,
+    current_dependency_versions,
+    current_output_algorithm_revision,
+    file_sha256,
+    is_resumable,
+    output_identity_for,
+    read_manifest,
+    source_identity_for,
+    write_manifest,
+)
+from osm_polygon_description_tag.dataset.reporting import (
+    ReportingError,
+    collect_stats,
+    generate_dataset_docs,
+)
+from osm_polygon_description_tag.dataset.schema import (
+    GEOPARQUET_VERSION,
+    SCHEMA,
+    SCHEMA_VERSION,
+    geo_metadata,
+)
+from osm_polygon_description_tag.dataset.storage import (
+    StorageError,
+    validate_geoparquet,
+    write_geoparquet,
+)
+from osm_polygon_description_tag.dataset.transform import (
+    RejectedFeature,
+    descriptions_from_tags,
+    geodesic_area_m2,
+    names_from_tags,
+    transform_record,
+)
+
+__all__ = [
+    "GEOPARQUET_VERSION",
+    "MANIFEST_SCHEMA_VERSION",
+    "SCHEMA",
+    "SCHEMA_VERSION",
+    "TRANSFORM_ALGORITHM_VERSION",
+    "Manifest",
+    "ManifestError",
+    "OutputIdentity",
+    "RejectedFeature",
+    "ReportingError",
+    "RunCounts",
+    "SourceIdentity",
+    "StorageError",
+    "collect_stats",
+    "current_area_policy_sha256",
+    "current_code_revision",
+    "current_dependency_versions",
+    "current_output_algorithm_revision",
+    "descriptions_from_tags",
+    "file_sha256",
+    "generate_dataset_docs",
+    "geo_metadata",
+    "geodesic_area_m2",
+    "is_resumable",
+    "names_from_tags",
+    "output_identity_for",
+    "read_manifest",
+    "source_identity_for",
+    "transform_record",
+    "validate_geoparquet",
+    "write_geoparquet",
+    "write_manifest",
+]

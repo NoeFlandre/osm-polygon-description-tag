@@ -8,7 +8,7 @@ The amendment:
 
 - The hash must be computed incrementally using ``file_sha256`` (or an
   equivalent bounded streaming helper) from
-  ``osm_polygon_description_tag.manifest``.
+  ``osm_polygon_description_tag.dataset.manifest``.
 - A regression test makes ``Path.read_bytes()`` raise and proves that
   fallback remote verification still succeeds through streaming hashing.
 """

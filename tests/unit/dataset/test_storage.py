@@ -7,8 +7,12 @@ import pytest
 from shapely import to_wkb
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag.schema import SCHEMA
-from osm_polygon_description_tag.storage import StorageError, validate_geoparquet, write_geoparquet
+from osm_polygon_description_tag.dataset.schema import SCHEMA
+from osm_polygon_description_tag.dataset.storage import (
+    StorageError,
+    validate_geoparquet,
+    write_geoparquet,
+)
 from tests.conftest import make_record_dict
 
 _POLYGON_WKB = to_wkb(Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]), output_dimension=2)

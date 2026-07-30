@@ -4,13 +4,13 @@ import pytest
 from shapely import from_wkb, to_wkb
 from shapely.geometry import LineString, MultiPolygon, Polygon
 
-from osm_polygon_description_tag.extraction import ExportRecord
-from osm_polygon_description_tag.transform import (
+from osm_polygon_description_tag.dataset.transform import (
     RejectedFeature,
     descriptions_from_tags,
     geodesic_area_m2,
     transform_record,
 )
+from osm_polygon_description_tag.extraction import ExportRecord
 
 
 def test_descriptions_preserve_base_suffixes_and_values() -> None:
@@ -160,7 +160,9 @@ def test_transform_rejects_with_stable_reason(
 def test_transform_rejects_nonpositive_area(monkeypatch: pytest.MonkeyPatch) -> None:
     # A valid polygon always has positive geodesic area, so exercise the branch directly.
     polygon = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
-    monkeypatch.setattr("osm_polygon_description_tag.transform.geodesic_area_m2", lambda _geom: 0.0)
+    monkeypatch.setattr(
+        "osm_polygon_description_tag.dataset.transform.geodesic_area_m2", lambda _geom: 0.0
+    )
     record = _record(polygon, {"description": "x"})
     with pytest.raises(RejectedFeature) as info:
         transform_record(record, "x.osm.pbf")

@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag.manifest import (
+from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     RunCounts,
     current_area_policy_sha256,
@@ -135,7 +135,7 @@ def test_full_run_no_rebuild_on_doc_only_commit(
     (source_root / "a.osm.pbf").write_bytes(b"a-bytes")
     paths = Paths(source_root=source_root, data_root=data_root)
 
-    from osm_polygon_description_tag.storage import write_geoparquet
+    from osm_polygon_description_tag.dataset.storage import write_geoparquet
     from tests.conftest import make_record_dict
 
     write_geoparquet(
@@ -155,7 +155,7 @@ def test_full_run_no_rebuild_on_doc_only_commit(
     (paths.data_root / "data").mkdir(parents=True, exist_ok=True)
     (paths.data_root / "manifests").mkdir(parents=True, exist_ok=True)
 
-    from osm_polygon_description_tag.manifest import write_manifest
+    from osm_polygon_description_tag.dataset.manifest import write_manifest
 
     write_manifest(
         Manifest(
@@ -183,7 +183,7 @@ def test_full_run_no_rebuild_on_doc_only_commit(
 
     # Mark a.osm.pbf as already published AND mark the metadata as
     # already published so the fully-completed run is a no-op.
-    from osm_polygon_description_tag.manifest import file_sha256
+    from osm_polygon_description_tag.dataset.manifest import file_sha256
     from osm_polygon_description_tag.publication import _build_metadata_only_upload_plan
 
     metadata_plan = _build_metadata_only_upload_plan(paths.data_root)

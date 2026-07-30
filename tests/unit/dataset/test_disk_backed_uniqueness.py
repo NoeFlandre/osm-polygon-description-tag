@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag.storage import (
+from osm_polygon_description_tag.dataset.storage import (
     StorageError,
     _UniquenessIndex,
     validate_geoparquet,

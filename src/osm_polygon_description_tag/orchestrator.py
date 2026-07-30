@@ -42,7 +42,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, cast
 
-from osm_polygon_description_tag.manifest import (
+from osm_polygon_description_tag.dataset.manifest import (
     TRANSFORM_ALGORITHM_VERSION,
     Manifest,
     current_area_policy_sha256,
@@ -51,6 +51,8 @@ from osm_polygon_description_tag.manifest import (
     read_manifest,
     source_identity_for,
 )
+from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
+from osm_polygon_description_tag.dataset.storage import StorageError, validate_geoparquet
 from osm_polygon_description_tag.osm.discovery import Source, discover_sources
 from osm_polygon_description_tag.osm.extraction import ExportRecord
 from osm_polygon_description_tag.pipeline import build_one
@@ -65,7 +67,6 @@ from osm_polygon_description_tag.publication import (
     execute_upload,
     per_pbf_command,
 )
-from osm_polygon_description_tag.reporting import generate_dataset_docs
 from osm_polygon_description_tag.runtime.cleanup import cleanup_stale_owned_temps
 from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.runtime.logging import RunLogger
@@ -73,7 +74,6 @@ from osm_polygon_description_tag.runtime.resources import (
     dataset_card_template,
     osmium_export_config,
 )
-from osm_polygon_description_tag.storage import StorageError, validate_geoparquet
 
 PUBLICATION_STATE_FILENAME = "publication-state.json"
 INTERRUPT_EXIT_CODE = 130
@@ -217,7 +217,7 @@ def _metadata_state_matches(data_root: Path, metadata_plan: UploadPlan) -> bool:
     stats_path = data_root / "stats.json"
     if not readme_path.is_file() or not stats_path.is_file():
         return False
-    from osm_polygon_description_tag.manifest import file_sha256
+    from osm_polygon_description_tag.dataset.manifest import file_sha256
 
     expected_readme_sha = file_sha256(readme_path)
     expected_stats_sha = file_sha256(stats_path)
@@ -436,7 +436,7 @@ def _file_sha256_streaming(path: Path) -> str:
     use this helper so download-and-hash verification never OOMs the
     process on large dataset files.
     """
-    from osm_polygon_description_tag.manifest import file_sha256 as _file_sha256
+    from osm_polygon_description_tag.dataset.manifest import file_sha256 as _file_sha256
 
     return _file_sha256(path)
 
@@ -1253,7 +1253,7 @@ def _upload_final_metadata(
         )
 
     # Write the metadata state atomically only after verification succeeds.
-    from osm_polygon_description_tag.manifest import file_sha256
+    from osm_polygon_description_tag.dataset.manifest import file_sha256
 
     _write_metadata_state(
         paths.data_root,
