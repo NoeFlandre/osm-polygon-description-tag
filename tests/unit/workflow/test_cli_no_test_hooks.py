@@ -8,22 +8,23 @@ and ``--clock`` hooks must not appear in the public CLI surface.
 
 from __future__ import annotations
 
-from osm_polygon_description_tag.cli import create_parser
+import subprocess
+import sys
+from pathlib import Path
 
 
 def _subparser_text(command: str) -> str:
-    """Return the formatted help for a specific subcommand."""
-    parser = create_parser()
-    # Format the help for the chosen subcommand.
-    sub_actions = [
-        action
-        for action in parser._actions  # type: ignore[attr-defined]
-        if action.__class__.__name__ == "_SubParsersAction"
-    ]
-    assert sub_actions, "no subparsers defined"
-    subparsers_action = sub_actions[0]
-    subparser = subparsers_action.choices[command]
-    return subparser.format_help()
+    """Return public console help without depending on a parser implementation."""
+    executable = Path(sys.executable).with_name("osm-polygon-description-tag")
+    result = subprocess.run(  # noqa: S603
+        [str(executable), command, "--help"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert result.stderr == ""
+    return result.stdout
 
 
 def test_run_and_publish_does_not_expose_preflight_flag() -> None:
@@ -52,15 +53,16 @@ def test_publish_does_not_expose_publisher_flag() -> None:
 
 def test_run_and_publish_requires_confirm_repo() -> None:
     """The run-and-publish command still requires ``--confirm-repo``."""
+    executable = Path(sys.executable).with_name("osm-polygon-description-tag")
+    result = subprocess.run(  # noqa: S603
+        [str(executable), "run-and-publish"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
 
-    from osm_polygon_description_tag.cli import run
-
-    try:
-        exit_code = run(["run-and-publish"])
-        assert exit_code != 0
-    except SystemExit as exc:
-        # argparse calls sys.exit(2) on missing required args; that's fine.
-        assert exc.code != 0
+    assert result.returncode == 2
+    assert "usage:" in result.stderr
 
 
 def test_run_and_publish_help_lists_only_public_flags() -> None:

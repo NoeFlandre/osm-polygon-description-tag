@@ -1,4 +1,7 @@
 import json
+import re
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -6,7 +9,6 @@ import pytest
 from shapely.geometry import Polygon
 
 from osm_polygon_description_tag.cli import (
-    create_parser,
     handle_inspect,
     handle_publish,
     handle_publish_plan,
@@ -18,20 +20,84 @@ from osm_polygon_description_tag.publication import PublicationError
 from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
 
+COMMANDS = (
+    "inspect",
+    "build-one",
+    "build-all",
+    "validate",
+    "generate-card",
+    "publish-plan",
+    "publish",
+    "run-and-publish",
+)
+COMMON_OPTIONS = ("--source-root", "--data-root", "--osmium")
+HELP_OPTION = {"--help"}
+COMMAND_OPTIONS = {
+    "inspect": {*COMMON_OPTIONS, *HELP_OPTION},
+    "build-one": {*COMMON_OPTIONS, *HELP_OPTION},
+    "build-all": {*COMMON_OPTIONS, *HELP_OPTION},
+    "validate": {*COMMON_OPTIONS, *HELP_OPTION},
+    "generate-card": {*COMMON_OPTIONS, *HELP_OPTION},
+    "publish-plan": {*COMMON_OPTIONS, *HELP_OPTION},
+    "publish": {*COMMON_OPTIONS, *HELP_OPTION, "--plan"},
+    "run-and-publish": {*COMMON_OPTIONS, *HELP_OPTION, "--confirm-repo"},
+}
 
-def test_subcommands_are_frozen() -> None:
-    parser = create_parser()
-    sub_action = next(a for a in parser._actions if isinstance(a.choices, dict))
-    assert set(sub_action.choices) == {
-        "inspect",
-        "build-one",
-        "build-all",
-        "validate",
-        "generate-card",
-        "publish-plan",
-        "publish",
-        "run-and-publish",
-    }
+
+def _cli(*args: str) -> subprocess.CompletedProcess[str]:
+    """Invoke the installed public console-script entry point."""
+    executable = Path(sys.executable).with_name("osm-polygon-description-tag")
+    return subprocess.run(  # noqa: S603
+        [str(executable), *args],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def test_all_public_commands_remain_available_from_console_entry_point() -> None:
+    result = _cli("--help")
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert all(command in result.stdout for command in COMMANDS)
+
+
+@pytest.mark.parametrize("command", COMMANDS)
+def test_every_command_keeps_exact_public_options(command: str) -> None:
+    result = _cli(command, "--help")
+    long_options = set(re.findall(r"--[a-z][a-z-]*", result.stdout))
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert long_options == COMMAND_OPTIONS[command]
+
+
+def test_build_one_keeps_required_basename() -> None:
+    help_result = _cli("build-one", "--help")
+    missing_result = _cli("build-one")
+
+    assert "basename" in help_result.stdout
+    assert missing_result.returncode == 2
+    assert "usage:" in missing_result.stderr
+
+
+def test_publish_keeps_required_plan_option() -> None:
+    help_result = _cli("publish", "--help")
+    missing_result = _cli("publish")
+
+    assert "--plan" in help_result.stdout
+    assert missing_result.returncode == 2
+    assert "usage:" in missing_result.stderr
+
+
+def test_run_and_publish_keeps_required_confirm_repo_option() -> None:
+    help_result = _cli("run-and-publish", "--help")
+    missing_result = _cli("run-and-publish")
+
+    assert "--confirm-repo" in help_result.stdout
+    assert missing_result.returncode == 2
+    assert "usage:" in missing_result.stderr
 
 
 def test_inspect_uses_approved_default_paths(capsys: pytest.CaptureFixture[str]) -> None:
@@ -41,18 +107,6 @@ def test_inspect_uses_approved_default_paths(capsys: pytest.CaptureFixture[str])
     captured = capsys.readouterr()
     assert exit_code != 0
     assert DEFAULT_SOURCE_ROOT.name in str(captured.err) or "/no/such/raw" in str(captured.err)
-
-
-def test_build_one_requires_basename() -> None:
-    with pytest.raises(SystemExit) as info:
-        run(["build-one"])
-    assert info.value.code != 0
-
-
-def test_publish_requires_plan_argument() -> None:
-    with pytest.raises(SystemExit) as info:
-        run(["publish"])
-    assert info.value.code != 0
 
 
 def test_publish_rejects_wrong_plan_identity(
