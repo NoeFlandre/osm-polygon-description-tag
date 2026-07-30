@@ -1,6 +1,7 @@
 """Shared pytest fixtures producing realistic schema-conformant records."""
 
 import os
+import shlex
 import shutil
 import subprocess
 from collections.abc import Iterator
@@ -24,22 +25,32 @@ def _is_test_owned_executable(executable: str) -> bool:
 
 
 def _reject_live_hf_command(command: object) -> None:
-    if isinstance(command, str | bytes) or not isinstance(command, list | tuple):
+    if isinstance(command, bytes):
+        command = os.fsdecode(command)
+    if isinstance(command, str):
+        try:
+            lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|")
+            lexer.whitespace_split = True
+            tokens = list(lexer)
+        except ValueError:
+            tokens = command.split()
+    elif isinstance(command, list | tuple):
+        tokens = [os.fspath(part) for part in command]
+    else:
         return
-    if not command:
+    if not tokens:
         return
-    executable = os.fspath(command[0])
-    if Path(executable).name != "hf":
-        return
-    action = tuple(os.fspath(part) for part in command[1:3])
-    if not action or action[0] not in {"auth", "upload", "upload-large-folder"}:
-        return
-    if _is_test_owned_executable(executable):
-        return
-    raise RuntimeError(
-        "refusing to launch real Hugging Face CLI from tests; "
-        "patch the defining runner or use a pytest-owned fake executable"
-    )
+    for index, executable in enumerate(tokens[:-1]):
+        if Path(executable).name != "hf":
+            continue
+        if tokens[index + 1] not in {"auth", "upload", "upload-large-folder"}:
+            continue
+        if _is_test_owned_executable(executable):
+            continue
+        raise RuntimeError(
+            "refusing to launch real Hugging Face CLI from tests; "
+            "patch the defining runner or use a pytest-owned fake executable"
+        )
 
 
 @pytest.fixture(autouse=True)
