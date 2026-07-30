@@ -1,21 +1,8 @@
-"""Global test guard ensuring no live Hugging Face calls leak from tests.
+"""Workflow preflight coverage for the hermetic Hugging Face test guard.
 
-Tests must be hermetic. The default Hub verifier and the production
-preflight both call real ``huggingface_hub`` APIs. When tests do not
-patch those APIs, the calls leak into the real network.
-
-The guard:
-
-1. Replaces ``huggingface_hub.HfApi`` with a recording stub before any
-   test session starts. Any test that calls ``HfApi`` directly without
-   having patched it via the lazy wrapper fails with a clear message.
-2. Inspects all pytest tests and, for tests that exercise the public
-   preflight, requires the production HfApi stub to be the recording
-   stub installed by ``conftest.py``. The dedicated pseudo-HF API class
-   is the only allowed "real" usage.
-
-The test suite must fail if any code outside the stub makes a real
-``huggingface_hub`` call.
+The suite-wide fail-closed subprocess/API guard lives in ``tests/conftest.py``.
+This module proves that canonical workflow preflight resolves a patched
+``huggingface_hub.HfApi`` and therefore performs no live Hub call.
 """
 
 from __future__ import annotations
@@ -109,7 +96,7 @@ def _install_hermetic_hub(monkeypatch: pytest.MonkeyPatch) -> _RecordingHubApi:
 
 @pytest.fixture(autouse=True)
 def _hermetic_hub_stub(monkeypatch: pytest.MonkeyPatch) -> _RecordingHubApi:
-    """Every test runs with the hermetic Hub stub installed by default."""
+    """Every test in this module runs with the recording Hub stub."""
     return _install_hermetic_hub(monkeypatch)
 
 
@@ -143,8 +130,8 @@ def test_preflight_hardening_no_live_hf_calls(
 
     monkeypatch.setattr("shutil.which", fake_which)
 
-    from osm_polygon_description_tag.config import Paths
-    from osm_polygon_description_tag.orchestrator import default_preflight
+    from osm_polygon_description_tag.runtime import Paths
+    from osm_polygon_description_tag.workflow import default_preflight
 
     paths = Paths(source_root=source_root, data_root=data_root)
     default_preflight(
@@ -156,4 +143,4 @@ def test_preflight_hardening_no_live_hf_calls(
 
     # The hermetic HfApi was used (no network exception was raised).
     # The point is that the call lands on the recording stub automatically
-    # because of the autouse fixture installed above.
+    # because of this module's autouse fixture.

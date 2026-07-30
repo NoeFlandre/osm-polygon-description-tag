@@ -32,3 +32,11 @@ def test_package_and_project_architecture_docs_exist() -> None:
     assert (package_root / "README.md").is_file()
     assert (project_root / "docs" / "architecture.md").is_file()
     assert (project_root / "docs" / "development.md").is_file()
+
+
+def test_unit_tests_mirror_source_domains() -> None:
+    project_root = Path(osm_polygon_description_tag.__file__).parent.parents[1]
+    tests_root = project_root / "tests"
+    assert not list(tests_root.glob("test_*.py"))
+    for domain in CANONICAL_PACKAGES:
+        assert (tests_root / "unit" / domain).is_dir()

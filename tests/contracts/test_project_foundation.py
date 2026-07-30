@@ -1,7 +1,7 @@
 import tomllib
 from pathlib import Path
 
-ROOT = Path(__file__).parents[1]
+ROOT = Path(__file__).parents[2]
 
 
 def test_public_uv_project_foundation_is_complete() -> None:
