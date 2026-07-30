@@ -68,11 +68,21 @@ from osm_polygon_description_tag.publication.planning import (
 from osm_polygon_description_tag.publication.state import (
     PUBLICATION_STATE_FILENAME,
     PublicationStateError,
-    _metadata_state_matches,
-    _write_metadata_state,
-    _write_publication_state,
-    cast_dict,
-    read_publication_state,
+)
+from osm_polygon_description_tag.publication.state import (
+    _metadata_state_matches as _state_metadata_state_matches,
+)
+from osm_polygon_description_tag.publication.state import (
+    _write_metadata_state as _state_write_metadata_state,
+)
+from osm_polygon_description_tag.publication.state import (
+    _write_publication_state as _state_write_publication_state,
+)
+from osm_polygon_description_tag.publication.state import (
+    cast_dict as _state_cast_dict,
+)
+from osm_polygon_description_tag.publication.state import (
+    read_publication_state as _state_read_publication_state,
 )
 from osm_polygon_description_tag.publication.upload import execute_upload
 from osm_polygon_description_tag.publication.verification import (
@@ -105,7 +115,47 @@ class PreflightError(RuntimeError):
     """Raised when the preflight verification fails before any source is touched."""
 
 
-OrchestratorError = PublicationStateError
+class OrchestratorError(RuntimeError):
+    """Raised for orchestrator-level failures after preflight succeeds."""
+
+
+def _translate_state_error(error: PublicationStateError) -> OrchestratorError:
+    return OrchestratorError(str(error))
+
+
+def read_publication_state(data_root: Path) -> dict[str, object]:
+    try:
+        return _state_read_publication_state(data_root)
+    except PublicationStateError as error:
+        raise _translate_state_error(error) from error
+
+
+def cast_dict(value: object) -> dict[str, object]:
+    try:
+        return _state_cast_dict(value)
+    except PublicationStateError as error:
+        raise _translate_state_error(error) from error
+
+
+def _write_publication_state(*args: Any, **kwargs: Any) -> dict[str, object]:
+    try:
+        return _state_write_publication_state(*args, **kwargs)
+    except PublicationStateError as error:
+        raise _translate_state_error(error) from error
+
+
+def _metadata_state_matches(*args: Any, **kwargs: Any) -> bool:
+    try:
+        return _state_metadata_state_matches(*args, **kwargs)
+    except PublicationStateError as error:
+        raise _translate_state_error(error) from error
+
+
+def _write_metadata_state(*args: Any, **kwargs: Any) -> dict[str, object]:
+    try:
+        return _state_write_metadata_state(*args, **kwargs)
+    except PublicationStateError as error:
+        raise _translate_state_error(error) from error
 
 
 class Preflight(Protocol):
@@ -190,14 +240,15 @@ def default_preflight(
         raise PreflightError(f"--confirm-repo must equal {REPO_ID!r} (got {confirm_repo!r})")
     if shutil.which(osmium_executable) is None:
         raise PreflightError(f"osmium executable not found: {osmium_executable}")
-    if shutil.which(hf_executable) is None:
+    resolved_hf = shutil.which(hf_executable)
+    if resolved_hf is None:
         raise PreflightError(f"hf executable not found: {hf_executable}")
 
     osmium_version_output = _probe_osmium_version(osmium_executable)
 
     try:
         completed = subprocess.run(  # noqa: S603 - controlled argument array, no shell
-            [hf_executable, "auth", "whoami"],
+            [resolved_hf, "auth", "whoami"],
             check=True,
             shell=False,
             capture_output=True,
@@ -252,7 +303,7 @@ def default_preflight(
     return {
         "osmium_executable": osmium_executable,
         "osmium_version": osmium_version_output,
-        "hf_executable": hf_executable,
+        "hf_executable": resolved_hf,
         "hf_whoami": whoami,
         "hf_identity": dict(identity) if isinstance(identity, dict) else str(identity),
         "hub_repo_sha": str(getattr(repo_info, "sha", "")),

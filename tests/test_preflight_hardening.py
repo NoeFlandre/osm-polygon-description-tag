@@ -136,11 +136,11 @@ def test_preflight_requires_hf_whoami_success(
     real_run = subprocess.run
 
     def fake_run(command, *args, **kwargs):
-        if command[:3] == ["hf", "auth", "whoami"]:
+        if Path(command[0]).name == "hf" and command[1:3] == ["auth", "whoami"]:
             raise subprocess.CalledProcessError(1, command, stderr=b"login required")
         return real_run(command, *args, **kwargs)
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("osm_polygon_description_tag.orchestrator.subprocess.run", fake_run)
 
     with pytest.raises(PreflightError, match="hf authentication"):
         default_preflight(

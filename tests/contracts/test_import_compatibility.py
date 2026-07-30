@@ -19,6 +19,7 @@ from osm_polygon_description_tag.dataset import reporting as dataset_reporting
 from osm_polygon_description_tag.dataset import schema as dataset_schema
 from osm_polygon_description_tag.dataset import storage as dataset_storage
 from osm_polygon_description_tag.dataset import transform as dataset_transform
+from osm_polygon_description_tag.orchestrator import OrchestratorError
 from osm_polygon_description_tag.osm import discovery as osm_discovery
 from osm_polygon_description_tag.osm import extraction as osm_extraction
 from osm_polygon_description_tag.publication import models as publication_models
@@ -98,3 +99,8 @@ def test_publication_package_exports_canonical_objects() -> None:
     assert legacy_publication.PublicationError is publication_models.PublicationError
     assert legacy_publication.create_upload_plan is publication_planning.create_upload_plan
     assert legacy_publication.execute_upload is publication_upload.execute_upload
+
+
+def test_orchestrator_error_preserves_public_class_identity() -> None:
+    assert OrchestratorError.__name__ == "OrchestratorError"
+    assert OrchestratorError.__module__ == "osm_polygon_description_tag.orchestrator"

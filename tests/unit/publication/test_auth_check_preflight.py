@@ -22,6 +22,7 @@ Tests must prove:
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -115,8 +116,16 @@ def test_preflight_calls_auth_check_with_write_true(
     osmium = _patch_osmium(monkeypatch, tmp_path)
     hf_bin = _patch_hf_binary(monkeypatch, tmp_path)
     _patch_which(monkeypatch, osmium, hf_bin)
+    commands: list[list[str]] = []
+    real_run = subprocess.run
 
-    default_preflight(
+    def recording_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return real_run(command, **kwargs)
+
+    monkeypatch.setattr("osm_polygon_description_tag.orchestrator.subprocess.run", recording_run)
+
+    report = default_preflight(
         paths,
         confirm_repo="NoeFlandre/osm-polygon-description-tag",
         osmium_executable="osmium",
@@ -130,6 +139,37 @@ def test_preflight_calls_auth_check_with_write_true(
     assert repo_id == "NoeFlandre/osm-polygon-description-tag"
     assert repo_type == "dataset"
     assert write is True
+    assert [str(hf_bin), "auth", "whoami"] in commands
+    assert ["hf", "auth", "whoami"] not in commands
+    assert report["hf_executable"] == str(hf_bin)
+
+
+def test_preflight_never_falls_back_to_installed_hf(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    paths = _paths(tmp_path)
+    osmium = _patch_osmium(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "osm_polygon_description_tag.orchestrator.shutil.which",
+        lambda name: str(osmium) if name == "osmium" else None,
+    )
+    launched: list[list[str]] = []
+
+    def forbidden_run(command: list[str], **_kwargs: object) -> None:
+        launched.append(command)
+        raise AssertionError("no subprocess may launch when hf resolution fails")
+
+    monkeypatch.setattr("osm_polygon_description_tag.orchestrator.subprocess.run", forbidden_run)
+
+    with pytest.raises(PreflightError, match="hf executable not found"):
+        default_preflight(
+            paths,
+            confirm_repo="NoeFlandre/osm-polygon-description-tag",
+            osmium_executable="osmium",
+            hf_executable="hf",
+        )
+
+    assert launched == []
 
 
 def test_preflight_denied_write_raises_preflight_error(
