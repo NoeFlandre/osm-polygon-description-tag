@@ -9,10 +9,13 @@ from osm_polygon_description_tag.publication.models import UploadItem
 
 LFS_SHA_THRESHOLD_BYTES = 5 * 1024 * 1024
 
+
 class HubVerifier(Protocol):
     """Verify that ``files`` actually exist in ``repo_id`` and return the repo SHA."""
 
     def __call__(self, repo_id: str, files: tuple[UploadItem, ...]) -> str: ...
+
+
 class _HuggingFaceHub:
     """Lazy wrapper around the huggingface_hub package.
 

@@ -31,12 +31,28 @@ COMPATIBILITY_MODULES = (
     "storage",
     "transform",
 )
+SHIM_TARGETS = {
+    "_logging": {"osm_polygon_description_tag.runtime.logging"},
+    "_resources": {"osm_polygon_description_tag.runtime.resources"},
+    "config": {"osm_polygon_description_tag.runtime.config"},
+    "discovery": {"osm_polygon_description_tag.osm.discovery"},
+    "extraction": {"osm_polygon_description_tag.osm.extraction"},
+    "manifest": {"osm_polygon_description_tag.dataset.manifest"},
+    "orchestrator": {
+        "osm_polygon_description_tag.workflow.orchestrator",
+        "osm_polygon_description_tag.workflow.preflight",
+    },
+    "pipeline": {"osm_polygon_description_tag.workflow.build"},
+    "reporting": {"osm_polygon_description_tag.dataset.reporting"},
+    "schema": {"osm_polygon_description_tag.dataset.schema"},
+    "storage": {"osm_polygon_description_tag.dataset.storage"},
+    "transform": {"osm_polygon_description_tag.dataset.transform"},
+}
 
 
-def _package_imports(path: Path) -> list[str]:
+def _package_imports_from_source(source: str, module_parts: list[str]) -> list[str]:
     imports: list[str] = []
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    module_parts = list(path.relative_to(PACKAGE_ROOT).with_suffix("").parts)
+    tree = ast.parse(source)
     package_parts = module_parts[:-1]
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -44,17 +60,81 @@ def _package_imports(path: Path) -> list[str]:
         elif isinstance(node, ast.ImportFrom):
             if node.level:
                 base = package_parts[: len(package_parts) - node.level + 1]
-                imported = [*base, *(node.module or "").split(".")]
-                imports.append(
-                    ".".join(["osm_polygon_description_tag", *(part for part in imported if part)])
-                )
+                imported = [
+                    "osm_polygon_description_tag",
+                    *base,
+                    *(node.module or "").split("."),
+                ]
             elif node.module is not None:
-                imports.append(node.module)
+                imported = node.module.split(".")
+            else:
+                continue
+            imported = [part for part in imported if part]
+            if imported == ["osm_polygon_description_tag"] or node.module is None:
+                imports.extend(".".join([*imported, alias.name]) for alias in node.names)
+            else:
+                imports.append(".".join(imported))
     return [
         name.removeprefix("osm_polygon_description_tag.")
         for name in imports
         if name.startswith("osm_polygon_description_tag.")
     ]
+
+
+def _package_imports(path: Path) -> list[str]:
+    module_parts = list(path.relative_to(PACKAGE_ROOT).with_suffix("").parts)
+    return _package_imports_from_source(path.read_text(encoding="utf-8"), module_parts)
+
+
+def _forbidden_imports(source: str, module_parts: list[str], allowed_layers: set[str]) -> list[str]:
+    return [
+        imported_module
+        for imported_module in _package_imports_from_source(source, module_parts)
+        if imported_module.split(".", maxsplit=1)[0] not in allowed_layers
+    ]
+
+
+def _shim_violations(source: str, approved_targets: set[str]) -> list[str]:
+    violations: list[str] = []
+    tree = ast.parse(source)
+    statements = list(tree.body)
+    if (
+        statements
+        and isinstance(statements[0], ast.Expr)
+        and isinstance(statements[0].value, ast.Constant)
+        and isinstance(statements[0].value.value, str)
+    ):
+        statements.pop(0)
+
+    all_assignments = 0
+    for node in statements:
+        if isinstance(node, ast.ImportFrom):
+            if node.module == "__future__" and [alias.name for alias in node.names] == [
+                "annotations"
+            ]:
+                continue
+            if node.level or node.module not in approved_targets:
+                violations.append(f"unapproved import target: {node.module}")
+            if any(alias.name == "*" for alias in node.names):
+                violations.append("wildcard import")
+        elif isinstance(node, ast.Assign):
+            all_assignments += 1
+            valid_target = (
+                len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id == "__all__"
+            )
+            valid_value = isinstance(node.value, ast.List | ast.Tuple) and all(
+                isinstance(element, ast.Constant) and isinstance(element.value, str)
+                for element in node.value.elts
+            )
+            if not valid_target or not valid_value:
+                violations.append("invalid compatibility metadata")
+        else:
+            violations.append(f"disallowed statement: {type(node).__name__}")
+    if all_assignments != 1:
+        violations.append("expected one explicit __all__ assignment")
+    return violations
 
 
 @pytest.mark.parametrize("package_name", CANONICAL_DEPENDENCIES)
@@ -80,31 +160,46 @@ def test_cli_imports_only_canonical_packages() -> None:
     assert violations == []
 
 
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("from osm_polygon_description_tag import manifest", ["manifest"]),
+        ("from .. import manifest", ["manifest"]),
+        ("from . import cleanup", ["runtime.cleanup"]),
+    ],
+)
+def test_import_parser_resolves_package_root_and_relative_aliases(
+    source: str, expected: list[str]
+) -> None:
+    assert _package_imports_from_source(source, ["runtime", "example"]) == expected
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from osm_polygon_description_tag import manifest",
+        "from .. import manifest",
+    ],
+)
+def test_alias_imports_cannot_evade_lower_layer_contract(source: str) -> None:
+    assert _forbidden_imports(source, ["runtime", "example"], {"runtime"}) == ["manifest"]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from osm_polygon_description_tag.runtime.logging import *",
+        "import subprocess",
+    ],
+)
+def test_shim_mutations_are_rejected(source: str) -> None:
+    assert _shim_violations(
+        source,
+        {"osm_polygon_description_tag.runtime.logging"},
+    )
+
+
 @pytest.mark.parametrize("module_name", COMPATIBILITY_MODULES)
 def test_compatibility_module_is_a_pure_import_shim(module_name: str) -> None:
     path = PACKAGE_ROOT / f"{module_name}.py"
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    statements = list(tree.body)
-    if statements and isinstance(statements[0], ast.Expr):
-        assert isinstance(statements[0].value, ast.Constant)
-        assert isinstance(statements[0].value.value, str)
-        statements.pop(0)
-
-    assignments = [node for node in statements if isinstance(node, ast.Assign)]
-    assert len(assignments) == 1
-    assignment = assignments[0]
-    assert len(assignment.targets) == 1
-    assert isinstance(assignment.targets[0], ast.Name)
-    assert assignment.targets[0].id == "__all__"
-    assert isinstance(assignment.value, ast.List | ast.Tuple)
-    assert all(
-        isinstance(element, ast.Constant) and isinstance(element.value, str)
-        for element in assignment.value.elts
-    )
-
-    disallowed = [
-        type(node).__name__
-        for node in statements
-        if not isinstance(node, ast.Import | ast.ImportFrom | ast.Assign)
-    ]
-    assert disallowed == []
+    assert _shim_violations(path.read_text(encoding="utf-8"), SHIM_TARGETS[module_name]) == []

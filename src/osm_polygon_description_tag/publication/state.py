@@ -11,8 +11,10 @@ from osm_polygon_description_tag.publication.models import UploadPlan
 
 PUBLICATION_STATE_FILENAME = "publication-state.json"
 
+
 class PublicationStateError(RuntimeError):
     """Raised when publication state is malformed or unsupported."""
+
 
 def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
