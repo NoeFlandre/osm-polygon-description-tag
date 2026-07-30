@@ -68,7 +68,6 @@ src/osm_polygon_description_tag/
 ├── manifest.py
 ├── orchestrator.py
 ├── pipeline.py
-├── publication.py
 ├── reporting.py
 ├── schema.py
 ├── storage.py
@@ -115,11 +114,15 @@ src/osm_polygon_description_tag/
     └── preflight.py
 ```
 
-The existing top-level modules remain intentionally. They become documented
-compatibility shims that re-export the same supported names from canonical
-subpackages. `cli.py` remains the stable console entry point. `config.py`
-remains a compatibility module because path defaults are already imported by
-external-facing tests and scripts.
+The existing top-level modules remain intentionally, except for
+`publication.py`. They become documented compatibility shims that re-export
+the same supported names from canonical subpackages. The existing
+`osm_polygon_description_tag.publication` import path becomes the
+`publication/__init__.py` package API, so the old module must be replaced
+atomically rather than retained: Python gives a same-named package precedence
+over a module file. `cli.py` remains the stable console entry point.
+`config.py` remains a compatibility module because path defaults are already
+imported by external-facing tests and scripts.
 
 ## Package responsibilities and dependency direction
 
@@ -205,6 +208,9 @@ Each compatibility module contains:
 - explicit imports rather than wildcard exports;
 - an explicit `__all__`;
 - no independent business logic or mutable state.
+
+`publication/__init__.py` follows the same explicit export discipline while
+also serving as the canonical package API.
 
 Private monkeypatch targets used by the repository tests are migrated to
 canonical modules. Compatibility tests cover public names, not indefinite
