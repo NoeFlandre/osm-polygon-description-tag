@@ -43,3 +43,17 @@ def test_lockfile_has_no_mypy_package() -> None:
 
     locked_names = {package["name"].lower() for package in lock["package"]}
     assert "mypy" not in locked_names
+
+
+def test_typer_fully_owns_the_cli() -> None:
+    cli_source = (PROJECT_ROOT / "src" / "osm_polygon_description_tag" / "cli.py").read_text(
+        encoding="utf-8"
+    )
+    project = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert "import argparse" not in cli_source
+    assert "typer.Typer" in cli_source
+    assert (
+        project["project"]["scripts"]["osm-polygon-description-tag"]
+        == "osm_polygon_description_tag.cli:main"
+    )

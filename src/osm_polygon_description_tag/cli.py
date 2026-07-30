@@ -1,28 +1,20 @@
-"""Public CLI mapping arguments to the pipeline's public module functions.
+"""Typer CLI for deterministic polygon dataset build and publication.
 
-Subcommands:
-
-- ``inspect``: read-only source discovery and preflight.
-- ``build-one``: build one named PBF output.
-- ``build-all``: deterministic, resumable orchestration.
-- ``validate``: validate selected or all finalized outputs.
-- ``generate-card``: regenerate ``stats.json`` and the dataset card.
-- ``publish-plan``: validate and show the exact prospective upload.
-- ``publish``: separately confirmed execution of an unchanged plan.
-- ``run-and-publish``: stoppable, resumable build + publish for every PBF.
-
-All file-path defaults are resolved against the installed package, not the
-caller's working directory.
+Successful commands write one JSON document to stdout. Usage diagnostics,
+operational events, and domain errors are confined to stderr.
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Annotated, Any
+
+import typer
+from typer._click.exceptions import ClickException, Exit, UsageError
 
 from osm_polygon_description_tag.dataset.manifest import ManifestError
 from osm_polygon_description_tag.dataset.reporting import ReportingError, generate_dataset_docs
@@ -46,24 +38,57 @@ from osm_polygon_description_tag.workflow.orchestrator import (
 )
 from osm_polygon_description_tag.workflow.preflight import PreflightError
 
+app = typer.Typer(
+    name="osm-polygon-description-tag",
+    add_completion=False,
+    no_args_is_help=False,
+    pretty_exceptions_enable=False,
+)
 
-def _resolve_paths(args: argparse.Namespace) -> Paths:
-    if args.source_root is None and args.data_root is None:
-        paths = Paths.defaults()
-    else:
-        defaults = Paths.defaults()
-        paths = Paths(
-            source_root=args.source_root or defaults.source_root,
-            data_root=args.data_root or defaults.data_root,
-        )
-    return paths.validate()
+SourceRoot = Annotated[Path | None, typer.Option("--source-root")]
+DataRoot = Annotated[Path | None, typer.Option("--data-root")]
+Osmium = Annotated[str, typer.Option("--osmium")]
+
+
+def _namespace(
+    *,
+    source_root: Path | None,
+    data_root: Path | None,
+    osmium: str,
+    **values: object,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        source_root=source_root,
+        data_root=data_root,
+        osmium=osmium,
+        **values,
+    )
+
+
+def _resolve_paths(args: SimpleNamespace) -> Paths:
+    defaults = Paths.defaults()
+    return Paths(
+        source_root=args.source_root or defaults.source_root,
+        data_root=args.data_root or defaults.data_root,
+    ).validate()
 
 
 def _print_json(payload: dict[str, object]) -> None:
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
 
 
-def handle_inspect(args: argparse.Namespace) -> int:
+class _Interrupted(Exception):
+    """Carry Ctrl-C through Typer without its default exit-code conversion."""
+
+
+def _invoke(handler: Callable[[SimpleNamespace], int], args: SimpleNamespace) -> None:
+    try:
+        handler(args)
+    except KeyboardInterrupt as error:
+        raise _Interrupted from error
+
+
+def handle_inspect(args: SimpleNamespace) -> int:
     paths = _resolve_paths(args)
     sources = discover_sources(paths.source_root)
     _print_json(
@@ -88,7 +113,7 @@ def handle_inspect(args: argparse.Namespace) -> int:
 
 
 def _build_paths_and_executor(
-    args: argparse.Namespace,
+    args: SimpleNamespace,
 ) -> tuple[Paths, Callable[[Any], BuildResult]]:
     paths = _resolve_paths(args)
 
@@ -103,7 +128,7 @@ def _build_paths_and_executor(
     return paths, executor
 
 
-def handle_build_one(args: argparse.Namespace) -> int:
+def handle_build_one(args: SimpleNamespace) -> int:
     paths, executor = _build_paths_and_executor(args)
     sources = discover_sources(paths.source_root)
     match = next((source for source in sources if source.name == args.basename), None)
@@ -125,7 +150,7 @@ def handle_build_one(args: argparse.Namespace) -> int:
     return 0
 
 
-def handle_build_all(args: argparse.Namespace) -> int:
+def handle_build_all(args: SimpleNamespace) -> int:
     paths, executor = _build_paths_and_executor(args)
     sources = discover_sources(paths.source_root)
     results: list[BuildResult] = build_all(sources, build=executor)
@@ -134,32 +159,32 @@ def handle_build_all(args: argparse.Namespace) -> int:
             "count": len(results),
             "results": [
                 {
-                    "source_name": r.source_name,
-                    "status": r.status,
-                    "included_rows": r.included_rows,
+                    "source_name": result.source_name,
+                    "status": result.status,
+                    "included_rows": result.included_rows,
                 }
-                for r in results
+                for result in results
             ],
         }
     )
     return 0
 
 
-def handle_validate(args: argparse.Namespace) -> int:
+def handle_validate(args: SimpleNamespace) -> int:
     paths = _resolve_paths(args)
     data_dir = paths.data_root / "data"
     if not data_dir.is_dir():
         raise ValueError(f"missing data directory: {data_dir}")
     rows_total = 0
     files = 0
-    for parquet in sorted(data_dir.glob("*.parquet"), key=lambda p: p.name):
+    for parquet in sorted(data_dir.glob("*.parquet"), key=lambda path: path.name):
         rows_total += validate_geoparquet(parquet)
         files += 1
     _print_json({"files": files, "rows": rows_total})
     return 0
 
 
-def handle_card(args: argparse.Namespace) -> int:
+def handle_card(args: SimpleNamespace) -> int:
     paths = _resolve_paths(args)
     stats = generate_dataset_docs(paths.data_root, dataset_card_template())
     _print_json(
@@ -172,7 +197,7 @@ def handle_card(args: argparse.Namespace) -> int:
     return 0
 
 
-def handle_publish_plan(args: argparse.Namespace) -> int:
+def handle_publish_plan(args: SimpleNamespace) -> int:
     paths = _resolve_paths(args)
     plan = create_upload_plan(paths.data_root)
     _print_json(
@@ -187,7 +212,7 @@ def handle_publish_plan(args: argparse.Namespace) -> int:
     return 0
 
 
-def handle_publish(args: argparse.Namespace) -> int:
+def handle_publish(args: SimpleNamespace) -> int:
     paths = _resolve_paths(args)
     plan = create_upload_plan(paths.data_root)
     execute_upload(plan, confirmation=args.plan)
@@ -195,7 +220,7 @@ def handle_publish(args: argparse.Namespace) -> int:
     return 0
 
 
-def handle_run_and_publish(args: argparse.Namespace) -> int:
+def handle_run_and_publish(args: SimpleNamespace) -> int:
     paths = _resolve_paths(args)
     report = run_and_publish(
         paths=paths,
@@ -206,59 +231,133 @@ def handle_run_and_publish(args: argparse.Namespace) -> int:
     return 0
 
 
-def create_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="osm-polygon-description-tag")
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--source-root", type=Path, default=None)
-    common.add_argument("--data-root", type=Path, default=None)
-    common.add_argument("--osmium", default="osmium")
-
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    sub = subparsers.add_parser("inspect", parents=[common], help="Read-only discovery")
-    sub.set_defaults(handler=handle_inspect)
-
-    sub = subparsers.add_parser("build-one", parents=[common], help="Build one source")
-    sub.add_argument("basename")
-    sub.set_defaults(handler=handle_build_one)
-
-    sub = subparsers.add_parser("build-all", parents=[common], help="Build all discovered sources")
-    sub.set_defaults(handler=handle_build_all)
-
-    sub = subparsers.add_parser("validate", parents=[common], help="Validate finalized outputs")
-    sub.set_defaults(handler=handle_validate)
-
-    sub = subparsers.add_parser(
-        "generate-card", parents=[common], help="Regenerate stats.json and README.md"
+@app.command("inspect", help="Read-only discovery")
+def inspect_command(
+    source_root: SourceRoot = None,
+    data_root: DataRoot = None,
+    osmium: Osmium = "osmium",
+) -> None:
+    _invoke(
+        handle_inspect,
+        _namespace(source_root=source_root, data_root=data_root, osmium=osmium),
     )
-    sub.set_defaults(handler=handle_card)
 
-    sub = subparsers.add_parser(
-        "publish-plan", parents=[common], help="Show the allowlisted upload plan identity"
-    )
-    sub.set_defaults(handler=handle_publish_plan)
 
-    sub = subparsers.add_parser(
-        "publish", parents=[common], help="Upload after exact plan confirmation"
+@app.command("build-one", help="Build one source")
+def build_one_command(
+    basename: Annotated[str, typer.Argument()],
+    source_root: SourceRoot = None,
+    data_root: DataRoot = None,
+    osmium: Osmium = "osmium",
+) -> None:
+    _invoke(
+        handle_build_one,
+        _namespace(
+            source_root=source_root,
+            data_root=data_root,
+            osmium=osmium,
+            basename=basename,
+        ),
     )
-    sub.add_argument(
-        "--plan", required=True, help="Plan identity SHA-256 (must match freshly computed identity)"
-    )
-    sub.set_defaults(handler=handle_publish)
 
-    sub = subparsers.add_parser(
-        "run-and-publish",
-        parents=[common],
-        help="Stoppable, resumable build+publish for every discovered PBF",
-    )
-    sub.add_argument(
-        "--confirm-repo",
-        required=True,
-        help="Exact dataset repo id (must equal NoeFlandre/osm-polygon-description-tag)",
-    )
-    sub.set_defaults(handler=handle_run_and_publish)
 
-    return parser
+@app.command("build-all", help="Build all discovered sources")
+def build_all_command(
+    source_root: SourceRoot = None,
+    data_root: DataRoot = None,
+    osmium: Osmium = "osmium",
+) -> None:
+    _invoke(
+        handle_build_all,
+        _namespace(source_root=source_root, data_root=data_root, osmium=osmium),
+    )
+
+
+@app.command("validate", help="Validate finalized outputs")
+def validate_command(
+    source_root: SourceRoot = None,
+    data_root: DataRoot = None,
+    osmium: Osmium = "osmium",
+) -> None:
+    _invoke(
+        handle_validate,
+        _namespace(source_root=source_root, data_root=data_root, osmium=osmium),
+    )
+
+
+@app.command("generate-card", help="Regenerate stats.json and README.md")
+def generate_card_command(
+    source_root: SourceRoot = None,
+    data_root: DataRoot = None,
+    osmium: Osmium = "osmium",
+) -> None:
+    _invoke(
+        handle_card,
+        _namespace(source_root=source_root, data_root=data_root, osmium=osmium),
+    )
+
+
+@app.command("publish-plan", help="Show the allowlisted upload plan identity")
+def publish_plan_command(
+    source_root: SourceRoot = None,
+    data_root: DataRoot = None,
+    osmium: Osmium = "osmium",
+) -> None:
+    _invoke(
+        handle_publish_plan,
+        _namespace(source_root=source_root, data_root=data_root, osmium=osmium),
+    )
+
+
+@app.command("publish", help="Upload after exact plan confirmation")
+def publish_command(
+    plan: Annotated[
+        str,
+        typer.Option(
+            "--plan",
+            help="Plan identity SHA-256 (must match freshly computed identity)",
+        ),
+    ],
+    source_root: SourceRoot = None,
+    data_root: DataRoot = None,
+    osmium: Osmium = "osmium",
+) -> None:
+    _invoke(
+        handle_publish,
+        _namespace(
+            source_root=source_root,
+            data_root=data_root,
+            osmium=osmium,
+            plan=plan,
+        ),
+    )
+
+
+@app.command(
+    "run-and-publish",
+    help="Stoppable, resumable build+publish for every discovered PBF",
+)
+def run_and_publish_command(
+    confirm_repo: Annotated[
+        str,
+        typer.Option(
+            "--confirm-repo",
+            help="Exact dataset repo id (must equal NoeFlandre/osm-polygon-description-tag)",
+        ),
+    ],
+    source_root: SourceRoot = None,
+    data_root: DataRoot = None,
+    osmium: Osmium = "osmium",
+) -> None:
+    _invoke(
+        handle_run_and_publish,
+        _namespace(
+            source_root=source_root,
+            data_root=data_root,
+            osmium=osmium,
+            confirm_repo=confirm_repo,
+        ),
+    )
 
 
 _ERROR_TYPES = (
@@ -274,24 +373,55 @@ _ERROR_TYPES = (
 )
 
 
+def _show_click_error(error: ClickException) -> None:
+    if isinstance(error, UsageError) and error.ctx is not None:
+        usage = error.ctx.get_usage()
+        if usage.startswith("Usage:"):
+            usage = "usage:" + usage.removeprefix("Usage:")
+        print(usage, file=sys.stderr)
+        print(f"error: {error.format_message()}", file=sys.stderr)
+        return
+    error.show(file=sys.stderr)
+
+
 def run(argv: Sequence[str] | None = None) -> int:
-    parser = create_parser()
-    args = parser.parse_args(argv)
     try:
-        return int(args.handler(args))
-    except KeyboardInterrupt:
+        app(
+            args=list(argv) if argv is not None else None,
+            prog_name="osm-polygon-description-tag",
+            standalone_mode=False,
+        )
+        return 0
+    except Exit as error:
+        return int(error.exit_code)
+    except ClickException as error:
+        _show_click_error(error)
+        return int(error.exit_code)
+    except (KeyboardInterrupt, _Interrupted):
         return 130
     except _ERROR_TYPES as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
 
 
+def main() -> None:
+    raise SystemExit(run())
+
+
+if __name__ == "__main__":
+    main()
+
+
 __all__ = [
-    "create_parser",
+    "app",
+    "handle_build_all",
+    "handle_build_one",
+    "handle_card",
     "handle_inspect",
     "handle_publish",
     "handle_publish_plan",
     "handle_run_and_publish",
     "handle_validate",
+    "main",
     "run",
 ]

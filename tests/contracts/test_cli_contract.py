@@ -62,6 +62,17 @@ def _public_commands(help_text: str) -> set[str]:
     if argparse_group is not None:
         return {piece.strip() for piece in argparse_group.group(1).split(",")}
 
+    rich_commands = re.search(
+        r"(?m)^[^\n]*Commands[^\n]*\n(?P<body>(?:.*\n)*?)^╰.*$",
+        plain,
+    )
+    if rich_commands is not None:
+        return {
+            match.group(1)
+            for line in rich_commands.group("body").splitlines()
+            if (match := re.match(r"^\s*│\s*([a-z][a-z0-9-]*)\b", line))
+        }
+
     commands_match = re.search(r"(?ms)^Commands:\s*\n(?P<body>.*?)(?:\n\S|\Z)", plain)
     if commands_match is None:
         return set()

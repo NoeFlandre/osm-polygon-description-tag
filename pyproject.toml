@@ -30,7 +30,7 @@ dependencies = [
 ]
 
 [project.scripts]
-osm-polygon-description-tag = "osm_polygon_description_tag.cli:run"
+osm-polygon-description-tag = "osm_polygon_description_tag.cli:main"
 
 [project.urls]
 Source = "https://github.com/NoeFlandre/osm-polygon-description-tag"

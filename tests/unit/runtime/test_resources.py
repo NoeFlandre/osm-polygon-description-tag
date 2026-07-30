@@ -83,22 +83,15 @@ def test_resources_resolve_from_unrelated_cwd(tmp_path: Path) -> None:
 
 def test_cli_uses_packaged_resources_from_unrelated_cwd(tmp_path: Path) -> None:
     """The CLI's run-and-publish subcommand resolves resources from any cwd."""
-    from osm_polygon_description_tag.cli import create_parser
-
-    parser = create_parser()
+    from osm_polygon_description_tag.cli import run
 
     cwd_before = os.getcwd()
     try:
         os.chdir(tmp_path)
-        args = parser.parse_args(
-            [
-                "run-and-publish",
-                "--confirm-repo",
-                "NoeFlandre/osm-polygon-description-tag",
-            ]
-        )
-        # Argument parsing succeeds from an unrelated cwd; resources resolve.
-        assert args.confirm_repo == "NoeFlandre/osm-polygon-description-tag"
+        exit_code = run(["run-and-publish", "--help"])
+        assert exit_code == 0
+        assert osmium_export_config().is_file()
+        assert dataset_card_template().is_file()
     finally:
         os.chdir(cwd_before)
 

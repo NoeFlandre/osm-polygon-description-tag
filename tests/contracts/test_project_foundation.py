@@ -20,7 +20,7 @@ def test_public_uv_project_foundation_is_complete() -> None:
     assert project["requires-python"] == ">=3.12"
     assert project["license"] == "Apache-2.0"
     assert project["scripts"] == {
-        "osm-polygon-description-tag": "osm_polygon_description_tag.cli:run"
+        "osm-polygon-description-tag": "osm_polygon_description_tag.cli:main"
     }
 
     readme = readme_path.read_text(encoding="utf-8")
