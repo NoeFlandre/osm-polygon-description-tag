@@ -240,17 +240,24 @@ def test_keyboardinterrupt_through_cli_returns_130(
     (paths.data_root / "README.md").write_text("# README")
     (paths.data_root / "stats.json").write_text("{}")
 
-    import osm_polygon_description_tag.orchestrator as orch
     import osm_polygon_description_tag.publication.upload as pub
+    import osm_polygon_description_tag.workflow.orchestrator as orch
 
     def interrupting_runner(command: list[str], timeout: float | None = None) -> None:
         raise KeyboardInterrupt()
 
     monkeypatch.setattr(pub, "_default_runner_with_retry", interrupting_runner)
+    verifier_factory_calls = 0
+
+    def verifier_factory():
+        nonlocal verifier_factory_calls
+        verifier_factory_calls += 1
+        return lambda *_a, **_kw: "verified"
+
     monkeypatch.setattr(
         orch,
         "default_hub_verifier_factory",
-        lambda: (lambda *_a, **_kw: "verified"),
+        verifier_factory,
     )
 
     from osm_polygon_description_tag.cli import run as cli_run
@@ -267,6 +274,7 @@ def test_keyboardinterrupt_through_cli_returns_130(
         ]
     )
     assert exit_code == 130
+    assert verifier_factory_calls == 1
 
 
 def test_explicit_timeout_reaches_subprocess_run() -> None:

@@ -212,14 +212,19 @@ def test_preflight_denial_prevents_any_subprocess_or_filesystem_mutation(
 
     # If any subsequent code attempts to invoke the exporter or uploader,
     # raise here so the test fails loudly.
+    build_calls = 0
+
     def forbidden(*_a: Any, **_kw: Any) -> None:
+        nonlocal build_calls
+        build_calls += 1
         raise AssertionError("must not be called after preflight denial")
 
-    monkeypatch.setattr("osm_polygon_description_tag.pipeline.build_one", forbidden)
+    monkeypatch.setattr(
+        "osm_polygon_description_tag.workflow.orchestrator.build_one", forbidden
+    )
     monkeypatch.setattr(
         "osm_polygon_description_tag.publication.upload._default_runner_with_retry", forbidden
     )
-    monkeypatch.setattr("osm_polygon_description_tag.publication.upload.execute_upload", forbidden)
 
     # Snapshot the data root before invocation.
     data_root = paths.data_root
@@ -237,6 +242,13 @@ def test_preflight_denial_prevents_any_subprocess_or_filesystem_mutation(
         ]
     )
     assert exit_code != 0
+    assert build_calls == 0
+
+    # Prove the sentinel is installed at the live orchestration boundary.
+    import osm_polygon_description_tag.workflow.orchestrator as workflow_orchestrator
+
+    with pytest.raises(AssertionError, match="must not be called"):
+        workflow_orchestrator.build_one()
 
     # No PBF or generated artifact file was created or removed in the data root.
     files_after = sorted(p.name for p in data_root.iterdir())
