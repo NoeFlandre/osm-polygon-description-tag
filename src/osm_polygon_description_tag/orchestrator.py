@@ -1,4 +1,6 @@
-"""Compatibility imports for ``osm_polygon_description_tag.workflow.orchestrator`` and preflight."""
+"""Compatibility imports for ``osm_polygon_description_tag.workflow.orchestrator`` and
+``osm_polygon_description_tag.workflow.preflight``.
+"""
 
 from osm_polygon_description_tag.workflow.orchestrator import (
     INTERRUPT_EXIT_CODE,

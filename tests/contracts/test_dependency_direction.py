@@ -99,6 +99,8 @@ def _shim_violations(source: str, approved_targets: set[str]) -> list[str]:
     tree = ast.parse(source)
     statements = list(tree.body)
     docstring: str | None = None
+    imported_targets: set[str] = set()
+    has_type_checking_import = False
     if (
         statements
         and isinstance(statements[0], ast.Expr)
@@ -111,8 +113,6 @@ def _shim_violations(source: str, approved_targets: set[str]) -> list[str]:
         violations.append("missing module docstring")
     elif not docstring.strip():
         violations.append("empty module docstring")
-    elif not any(target in docstring for target in approved_targets):
-        violations.append("module docstring does not name approved target")
 
     all_assignments = 0
     for node in statements:
@@ -121,10 +121,43 @@ def _shim_violations(source: str, approved_targets: set[str]) -> list[str]:
                 "annotations"
             ]:
                 continue
+            if (
+                node.module == "typing"
+                and node.level == 0
+                and len(node.names) == 1
+                and node.names[0].name == "TYPE_CHECKING"
+                and node.names[0].asname is None
+            ):
+                has_type_checking_import = True
+                continue
             if node.level or node.module not in approved_targets:
                 violations.append(f"unapproved import target: {node.module}")
+            else:
+                imported_targets.add(node.module)
             if any(alias.name == "*" for alias in node.names):
                 violations.append("wildcard import")
+        elif isinstance(node, ast.If):
+            if not isinstance(node.test, ast.Name) or node.test.id != "TYPE_CHECKING":
+                violations.append("only TYPE_CHECKING guard is permitted")
+                continue
+            if not has_type_checking_import:
+                violations.append("TYPE_CHECKING guard requires exact typing import")
+            if node.orelse:
+                violations.append("TYPE_CHECKING guard must not have else")
+            for guarded_node in node.body:
+                if not isinstance(guarded_node, ast.ImportFrom):
+                    violations.append(
+                        f"disallowed TYPE_CHECKING statement: {type(guarded_node).__name__}"
+                    )
+                    continue
+                if guarded_node.level or guarded_node.module not in approved_targets:
+                    violations.append(
+                        f"unapproved TYPE_CHECKING import target: {guarded_node.module}"
+                    )
+                else:
+                    imported_targets.add(guarded_node.module)
+                if any(alias.name == "*" for alias in guarded_node.names):
+                    violations.append("TYPE_CHECKING wildcard import")
         elif isinstance(node, ast.Assign):
             all_assignments += 1
             valid_target = (
@@ -142,6 +175,15 @@ def _shim_violations(source: str, approved_targets: set[str]) -> list[str]:
             violations.append(f"disallowed statement: {type(node).__name__}")
     if all_assignments != 1:
         violations.append("expected one explicit __all__ assignment")
+    if docstring:
+        named_targets = {target for target in imported_targets if target in docstring}
+        if imported_targets and not named_targets:
+            violations.append("module docstring does not name approved target")
+        else:
+            violations.extend(
+                f"module docstring missing approved target: {target}"
+                for target in sorted(imported_targets - named_targets)
+            )
     return violations
 
 
@@ -246,6 +288,81 @@ __all__ = ["RunLogger"]
 def test_shim_docstring_mutations_are_rejected(source: str, expected_violation: str) -> None:
     assert _shim_violations(source, {"osm_polygon_description_tag.runtime.logging"}) == [
         expected_violation
+    ]
+
+
+def test_shim_permits_narrow_type_checking_imports() -> None:
+    source = '''"""Compatibility imports for osm_polygon_description_tag.runtime.logging."""
+
+from typing import TYPE_CHECKING
+
+from osm_polygon_description_tag.runtime.logging import RunLogger
+
+if TYPE_CHECKING:
+    from osm_polygon_description_tag.runtime.logging import configure_rotation
+
+__all__ = ["RunLogger"]
+'''
+    assert _shim_violations(source, {"osm_polygon_description_tag.runtime.logging"}) == []
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_violation"),
+    [
+        ("if True:\n    pass", "only TYPE_CHECKING guard is permitted"),
+        (
+            "if TYPE_CHECKING:\n    reveal_type(object())",
+            "disallowed TYPE_CHECKING statement: Expr",
+        ),
+        (
+            "if TYPE_CHECKING:\n    from osm_polygon_description_tag.runtime.logging import *",
+            "TYPE_CHECKING wildcard import",
+        ),
+        (
+            "if TYPE_CHECKING:\n    from osm_polygon_description_tag.dataset.schema import SCHEMA",
+            "unapproved TYPE_CHECKING import target: osm_polygon_description_tag.dataset.schema",
+        ),
+        (
+            "if TYPE_CHECKING:\n"
+            "    from osm_polygon_description_tag.runtime.logging import RunLogger\n"
+            "else:\n"
+            "    pass",
+            "TYPE_CHECKING guard must not have else",
+        ),
+    ],
+)
+def test_shim_type_checking_mutations_are_rejected(mutation: str, expected_violation: str) -> None:
+    source = f'''"""Compatibility imports for osm_polygon_description_tag.runtime.logging."""
+
+from typing import TYPE_CHECKING
+
+from osm_polygon_description_tag.runtime.logging import RunLogger
+
+{mutation}
+
+__all__ = ["RunLogger"]
+'''
+    assert _shim_violations(source, {"osm_polygon_description_tag.runtime.logging"}) == [
+        expected_violation
+    ]
+
+
+def test_multi_target_shim_docstring_must_name_every_imported_target() -> None:
+    source = '''"""Compatibility imports for osm_polygon_description_tag.workflow.orchestrator."""
+
+from osm_polygon_description_tag.workflow.orchestrator import run_and_publish
+from osm_polygon_description_tag.workflow.preflight import PreflightError
+
+__all__ = ["PreflightError", "run_and_publish"]
+'''
+    assert _shim_violations(
+        source,
+        {
+            "osm_polygon_description_tag.workflow.orchestrator",
+            "osm_polygon_description_tag.workflow.preflight",
+        },
+    ) == [
+        "module docstring missing approved target: osm_polygon_description_tag.workflow.preflight"
     ]
 
 
