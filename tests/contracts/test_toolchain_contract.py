@@ -57,3 +57,26 @@ def test_typer_fully_owns_the_cli() -> None:
         project["project"]["scripts"]["osm-polygon-description-tag"]
         == "osm_polygon_description_tag.cli:main"
     )
+
+
+def test_pre_commit_and_just_are_configured() -> None:
+    pre_commit = (PROJECT_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    justfile = (PROJECT_ROOT / "justfile").read_text(encoding="utf-8")
+
+    for token in ("ruff-format", "ruff-check", "uv run ty check", "uv run pytest"):
+        assert token in pre_commit
+    for recipe in (
+        "sync:",
+        "format:",
+        "lint:",
+        "typecheck:",
+        "test:",
+        "test-integration:",
+        "build:",
+        "check:",
+        "run-and-publish:",
+    ):
+        assert recipe in justfile
+    assert '"/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw"' in justfile
+    assert '"/Volumes/Seagate M3/projects/osm-polygon-description-tag"' in justfile
+    assert "NoeFlandre/osm-polygon-description-tag" in justfile
