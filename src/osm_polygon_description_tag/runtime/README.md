@@ -6,8 +6,8 @@ Provide the canonical boundary for process-wide runtime support.
 
 ## Responsibilities
 
-Approved path configuration, packaged-resource lookup, operational logging, and safe cleanup of
-abandoned temporary files belong here as they are migrated.
+This package owns approved path configuration, packaged-resource lookup, operational logging, and
+safe cleanup of abandoned application-owned temporary files.
 
 ## Non-responsibilities
 
@@ -16,8 +16,19 @@ the workflow.
 
 ## Public API
 
-Exports are introduced incrementally during the package reorganization. This initial boundary has
-no public exports.
+Import canonical APIs from the package boundary:
+
+```python
+from osm_polygon_description_tag.runtime import (
+    Paths,
+    RunLogger,
+    cleanup_stale_owned_temps,
+    osmium_export_config,
+)
+```
+
+The package exports `Paths`, `UnsafePathError`, `RunLogger`, `configure_rotation`, the packaged
+resource locators, project checkout locators, and `cleanup_stale_owned_temps`.
 
 ## Allowed dependencies
 
@@ -25,8 +36,9 @@ Python's standard library and static package resources.
 
 ## Data flow and side effects
 
-Future runtime APIs may read configuration and packaged resources, write operational logs, and
-remove only verified abandoned temporary files owned by this application.
+Configuration validates source and data roots. Resource APIs locate immutable packaged files and
+may inspect the project checkout revision. Logging writes operational event streams. Cleanup
+removes only recognized stale temporary files when a newer finalized target exists.
 
 ## Safety and determinism invariants
 

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from osm_polygon_description_tag.config import (
+from osm_polygon_description_tag.runtime.config import (
     DEFAULT_DATA_ROOT,
     DEFAULT_SOURCE_ROOT,
     Paths,

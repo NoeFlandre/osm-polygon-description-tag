@@ -16,7 +16,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from osm_polygon_description_tag._resources import osmium_export_config, project_code_revision
+from osm_polygon_description_tag.runtime.resources import (
+    osmium_export_config,
+    project_code_revision,
+)
 from osm_polygon_description_tag.schema import GEOPARQUET_VERSION, SCHEMA_VERSION
 
 MANIFEST_SCHEMA_VERSION = 2

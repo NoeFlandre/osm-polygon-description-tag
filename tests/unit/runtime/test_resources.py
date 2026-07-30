@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from osm_polygon_description_tag._resources import (
+from osm_polygon_description_tag.runtime.resources import (
     dataset_card_template,
     osmium_export_config,
     package_data_dir,

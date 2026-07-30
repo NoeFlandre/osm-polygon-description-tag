@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def test_cleanup_removes_only_owned_temp_older_than_final_target(tmp_path: Path) -> None:
-    from osm_polygon_description_tag.orchestrator import cleanup_stale_owned_temps
+    from osm_polygon_description_tag.runtime.cleanup import cleanup_stale_owned_temps
 
     data_root = tmp_path / "generated"
     data_dir = data_root / "data"

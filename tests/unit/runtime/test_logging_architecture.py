@@ -11,7 +11,7 @@ The amendment introduces a typed event sink that:
 - never enters an upload plan.
 
 This file contains RED tests for each invariant. Implementation lives in
-``osm_polygon_description_tag._logging``.
+``osm_polygon_description_tag.runtime.logging``.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import pytest
 
 @pytest.fixture
 def logger_factory():
-    from osm_polygon_description_tag._logging import (
+    from osm_polygon_description_tag.runtime.logging import (
         RunLogger,
         configure_rotation,
     )
@@ -466,7 +466,7 @@ def test_run_logger_close_is_idempotent_and_safe(tmp_path: Path, logger_factory)
 
 def test_project_root_uses_env_var_when_set(tmp_path, monkeypatch) -> None:
     """``OSM_POLYGON_DESCRIPTION_TAG_HOME`` overrides the upward walk."""
-    from osm_polygon_description_tag._resources import project_root
+    from osm_polygon_description_tag.runtime.resources import project_root
 
     env_root = tmp_path / "env-root"
     env_root.mkdir()
@@ -483,48 +483,48 @@ def test_project_root_raises_when_no_pyproject_found(tmp_path, monkeypatch) -> N
     upward-walk source by pointing ``__file__`` at a sentinel inside the
     empty directory so no parent contains a pyproject.toml.
     """
-    from osm_polygon_description_tag import _resources
+    from osm_polygon_description_tag.runtime import resources
 
     bogus = tmp_path / "no-project-here"
     bogus.mkdir()
     sentinel = bogus / "_resources_fake.py"
     sentinel.write_text("")
-    monkeypatch.setattr(_resources, "__file__", str(sentinel))
+    monkeypatch.setattr(resources, "__file__", str(sentinel))
     monkeypatch.delenv("OSM_POLYGON_DESCRIPTION_TAG_HOME", raising=False)
     with pytest.raises(FileNotFoundError, match="project root"):
-        _resources.project_root()
+        resources.project_root()
 
 
 def test_project_code_revision_returns_none_when_no_git(monkeypatch, tmp_path) -> None:
     """``project_code_revision`` returns None when git is unavailable or fails."""
-    from osm_polygon_description_tag import _resources
+    from osm_polygon_description_tag.runtime import resources
 
-    monkeypatch.setattr(_resources.subprocess, "run", lambda *a, **kw: None)
+    monkeypatch.setattr(resources.subprocess, "run", lambda *a, **kw: None)
     # Use an env var that has no pyproject so it walks upward via __file__.
     # The walk will find the project root (it always does in this checkout),
     # but subprocess.run is patched to return None.
     fake_completed = type("Fake", (), {"returncode": 0, "stdout": ""})()
-    monkeypatch.setattr(_resources.subprocess, "run", lambda *a, **kw: fake_completed)
-    assert _resources.project_code_revision() in (None, "")
+    monkeypatch.setattr(resources.subprocess, "run", lambda *a, **kw: fake_completed)
+    assert resources.project_code_revision() in (None, "")
 
 
 def test_project_code_revision_returns_revision_on_success(monkeypatch, tmp_path) -> None:
     """``project_code_revision`` returns the Git revision when git succeeds."""
-    from osm_polygon_description_tag import _resources
+    from osm_polygon_description_tag.runtime import resources
 
     fake_completed = type(
         "Fake",
         (),
         {"returncode": 0, "stdout": "abcdef1234567890\n"},
     )()
-    monkeypatch.setattr(_resources.subprocess, "run", lambda *a, **kw: fake_completed)
-    assert _resources.project_code_revision() == "abcdef1234567890"
+    monkeypatch.setattr(resources.subprocess, "run", lambda *a, **kw: fake_completed)
+    assert resources.project_code_revision() == "abcdef1234567890"
 
 
 def test_project_code_revision_returns_none_when_git_fails(monkeypatch) -> None:
     """``project_code_revision`` returns None when the git command fails."""
-    from osm_polygon_description_tag import _resources
+    from osm_polygon_description_tag.runtime import resources
 
     fake_completed = type("Fake", (), {"returncode": 128, "stdout": "fatal: not a git repo"})()
-    monkeypatch.setattr(_resources.subprocess, "run", lambda *a, **kw: fake_completed)
-    assert _resources.project_code_revision() is None
+    monkeypatch.setattr(resources.subprocess, "run", lambda *a, **kw: fake_completed)
+    assert resources.project_code_revision() is None
