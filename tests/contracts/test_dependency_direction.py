@@ -98,13 +98,21 @@ def _shim_violations(source: str, approved_targets: set[str]) -> list[str]:
     violations: list[str] = []
     tree = ast.parse(source)
     statements = list(tree.body)
+    docstring: str | None = None
     if (
         statements
         and isinstance(statements[0], ast.Expr)
         and isinstance(statements[0].value, ast.Constant)
         and isinstance(statements[0].value.value, str)
     ):
+        docstring = statements[0].value.value
         statements.pop(0)
+    if docstring is None:
+        violations.append("missing module docstring")
+    elif not docstring.strip():
+        violations.append("empty module docstring")
+    elif not any(target in docstring for target in approved_targets):
+        violations.append("module docstring does not name approved target")
 
     all_assignments = 0
     for node in statements:
@@ -186,17 +194,59 @@ def test_alias_imports_cannot_evade_lower_layer_contract(source: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "source",
+    ("source", "expected_violation"),
     [
-        "from osm_polygon_description_tag.runtime.logging import *",
-        "import subprocess",
+        (
+            '''"""Compatibility imports for osm_polygon_description_tag.runtime.logging."""
+
+from osm_polygon_description_tag.runtime.logging import *
+
+__all__ = ["RunLogger"]
+''',
+            "wildcard import",
+        ),
+        (
+            '''"""Compatibility imports for osm_polygon_description_tag.runtime.logging."""
+
+import subprocess
+
+__all__ = ["RunLogger"]
+''',
+            "disallowed statement: Import",
+        ),
     ],
 )
-def test_shim_mutations_are_rejected(source: str) -> None:
-    assert _shim_violations(
-        source,
-        {"osm_polygon_description_tag.runtime.logging"},
-    )
+def test_shim_mutations_are_rejected(source: str, expected_violation: str) -> None:
+    assert _shim_violations(source, {"osm_polygon_description_tag.runtime.logging"}) == [
+        expected_violation
+    ]
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_violation"),
+    [
+        (
+            """from osm_polygon_description_tag.runtime.logging import RunLogger
+
+__all__ = ["RunLogger"]
+""",
+            "missing module docstring",
+        ),
+        (
+            '''"""Compatibility imports for the wrong module."""
+
+from osm_polygon_description_tag.runtime.logging import RunLogger
+
+__all__ = ["RunLogger"]
+''',
+            "module docstring does not name approved target",
+        ),
+    ],
+)
+def test_shim_docstring_mutations_are_rejected(source: str, expected_violation: str) -> None:
+    assert _shim_violations(source, {"osm_polygon_description_tag.runtime.logging"}) == [
+        expected_violation
+    ]
 
 
 @pytest.mark.parametrize("module_name", COMPATIBILITY_MODULES)

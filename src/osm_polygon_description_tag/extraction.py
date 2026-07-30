@@ -1,4 +1,4 @@
-"""Compatibility exports for the canonical OSM extraction API."""
+"""Compatibility exports for :mod:`osm_polygon_description_tag.osm.extraction`."""
 
 from osm_polygon_description_tag.osm.extraction import (
     STDERR_CAP_BYTES,

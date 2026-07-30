@@ -1,4 +1,4 @@
-"""Compatibility imports; canonical APIs live in `.workflow.build`."""
+"""Compatibility imports for :mod:`osm_polygon_description_tag.workflow.build`."""
 
 from osm_polygon_description_tag.workflow.build import (
     BuildResult,

@@ -1,4 +1,4 @@
-"""Compatibility exports for the canonical OSM discovery API."""
+"""Compatibility exports for :mod:`osm_polygon_description_tag.osm.discovery`."""
 
 from osm_polygon_description_tag.osm.discovery import Source, discover_sources
 
