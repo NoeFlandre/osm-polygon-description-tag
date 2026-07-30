@@ -9,12 +9,9 @@ The canonical implementation is organized by operational domain:
 - `workflow`: preflight, resumable builds, completeness, and lifecycle composition;
 - `cli.py`: the stable console entry point.
 
-The domain packages are being introduced incrementally. Until each migration is complete, the
-existing top-level modules remain the implementation and supported import paths. After migration,
-those top-level modules become explicit compatibility shims that re-export supported names from
-the canonical package. The existing `osm_polygon_description_tag.publication` module is replaced
-atomically by its same-named package so imports are never ambiguously split between both forms.
+The domain packages contain the canonical implementation. Existing top-level
+modules are explicit compatibility shims that re-export supported names from
+those packages; they contain no business logic or mutable state.
 
-New internal code should use canonical domain imports once the corresponding API has moved.
-External callers may continue using the documented compatibility imports. Compatibility shims do
-not own business logic or mutable state.
+New internal code uses canonical domain imports. External callers may continue
+using documented compatibility imports.

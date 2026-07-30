@@ -1,40 +1,70 @@
 # Development
 
-Use uv as the project and dependency runner:
+Python 3.12 and uv define the reproducible environment:
 
 ```bash
-uv sync
-uv run pytest -q
+uv sync --locked
 ```
 
-Run focused tests while developing, then the full suite:
+Runtime commands use a Typer CLI. Rich and tqdm provide interactive stderr
+presentation while stdout stays machine-readable.
+
+## Everyday commands
+
+Just is the documented task runner:
 
 ```bash
-uv run pytest tests/contracts/test_package_layout.py -q
-uv run pytest -q
+just format
+just lint
+just typecheck
+just test
+just test-integration
+just build
+just check
 ```
 
-Use Ruff for formatting and linting:
+The equivalent direct quality commands are:
 
 ```bash
 uv run ruff format --check .
 uv run ruff check .
+uv run ty check
+HF_HUB_OFFLINE=1 uv run pytest
 ```
 
-The current type-checking command is:
+Ruff is the sole formatter and linter. ty is the sole static type checker;
+mypy is not part of the project. pytest owns unit, contract, and integration
+tests.
+
+## Test-driven changes
+
+Add a focused failing pytest test, confirm the failure, implement the smallest
+change, and confirm the focused test passes before running the complete gates.
+Keep public compatibility shims when moving supported imports, and avoid
+combining behavior changes with package moves.
+
+## Local hooks and CI
+
+Install pre-commit once per checkout:
 
 ```bash
-uv run ty check
+uv run pre-commit install
+uv run pre-commit run --all-files
 ```
 
-## Change workflow
+The hooks run repository hygiene, Ruff, ty, and contract tests. GitHub Actions
+runs the locked uv environment, the same quality gates, the full offline
+pytest suite, and a wheel-content check. CI must never authenticate to or
+publish on Hugging Face.
 
-Use test-driven development: add a focused failing test, confirm the expected failure, make the
-smallest implementation change, and confirm the focused test passes. Keep compatibility contracts
-when moving a public import, and avoid combining behavior changes with package moves.
+## Operational boundary
 
-## Release gates
+Development and verification do not authorize a real source build or Hub
+publication. The single stoppable and resumable production command is:
 
-Before completion, run formatting and lint checks, type checking, the full pytest suite, and any
-integration test whose external dependency is available. A local test run does not authorize a
-real source-data build or Hub publication.
+```bash
+just run-and-publish
+```
+
+It uses the immutable raw-source and generated-data roots documented in the
+root README.

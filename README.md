@@ -8,12 +8,12 @@ and successfully assembled `type=multipolygon` or `type=boundary` relations,
 with complete original OSM tags, WGS84 geometry, geodesic area, source
 identity, validation manifests, and artifact-derived documentation.
 
-## Current status
+## Project status
 
-Implementation tasks 1-12 of the approved plan are complete and verified
-locally. No real source PBF has been processed, and no dataset artifact has
-been uploaded. Real-source processing, a real-source canary, GitHub
-publication, and Hugging Face upload remain separate operational gates.
+The codebase provides the complete local build, validation, reporting, and
+guarded publication workflow. Running the production command remains an
+explicit operational action: tests and development commands never read the
+real PBF corpus or contact Hugging Face.
 
 ## Storage boundaries
 
@@ -34,6 +34,9 @@ resumable. Re-running it after any interruption is safe and idempotent:
 nothing is rebuilt if the local artifact is already complete and verified.
 
 ```bash
+just run-and-publish
+
+# Equivalent explicit invocation:
 uv run osm-polygon-description-tag run-and-publish \
   --source-root "/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw" \
   --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag" \
@@ -116,14 +119,20 @@ each manifest as a SHA-256 provenance.
 
 `run-and-publish` writes a typed event stream to
 `<data-root>/logs/run-and-publish.jsonl` (redacted JSONL) and a human
-line on stderr. The log file rotates atomically at 10 MiB with five
+line on stderr. On an interactive terminal, Rich and tqdm render bounded
+progress on stderr; stdout remains a single machine-readable JSON result.
+The log file rotates atomically at 10 MiB with five
 backups, using same-directory hard-link staging and `os.replace`. The
 logs directory is allowlisted locally but never included in any upload
 plan.
 
 ## Usage
 
-The project uses Python 3.12 and [`uv`](https://docs.astral.sh/uv/).
+The project uses Python 3.12 and [`uv`](https://docs.astral.sh/uv/), with
+Ruff, ty, pytest, pre-commit, Typer, Rich, tqdm, Just, and GitHub Actions as
+its supported development and automation toolchain. See
+[`docs/development.md`](docs/development.md) for the exact commands and
+[`docs/architecture.md`](docs/architecture.md) for the module boundaries.
 Extraction depends on `osmium-tool`; publication uses the `hf` CLI.
 
 ```bash

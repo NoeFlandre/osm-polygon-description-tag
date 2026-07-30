@@ -18,7 +18,7 @@ README_SECTIONS = (
 
 def test_canonical_packages_are_documented() -> None:
     package_root = Path(osm_polygon_description_tag.__file__).parent
-    for package_name in STAGED_PACKAGES:
+    for package_name in CANONICAL_PACKAGES:
         package = package_root / package_name
         assert (package / "__init__.py").is_file()
         readme = (package / "README.md").read_text(encoding="utf-8")
@@ -40,3 +40,30 @@ def test_unit_tests_mirror_source_domains() -> None:
     assert not list(tests_root.glob("test_*.py"))
     for domain in CANONICAL_PACKAGES:
         assert (tests_root / "unit" / domain).is_dir()
+
+
+def test_active_docs_name_the_complete_toolchain() -> None:
+    package_root = Path(osm_polygon_description_tag.__file__).parent
+    project_root = package_root.parents[1]
+    paths = (
+        project_root / "README.md",
+        project_root / "docs" / "development.md",
+        project_root / "docs" / "architecture.md",
+    )
+    text = "\n".join(path.read_text(encoding="utf-8") for path in paths)
+
+    for name in (
+        "uv",
+        "Ruff",
+        "ty",
+        "pytest",
+        "pre-commit",
+        "Typer",
+        "Rich",
+        "tqdm",
+        "Just",
+        "GitHub Actions",
+    ):
+        assert name in text
+    assert "uv run mypy" not in text
+    assert "argparse" not in text

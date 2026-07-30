@@ -75,5 +75,9 @@ jobs:
           'osm_polygon_description_tag/_data/dataset-card-template.md',
           'osm_polygon_description_tag/py.typed',
           'osm_polygon_description_tag/README.md',
-          'osm_polygon_description_tag/runtime/README.md'};
+          'osm_polygon_description_tag/runtime/README.md',
+          'osm_polygon_description_tag/osm/README.md',
+          'osm_polygon_description_tag/dataset/README.md',
+          'osm_polygon_description_tag/publication/README.md',
+          'osm_polygon_description_tag/workflow/README.md'};
           missing=required-names; assert not missing, missing"

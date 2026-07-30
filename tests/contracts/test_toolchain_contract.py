@@ -83,9 +83,7 @@ def test_pre_commit_and_just_are_configured() -> None:
 
 
 def test_github_actions_runs_complete_quality_gate() -> None:
-    workflow = (
-        PROJECT_ROOT / ".github" / "workflows" / "quality.yml"
-    ).read_text(encoding="utf-8")
+    workflow = (PROJECT_ROOT / ".github" / "workflows" / "quality.yml").read_text(encoding="utf-8")
 
     for token in (
         "ubuntu-latest",
