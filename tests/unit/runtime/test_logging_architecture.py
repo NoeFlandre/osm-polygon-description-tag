@@ -17,6 +17,7 @@ This file contains RED tests for each invariant. Implementation lives in
 from __future__ import annotations
 
 import json
+from io import StringIO
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,49 @@ def logger_factory():
     )
 
     return RunLogger, configure_rotation
+
+
+def test_observer_receives_redacted_event_and_cannot_break_logging(
+    tmp_path: Path,
+) -> None:
+    from osm_polygon_description_tag.runtime.logging import RunLogger
+
+    observed: list[dict[str, object]] = []
+
+    def observer(event: dict[str, object]) -> None:
+        observed.append(event)
+        raise RuntimeError("presentation failure")
+
+    stderr = StringIO()
+    logger = RunLogger(
+        data_root=tmp_path,
+        run_id="run-1",
+        clock=lambda: "2026-07-30T00:00:00+00:00",
+        stderr=stderr,
+        observer=observer,
+    )
+    logger.event(
+        "upload_retry",
+        token="hf_secretvalue",  # noqa: S106 - deliberate credential-redaction fixture
+        reason="Bearer abcdefgh",
+    )
+    logger.close()
+
+    assert observed == [
+        {
+            "event": "upload_retry",
+            "level": "INFO",
+            "reason": "[REDACTED]",
+            "run_id": "run-1",
+            "token": "[REDACTED]",
+            "ts": "2026-07-30T00:00:00+00:00",
+        }
+    ]
+    assert "hf_secretvalue" not in stderr.getvalue()
+    assert "[REDACTED]" in stderr.getvalue()
+    persisted = (tmp_path / "logs" / "run-and-publish.jsonl").read_text(encoding="utf-8")
+    assert "hf_secretvalue" not in persisted
+    assert "[REDACTED]" in persisted
 
 
 def test_run_logger_writes_canonical_jsonl_and_human_stderr(

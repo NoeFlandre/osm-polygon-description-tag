@@ -33,7 +33,7 @@ import re
 import sys
 import threading
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, Any
@@ -145,6 +145,7 @@ class RunLogger:
         clock: Callable[[], str] | None = None,
         buffer_preflight: bool = False,
         stderr: Any | None = None,
+        observer: Callable[[Mapping[str, object]], None] | None = None,
     ) -> None:
         self._data_root = data_root
         self._run_id = run_id
@@ -153,6 +154,7 @@ class RunLogger:
         self._buffered: list[_BufferedEvent] = []
         self._buffer_preflight = buffer_preflight
         self._stderr = stderr if stderr is not None else sys.stderr
+        self._observer = observer
         self._max_bytes = 10 * 1024 * 1024
         self._backups = 5
         self._path: Path | None = None
@@ -209,6 +211,9 @@ class RunLogger:
             record[key] = value
         scrubbed = _scrub(record)
         raw = json.dumps(scrubbed, ensure_ascii=False, sort_keys=True, cls=_SafeJsonFormatter)
+        if self._observer is not None:
+            with contextlib.suppress(Exception):
+                self._observer(dict(scrubbed))
         self._emit(scrubbed, raw)
 
     def _emit(self, record: dict[str, object], raw: str) -> None:

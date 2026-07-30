@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sys
+import uuid
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import SimpleNamespace
@@ -27,6 +28,8 @@ from osm_polygon_description_tag.publication import (
     execute_upload,
 )
 from osm_polygon_description_tag.runtime.config import Paths
+from osm_polygon_description_tag.runtime.logging import RunLogger
+from osm_polygon_description_tag.runtime.presentation import TerminalPresenter
 from osm_polygon_description_tag.runtime.resources import (
     dataset_card_template,
     osmium_export_config,
@@ -222,11 +225,28 @@ def handle_publish(args: SimpleNamespace) -> int:
 
 def handle_run_and_publish(args: SimpleNamespace) -> int:
     paths = _resolve_paths(args)
-    report = run_and_publish(
-        paths=paths,
-        confirm_repo=args.confirm_repo,
-        osmium_executable=args.osmium,
+    presenter = getattr(args, "presenter", None)
+    logger = (
+        RunLogger(
+            data_root=paths.data_root,
+            run_id=str(uuid.uuid4()),
+            buffer_preflight=True,
+            stderr=sys.stderr,
+            observer=presenter.observe,
+        )
+        if presenter is not None
+        else None
     )
+    try:
+        report = run_and_publish(
+            paths=paths,
+            confirm_repo=args.confirm_repo,
+            osmium_executable=args.osmium,
+            logger=logger,
+        )
+    finally:
+        if logger is not None:
+            logger.close()
     _print_json(report.to_payload())
     return 0
 
@@ -349,15 +369,20 @@ def run_and_publish_command(
     data_root: DataRoot = None,
     osmium: Osmium = "osmium",
 ) -> None:
-    _invoke(
-        handle_run_and_publish,
-        _namespace(
-            source_root=source_root,
-            data_root=data_root,
-            osmium=osmium,
-            confirm_repo=confirm_repo,
-        ),
-    )
+    presenter = TerminalPresenter(stderr=sys.stderr)
+    try:
+        _invoke(
+            handle_run_and_publish,
+            _namespace(
+                source_root=source_root,
+                data_root=data_root,
+                osmium=osmium,
+                confirm_repo=confirm_repo,
+                presenter=presenter,
+            ),
+        )
+    finally:
+        presenter.close()
 
 
 _ERROR_TYPES = (
@@ -400,7 +425,7 @@ def run(argv: Sequence[str] | None = None) -> int:
     except (KeyboardInterrupt, _Interrupted):
         return 130
     except _ERROR_TYPES as error:
-        print(f"error: {error}", file=sys.stderr)
+        TerminalPresenter(stderr=sys.stderr).error(str(error))
         return 1
 
 
