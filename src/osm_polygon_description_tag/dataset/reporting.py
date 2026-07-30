@@ -38,7 +38,7 @@ from osm_polygon_description_tag.dataset.manifest import (
 )
 from osm_polygon_description_tag.dataset.schema import SCHEMA_VERSION
 
-_STATS_SCHEMA_VERSION = 2
+_STATS_SCHEMA_VERSION = 3
 _QUANTILE_PROBABILITIES = [0.25, 0.5, 0.75]
 _GENERATED_PATTERN = re.compile(
     r"(<!-- GENERATED:STATS:START -->\n)(.*?)(<!-- GENERATED:STATS:END -->)", re.DOTALL
@@ -143,6 +143,39 @@ def _suffix_counts(connection: duckdb.DuckDBPyConnection, map_column: str) -> di
     ).fetchall():
         return {key: int(value) for key, value in rows}
     return {}
+
+
+def _description_word_stats(
+    connection: duckdb.DuckDBPyConnection,
+    *,
+    localized: bool,
+) -> tuple[int, int, float | None]:
+    values_query = (
+        """
+        SELECT entry.value AS value
+        FROM (
+            SELECT unnest(map_entries(localized_descriptions)) AS entry
+            FROM features
+            WHERE cardinality(localized_descriptions) > 0
+        )
+        """
+        if localized
+        else "SELECT description AS value FROM features WHERE description IS NOT NULL"
+    )
+    row = connection.execute(
+        rf"""
+        WITH description_values AS ({values_query}),
+        word_counts AS (
+            SELECT list_count(regexp_extract_all(value, '[^\s\p{{Z}}]+')) AS word_count
+            FROM description_values
+        )
+        SELECT COUNT(*), COALESCE(SUM(word_count), 0), quantile_cont(word_count, 0.5)
+        FROM word_counts
+        """
+    ).fetchone()
+    if row is None:
+        return 0, 0, None
+    return int(row[0]), int(row[1]), float(row[2]) if row[2] is not None else None
 
 
 def collect_stats(
@@ -284,6 +317,16 @@ def collect_stats(
             ).fetchone()
             min_ts = ts_row[0].isoformat() if ts_row and ts_row[0] else None
             max_ts = ts_row[1].isoformat() if ts_row and ts_row[1] else None
+        (
+            base_description_values,
+            base_description_words_total,
+            base_description_words_median,
+        ) = _description_word_stats(connection, localized=False)
+        (
+            localized_description_values,
+            localized_description_words_total,
+            localized_description_words_median,
+        ) = _description_word_stats(connection, localized=True)
     finally:
         connection.close()
 
@@ -328,6 +371,12 @@ def collect_stats(
         "name_suffixes": name_suffixes,
         "base_description_rows": base_description_rows,
         "localized_description_rows": localized_description_rows,
+        "base_description_values": base_description_values,
+        "base_description_words_total": base_description_words_total,
+        "base_description_words_median": base_description_words_median,
+        "localized_description_values": localized_description_values,
+        "localized_description_words_total": localized_description_words_total,
+        "localized_description_words_median": localized_description_words_median,
         "base_name_rows": base_name_rows,
         "localized_name_rows": localized_name_rows,
         "rejections": dict(sorted(rejections.items())),

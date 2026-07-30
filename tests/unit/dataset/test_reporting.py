@@ -107,7 +107,63 @@ def test_collect_stats_aggregates_from_validated_artifacts(tmp_path: Path) -> No
     assert "generation_timestamp_utc" not in stats
     assert stats["area_m2_min_m2"] is not None and stats["area_m2_min_m2"] > 0
     assert stats["area_m2_max_m2"] >= stats["area_m2_min_m2"]
-    assert stats["stats_schema_version"] == 2
+    assert stats["stats_schema_version"] == 3
+
+
+def test_collect_stats_separates_base_and_localized_description_words(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    source_root.mkdir()
+    (data_root / "data").mkdir(parents=True)
+    (data_root / "manifests").mkdir(parents=True)
+    records = [
+        make_record_dict(
+            Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+            {
+                "description": "Two words",
+                "description:en": "three localized words",
+                "description:fr": "quatre\u2003mots",
+            },
+            osm_id=10,
+            source_pbf="words.osm.pbf",
+        ),
+        make_record_dict(
+            Polygon([(2, 2), (2, 3), (3, 3), (3, 2)]),
+            {"description": "One", "description:en": "single"},
+            osm_id=11,
+            source_pbf="words.osm.pbf",
+        ),
+    ]
+    _build_pair(data_root, source_root, "words", records, {})
+
+    stats = collect_stats(data_root)
+
+    assert stats["stats_schema_version"] == 3
+    assert stats["base_description_values"] == 2
+    assert stats["base_description_words_total"] == 3
+    assert stats["base_description_words_median"] == 1.5
+    assert stats["localized_description_values"] == 3
+    assert stats["localized_description_words_total"] == 6
+    assert stats["localized_description_words_median"] == 2.0
+
+
+def test_collect_stats_uses_zero_totals_and_null_medians_for_empty_dataset(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "generated"
+    (data_root / "data").mkdir(parents=True)
+    (data_root / "manifests").mkdir(parents=True)
+
+    stats = collect_stats(data_root)
+
+    assert stats["base_description_values"] == 0
+    assert stats["base_description_words_total"] == 0
+    assert stats["base_description_words_median"] is None
+    assert stats["localized_description_values"] == 0
+    assert stats["localized_description_words_total"] == 0
+    assert stats["localized_description_words_median"] is None
 
 
 def test_collect_stats_rejects_missing_manifest(tmp_path: Path) -> None:
