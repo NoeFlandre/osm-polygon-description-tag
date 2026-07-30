@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
@@ -100,6 +101,9 @@ def _shim_violations(source: str, approved_targets: set[str]) -> list[str]:
     statements = list(tree.body)
     docstring: str | None = None
     imported_targets: set[str] = set()
+    runtime_imported_names: set[str] = set()
+    public_exports: set[str] = set()
+    has_runtime_wildcard = False
     has_type_checking_import = False
     if (
         statements
@@ -134,8 +138,12 @@ def _shim_violations(source: str, approved_targets: set[str]) -> list[str]:
                 violations.append(f"unapproved import target: {node.module}")
             else:
                 imported_targets.add(node.module)
+                runtime_imported_names.update(
+                    alias.asname or alias.name for alias in node.names if alias.name != "*"
+                )
             if any(alias.name == "*" for alias in node.names):
                 violations.append("wildcard import")
+                has_runtime_wildcard = True
         elif isinstance(node, ast.If):
             if not isinstance(node.test, ast.Name) or node.test.id != "TYPE_CHECKING":
                 violations.append("only TYPE_CHECKING guard is permitted")
@@ -171,12 +179,23 @@ def _shim_violations(source: str, approved_targets: set[str]) -> list[str]:
             )
             if not valid_target or not valid_value:
                 violations.append("invalid compatibility metadata")
+            elif isinstance(node.value, ast.List | ast.Tuple):
+                public_exports.update(element.value for element in node.value.elts)
         else:
             violations.append(f"disallowed statement: {type(node).__name__}")
     if all_assignments != 1:
         violations.append("expected one explicit __all__ assignment")
+    if not has_runtime_wildcard:
+        violations.extend(
+            f"public export lacks unconditional approved import: {name}"
+            for name in sorted(public_exports - runtime_imported_names)
+        )
     if docstring:
-        named_targets = {target for target in imported_targets if target in docstring}
+        named_targets = {
+            target
+            for target in imported_targets
+            if re.search(rf"(?<![\w.]){re.escape(target)}(?!\w|\.\w)", docstring)
+        }
         if imported_targets and not named_targets:
             violations.append("module docstring does not name approved target")
         else:
@@ -251,6 +270,7 @@ __all__ = ["RunLogger"]
             '''"""Compatibility imports for osm_polygon_description_tag.runtime.logging."""
 
 import subprocess
+from osm_polygon_description_tag.runtime.logging import RunLogger
 
 __all__ = ["RunLogger"]
 ''',
@@ -304,6 +324,36 @@ if TYPE_CHECKING:
 __all__ = ["RunLogger"]
 '''
     assert _shim_violations(source, {"osm_polygon_description_tag.runtime.logging"}) == []
+
+
+def test_type_checking_only_import_is_valid_when_not_publicly_exported() -> None:
+    source = '''"""Compatibility imports for osm_polygon_description_tag.runtime.logging."""
+
+from typing import TYPE_CHECKING
+
+from osm_polygon_description_tag.runtime.logging import configure_rotation
+
+if TYPE_CHECKING:
+    from osm_polygon_description_tag.runtime.logging import RunLogger
+
+__all__ = ["configure_rotation"]
+'''
+    assert _shim_violations(source, {"osm_polygon_description_tag.runtime.logging"}) == []
+
+
+def test_type_checking_only_import_cannot_satisfy_public_export() -> None:
+    source = '''"""Compatibility imports for osm_polygon_description_tag.runtime.logging."""
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from osm_polygon_description_tag.runtime.logging import RunLogger
+
+__all__ = ["RunLogger"]
+'''
+    assert _shim_violations(source, {"osm_polygon_description_tag.runtime.logging"}) == [
+        "public export lacks unconditional approved import: RunLogger"
+    ]
 
 
 @pytest.mark.parametrize(
@@ -363,6 +413,18 @@ __all__ = ["PreflightError", "run_and_publish"]
         },
     ) == [
         "module docstring missing approved target: osm_polygon_description_tag.workflow.preflight"
+    ]
+
+
+def test_docstring_near_prefix_is_not_an_exact_canonical_target() -> None:
+    source = '''"""Compatibility imports for osm_polygon_description_tag.runtime.logging_extra."""
+
+from osm_polygon_description_tag.runtime.logging import RunLogger
+
+__all__ = ["RunLogger"]
+'''
+    assert _shim_violations(source, {"osm_polygon_description_tag.runtime.logging"}) == [
+        "module docstring does not name approved target"
     ]
 
 
