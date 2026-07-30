@@ -55,12 +55,29 @@ def _cli(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _public_commands(help_text: str) -> set[str]:
+    """Extract the exact command group from argparse or Typer help."""
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", help_text)
+    argparse_group = re.search(r"\{([^}\n]+)\}", plain)
+    if argparse_group is not None:
+        return {piece.strip() for piece in argparse_group.group(1).split(",")}
+
+    commands_match = re.search(r"(?ms)^Commands:\s*\n(?P<body>.*?)(?:\n\S|\Z)", plain)
+    if commands_match is None:
+        return set()
+    return {
+        match.group(1)
+        for line in commands_match.group("body").splitlines()
+        if (match := re.match(r"^\s{2,}([a-z][a-z0-9-]*)\b", line))
+    }
+
+
 def test_all_public_commands_remain_available_from_console_entry_point() -> None:
     result = _cli("--help")
 
     assert result.returncode == 0
     assert result.stderr == ""
-    assert all(command in result.stdout for command in COMMANDS)
+    assert _public_commands(result.stdout) == set(COMMANDS)
 
 
 @pytest.mark.parametrize("command", COMMANDS)

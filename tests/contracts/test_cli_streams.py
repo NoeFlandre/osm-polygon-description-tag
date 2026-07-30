@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
+from shapely import to_wkb
+from shapely.geometry import Polygon
 
 import osm_polygon_description_tag.cli as cli
+import osm_polygon_description_tag.workflow.orchestrator as workflow_orchestrator
 from osm_polygon_description_tag.osm.discovery import Source
+from osm_polygon_description_tag.osm.extraction import ExportRecord
 from osm_polygon_description_tag.publication.models import UploadItem, UploadPlan
-from osm_polygon_description_tag.runtime.logging import RunLogger
 from osm_polygon_description_tag.workflow.build import BuildResult
 from osm_polygon_description_tag.workflow.orchestrator import (
     OrchestrationReport,
@@ -367,24 +369,39 @@ def test_noninteractive_run_and_publish_keeps_progress_plain(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     source_root, data_root = cli_roots
+    source_path = source_root / "region.osm.pbf"
+    source_path.write_bytes(b"synthetic")
 
-    def fake_run_and_publish(**_kwargs: object) -> OrchestrationReport:
-        logger = RunLogger(
-            data_root=data_root,
-            run_id="run-1",
+    geometry = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
+    record = ExportRecord(
+        geometry_ewkb_hex=to_wkb(
+            geometry, include_srid=True, flavor="extended", byte_order=1
+        ).hex(),
+        osm_type="way",
+        osm_id=1,
+        version=1,
+        changeset=1,
+        timestamp="2026-01-01T00:00:00Z",
+        tags={"description": "synthetic"},
+    )
+
+    def run_real_orchestrator(**kwargs: object) -> OrchestrationReport:
+        return workflow_orchestrator.run_and_publish(
+            **kwargs,
+            preflight=lambda: {
+                "osmium_executable": "fake-osmium",
+                "osmium_version": "osmium version 1.19.1",
+                "hub_repo_sha": "preflight-sha",
+                "source_count": 1,
+            },
+            exporter=lambda *_args, **_kwargs: iter((record,)),
+            upload_runner=lambda _command: "upload-revision",
+            verifier=lambda _repo_id, _files: "verified-revision",
             clock=lambda: "2026-07-30T12:00:00+00:00",
-            buffer_preflight=True,
-            stderr=sys.stderr,
+            progress_interval=1,
         )
-        logger.event(
-            "build_progress",
-            source="region.osm.pbf",
-            emitted=100_000,
-            included=80_000,
-        )
-        return _report()
 
-    monkeypatch.setattr(cli, "run_and_publish", fake_run_and_publish)
+    monkeypatch.setattr(cli, "run_and_publish", run_real_orchestrator)
 
     exit_code = cli.run(
         [
@@ -399,12 +416,13 @@ def test_noninteractive_run_and_publish_keeps_progress_plain(
     payload, end = decoder.raw_decode(captured.out)
 
     assert exit_code == 0
-    assert payload == _report().to_payload()
+    assert payload["source_count"] == 1
+    assert payload["outcomes"][0]["source_name"] == "region.osm.pbf"
+    assert payload["outcomes"][0]["status"] == "built-needs-upload"
     assert captured.out[end:].strip() == ""
-    assert captured.err == (
-        "2026-07-30T12:00:00+00:00 INFO run=run-1 build_progress "
-        "source=region.osm.pbf emitted=100000 included=80000\n"
-    )
+    assert " build_progress " in captured.err
+    assert "source=region.osm.pbf" in captured.err
+    assert "emitted=1 included=1" in captured.err
     assert "\x1b[" not in captured.err
     assert "\r" not in captured.err
     assert "it/s" not in captured.err
