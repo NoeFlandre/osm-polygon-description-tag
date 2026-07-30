@@ -297,3 +297,24 @@ def current_dependency_versions() -> dict[str, str]:
 def current_code_revision() -> str | None:
     """Return the current Git revision of the project checkout."""
     return project_code_revision()
+
+
+__all__ = [
+    "MANIFEST_SCHEMA_VERSION",
+    "TRANSFORM_ALGORITHM_VERSION",
+    "Manifest",
+    "ManifestError",
+    "OutputIdentity",
+    "RunCounts",
+    "SourceIdentity",
+    "current_area_policy_sha256",
+    "current_code_revision",
+    "current_dependency_versions",
+    "current_output_algorithm_revision",
+    "file_sha256",
+    "is_resumable",
+    "output_identity_for",
+    "read_manifest",
+    "source_identity_for",
+    "write_manifest",
+]

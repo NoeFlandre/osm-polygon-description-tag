@@ -144,3 +144,13 @@ def transform_record(record: ExportRecord, source_pbf: str) -> dict[str, object]
         "bbox_max_y": max_y,
         "geometry": to_wkb(oriented, output_dimension=2),
     }
+
+
+__all__ = [
+    "GEOD",
+    "RejectedFeature",
+    "descriptions_from_tags",
+    "geodesic_area_m2",
+    "names_from_tags",
+    "transform_record",
+]

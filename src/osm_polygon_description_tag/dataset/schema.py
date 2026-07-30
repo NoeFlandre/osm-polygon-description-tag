@@ -63,3 +63,6 @@ def geo_metadata(geometry_types: list[str], bbox: list[float]) -> dict[str, obje
         "primary_column": "geometry",
         "columns": {"geometry": column},
     }
+
+
+__all__ = ["GEOPARQUET_VERSION", "SCHEMA", "SCHEMA_VERSION", "geo_metadata"]

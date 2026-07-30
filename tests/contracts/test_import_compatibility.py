@@ -1,8 +1,11 @@
 """Legacy runtime imports remain identity-compatible with canonical modules."""
 
+from types import ModuleType
+
 from osm_polygon_description_tag import _logging as legacy_logging
 from osm_polygon_description_tag import _resources as legacy_resources
 from osm_polygon_description_tag import config as legacy_config
+from osm_polygon_description_tag import dataset as dataset_package
 from osm_polygon_description_tag import discovery as legacy_discovery
 from osm_polygon_description_tag import extraction as legacy_extraction
 from osm_polygon_description_tag import manifest as legacy_manifest
@@ -43,9 +46,43 @@ def test_legacy_osm_exports_canonical_objects() -> None:
     assert legacy_extraction.stream_export is osm_extraction.stream_export
 
 
-def test_legacy_dataset_exports_canonical_objects() -> None:
-    assert legacy_schema.SCHEMA is dataset_schema.SCHEMA
-    assert legacy_transform.transform_record is dataset_transform.transform_record
-    assert legacy_storage.validate_geoparquet is dataset_storage.validate_geoparquet
-    assert legacy_manifest.Manifest is dataset_manifest.Manifest
-    assert legacy_reporting.generate_dataset_docs is dataset_reporting.generate_dataset_docs
+def _assert_exact_compatibility_exports(legacy: ModuleType, canonical: ModuleType) -> None:
+    assert legacy.__all__ == canonical.__all__
+    for name in legacy.__all__:
+        assert getattr(legacy, name) is getattr(canonical, name)
+
+
+def test_legacy_schema_exports_all_canonical_objects() -> None:
+    _assert_exact_compatibility_exports(legacy_schema, dataset_schema)
+
+
+def test_legacy_transform_exports_all_canonical_objects() -> None:
+    _assert_exact_compatibility_exports(legacy_transform, dataset_transform)
+
+
+def test_legacy_storage_exports_all_canonical_objects() -> None:
+    _assert_exact_compatibility_exports(legacy_storage, dataset_storage)
+
+
+def test_legacy_manifest_exports_all_canonical_objects() -> None:
+    _assert_exact_compatibility_exports(legacy_manifest, dataset_manifest)
+
+
+def test_legacy_reporting_exports_all_canonical_objects() -> None:
+    _assert_exact_compatibility_exports(legacy_reporting, dataset_reporting)
+
+
+def test_dataset_package_exports_exact_stable_module_api() -> None:
+    canonical_modules = (
+        dataset_schema,
+        dataset_transform,
+        dataset_storage,
+        dataset_manifest,
+        dataset_reporting,
+    )
+    intended_package_exports = set().union(*(module.__all__ for module in canonical_modules))
+    intended_package_exports -= {"GEOD", "utc_now_iso"}
+    assert set(dataset_package.__all__) == intended_package_exports
+    for name in dataset_package.__all__:
+        defining_module = next(module for module in canonical_modules if name in module.__all__)
+        assert getattr(dataset_package, name) is getattr(defining_module, name)

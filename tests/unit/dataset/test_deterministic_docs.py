@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -204,6 +205,10 @@ def test_identical_regeneration_does_not_invalidate_metadata_state(
         ]
     )
     assert exit_code == 0
+    assert log["preflight_commands"] == [
+        ("osmium", "--version"),
+        ("hf", "auth", "whoami"),
+    ]
     assert log["uploads"] == 0
     assert log["verifier_calls"] == 0
     assert file_sha256(state_path) == snapshot_state
@@ -263,7 +268,28 @@ def _install_subprocess_recorder(monkeypatch: pytest.MonkeyPatch, *, action: str
     import osm_polygon_description_tag.orchestrator as orch
     import osm_polygon_description_tag.publication as pub
 
-    log = {"uploads": 0, "verifier_calls": 0}
+    log = {"uploads": 0, "verifier_calls": 0, "preflight_commands": []}
+
+    def preflight_runner(
+        command: list[str],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        log["preflight_commands"].append(tuple(command))
+        if command == ["osmium", "--version"]:
+            return subprocess.CompletedProcess(
+                command,
+                returncode=0,
+                stdout="osmium version 1.19.1\n",
+                stderr="",
+            )
+        if command == ["hf", "auth", "whoami"]:
+            return subprocess.CompletedProcess(
+                command,
+                returncode=0,
+                stdout="fake-user\n",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected preflight subprocess: {command!r}")
 
     def runner(command: list[str], timeout: float | None = None) -> None:
         log["uploads"] += 1
@@ -292,6 +318,8 @@ def _install_subprocess_recorder(monkeypatch: pytest.MonkeyPatch, *, action: str
         return f
 
     monkeypatch.setattr(pub, "_default_runner_with_retry", runner)
+    monkeypatch.setattr(orch.subprocess, "run", preflight_runner)
+    monkeypatch.setattr(orch.shutil, "which", lambda executable: executable)
     monkeypatch.setattr(orch, "default_hub_verifier_factory", verifier_factory)
     monkeypatch.setattr(orch, "_default_clock", lambda: "2026-01-01T00:00:00+00:00")
     monkeypatch.setattr(orch._huggingface_hub, "HfApi", hfapi_factory)
