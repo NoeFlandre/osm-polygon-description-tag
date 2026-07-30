@@ -27,14 +27,8 @@ from typing import Any
 from osm_polygon_description_tag.dataset.manifest import ManifestError
 from osm_polygon_description_tag.dataset.reporting import ReportingError, generate_dataset_docs
 from osm_polygon_description_tag.dataset.storage import StorageError, validate_geoparquet
-from osm_polygon_description_tag.orchestrator import (
-    OrchestratorError,
-    PreflightError,
-    run_and_publish,
-)
 from osm_polygon_description_tag.osm.discovery import discover_sources
 from osm_polygon_description_tag.osm.extraction import OsmiumExportError
-from osm_polygon_description_tag.pipeline import BuildResult, build_all, build_one
 from osm_polygon_description_tag.publication import (
     PublicationError,
     create_upload_plan,
@@ -45,6 +39,12 @@ from osm_polygon_description_tag.runtime.resources import (
     dataset_card_template,
     osmium_export_config,
 )
+from osm_polygon_description_tag.workflow.build import BuildResult, build_all, build_one
+from osm_polygon_description_tag.workflow.orchestrator import (
+    OrchestratorError,
+    run_and_publish,
+)
+from osm_polygon_description_tag.workflow.preflight import PreflightError
 
 
 def _resolve_paths(args: argparse.Namespace) -> Paths:
