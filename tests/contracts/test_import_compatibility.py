@@ -9,6 +9,8 @@ from osm_polygon_description_tag import dataset as dataset_package
 from osm_polygon_description_tag import discovery as legacy_discovery
 from osm_polygon_description_tag import extraction as legacy_extraction
 from osm_polygon_description_tag import manifest as legacy_manifest
+from osm_polygon_description_tag import orchestrator as legacy_orchestrator
+from osm_polygon_description_tag import pipeline as legacy_pipeline
 from osm_polygon_description_tag import publication as legacy_publication
 from osm_polygon_description_tag import reporting as legacy_reporting
 from osm_polygon_description_tag import schema as legacy_schema
@@ -28,6 +30,13 @@ from osm_polygon_description_tag.publication import upload as publication_upload
 from osm_polygon_description_tag.runtime import config as runtime_config
 from osm_polygon_description_tag.runtime import logging as runtime_logging
 from osm_polygon_description_tag.runtime import resources as runtime_resources
+from osm_polygon_description_tag.workflow import (
+    BuildResult,
+    OrchestrationReport,
+    build_all,
+    build_one,
+    run_and_publish,
+)
 
 
 def test_legacy_config_exports_canonical_objects() -> None:
@@ -104,3 +113,11 @@ def test_publication_package_exports_canonical_objects() -> None:
 def test_orchestrator_error_preserves_public_class_identity() -> None:
     assert OrchestratorError.__name__ == "OrchestratorError"
     assert OrchestratorError.__module__ == "osm_polygon_description_tag.orchestrator"
+
+
+def test_workflow_legacy_imports_are_identical() -> None:
+    assert legacy_pipeline.BuildResult is BuildResult
+    assert legacy_pipeline.build_one is build_one
+    assert legacy_pipeline.build_all is build_all
+    assert legacy_orchestrator.OrchestrationReport is OrchestrationReport
+    assert legacy_orchestrator.run_and_publish is run_and_publish

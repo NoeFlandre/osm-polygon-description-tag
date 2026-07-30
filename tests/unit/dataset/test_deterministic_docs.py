@@ -265,8 +265,9 @@ def _plant_metadata(data_root: Path) -> None:
 
 
 def _install_subprocess_recorder(monkeypatch: pytest.MonkeyPatch, *, action: str = "ok") -> dict:
-    import osm_polygon_description_tag.orchestrator as orch
     import osm_polygon_description_tag.publication.upload as pub
+    import osm_polygon_description_tag.workflow.orchestrator as orch
+    import osm_polygon_description_tag.workflow.preflight as preflight_module
 
     log = {"uploads": 0, "verifier_calls": 0, "preflight_commands": []}
 
@@ -318,11 +319,11 @@ def _install_subprocess_recorder(monkeypatch: pytest.MonkeyPatch, *, action: str
         return f
 
     monkeypatch.setattr(pub, "_default_runner_with_retry", runner)
-    monkeypatch.setattr(orch.subprocess, "run", preflight_runner)
-    monkeypatch.setattr(orch.shutil, "which", lambda executable: executable)
+    monkeypatch.setattr(preflight_module.subprocess, "run", preflight_runner)
+    monkeypatch.setattr(preflight_module.shutil, "which", lambda executable: executable)
     monkeypatch.setattr(orch, "default_hub_verifier_factory", verifier_factory)
     monkeypatch.setattr(orch, "_default_clock", lambda: "2026-01-01T00:00:00+00:00")
-    monkeypatch.setattr(orch._huggingface_hub, "HfApi", hfapi_factory)
+    monkeypatch.setattr(preflight_module._huggingface_hub, "HfApi", hfapi_factory)
     return log
 
 

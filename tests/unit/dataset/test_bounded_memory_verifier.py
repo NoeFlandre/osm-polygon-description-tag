@@ -104,7 +104,7 @@ class _PathInfo:
 
 
 def _patch_hub(monkeypatch: pytest.MonkeyPatch, hub: _FakeHubApi) -> None:
-    import osm_polygon_description_tag.orchestrator as orch
+    import osm_polygon_description_tag.publication.verification as orch
 
     def factory(*a: object, **kw: object) -> _FakeHubApi:
         return hub

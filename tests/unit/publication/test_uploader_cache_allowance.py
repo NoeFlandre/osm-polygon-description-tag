@@ -318,8 +318,9 @@ def test_uploader_cache_survives_across_runs(
 
         return f
 
-    import osm_polygon_description_tag.orchestrator as orch
     import osm_polygon_description_tag.publication.upload as pub
+    import osm_polygon_description_tag.workflow.orchestrator as orch
+    import osm_polygon_description_tag.workflow.preflight as preflight_module
 
     monkeypatch.setattr(pub, "_default_runner_with_retry", fake_runner)
     monkeypatch.setattr(orch, "default_hub_verifier_factory", stub_hf_api_factory)
@@ -339,7 +340,7 @@ def test_uploader_cache_survives_across_runs(
         def auth_check(self, *_a: object, **_kw: object) -> None:
             return None
 
-    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *_a, **_kw: _Stub())
+    monkeypatch.setattr(preflight_module._huggingface_hub, "HfApi", lambda *_a, **_kw: _Stub())
 
     exit_code = cli_run(
         [

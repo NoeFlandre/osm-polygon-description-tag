@@ -37,7 +37,7 @@ from osm_polygon_description_tag.dataset.manifest import (
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.discovery import Source
 from osm_polygon_description_tag.extraction import ExportRecord
-from osm_polygon_description_tag.orchestrator import (
+from osm_polygon_description_tag.workflow.orchestrator import (
     PUBLICATION_STATE_FILENAME,
     OrchestratorError,
     _process_one,
@@ -341,7 +341,7 @@ def test_run_and_publish_complete_check_rejects_missing_manifest(tmp_path: Path)
     # Bypass the orchestrator's pre-build check by directly invoking completeness
     # on the inconsistent state.
     from osm_polygon_description_tag.discovery import discover_sources
-    from osm_polygon_description_tag.orchestrator import _verify_final_completeness
+    from osm_polygon_description_tag.workflow.orchestrator import _verify_final_completeness
 
     sources = discover_sources(paths.source_root)
     with pytest.raises(Exception, match="completeness"):
@@ -433,7 +433,7 @@ def test_run_and_publish_publication_plan_validated_immediately_before_upload(
     """The per-PBF UploadPlan is revalidated via create_upload_plan right before upload."""
     paths, source_root, data_root = _setup_workspace(tmp_path)
     validation_calls: list[Path] = []
-    import osm_polygon_description_tag.orchestrator as orch
+    import osm_polygon_description_tag.workflow.orchestrator as orch
 
     original_create = orch.create_upload_plan
 

@@ -9,8 +9,8 @@ from osm_polygon_description_tag.config import Paths
 from osm_polygon_description_tag.discovery import Source, discover_sources
 from osm_polygon_description_tag.extraction import ExportRecord, OsmiumExportError
 from osm_polygon_description_tag.manifest import read_manifest
-from osm_polygon_description_tag.pipeline import BuildResult, build_all, build_one
 from osm_polygon_description_tag.storage import write_geoparquet
+from osm_polygon_description_tag.workflow.build import BuildResult, build_all, build_one
 from tests.conftest import make_export_record
 
 
@@ -287,7 +287,7 @@ def test_build_one_records_osmium_version_when_provided(tmp_path: Path) -> None:
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
-            "osm_polygon_description_tag.pipeline.safe_osmium_version",
+            "osm_polygon_description_tag.workflow.build.safe_osmium_version",
             lambda executable: f"osmium version test ({executable})",
         )
         result = build_one(

@@ -8,11 +8,11 @@ from types import SimpleNamespace
 import pytest
 
 from osm_polygon_description_tag.config import Paths
-from osm_polygon_description_tag.orchestrator import (
+from osm_polygon_description_tag.publication import UploadItem
+from osm_polygon_description_tag.workflow.orchestrator import (
     default_hub_verifier_factory,
     run_and_publish,
 )
-from osm_polygon_description_tag.publication import UploadItem
 
 
 def test_denied_preflight_does_not_create_logs(tmp_path: Path) -> None:
@@ -60,7 +60,7 @@ def test_hub_verifier_download_cache_is_below_data_root(
             return str(artifact)
 
     monkeypatch.setattr(
-        "osm_polygon_description_tag.orchestrator._huggingface_hub.HfApi",
+        "osm_polygon_description_tag.workflow.preflight._huggingface_hub.HfApi",
         Api,
     )
     import hashlib
@@ -126,7 +126,7 @@ def test_default_verifier_reconciles_only_stale_managed_artifacts(
             return SimpleNamespace(oid="revision-after-delete")
 
     monkeypatch.setattr(
-        "osm_polygon_description_tag.orchestrator._huggingface_hub.HfApi",
+        "osm_polygon_description_tag.workflow.preflight._huggingface_hub.HfApi",
         Api,
     )
     verifier = default_hub_verifier_factory()

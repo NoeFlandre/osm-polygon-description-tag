@@ -7,7 +7,7 @@ Provide the canonical boundary for composing the complete resumable pipeline.
 ## Responsibilities
 
 Preflight, one-PBF build composition, per-source state transitions, completeness checks, and the
-`run-and-publish` lifecycle belong here as they are migrated.
+`run-and-publish` lifecycle live here.
 
 ## Non-responsibilities
 
@@ -15,8 +15,10 @@ This package does not redefine lower-level runtime, ingestion, dataset, or publi
 
 ## Public API
 
-Exports are introduced incrementally during the package reorganization. This initial boundary has
-no public exports.
+Import `BuildResult`, `PipelineError`, `build_one`, `build_all`, `safe_osmium_version`,
+`PreflightError`, `default_preflight`, `SourceOutcome`, `OrchestrationReport`,
+`OrchestratorError`, and `run_and_publish` from `osm_polygon_description_tag.workflow`.
+Legacy top-level `pipeline` and `orchestrator` imports remain identity-compatible shims.
 
 ## Allowed dependencies
 
@@ -24,8 +26,9 @@ The `runtime`, `osm`, `dataset`, and `publication` packages plus Python's standa
 
 ## Data flow and side effects
 
-Future workflow APIs will coordinate approved reads, artifact writes, checkpoints, and explicit
-publication through the lower-level packages.
+`default_preflight` performs only validation and non-mutating authentication and permission
+checks. After approval, builds stream OSM input into atomic local artifacts; orchestration then
+creates exact upload plans, verifies remote identities, and atomically records publication state.
 
 ## Safety and determinism invariants
 

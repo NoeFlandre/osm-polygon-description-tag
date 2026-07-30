@@ -93,7 +93,7 @@ def test_three_run_scenario(tmp_path: Path) -> None:
     exporter = _fake_exporter()
 
     # Patch the per-PBF state writer to raise on the second source.
-    from osm_polygon_description_tag import orchestrator
+    from osm_polygon_description_tag.workflow import orchestrator
 
     real_write = orchestrator._write_publication_state
     written: list[str] = []
@@ -193,7 +193,7 @@ def test_run_and_publish_publication_plan_revalidation_before_upload(
     """The orchestrator calls create_upload_plan immediately before each upload."""
     paths, source_root, data_root = _setup_workspace(tmp_path)
 
-    from osm_polygon_description_tag import orchestrator as orch
+    from osm_polygon_description_tag.workflow import orchestrator as orch
 
     call_count = {"value": 0}
     original_create = orch.create_upload_plan

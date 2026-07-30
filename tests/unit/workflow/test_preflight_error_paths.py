@@ -8,16 +8,15 @@ from pathlib import Path
 import pytest
 
 from osm_polygon_description_tag.config import Paths
-from osm_polygon_description_tag.orchestrator import (
-    PUBLICATION_STATE_FILENAME,
-    OrchestratorError,
-    PreflightError,
-    _execute_publication,
-    default_preflight,
-)
 from osm_polygon_description_tag.publication import (
     REPO_ID,
 )
+from osm_polygon_description_tag.workflow.orchestrator import (
+    PUBLICATION_STATE_FILENAME,
+    OrchestratorError,
+    _execute_publication,
+)
+from osm_polygon_description_tag.workflow.preflight import PreflightError, default_preflight
 
 
 def _setup_paths(tmp_path: Path) -> Paths:
@@ -114,7 +113,7 @@ def test_default_preflight_rejects_empty_hf_identity(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Default preflight refuses if the Hub identity is empty."""
-    import osm_polygon_description_tag.orchestrator as orch
+    import osm_polygon_description_tag.workflow.preflight as orch
 
     paths = _setup_paths(tmp_path)
     (paths.source_root / "a.osm.pbf").write_bytes(b"x")
@@ -161,7 +160,7 @@ def test_default_preflight_rejects_missing_sha(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Default preflight refuses if the Hub repository returns no SHA."""
-    import osm_polygon_description_tag.orchestrator as orch
+    import osm_polygon_description_tag.workflow.preflight as orch
 
     paths = _setup_paths(tmp_path)
     (paths.source_root / "a.osm.pbf").write_bytes(b"x")
@@ -208,7 +207,7 @@ def test_default_preflight_rejects_hf_api_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Default preflight refuses if the HfApi raises."""
-    import osm_polygon_description_tag.orchestrator as orch
+    import osm_polygon_description_tag.workflow.preflight as orch
 
     paths = _setup_paths(tmp_path)
     (paths.source_root / "a.osm.pbf").write_bytes(b"x")
@@ -244,7 +243,7 @@ def test_default_preflight_rejects_hf_api_failure(
 
 def test_atomic_state_write_raises_orchestrator_error(tmp_path: Path) -> None:
     """State writer raises OrchestratorError on invalid schema_version."""
-    from osm_polygon_description_tag.orchestrator import _write_publication_state
+    from osm_polygon_description_tag.workflow.orchestrator import _write_publication_state
 
     paths = _setup_paths(tmp_path)
     state_path = paths.data_root / PUBLICATION_STATE_FILENAME

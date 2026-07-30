@@ -129,7 +129,7 @@ class _LfsInfo:
 @pytest.fixture
 def patched_hf(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Replace ``HfApi`` reference inside the orchestrator module."""
-    import osm_polygon_description_tag.orchestrator as orch
+    import osm_polygon_description_tag.publication.verification as orch
 
     state: dict[str, Any] = {"api": _FakeHubApi()}
 

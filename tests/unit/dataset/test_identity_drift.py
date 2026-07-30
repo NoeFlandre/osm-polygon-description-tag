@@ -27,7 +27,7 @@ from osm_polygon_description_tag.dataset.manifest import (
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.discovery import Source
 from osm_polygon_description_tag.extraction import ExportRecord
-from osm_polygon_description_tag.orchestrator import (
+from osm_polygon_description_tag.workflow.orchestrator import (
     PUBLICATION_STATE_FILENAME,
     _process_one,
     read_publication_state,

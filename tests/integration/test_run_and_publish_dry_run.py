@@ -149,7 +149,7 @@ def test_run_and_publish_safe_upload_retry_after_interrupt(
 
     # First upload: succeeds but we patch _write_publication_state to silently
     # fail (simulate crash after remote commit but before local checkpoint).
-    from osm_polygon_description_tag import orchestrator
+    from osm_polygon_description_tag.workflow import orchestrator
 
     real_write = orchestrator._write_publication_state
 

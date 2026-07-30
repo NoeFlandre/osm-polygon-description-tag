@@ -98,14 +98,15 @@ def _patch_external_boundaries(
     hf_api_factory=None,
 ) -> None:
     """Patch only external process + Hub boundaries; production defaults remain."""
-    import osm_polygon_description_tag.orchestrator as orch
     import osm_polygon_description_tag.publication.upload as pub
+    import osm_polygon_description_tag.workflow.orchestrator as orch
+    import osm_polygon_description_tag.workflow.preflight as preflight_module
 
     monkeypatch.setattr(pub, "_default_runner_with_retry", subprocess_runner)
     monkeypatch.setattr(orch, "default_hub_verifier_factory", verifier_factory)
     # Patch HfApi used by the default preflight to avoid real network calls.
     if hf_api_factory is not None:
-        monkeypatch.setattr(orch._huggingface_hub, "HfApi", hf_api_factory)
+        monkeypatch.setattr(preflight_module._huggingface_hub, "HfApi", hf_api_factory)
     if clock is not None:
         monkeypatch.setattr(orch, "_default_clock", clock)
 

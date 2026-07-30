@@ -72,7 +72,7 @@ class _Info:
 
 def _patch_hf(monkeypatch: pytest.MonkeyPatch, hub: _RecordingHubApi) -> None:
     """Patch the lazy HfApi to use an in-process stand-in."""
-    import osm_polygon_description_tag.orchestrator as orch
+    import osm_polygon_description_tag.workflow.preflight as orch
 
     def factory(*_a: object, **_kw: object) -> _RecordingHubApi:
         return hub
@@ -123,7 +123,9 @@ def test_preflight_calls_auth_check_with_write_true(
         commands.append(command)
         return real_run(command, **kwargs)
 
-    monkeypatch.setattr("osm_polygon_description_tag.orchestrator.subprocess.run", recording_run)
+    monkeypatch.setattr(
+        "osm_polygon_description_tag.workflow.preflight.subprocess.run", recording_run
+    )
 
     report = default_preflight(
         paths,
@@ -150,7 +152,7 @@ def test_preflight_never_falls_back_to_installed_hf(
     paths = _paths(tmp_path)
     osmium = _patch_osmium(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        "osm_polygon_description_tag.orchestrator.shutil.which",
+        "osm_polygon_description_tag.workflow.preflight.shutil.which",
         lambda name: str(osmium) if name == "osmium" else None,
     )
     launched: list[list[str]] = []
@@ -159,7 +161,9 @@ def test_preflight_never_falls_back_to_installed_hf(
         launched.append(command)
         raise AssertionError("no subprocess may launch when hf resolution fails")
 
-    monkeypatch.setattr("osm_polygon_description_tag.orchestrator.subprocess.run", forbidden_run)
+    monkeypatch.setattr(
+        "osm_polygon_description_tag.workflow.preflight.subprocess.run", forbidden_run
+    )
 
     with pytest.raises(PreflightError, match="hf executable not found"):
         default_preflight(

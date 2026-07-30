@@ -111,8 +111,9 @@ def _install_external_boundaries(
     verifier_factory,
     interrupts_on_per_pbf: int | None = None,
 ) -> dict:
-    import osm_polygon_description_tag.orchestrator as orch
     import osm_polygon_description_tag.publication.upload as pub
+    import osm_polygon_description_tag.workflow.orchestrator as orch
+    import osm_polygon_description_tag.workflow.preflight as preflight_module
 
     log: dict[str, object] = {
         "uploads": 0,
@@ -140,7 +141,9 @@ def _install_external_boundaries(
     monkeypatch.setattr(pub, "_default_runner_with_retry", runner_wrapper)
     monkeypatch.setattr(orch, "default_hub_verifier_factory", verifier_factory)
     monkeypatch.setattr(orch, "_default_clock", lambda: "2026-07-28T00:00:00+00:00")
-    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _make_hf_stub())
+    monkeypatch.setattr(
+        preflight_module._huggingface_hub, "HfApi", lambda *a, **kw: _make_hf_stub()
+    )
     return log
 
 

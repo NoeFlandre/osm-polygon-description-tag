@@ -127,8 +127,9 @@ def _patch_external_boundaries(
     metadata upload (the runner after all per-PBF uploads). It is used
     to simulate metadata failures without failing per-PBF uploads.
     """
-    import osm_polygon_description_tag.orchestrator as orch
     import osm_polygon_description_tag.publication.upload as pub
+    import osm_polygon_description_tag.workflow.orchestrator as orch
+    import osm_polygon_description_tag.workflow.preflight as preflight_module
 
     call_log: dict[str, int] = {"uploads": 0, "verifier_calls": 0}
 
@@ -166,7 +167,7 @@ def _patch_external_boundaries(
         def auth_check(self, *_a: object, **_kw: object) -> None:
             return None
 
-    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *_a, **_kw: _Stub())
+    monkeypatch.setattr(preflight_module._huggingface_hub, "HfApi", lambda *_a, **_kw: _Stub())
     monkeypatch.setattr(pub, "_default_runner_with_retry", counting_runner)
     monkeypatch.setattr(orch, "default_hub_verifier_factory", patching_verifier_factory)
     monkeypatch.setattr(orch, "_default_clock", lambda: _CLOCK)

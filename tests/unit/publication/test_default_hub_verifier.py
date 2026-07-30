@@ -204,7 +204,7 @@ def _fake_exporter() -> object:
 
 def _monkeypatch_hub(monkeypatch: pytest.MonkeyPatch, hub: _FakeHubApi) -> None:
     monkeypatch.setattr(
-        "osm_polygon_description_tag.orchestrator._huggingface_hub.HfApi",
+        "osm_polygon_description_tag.publication.verification._huggingface_hub.HfApi",
         lambda *a, **kw: hub,
     )
 
@@ -228,7 +228,8 @@ def test_default_hub_verifier_factory_creates_hfapi(monkeypatch: pytest.MonkeyPa
         )
 
     monkeypatch.setattr(
-        "osm_polygon_description_tag.orchestrator._huggingface_hub.HfApi", fake_hfapi
+        "osm_polygon_description_tag.publication.verification._huggingface_hub.HfApi",
+        fake_hfapi,
     )
 
     factory = default_hub_verifier_factory()
@@ -403,8 +404,8 @@ def test_cli_run_and_publish_invokes_default_verifier(
 
     import types  # local import to keep module top-level clean
 
-    import osm_polygon_description_tag.orchestrator as orch
     import osm_polygon_description_tag.publication.upload as pub
+    import osm_polygon_description_tag.publication.verification as orch
 
     monkeypatch.setattr(orch._huggingface_hub, "HfApi", fake_hubapi)
     monkeypatch.setattr(pub, "_default_runner_with_retry", lambda command, **kw: None)
@@ -526,8 +527,8 @@ def test_no_state_written_before_verifier_succeeds(
     (paths.data_root / "README.md").write_text("# README")
     (paths.data_root / "stats.json").write_text("{}")
 
-    import osm_polygon_description_tag.orchestrator as orch
     import osm_polygon_description_tag.publication.upload as pub
+    import osm_polygon_description_tag.workflow.orchestrator as orch
 
     monkeypatch.setattr(pub, "_default_runner_with_retry", lambda command, **kw: None)
 
@@ -574,7 +575,7 @@ def test_default_verifier_fails_closed_on_empty_identity(
         def repo_info(self, *_a: object, **_kw: object) -> object:
             raise AssertionError("should not be reached")
 
-    import osm_polygon_description_tag.orchestrator as orch
+    import osm_polygon_description_tag.publication.verification as orch
 
     monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
 
@@ -598,7 +599,7 @@ def test_default_verifier_fails_closed_on_repo_info_error(
         def repo_info(self, *_a: object, **_kw: object) -> object:
             raise RuntimeError("repo not found")
 
-    import osm_polygon_description_tag.orchestrator as orch
+    import osm_polygon_description_tag.publication.verification as orch
 
     monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
 
@@ -625,7 +626,7 @@ def test_default_verifier_fails_closed_on_empty_revision(
 
             return _Info()
 
-    import osm_polygon_description_tag.orchestrator as orch
+    import osm_polygon_description_tag.publication.verification as orch
 
     monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
 
@@ -662,7 +663,7 @@ def test_default_verifier_fails_closed_on_size_mismatch(
         ) -> list[Any]:
             return [_PathInfoStub(path=paths[0], size=999, sha=("a" * 64))]
 
-    import osm_polygon_description_tag.orchestrator as orch
+    import osm_polygon_description_tag.publication.verification as orch
 
     monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
 
@@ -699,7 +700,7 @@ def test_default_verifier_fails_closed_on_lfs_sha_mismatch(
         ) -> list[Any]:
             return [_BlobInfoStub(size=4, lfs_sha256="b" * 64)]
 
-    import osm_polygon_description_tag.orchestrator as orch
+    import osm_polygon_description_tag.publication.verification as orch
 
     monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
 
@@ -746,7 +747,7 @@ def test_default_verifier_fails_closed_on_download_error(
         ) -> str:
             raise RuntimeError("download failed")
 
-    import osm_polygon_description_tag.orchestrator as orch
+    import osm_polygon_description_tag.publication.verification as orch
 
     monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
 
