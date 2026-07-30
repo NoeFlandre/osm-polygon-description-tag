@@ -128,7 +128,7 @@ def _patch_external_boundaries(
     to simulate metadata failures without failing per-PBF uploads.
     """
     import osm_polygon_description_tag.orchestrator as orch
-    import osm_polygon_description_tag.publication as pub
+    import osm_polygon_description_tag.publication.upload as pub
 
     call_log: dict[str, int] = {"uploads": 0, "verifier_calls": 0}
 

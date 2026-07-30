@@ -112,7 +112,7 @@ def _install_external_boundaries(
     interrupts_on_per_pbf: int | None = None,
 ) -> dict:
     import osm_polygon_description_tag.orchestrator as orch
-    import osm_polygon_description_tag.publication as pub
+    import osm_polygon_description_tag.publication.upload as pub
 
     log: dict[str, object] = {
         "uploads": 0,

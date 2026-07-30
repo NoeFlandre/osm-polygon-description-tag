@@ -319,7 +319,7 @@ def test_uploader_cache_survives_across_runs(
         return f
 
     import osm_polygon_description_tag.orchestrator as orch
-    import osm_polygon_description_tag.publication as pub
+    import osm_polygon_description_tag.publication.upload as pub
 
     monkeypatch.setattr(pub, "_default_runner_with_retry", fake_runner)
     monkeypatch.setattr(orch, "default_hub_verifier_factory", stub_hf_api_factory)

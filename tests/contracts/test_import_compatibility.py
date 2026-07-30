@@ -9,6 +9,7 @@ from osm_polygon_description_tag import dataset as dataset_package
 from osm_polygon_description_tag import discovery as legacy_discovery
 from osm_polygon_description_tag import extraction as legacy_extraction
 from osm_polygon_description_tag import manifest as legacy_manifest
+from osm_polygon_description_tag import publication as legacy_publication
 from osm_polygon_description_tag import reporting as legacy_reporting
 from osm_polygon_description_tag import schema as legacy_schema
 from osm_polygon_description_tag import storage as legacy_storage
@@ -20,6 +21,9 @@ from osm_polygon_description_tag.dataset import storage as dataset_storage
 from osm_polygon_description_tag.dataset import transform as dataset_transform
 from osm_polygon_description_tag.osm import discovery as osm_discovery
 from osm_polygon_description_tag.osm import extraction as osm_extraction
+from osm_polygon_description_tag.publication import models as publication_models
+from osm_polygon_description_tag.publication import planning as publication_planning
+from osm_polygon_description_tag.publication import upload as publication_upload
 from osm_polygon_description_tag.runtime import config as runtime_config
 from osm_polygon_description_tag.runtime import logging as runtime_logging
 from osm_polygon_description_tag.runtime import resources as runtime_resources
@@ -86,3 +90,11 @@ def test_dataset_package_exports_exact_stable_module_api() -> None:
     for name in dataset_package.__all__:
         defining_module = next(module for module in canonical_modules if name in module.__all__)
         assert getattr(dataset_package, name) is getattr(defining_module, name)
+
+
+def test_publication_package_exports_canonical_objects() -> None:
+    assert legacy_publication.UploadPlan is publication_models.UploadPlan
+    assert legacy_publication.UploadItem is publication_models.UploadItem
+    assert legacy_publication.PublicationError is publication_models.PublicationError
+    assert legacy_publication.create_upload_plan is publication_planning.create_upload_plan
+    assert legacy_publication.execute_upload is publication_upload.execute_upload

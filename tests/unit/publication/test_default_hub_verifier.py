@@ -404,7 +404,7 @@ def test_cli_run_and_publish_invokes_default_verifier(
     import types  # local import to keep module top-level clean
 
     import osm_polygon_description_tag.orchestrator as orch
-    import osm_polygon_description_tag.publication as pub
+    import osm_polygon_description_tag.publication.upload as pub
 
     monkeypatch.setattr(orch._huggingface_hub, "HfApi", fake_hubapi)
     monkeypatch.setattr(pub, "_default_runner_with_retry", lambda command, **kw: None)
@@ -527,7 +527,7 @@ def test_no_state_written_before_verifier_succeeds(
     (paths.data_root / "stats.json").write_text("{}")
 
     import osm_polygon_description_tag.orchestrator as orch
-    import osm_polygon_description_tag.publication as pub
+    import osm_polygon_description_tag.publication.upload as pub
 
     monkeypatch.setattr(pub, "_default_runner_with_retry", lambda command, **kw: None)
 

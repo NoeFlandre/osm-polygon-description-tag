@@ -157,7 +157,7 @@ def test_no_test_production_divergence_default_runner(
     def fake_subprocess(command: list[str], timeout: float | None = None) -> None:
         captured.append(command)
 
-    import osm_polygon_description_tag.publication as pub
+    import osm_polygon_description_tag.publication.upload as pub
 
     monkeypatch.setattr(pub, "_default_runner_with_retry", fake_subprocess)
 

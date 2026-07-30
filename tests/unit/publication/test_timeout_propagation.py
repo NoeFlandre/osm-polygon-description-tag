@@ -96,7 +96,7 @@ def test_orchestrator_threads_timeout_to_publication(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """run_and_publish(upload_timeout=...) propagates to execute_upload."""
-    import osm_polygon_description_tag.publication as pub
+    import osm_polygon_description_tag.publication.upload as pub
 
     seen: list[float | None] = []
 
@@ -241,7 +241,7 @@ def test_keyboardinterrupt_through_cli_returns_130(
     (paths.data_root / "stats.json").write_text("{}")
 
     import osm_polygon_description_tag.orchestrator as orch
-    import osm_polygon_description_tag.publication as pub
+    import osm_polygon_description_tag.publication.upload as pub
 
     def interrupting_runner(command: list[str], timeout: float | None = None) -> None:
         raise KeyboardInterrupt()

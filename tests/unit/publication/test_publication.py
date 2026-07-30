@@ -184,7 +184,7 @@ def test_execute_upload_invokes_runner_with_subprocess_run_by_default(tmp_path: 
         return subprocess.CompletedProcess(command, 0)
 
     # Patch subprocess.run via the publication module import path.
-    import osm_polygon_description_tag.publication as publication
+    import osm_polygon_description_tag.publication.upload as publication
 
     original = publication.subprocess.run
     publication.subprocess.run = fake_subprocess_run  # type: ignore[assignment]
