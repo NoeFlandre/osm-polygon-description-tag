@@ -80,3 +80,28 @@ def test_pre_commit_and_just_are_configured() -> None:
     assert '"/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw"' in justfile
     assert '"/Volumes/Seagate M3/projects/osm-polygon-description-tag"' in justfile
     assert "NoeFlandre/osm-polygon-description-tag" in justfile
+
+
+def test_github_actions_runs_complete_quality_gate() -> None:
+    workflow = (
+        PROJECT_ROOT / ".github" / "workflows" / "quality.yml"
+    ).read_text(encoding="utf-8")
+
+    for token in (
+        "ubuntu-latest",
+        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b",
+        'version: "0.11.16"',
+        "uv python install 3.12",
+        "osmium-tool",
+        "uv sync --frozen",
+        "uv lock --check",
+        "pre-commit run --all-files",
+        "ruff format --check .",
+        "ruff check .",
+        "ty check",
+        "--cov-fail-under=90",
+        "uv build",
+        'HF_HUB_OFFLINE: "1"',
+    ):
+        assert token in workflow
