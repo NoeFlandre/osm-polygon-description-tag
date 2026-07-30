@@ -25,7 +25,7 @@ import re
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import duckdb
 import pyarrow.parquet as pq
@@ -128,7 +128,7 @@ def _safe_map(value: object) -> dict[str, int]:
     for key, count in items:
         if key is None:
             continue
-        cleaned[str(key)] = int(count)
+        cleaned[str(key)] = int(cast(int, count))
     return cleaned
 
 

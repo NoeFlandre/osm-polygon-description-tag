@@ -6,6 +6,7 @@ import json
 import os
 import uuid
 from pathlib import Path
+from typing import cast
 
 from osm_polygon_description_tag.publication.models import UploadPlan
 
@@ -131,4 +132,4 @@ def _write_metadata_state(
 def cast_dict(value: object) -> dict[str, object]:
     if not isinstance(value, dict):
         raise PublicationStateError(f"expected dict, got {type(value).__name__}")
-    return value
+    return cast(dict[str, object], value)

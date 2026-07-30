@@ -24,11 +24,8 @@ uv run ruff check .
 The current type-checking command is:
 
 ```bash
-uv run mypy
+uv run ty check
 ```
-
-Migration from mypy to Astral ty is a later task in the approved domain-package organization plan.
-Do not treat ty as the current release gate until that task updates the project configuration.
 
 ## Change workflow
 

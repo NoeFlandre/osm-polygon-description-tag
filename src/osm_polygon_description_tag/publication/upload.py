@@ -4,6 +4,7 @@ import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Protocol
 
 from osm_polygon_description_tag.dataset.manifest import file_sha256
 from osm_polygon_description_tag.publication.models import (
@@ -68,7 +69,22 @@ def _classify_failure(
     return False, returncode, "exit_code"
 
 
-def _default_runner_with_retry(
+class _RetryRunner(Protocol):
+    def __call__(
+        self,
+        command: list[str],
+        *,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+        backoff_seconds: float = DEFAULT_BACKOFF_SECONDS,
+        backoff_factor: float = DEFAULT_BACKOFF_FACTOR,
+        backoff_cap_seconds: float = DEFAULT_BACKOFF_CAP_SECONDS,
+        timeout: float | None = None,
+        _runner: Callable[[list[str], float | None], None] | None = None,
+        retry_observer: Callable[..., None] | None = None,
+    ) -> None: ...
+
+
+def _run_with_retry(
     command: list[str],
     *,
     max_retries: int = DEFAULT_MAX_RETRIES,
@@ -138,6 +154,9 @@ def _default_runner_with_retry(
                 )
             time.sleep(bounded_delay)
             delay *= backoff_factor
+
+
+_default_runner_with_retry: _RetryRunner = _run_with_retry
 
 
 def execute_upload(

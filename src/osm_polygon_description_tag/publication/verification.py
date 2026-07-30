@@ -168,8 +168,14 @@ def default_hub_verifier_factory(*, cache_dir: Path | None = None) -> HubVerifie
         info = api.repo_info(repo_id, repo_type="dataset")
         return str(getattr(info, "sha", "") or "") or None
 
-    verifier.reconcile_managed_files = reconcile_managed_files  # type: ignore[attr-defined]
-    return verifier
+    class Verifier:
+        def __call__(self, repo_id: str, files: tuple[UploadItem, ...]) -> str:
+            return verifier(repo_id, files)
+
+        def reconcile_managed_files(self, repo_id: str, expected_paths: set[str]) -> str | None:
+            return reconcile_managed_files(repo_id, expected_paths)
+
+    return Verifier()
 
 
 def _file_sha256_streaming(path: Path) -> str:

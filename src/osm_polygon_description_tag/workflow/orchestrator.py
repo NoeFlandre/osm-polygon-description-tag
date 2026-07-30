@@ -505,9 +505,27 @@ def run_and_publish(
 
             original_runner = pub._default_runner_with_retry
 
-            def _bridge(command: list[str], **kwargs: object) -> None:
+            def _bridge(
+                command: list[str],
+                *,
+                max_retries: int = 3,
+                backoff_seconds: float = 2.0,
+                backoff_factor: float = 2.0,
+                backoff_cap_seconds: float = 60.0,
+                timeout: float | None = None,
+                _runner: Callable[[list[str], float | None], None] | None = None,
+                retry_observer: Callable[..., None] | None = None,
+            ) -> None:
                 subprocess_runner(command)
-                _ = kwargs
+                _ = (
+                    max_retries,
+                    backoff_seconds,
+                    backoff_factor,
+                    backoff_cap_seconds,
+                    timeout,
+                    _runner,
+                    retry_observer,
+                )
 
             pub._default_runner_with_retry = _bridge
             try:

@@ -23,7 +23,10 @@ dependencies = [
     "pyarrow>=20,<22",
     "pyproj>=3.7,<4",
     "pyyaml>=6,<7",
+    "rich>=13,<15",
     "shapely>=2.1,<3",
+    "tqdm>=4.66,<5",
+    "typer>=0.12,<1",
 ]
 
 [project.scripts]
@@ -47,10 +50,11 @@ include = [
 
 [dependency-groups]
 dev = [
-    "mypy>=1.17,<2",
+    "pre-commit>=4.6.1",
     "pytest>=8.4,<9",
     "pytest-cov>=6.2,<7",
     "ruff>=0.12,<0.13",
+    "ty>=0.0.65",
 ]
 
 [tool.pytest.ini_options]
@@ -71,14 +75,15 @@ quote-style = "double"
 indent-style = "space"
 line-ending = "lf"
 
-[tool.mypy]
-python_version = "3.12"
-strict = true
-packages = ["osm_polygon_description_tag"]
+[tool.ty.environment]
+python-version = "3.12"
+root = ["./src"]
 
-[[tool.mypy.overrides]]
-module = ["shapely.*", "pyarrow.*"]
-ignore_missing_imports = true
+[tool.ty.src]
+include = ["src"]
+
+[tool.ty.terminal]
+error-on-warning = true
 
 [tool.coverage.run]
 branch = true
@@ -87,4 +92,3 @@ source = ["osm_polygon_description_tag"]
 [tool.coverage.report]
 fail_under = 90
 show_missing = true
-

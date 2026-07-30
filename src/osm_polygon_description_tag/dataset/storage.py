@@ -121,10 +121,10 @@ def write_geoparquet(
                 batch.append(record)
                 row_count += 1
                 geometry_types.add(str(record["geometry_type"]))
-                min_x = min(min_x, float(record["bbox_min_x"]))  # type: ignore[arg-type]
-                min_y = min(min_y, float(record["bbox_min_y"]))  # type: ignore[arg-type]
-                max_x = max(max_x, float(record["bbox_max_x"]))  # type: ignore[arg-type]
-                max_y = max(max_y, float(record["bbox_max_y"]))  # type: ignore[arg-type]
+                min_x = min(min_x, float(cast(float, record["bbox_min_x"])))
+                min_y = min(min_y, float(cast(float, record["bbox_min_y"])))
+                max_x = max(max_x, float(cast(float, record["bbox_max_x"])))
+                max_y = max(max_y, float(cast(float, record["bbox_max_y"])))
                 if len(batch) >= batch_size:
                     writer.write_batch(pa.RecordBatch.from_pylist(batch, schema=SCHEMA))
                     batch.clear()

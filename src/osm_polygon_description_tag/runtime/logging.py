@@ -91,8 +91,8 @@ _CREDENTIAL_RE = re.compile(
 
 
 class _SafeJsonFormatter(json.JSONEncoder):
-    def default(self, obj: object) -> object:
-        return str(obj)
+    def default(self, o: object) -> object:
+        return str(o)
 
 
 class _BufferedEvent:
