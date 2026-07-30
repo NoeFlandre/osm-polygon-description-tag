@@ -11,136 +11,83 @@ tags:
 
 # OSM Polygon Description Tag
 
-One GeoParquet file per OpenStreetMap regional extract, containing every polygon
-or multipolygon that carries at least one non-empty `description` or
-`description:<suffix>` tag. Closed ways are selected via osmium's general
-area handling (`area_tags: true`, `linear_tags: true`, `--geometry-types polygon`);
-`type=multipolygon` and `type=boundary` relations are included when area
-assembly succeeds.
+OpenStreetMap polygons with a non-empty `description` or
+`description:<suffix>` tag, published as one GeoParquet file per regional PBF
+extract. Every row retains the complete original tag map, full Polygon or
+MultiPolygon geometry, WGS84 geodesic area, bounding box, and OSM provenance.
 
 <!-- GENERATED:STATS:START -->
 <!-- GENERATED:STATS:END -->
 
+## What is included
+
+- Tagged closed ways that OSM classifies as areas, excluding `area=no`.
+- Successfully assembled `type=multipolygon` and `type=boundary` relations.
+- Exact base and localized descriptions and names.
+- Complete original OSM tags, full WKB geometry, `area_m2`, and bounding boxes.
+
+Nodes, open ways, undescribed features, and failed polygon assemblies are not
+included. Regional extracts can overlap, so the same OSM object may appear in
+more than one file.
+
 ## Schema
 
-Each Parquet file uses one versioned Arrow schema (currently `SCHEMA_VERSION = 2`)
-with a WKB `geometry` column carrying valid GeoParquet 1.1 metadata
-(OGC:CRS84 longitude/latitude). Columns are:
+- **Identity:** `source_pbf`, `osm_type`, `osm_id`, `osm_url`
+- **OSM provenance:** `version`, `changeset`, `timestamp`
+- **Convenience text fields:** `name`, `localized_names`, `description`,
+  `localized_descriptions`
+- **Authoritative source tags:** `tags`
+- **Spatial fields:** `geometry_type`, `area_m2`, `bbox_min_x`, `bbox_min_y`,
+  `bbox_max_x`, `bbox_max_y`, `geometry`
 
-| Column | Type | Nullable | Description |
-| --- | --- | --- | --- |
-| `source_pbf` | string | no | Name of the source `*.osm.pbf` file |
-| `osm_type` | string | no | One of `node`, `way`, `relation` (in practice only `way` and `relation` are emitted) |
-| `osm_id` | int64 | no | OpenStreetMap numeric identifier |
-| `osm_url` | string | no | Canonical `openstreetmap.org` URL for the feature |
-| `version` | int32 | yes | OSM `version` value when present |
-| `changeset` | int64 | yes | OSM `changeset` value when present |
-| `timestamp` | timestamp(ms, UTC) | yes | OSM `timestamp` value when present |
-| `name` | string | yes | Base `name` value extracted from the `tags` map (excludes `name:<suffix>`) |
-| `localized_names` | map<string,string> | no | `name:<suffix>` to value mapping, derived from the `tags` map |
-| `description` | string | yes | Base `description` value extracted from the `tags` map (excludes `description:<suffix>`) |
-| `localized_descriptions` | map<string,string> | no | `description:<suffix>` to value mapping, derived from the `tags` map |
-| `tags` | map<string,string> | no | The full, original, byte-faithful OSM `tags` map |
-| `geometry_type` | string | no | `Polygon` or `MultiPolygon` |
-| `area_m2` | float64 | no | Geodesic area in square metres on WGS84 |
-| `bbox_min_x` / `bbox_min_y` / `bbox_max_x` / `bbox_max_y` | float64 | no | Bounding box of the geometry |
-| `geometry` | binary | no | GeoParquet WKB geometry |
+`geometry` is WKB with GeoParquet 1.1 metadata and OGC:CRS84 longitude/latitude
+semantics. The `tags` map is authoritative; convenience text fields are exact
+derived views.
 
-The `tags` column is authoritative. The `name` and `description` columns plus the
-`localized_names` and `localized_descriptions` maps are derived views computed
-from `tags` for query convenience and remain in lock-step with the source map
-for every record.
-
-## Loading
+## Load the data
 
 ```python
 import pyarrow.parquet as pq
 
-table = pq.read_table("data/<source-stem>.parquet")
+table = pq.read_table("data/<region>-latest.parquet")
 ```
 
 ```python
 import geopandas as gpd
 
-df = gpd.read_parquet("data/<source-stem>.parquet")
+gdf = gpd.read_parquet("data/<region>-latest.parquet")
 ```
 
-## Source and methodology
+## Methodology
 
-Inputs are direct `*.osm.pbf` children of an immutable, read-only source
-directory. Each source maps deterministically to exactly one output. Geometry is
-assembled by `osmium export` with `area_tags: true`, `linear_tags: true`, and
-`--geometry-types polygon`, then streamed in PostgreSQL COPY mode for parsing.
-The repository's versioned `config/osmium-export.json` pins the public
-provenance for closed-way classification; the area policy is also documented
-inline in the manifest as a deterministic area-policy SHA-256.
+`osmium export` applies standard OSM area handling and emits polygon geometry
+only. The pipeline retains features with at least one exact non-empty
+description tag, computes geodesic WGS84 area with holes and multipolygon
+components included, validates GeoParquet and manifest identities, and writes
+artifacts atomically.
 
-`area=no` is honoured by osmium export as a closed-way exclusion. The output
-Parquet contains exactly the polygonal OSM features that osmium emits under
-this configuration, intersected with the dataset's own description requirement.
-
-Areas are computed geodesically (WGS84) with correct hole and multipolygon
-handling after ring normalization. Outputs are written atomically and validated
-before promotion; manifests record source/output identity, checksums, tool and
-library versions, factual feature/rejection counts, and the dataset-wide
-algorithm revision.
-
-## Deterministic stats and dataset-card generation
-
-`generate-card` writes a deterministic `stats.json` and dataset card. No
-wall-clock value is embedded in the generated bytes: identical regeneration
-preserves Parquet and dataset-card mtimes and never invalidates the metadata
-publication state. The per-file table below the auto-generated block lists one
-row per PBF with `source_bytes`, `output_bytes`, `source_sha256`, and
-`output_sha256` for transparent verification.
-
-## Operational logs
-
-`run-and-publish` writes a typed event stream to `<data-root>/logs/run-and-publish.jsonl`
-(streamed redacted JSONL) plus a human line on stderr. The log file rotates
-atomically at 10 MiB with five backups in the same directory using hard-link
-staging and `os.replace`; the logs directory is never included in the upload
-plan.
-
-## Attribution and license
-
-Project code is Apache-2.0. Derived OpenStreetMap data is © OpenStreetMap
-contributors and licensed under the Open Database License (ODbL). Public dataset
-artifacts must visibly credit OpenStreetMap contributors. When using or
-redistributing the data, you must comply with the ODbL obligations, including
-attributing OpenStreetMap and keeping any derived database under a compatible
-license. The implementation does not invent a source provider when the source
-artifacts do not establish one.
-
-## Intended uses
-
-Geospatial research, enrichment, documentation discovery, quality inspection,
-and reproducible downstream pipelines that need described polygons with stable
-identifiers and exact original tags.
+All displayed statistics are generated from validated Parquet files and their
+matching manifests. No counts are handwritten.
 
 ## Limitations
 
-- `description:<suffix>` and `name:<suffix>` suffixes are preserved verbatim
-  and are **not** validated as language codes. Suffixes such as `pt-BR` are kept
-  exactly; the dataset and card make no claim that every suffix is a valid
-  language tag.
-- Regional extracts overlap; the same `(osm_type, osm_id)` may appear in more
-  than one output file. No global deduplication is performed.
-- Feature-level rejections use stable reason codes and factual counts derived
-  only from observable transformation outcomes; counts that osmium does not
-  expose (for example internal assembly failures) are not invented.
-- Geometry is WGS84 longitude/latitude; ring orientation is normalized for
-  geodesic area, but the data otherwise reflects the source.
+- Suffixes such as `en` or `pt-BR` are preserved exactly but are not validated
+  as language codes.
+- Text comes directly from OpenStreetMap and may vary in quality, language,
+  formatting, and completeness.
+- Regional overlap means this is not a globally deduplicated table.
+- Geometry and tags reflect the source extracts at their recorded OSM
+  timestamps.
+
+## License and attribution
+
+Derived data is © OpenStreetMap contributors and available under the
+[Open Database License](https://opendatacommons.org/licenses/odbl/) (ODbL).
+Users and redistributors must comply with its attribution and share-alike
+requirements. Pipeline code is Apache-2.0.
 
 ## Reproducibility
 
-Run `inspect` (read-only), then `build-all`, `validate`, and `generate-card`.
-Build, real-source processing, and publication are separate operational gates
-that each require explicit approval. `run-and-publish` is stoppable (Ctrl-C
-exits 130) and resumable: it replays metadata and per-PBF state on every
-invocation, and a no-op rerun against a fully-published dataset performs zero
-dataset activity.
-
-## Contact
-
-See the project source repository for issues and provenance.
+The public source repository contains the versioned extraction policy,
+deterministic reporting code, validation contracts, and the stoppable,
+resumable `just run-and-publish` workflow.

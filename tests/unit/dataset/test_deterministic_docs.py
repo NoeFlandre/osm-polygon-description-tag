@@ -30,7 +30,11 @@ from osm_polygon_description_tag.dataset.manifest import (
     source_identity_for,
     write_manifest,
 )
-from osm_polygon_description_tag.dataset.reporting import collect_stats, generate_dataset_docs
+from osm_polygon_description_tag.dataset.reporting import (
+    _render_stats_block,
+    collect_stats,
+    generate_dataset_docs,
+)
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import REPO_ID
 from tests.conftest import make_record_dict
@@ -145,8 +149,8 @@ def test_stats_block_includes_name_localized_and_suffixes(tmp_path: Path) -> Non
     assert stats["rows"] == 2
 
 
-def test_stats_payload_includes_deterministic_per_file_table(tmp_path: Path) -> None:
-    """A per-file table is rendered into the generated stats block."""
+def test_stats_payload_retains_deterministic_per_file_provenance(tmp_path: Path) -> None:
+    """Detailed per-file provenance remains available in stats.json."""
     data_root = tmp_path / "generated"
     source_root = tmp_path / "raw"
     _populate_dataset(data_root, source_root)
@@ -168,6 +172,20 @@ def test_stats_payload_includes_deterministic_per_file_table(tmp_path: Path) -> 
         assert len(entry["output_sha256"]) == 64
         assert entry["output_bytes"] > 0
         assert entry["source_bytes"] > 0
+
+
+def test_card_renders_only_ten_suffixes_in_deterministic_order(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    _populate_dataset(data_root, source_root)
+    stats = collect_stats(data_root)
+    stats["description_suffixes"] = {f"s{index:02d}": 1 for index in range(11)}
+
+    rendered = _render_stats_block(stats, "0" * 64)
+
+    positions = [rendered.index(f"| `s{index:02d}` |") for index in range(10)]
+    assert positions == sorted(positions)
+    assert "| `s10` |" not in rendered
 
 
 def test_identical_regeneration_does_not_invalidate_metadata_state(

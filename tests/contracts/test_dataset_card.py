@@ -104,6 +104,17 @@ def test_generated_block_contains_only_backed_numbers(tmp_path: Path) -> None:
     start = readme.index("<!-- GENERATED:STATS:START -->")
     end = readme.index("<!-- GENERATED:STATS:END -->")
     generated = readme[start:end]
-    # Every stats count appears in the generated block; the schema version is rendered.
     assert f"schema_version: {stats['schema_version']}" in generated
     assert "stats_sha256:" in generated
+    assert "## Dataset at a glance" in generated
+    assert "## Description coverage" in generated
+    assert "Base descriptions" in generated
+    assert "Localized descriptions" in generated
+    assert "Total words" in generated
+    assert "Median words per description" in generated
+    assert "Detailed machine-readable statistics" in generated
+    assert "Files (deterministic, sorted by parquet filename)" not in readme
+    assert "Source SHA-256" not in readme
+    assert "Transformation rejections by reason" not in readme
+    assert stats["files"][0]["source_sha256"]
+    assert stats["files"][0]["output_sha256"]

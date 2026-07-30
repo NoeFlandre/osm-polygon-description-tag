@@ -171,7 +171,7 @@ def _description_word_stats(
         )
         SELECT COUNT(*), COALESCE(SUM(word_count), 0), quantile_cont(word_count, 0.5)
         FROM word_counts
-        """
+        """  # noqa: S608 - values_query is selected from two static statements
     ).fetchone()
     if row is None:
         return 0, 0, None
@@ -398,12 +398,23 @@ def _fmt_int(value: int) -> str:
     return f"{value:,}"
 
 
-def _count_table(title: str, counts: dict[str, int]) -> list[str]:
-    lines: list[str] = [f"**{title}**", "", "| Key | Count |", "| --- | --- |"]
-    for key, count in counts.items():
-        lines.append(f"| {key} | {_fmt_int(count)} |")
-    lines.append("")
-    return lines
+def _fmt_bytes(value: int) -> str:
+    size = float(value)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if size < 1024 or unit == "TiB":
+            return f"{size:,.0f} {unit}" if unit == "B" else f"{size:,.1f} {unit}"
+        size /= 1024
+    raise AssertionError("unreachable")
+
+
+def _fmt_median(value: float | None) -> str:
+    if value is None:
+        return "—"
+    return _fmt_int(int(value)) if value.is_integer() else f"{value:,.1f}"
+
+
+def _fmt_area(value: float | None) -> str:
+    return "—" if value is None else f"{value:,.1f}"
 
 
 def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
@@ -412,81 +423,81 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
         f"<!-- stats_schema_version: {stats['stats_schema_version']} -->",
         f"<!-- schema_version: {stats['schema_version']} -->",
         "",
+        "## Dataset at a glance",
+        "",
         "| Metric | Value |",
         "| --- | --- |",
-        f"| Output files | {_fmt_int(stats['output_files'])} |",
-        f"| Rows | {_fmt_int(stats['rows'])} |",
-        f"| Emitted features | {_fmt_int(stats['emitted_features'])} |",
-        f"| Base name rows | {_fmt_int(stats['base_name_rows'])} |",
-        f"| Localized name rows | {_fmt_int(stats['localized_name_rows'])} |",
-        f"| Base description rows | {_fmt_int(stats['base_description_rows'])} |",
-        f"| Localized description rows | {_fmt_int(stats['localized_description_rows'])} |",
-        f"| Source bytes total | {_fmt_int(stats['source_bytes_total'])} |",
-        f"| Output bytes total | {_fmt_int(stats['output_bytes_total'])} |",
+        f"| Polygons | {_fmt_int(stats['rows'])} |",
+        f"| Parquet files | {_fmt_int(stats['output_files'])} |",
+        f"| Download size | {_fmt_bytes(stats['output_bytes_total'])} |",
+        f"| Closed ways | {_fmt_int(stats['osm_types'].get('way', 0))} |",
+        f"| Relations | {_fmt_int(stats['osm_types'].get('relation', 0))} |",
+        f"| Polygon geometries | {_fmt_int(stats['geometry_types'].get('Polygon', 0))} |",
+        f"| MultiPolygon geometries | {_fmt_int(stats['geometry_types'].get('MultiPolygon', 0))} |",
+        "",
+        "## Description coverage",
+        "",
+        "| Description type | Values | Total words | Median words per description |",
+        "| --- | ---: | ---: | ---: |",
+        "| Base descriptions | "
+        f"{_fmt_int(stats['base_description_values'])} | "
+        f"{_fmt_int(stats['base_description_words_total'])} | "
+        f"{_fmt_median(stats['base_description_words_median'])} |",
+        "| Localized descriptions | "
+        f"{_fmt_int(stats['localized_description_values'])} | "
+        f"{_fmt_int(stats['localized_description_words_total'])} | "
+        f"{_fmt_median(stats['localized_description_words_median'])} |",
         "",
     ]
-    lines.extend(_count_table("Counts by OSM type", stats["osm_types"]))
-    lines.extend(_count_table("Counts by geometry type", stats["geometry_types"]))
-    lines.extend(
-        _count_table(
-            "Description suffix frequencies (exact suffix, not validated as a language code)",
-            stats["description_suffixes"],
-        )
-    )
-    lines.extend(
-        _count_table(
-            "Name suffix frequencies (exact suffix, not validated as a language code)",
-            stats["name_suffixes"],
-        )
-    )
-    lines.extend(_count_table("Transformation rejections by reason", stats["rejections"]))
 
-    lines.append("**Area distribution (square metres)**")
-    lines.append("")
-    lines.append("| Statistic | Value (m²) |")
-    lines.append("| --- | --- |")
-    for label, key in (
-        ("Minimum", "area_m2_min_m2"),
-        ("p25", "area_m2_p25_m2"),
-        ("Median", "area_m2_median_m2"),
-        ("p75", "area_m2_p75_m2"),
-        ("Maximum", "area_m2_max_m2"),
-    ):
-        lines.append(f"| {label} | {stats[key]} |")
-    lines.append("")
+    top_suffixes = sorted(
+        stats["description_suffixes"].items(),
+        key=lambda item: (-item[1], item[0]),
+    )[:10]
+    if top_suffixes:
+        lines.extend(
+            [
+                "### Most common localized suffixes",
+                "",
+                "These are exact OSM tag suffixes and are not validated language codes.",
+                "",
+                "| Suffix | Description values |",
+                "| --- | ---: |",
+            ]
+        )
+        lines.extend(f"| `{suffix}` | {_fmt_int(count)} |" for suffix, count in top_suffixes)
+        lines.append("")
+
+    lines.extend(
+        [
+            "### Spatial summary",
+            "",
+            "| Area statistic | Square metres |",
+            "| --- | ---: |",
+            f"| Minimum | {_fmt_area(stats['area_m2_min_m2'])} |",
+            f"| Median | {_fmt_area(stats['area_m2_median_m2'])} |",
+            f"| Maximum | {_fmt_area(stats['area_m2_max_m2'])} |",
+            "",
+        ]
+    )
 
     if stats["data_min_timestamp_utc"] and stats["data_max_timestamp_utc"]:
-        lines.append("**OSM data timestamp range (UTC)**")
-        lines.append("")
-        lines.append(
-            f"Minimum: {stats['data_min_timestamp_utc']}<br/>"
-            f"Maximum: {stats['data_max_timestamp_utc']}"
+        lines.extend(
+            [
+                "**OSM object timestamps (UTC):** "
+                f"{stats['data_min_timestamp_utc']} to {stats['data_max_timestamp_utc']}",
+                "",
+            ]
         )
-        lines.append("")
 
-    lines.append("**Files (deterministic, sorted by parquet filename)**")
-    lines.append("")
-    lines.append(
-        "| Source PBF | Parquet | Rows | Source bytes | Output bytes | Source SHA-256 | Output SHA-256 |"  # noqa: E501
+    lines.extend(
+        [
+            "Detailed machine-readable statistics, exact suffix frequencies, "
+            "rejection counts, and per-file SHA-256 provenance are available in "
+            "[`stats.json`](stats.json).",
+            "",
+        ]
     )
-    lines.append("| --- | --- | --- | --- | --- | --- | --- |")
-    for record in stats["files"]:
-        lines.append(
-            "| "
-            + " | ".join(
-                [
-                    record["source_pbf"],
-                    record["parquet"],
-                    _fmt_int(record["rows"]),
-                    _fmt_int(record["source_bytes"]),
-                    _fmt_int(record["output_bytes"]),
-                    f"`{record['source_sha256']}`",
-                    f"`{record['output_sha256']}`",
-                ]
-            )
-            + " |"
-        )
-    lines.append("")
     return "\n".join(lines)
 
 

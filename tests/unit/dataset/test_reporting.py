@@ -215,4 +215,16 @@ def test_generate_dataset_docs_writes_stats_and_card(tmp_path: Path) -> None:
     end = readme.index("<!-- GENERATED:STATS:END -->")
     generated = readme[start:end]
     assert "stats_sha256" in generated
-    assert "no_nonempty_description" in generated
+    assert "## Dataset at a glance" in generated
+    assert "## Description coverage" in generated
+    assert "Base descriptions" in generated
+    assert "Localized descriptions" in generated
+    assert "Total words" in generated
+    assert "Median words per description" in generated
+    assert "Detailed machine-readable statistics" in generated
+    assert "Files (deterministic, sorted by parquet filename)" not in generated
+    assert "Source SHA-256" not in generated
+    assert "Transformation rejections by reason" not in generated
+    assert stats["files"][0]["source_sha256"]
+    assert stats["files"][0]["output_sha256"]
+    assert stats["rejections"] == {"no_nonempty_description": 4}
