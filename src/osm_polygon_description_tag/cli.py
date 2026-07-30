@@ -24,14 +24,14 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from osm_polygon_description_tag.discovery import discover_sources
-from osm_polygon_description_tag.extraction import OsmiumExportError
 from osm_polygon_description_tag.manifest import ManifestError
 from osm_polygon_description_tag.orchestrator import (
     OrchestratorError,
     PreflightError,
     run_and_publish,
 )
+from osm_polygon_description_tag.osm.discovery import discover_sources
+from osm_polygon_description_tag.osm.extraction import OsmiumExportError
 from osm_polygon_description_tag.pipeline import BuildResult, build_all, build_one
 from osm_polygon_description_tag.publication import (
     PublicationError,

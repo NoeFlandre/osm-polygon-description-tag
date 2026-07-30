@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from osm_polygon_description_tag.extraction import (
+from osm_polygon_description_tag.osm.extraction import (
     STDERR_CAP_BYTES,
     OsmiumExportError,
     osmium_version,

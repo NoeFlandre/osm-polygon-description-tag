@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from osm_polygon_description_tag.discovery import Source, _output_name_for, discover_sources
+from osm_polygon_description_tag.osm.discovery import Source, _output_name_for, discover_sources
 
 
 def test_discovery_is_direct_sorted_and_pbf_only(tmp_path: Path) -> None:

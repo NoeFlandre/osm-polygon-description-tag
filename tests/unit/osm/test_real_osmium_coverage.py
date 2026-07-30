@@ -42,7 +42,6 @@ from osm_polygon_description_tag._resources import (
     osmium_export_config,
 )
 from osm_polygon_description_tag.config import Paths
-from osm_polygon_description_tag.discovery import discover_sources
 from osm_polygon_description_tag.manifest import (
     Manifest,
     RunCounts,
@@ -52,6 +51,7 @@ from osm_polygon_description_tag.manifest import (
     source_identity_for,
     write_manifest,
 )
+from osm_polygon_description_tag.osm.discovery import discover_sources
 from osm_polygon_description_tag.pipeline import build_one
 from osm_polygon_description_tag.reporting import generate_dataset_docs
 from osm_polygon_description_tag.storage import write_geoparquet

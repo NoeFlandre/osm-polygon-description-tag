@@ -14,7 +14,7 @@ from shapely.errors import ShapelyError
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import orient
 
-from osm_polygon_description_tag.extraction import ExportRecord
+from osm_polygon_description_tag.osm.extraction import ExportRecord
 
 GEOD = Geod(ellps="WGS84")
 

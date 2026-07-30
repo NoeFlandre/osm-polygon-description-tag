@@ -6,7 +6,8 @@ Provide the canonical boundary for deterministic OpenStreetMap source ingestion.
 
 ## Responsibilities
 
-PBF discovery and bounded `osmium export` streaming belong here as they are migrated.
+Discover immutable source PBFs without modifying or following indirect inputs, and stream bounded
+`osmium export` records.
 
 ## Non-responsibilities
 
@@ -15,8 +16,19 @@ workflow state.
 
 ## Public API
 
-Exports are introduced incrementally during the package reorganization. This initial boundary has
-no public exports.
+Import the canonical APIs from the package boundary:
+
+```python
+from osm_polygon_description_tag.osm import discover_sources, stream_export
+
+for source in discover_sources(source_root):
+    for record in stream_export(source.path, export_config):
+        process(record)
+```
+
+`Source`, `discover_sources`, `STDERR_CAP_BYTES`, `OsmiumExportError`, `ExportRecord`,
+`export_command`, `parse_copy_record`, `iter_records`, `stream_export`, and `osmium_version` are
+public. The former top-level `discovery` and `extraction` modules remain compatibility aliases.
 
 ## Allowed dependencies
 
@@ -24,8 +36,17 @@ The `runtime` package and Python's standard library.
 
 ## Data flow and side effects
 
-Future OSM APIs will discover source PBFs and stream exported records from bounded subprocesses;
-they will not write final dataset artifacts.
+Discovery is read-only: it enumerates direct, regular `*.osm.pbf` children in deterministic order
+and records their immutable identity metadata. Extraction constructs the exact no-shell argument
+array
+
+```text
+osmium export SOURCE --output-format pg --config CONFIG --geometry-types polygon --output -
+```
+
+and passes it to `subprocess` with `shell=False`. Records are yielded as a bounded stream and
+retained stderr is capped for diagnostics. This package does not transform records, write Parquet,
+publish files, or manage workflow state.
 
 ## Safety and determinism invariants
 

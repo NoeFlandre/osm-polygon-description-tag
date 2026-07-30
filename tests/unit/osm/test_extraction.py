@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from osm_polygon_description_tag.extraction import (
+from osm_polygon_description_tag.osm.extraction import (
     export_command,
     iter_records,
     parse_copy_record,

@@ -11,13 +11,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from osm_polygon_description_tag.discovery import Source
-from osm_polygon_description_tag.extraction import (
-    ExportRecord,
-    OsmiumExportError,
-    osmium_version,
-    stream_export,
-)
 from osm_polygon_description_tag.manifest import (
     MANIFEST_SCHEMA_VERSION,
     TRANSFORM_ALGORITHM_VERSION,
@@ -33,6 +26,13 @@ from osm_polygon_description_tag.manifest import (
     read_manifest,
     source_identity_for,
     write_manifest,
+)
+from osm_polygon_description_tag.osm.discovery import Source
+from osm_polygon_description_tag.osm.extraction import (
+    ExportRecord,
+    OsmiumExportError,
+    osmium_version,
+    stream_export,
 )
 from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.schema import SCHEMA_VERSION

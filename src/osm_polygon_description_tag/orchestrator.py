@@ -42,8 +42,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, cast
 
-from osm_polygon_description_tag.discovery import Source, discover_sources
-from osm_polygon_description_tag.extraction import ExportRecord
 from osm_polygon_description_tag.manifest import (
     TRANSFORM_ALGORITHM_VERSION,
     Manifest,
@@ -53,6 +51,8 @@ from osm_polygon_description_tag.manifest import (
     read_manifest,
     source_identity_for,
 )
+from osm_polygon_description_tag.osm.discovery import Source, discover_sources
+from osm_polygon_description_tag.osm.extraction import ExportRecord
 from osm_polygon_description_tag.pipeline import build_one
 from osm_polygon_description_tag.publication import (
     REPO_ID,
