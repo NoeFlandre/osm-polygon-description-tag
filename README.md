@@ -9,6 +9,10 @@ The public documentation site is built with MkDocs Material:
 uv run mkdocs serve
 ```
 
+It is published automatically from `main` with GitHub Pages at
+[noeflandre.github.io/osm-polygon-description-tag](https://noeflandre.github.io/osm-polygon-description-tag/).
+The deployment workflow builds the strict site from the locked uv environment.
+
 Read the documentation:
 
 - [Getting started](docs/getting-started.md)

@@ -52,6 +52,10 @@ uv run mkdocs serve
 uv run mkdocs build --strict
 ```
 
+The `docs` GitHub Actions workflow rebuilds and deploys the strict site to
+GitHub Pages after every push to `main`. A repository administrator must select
+**Settings → Pages → GitHub Actions** as the Pages source once.
+
 Historical design and implementation plans under `docs/superpowers/` are
 excluded from the public site navigation. The generated dataset-card template
 is maintained separately because it is published as dataset metadata.

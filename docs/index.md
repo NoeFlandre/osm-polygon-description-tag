@@ -17,6 +17,10 @@ tags, full geometry, geodesic area, and provenance.
 
 ## Start here
 
+The rendered documentation is available at
+[noeflandre.github.io/osm-polygon-description-tag](https://noeflandre.github.io/osm-polygon-description-tag/)
+and is rebuilt automatically when `main` changes.
+
 1. Follow [Getting started](getting-started.md) to install the toolchain.
 2. Read the [Dataset contract](dataset-contract.md) before consuming rows.
 3. Use [Operations](operations.md) for storage, resume, and publication rules.

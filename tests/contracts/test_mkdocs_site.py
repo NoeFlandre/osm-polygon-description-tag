@@ -47,3 +47,16 @@ def test_public_docs_state_operational_boundaries() -> None:
     assert "Hugging Face" in text
     assert "area_m2" in text
     assert "localized_descriptions" in text
+
+
+def test_github_pages_workflow_deploys_the_strict_site() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "docs.yml").read_text(encoding="utf-8")
+
+    assert "branches: [main]" in workflow
+    assert "uv run mkdocs build --strict --site-dir site" in workflow
+    assert "actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b" in workflow
+    assert "actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b" in workflow
+    assert "actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e" in workflow
+    assert "pages: write" in workflow
+    assert "id-token: write" in workflow
+    assert "environment:\n      name: github-pages" in workflow
