@@ -16,11 +16,13 @@ OpenStreetMap polygons with a non-empty `description` or
 extract. Every row retains the complete original tag map, full Polygon or
 MultiPolygon geometry, WGS84 geodesic area, bounding box, and OSM provenance.
 
+Source repository: [github.com/NoeFlandre/osm-polygon-description-tag](https://github.com/NoeFlandre/osm-polygon-description-tag).
+
 <!-- GENERATED:H3_MAP:START -->
 ![H3 density of description-tagged polygons](assets/description_polygon_density.png)
 <!-- GENERATED:H3_MAP:END -->
 Hexbin density of every described polygon at H3 resolution 3, drawn from each
-row's geometry centroid on a logarithmic scale. Darker cells contain more
+row's geometry centroid on a logarithmic scale. Lighter cells contain more
 polygons.
 <!-- GENERATED:STATS:START -->
 <!-- GENERATED:STATS:END -->
