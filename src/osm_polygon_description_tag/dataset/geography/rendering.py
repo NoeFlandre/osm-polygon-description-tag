@@ -1,9 +1,9 @@
 """Deterministic PNG rendering of the H3 density map.
 
-The renderer is a pure function of the H3 cell counts and the chosen
-output path. It does not download basemap data and produces a
-self-contained world map with stable visual constants for byte-for-byte
-determinism.
+The renderer is a pure function of the H3 cell counts, the bundled Natural
+Earth land reference, and the chosen output path. It never downloads
+basemap data and produces a self-contained world map with stable visual
+constants for byte-for-byte determinism.
 """
 
 from __future__ import annotations
@@ -24,6 +24,12 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 
+from osm_polygon_description_tag.dataset.geography.basemap import (
+    _LAND_COLOR,
+    _LAND_EDGE,
+    draw_landmasses,
+    load_land_basemap,
+)
 from osm_polygon_description_tag.dataset.geography.h3_policy import (
     cell_rings,
 )
@@ -199,15 +205,19 @@ def _atomic_save_png(fig: Any, output_path: Path) -> None:
 def render_density_map(
     cells: Mapping[str, int],
     output_path: Path,
+    *,
+    land_features: Sequence[Any] | None = None,
 ) -> RenderResult:
     """Render the H3 density map and atomically write it to ``output_path``.
 
     The ``cells`` argument maps each H3 cell id to the number of dataset
     rows whose geometry centroid falls inside that cell. The rendered
     caption reports the total row count and the number of occupied
-    cells, derived from the aggregation. The renderer is a pure
-    function of ``cells`` and the fixed visual constants defined in
-    this module; identical inputs produce byte-identical PNGs.
+    cells, derived from the aggregation. If ``land_features`` is omitted,
+    the bundled Natural Earth 110m land reference is loaded. Passing an
+    explicit sequence is useful for tests and alternate callers; passing an
+    empty sequence intentionally renders ocean only. Identical inputs and
+    the same bundled reference produce byte-identical PNGs.
     """
     if not cells and not output_path.exists():
         # Render the no-data image even when no file exists yet.
@@ -221,6 +231,10 @@ def render_density_map(
     fig, ax = plt.subplots(figsize=_FIGSIZE, dpi=_DPI)
     fig.set_facecolor("white")
     _init_axes(ax)
+    if land_features is None:
+        land_features = load_land_basemap()
+    if land_features:
+        draw_landmasses(ax, land_features)
 
     cmap = plt.get_cmap(_COLORMAP_NAME)
     if sorted_cells:
@@ -283,6 +297,8 @@ __all__ = [
     "_COLORMAP_NAME",
     "_DPI",
     "_FIGSIZE",
+    "_LAND_COLOR",
+    "_LAND_EDGE",
     "_METADATA_SOFTWARE",
     "_NO_DATA_CAPTION",
     "RenderResult",

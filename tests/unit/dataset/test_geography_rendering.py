@@ -29,10 +29,16 @@ from osm_polygon_description_tag.dataset.geography import (
     RenderResult,
     render_density_map,
 )
+from osm_polygon_description_tag.dataset.geography.basemap import (
+    draw_landmasses,
+    load_land_basemap,
+)
 from osm_polygon_description_tag.dataset.geography.rendering import (
     _COLORMAP_NAME,
     _DPI,
     _FIGSIZE,
+    _LAND_COLOR,
+    _LAND_EDGE,
     _METADATA_SOFTWARE,
     _NO_DATA_CAPTION,
 )
@@ -57,6 +63,97 @@ def test_render_density_map_produces_png(tmp_path: Path) -> None:
     assert out.is_file()
     # PNG signature.
     assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_render_density_map_draws_land_overlay_before_cells(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The production map must render landmasses over the blue ocean."""
+    import osm_polygon_description_tag.dataset.geography.rendering as rendering_module
+
+    calls: list[object] = []
+
+    def capture_landmasses(_ax: object, features: object) -> None:
+        calls.append(features)
+
+    monkeypatch.setattr(rendering_module, "draw_landmasses", capture_landmasses)
+    features = [{"type": "Feature", "geometry": {"type": "Polygon", "coordinates": []}}]
+    render_density_map(
+        {_fake_cell(48.8566, 2.3522): 1},
+        tmp_path / "map.png",
+        land_features=features,
+    )
+    assert calls == [features]
+
+
+def test_land_palette_matches_wikidata_only() -> None:
+    """Keep the shared beige land / blue ocean palette used by wikidata-only."""
+    assert _LAND_COLOR == "#e8e0d0"
+    assert _LAND_EDGE == "#b8aa90"
+
+
+def test_bundled_land_basemap_is_available_and_nonempty() -> None:
+    """The production wheel must carry the offline Natural Earth reference."""
+    features = load_land_basemap()
+    assert features
+    assert any(
+        isinstance(feature, dict)
+        and isinstance(feature.get("geometry"), dict)
+        and feature["geometry"].get("type") in {"Polygon", "MultiPolygon"}
+        for feature in features
+    )
+
+
+def test_land_basemap_loader_handles_missing_and_malformed_files(tmp_path: Path) -> None:
+    """A broken optional reference never turns map generation into a crash."""
+    assert load_land_basemap(tmp_path / "missing.geojson") == []
+    empty = tmp_path / "empty.geojson"
+    empty.touch()
+    assert load_land_basemap(empty) == []
+    invalid = tmp_path / "invalid.geojson"
+    invalid.write_text("not json", encoding="utf-8")
+    assert load_land_basemap(invalid) == []
+    not_object = tmp_path / "list.geojson"
+    not_object.write_text("[]", encoding="utf-8")
+    assert load_land_basemap(not_object) == []
+    bad_features = tmp_path / "bad-features.geojson"
+    bad_features.write_text('{"features": "nope"}', encoding="utf-8")
+    assert load_land_basemap(bad_features) == []
+
+
+def test_draw_landmasses_supports_polygon_multipolygon_and_bad_features() -> None:
+    """Only valid outer rings become beige land patches."""
+
+    class _Axes:
+        def __init__(self) -> None:
+            self.patches: list[object] = []
+
+        def add_patch(self, patch: object) -> None:
+            self.patches.append(patch)
+
+    axes = _Axes()
+    draw_landmasses(
+        axes,
+        [
+            None,
+            {"geometry": None},
+            {"geometry": {"type": "LineString", "coordinates": []}},
+            {"geometry": {"type": "Polygon", "coordinates": [[]]}},
+            {
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[(0, 0), (1, 0), (0, 1)]],
+                }
+            },
+            {
+                "geometry": {
+                    "type": "MultiPolygon",
+                    "coordinates": [[[(2, 0), (3, 0), (2, 1)]]],
+                }
+            },
+        ],
+    )
+    assert len(axes.patches) == 2
 
 
 def test_render_density_map_caption_contains_factual_counts(tmp_path: Path) -> None:

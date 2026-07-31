@@ -48,6 +48,7 @@ packages = ["src/osm_polygon_description_tag"]
 include = [
     "src/osm_polygon_description_tag/**/*.md",
     "src/osm_polygon_description_tag/_data/*.json",
+    "src/osm_polygon_description_tag/_data/*.geojson",
     "src/osm_polygon_description_tag/_data/*.md",
 ]
 

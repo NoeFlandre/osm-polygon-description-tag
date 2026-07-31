@@ -16,6 +16,8 @@ asset.
   counted as two dataset rows.
 * H3 resolution 3 is used.
 * The colour scale is logarithmic (`matplotlib.colors.LogNorm`).
+* Natural Earth 110m landmasses are bundled in the package and drawn in
+  beige over the blue ocean. Rendering never downloads basemap data.
 * The map caption reports the total dataset row count and the number
   of occupied H3 cells, derived from the aggregation.
 * Re-rendering identical input produces byte-identical PNGs and
@@ -40,10 +42,12 @@ coordinates raise a descriptive error and are never silently skipped.
   of distinct H3 cells, not the total row count.
 * `aggregation` is a thin pure function that walks every Parquet
   under `data/` and returns a sorted `{h3_cell: count}` mapping.
+* `basemap` owns loading and drawing the bundled Natural Earth 110m
+  landmasses. It never performs network I/O.
 * `rendering` owns the deterministic PNG output. It is a pure
-  function of the cell counts and the fixed visual constants.
-  The renderer never downloads basemap data; it renders a
-  self-contained world map.
+  function of the cell counts, the bundled land reference, and the fixed
+  visual constants. Land is drawn beneath H3 cells so geographic context
+  remains visible at sparse densities.
 * `card` owns the dataset-card marker block (`<!-- GENERATED:H3_MAP:START/END -->`)
   and the byte-stable substitution that keeps the surrounding
   handwritten prose verbatim across regenerations.
