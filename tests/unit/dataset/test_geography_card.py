@@ -27,6 +27,9 @@ from osm_polygon_description_tag.dataset.geography import (
     install_map_block,
     render_map_block,
 )
+from osm_polygon_description_tag.dataset.geography.card import (
+    write_map_block_marker_to_template,
+)
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     RunCounts,
@@ -310,8 +313,10 @@ def test_generation_preserves_existing_stats_block(
     start_map = readme.index("<!-- GENERATED:H3_MAP:START -->")
     end_map = readme.index("<!-- GENERATED:H3_MAP:END -->") + len("<!-- GENERATED:H3_MAP:END -->")
 
-    # The two generated blocks must be independent and complete.
-    assert start_map > end_stats
+    # The two generated blocks must be independent and complete. The H3 map
+    # block sits above the stats block so the visual asset is visible
+    # before the tabular summary.
+    assert start_map < start_stats
     stats_block = readme[start_stats:end_stats]
     map_block = readme[start_map:end_map]
     assert "## Dataset at a glance" in stats_block
@@ -516,3 +521,243 @@ def test_generated_readme_preserves_surrounding_prose_by_stripping_markers(
         "must be byte-identical to the pre-feature template. First diff: "
         f"{_first_diff(stripped_readme, stripped_pre_h3)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Template marker ordering, synchronization, and idempotency
+# ---------------------------------------------------------------------------
+
+
+def _pre_h3_template_text() -> str:
+    """Return the pre-feature dataset card template stripped of its H3 marker block."""
+    return _H3_MAP_BLOCK_PATTERN.sub(
+        "", Path("docs/dataset-card-template.md").read_text(encoding="utf-8"), count=1
+    )
+
+
+def test_both_markers_occur_exactly_once_in_each_template() -> None:
+    """The packaged and documentation templates each contain exactly one map and stats block."""
+    for template_path in (
+        Path("docs/dataset-card-template.md"),
+        Path("src/osm_polygon_description_tag/_data/dataset-card-template.md"),
+    ):
+        text = template_path.read_text(encoding="utf-8")
+        assert text.count(H3_MAP_START_MARKER) == 1, template_path
+        assert text.count(H3_MAP_END_MARKER) == 1, template_path
+        assert text.count("<!-- GENERATED:STATS:START -->") == 1, template_path
+        assert text.count("<!-- GENERATED:STATS:END -->") == 1, template_path
+
+
+def test_map_marker_appears_before_stats_marker_in_each_template() -> None:
+    """The H3 map marker must sit immediately above the stats marker in every template."""
+    for template_path in (
+        Path("docs/dataset-card-template.md"),
+        Path("src/osm_polygon_description_tag/_data/dataset-card-template.md"),
+    ):
+        text = template_path.read_text(encoding="utf-8")
+        start_map = text.index(H3_MAP_START_MARKER)
+        end_map = text.index(H3_MAP_END_MARKER) + len(H3_MAP_END_MARKER)
+        start_stats = text.index("<!-- GENERATED:STATS:START -->")
+        assert start_map < start_stats, template_path
+        # The map marker block ends before the stats marker begins.
+        assert end_map <= start_stats, template_path
+
+
+def test_packaged_and_documentation_templates_remain_synchronized() -> None:
+    """The packaged and documentation templates are byte-for-byte identical."""
+    packaged = Path("src/osm_polygon_description_tag/_data/dataset-card-template.md").read_text(
+        encoding="utf-8"
+    )
+    documented = Path("docs/dataset-card-template.md").read_text(encoding="utf-8")
+    assert packaged == documented
+
+
+def test_write_map_block_marker_inserts_single_block_before_stats(
+    tmp_path: Path,
+) -> None:
+    """``write_map_block_marker_to_template`` injects exactly one map block above stats."""
+    template = tmp_path / "template.md"
+    template.write_text(_pre_h3_template_text(), encoding="utf-8")
+    write_map_block_marker_to_template(template)
+
+    text = template.read_text(encoding="utf-8")
+    assert text.count(H3_MAP_START_MARKER) == 1
+    assert text.count(H3_MAP_END_MARKER) == 1
+    assert H3_MAP_ASSET_RELATIVE_PATH in text
+    start_map = text.index(H3_MAP_START_MARKER)
+    start_stats = text.index("<!-- GENERATED:STATS:START -->")
+    assert start_map < start_stats
+
+
+def test_write_map_block_marker_preserves_surrounding_prose(tmp_path: Path) -> None:
+    """Outside the map marker block, the surrounding prose is preserved byte-for-byte."""
+    original = _pre_h3_template_text()
+    template = tmp_path / "template.md"
+    template.write_text(original, encoding="utf-8")
+    write_map_block_marker_to_template(template)
+    text = template.read_text(encoding="utf-8")
+
+    start = text.index(H3_MAP_START_MARKER)
+    end = text.index(H3_MAP_END_MARKER) + len(H3_MAP_END_MARKER)
+    # The expected text equals the pre-feature template with the H3 block
+    # inserted immediately before the stats marker.
+    expected = (
+        original[: original.index("<!-- GENERATED:STATS:START -->")] + text[start:end] + text[end:]
+    )
+    assert text == expected
+    # Stripping the H3 marker block (start marker, image reference, end
+    # marker, and its trailing newline) must restore the pre-feature template
+    # byte-for-byte.
+    outside = _H3_MAP_BLOCK_PATTERN.sub("", text, count=1)
+    assert outside == original
+
+
+def test_write_map_block_marker_is_idempotent(tmp_path: Path) -> None:
+    """Repeated calls never duplicate the map block."""
+    template = tmp_path / "template.md"
+    template.write_text(_pre_h3_template_text(), encoding="utf-8")
+    write_map_block_marker_to_template(template)
+    once = template.read_text(encoding="utf-8")
+    write_map_block_marker_to_template(template)
+    twice = template.read_text(encoding="utf-8")
+    assert once == twice
+    assert twice.count(H3_MAP_START_MARKER) == 1
+    assert twice.count(H3_MAP_END_MARKER) == 1
+
+
+def test_write_map_block_marker_is_noop_when_markers_present(tmp_path: Path) -> None:
+    """When the markers are already present, the writer is a no-op (mtime preserved)."""
+    template = tmp_path / "template.md"
+    template.write_text(dataset_card_template().read_text(encoding="utf-8"), encoding="utf-8")
+    original_mtime = template.stat().st_mtime_ns
+    write_map_block_marker_to_template(template)
+    assert template.stat().st_mtime_ns == original_mtime
+
+
+def test_write_map_block_marker_rejects_duplicate_markers(tmp_path: Path) -> None:
+    """A template with duplicate map markers must be rejected."""
+    template = tmp_path / "template.md"
+    base = dataset_card_template().read_text(encoding="utf-8")
+    duplicate = base.replace(H3_MAP_END_MARKER, f"{H3_MAP_END_MARKER}\n{H3_MAP_START_MARKER}", 1)
+    duplicate = duplicate.replace(
+        "<!-- GENERATED:STATS:START -->",
+        f"{H3_MAP_END_MARKER}\n<!-- GENERATED:STATS:START -->",
+        1,
+    )
+    assert duplicate.count(H3_MAP_START_MARKER) == 2
+    assert duplicate.count(H3_MAP_END_MARKER) == 2
+    template.write_text(duplicate, encoding="utf-8")
+    with pytest.raises(ValueError, match="unique"):
+        write_map_block_marker_to_template(template)
+
+
+def test_write_map_block_marker_rejects_template_without_stats_marker(tmp_path: Path) -> None:
+    """A template missing the stats marker cannot host the map marker."""
+    template = tmp_path / "template.md"
+    template.write_text("# orphan\n\nno stats marker here\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="STATS:START"):
+        write_map_block_marker_to_template(template)
+
+
+# ---------------------------------------------------------------------------
+# Map cache identity: reuse when stable, recompute when finalized data changes
+# ---------------------------------------------------------------------------
+
+
+def _fake_record(stem: str, osm_id: int = 1) -> dict:
+    """Return a single description-tagged polygon record used to populate fixtures."""
+    from tests.conftest import make_record_dict
+
+    return make_record_dict(
+        Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+        {"description": stem},
+        osm_id=osm_id,
+        source_pbf=f"{stem}.osm.pbf",
+    )
+
+
+def test_readme_only_regeneration_does_not_rewrite_h3_png_when_cache_identity_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second ``generate_dataset_docs`` call with the same data is a no-op for the PNG."""
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    _populate_dataset(data_root, source_root)
+
+    import osm_polygon_description_tag.dataset.reporting as reporting
+
+    aggregate_calls: list[Path] = []
+    render_calls: list[Path] = []
+
+    def fake_aggregate(root: Path) -> dict[str, int]:
+        aggregate_calls.append(root)
+        return {"85280003fffffff": 2}
+
+    def fake_render(_counts: dict[str, int], output_path: Path) -> None:
+        render_calls.append(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"stable-map")
+
+    monkeypatch.setattr(reporting, "aggregate_h3_density", fake_aggregate)
+    monkeypatch.setattr(reporting, "render_density_map", fake_render)
+
+    template = dataset_card_template()
+    reporting.generate_dataset_docs(data_root, template)
+    map_path = data_root / H3_MAP_ASSET_RELATIVE_PATH
+    map_bytes = map_path.read_bytes()
+    map_mtime = map_path.stat().st_mtime_ns
+
+    # Second call: same template, identical finalized Parquets. The PNG must
+    # not be reaggregated or rewritten.
+    reporting.generate_dataset_docs(data_root, template)
+
+    assert aggregate_calls == [data_root], "H3 aggregation must not repeat"
+    assert render_calls == [map_path], "H3 PNG must not be re-rendered"
+    assert map_path.read_bytes() == map_bytes
+    assert map_path.stat().st_mtime_ns == map_mtime
+
+
+def test_map_is_recomputed_when_finalized_parquet_data_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A change to the finalized Parquet bytes invalidates the map cache."""
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    _populate_dataset(data_root, source_root)
+
+    import osm_polygon_description_tag.dataset.reporting as reporting
+
+    aggregate_calls: list[Path] = []
+    render_calls: list[Path] = []
+    identity_iter = iter(["identity-v1", "identity-v2"])
+
+    def fake_aggregate(root: Path) -> dict[str, int]:
+        aggregate_calls.append(root)
+        return {"85280003fffffff": 2}
+
+    def fake_render(_counts: dict[str, int], output_path: Path) -> None:
+        render_calls.append(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(f"map-{len(render_calls)}".encode())
+
+    def fake_h3_map_input_sha256(stats: object) -> str:
+        return next(identity_iter)
+
+    monkeypatch.setattr(reporting, "aggregate_h3_density", fake_aggregate)
+    monkeypatch.setattr(reporting, "render_density_map", fake_render)
+    monkeypatch.setattr(reporting, "_h3_map_input_sha256", fake_h3_map_input_sha256)
+
+    template = dataset_card_template()
+    reporting.generate_dataset_docs(data_root, template)
+    map_path = data_root / H3_MAP_ASSET_RELATIVE_PATH
+    first_bytes = map_path.read_bytes()
+    assert first_bytes == b"map-1"
+
+    # Simulate finalized Parquet bytes changing: the next identity is different
+    # from the cached identity, so the PNG must be regenerated.
+    reporting.generate_dataset_docs(data_root, template)
+
+    assert aggregate_calls == [data_root, data_root], "H3 aggregation must rerun on data change"
+    assert len(render_calls) == 2, "H3 PNG must be re-rendered on data change"
+    assert map_path.read_bytes() == b"map-2"
+    assert map_path.read_bytes() != first_bytes

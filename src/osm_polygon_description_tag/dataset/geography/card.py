@@ -75,16 +75,26 @@ def write_map_block_marker_to_template(
     is a no-op when the markers are already present.
     """
     text = template_path.read_text(encoding="utf-8")
-    if H3_MAP_START_MARKER in text and H3_MAP_END_MARKER in text:
+    start_count = text.count(H3_MAP_START_MARKER)
+    end_count = text.count(H3_MAP_END_MARKER)
+    if start_count > 1 or end_count > 1:
+        raise ValueError(
+            f"dataset card template must contain a unique H3 map marker block; "
+            f"found {start_count} start markers and {end_count} end markers"
+        )
+    if start_count == 1 and end_count == 1:
         return
-    # Insert the marker block immediately after the stats marker block.
-    stats_end = "<!-- GENERATED:STATS:END -->\n"
-    if stats_end not in text:
-        raise ValueError(f"template missing {stats_end!r} marker; cannot insert map block")
+    # Insert the marker block immediately before the stats marker block so the
+    # map image appears near the top of the dataset card. The H3 marker block
+    # ends with the same newline that introduces the stats marker, so the
+    # surrounding prose is preserved byte-for-byte.
+    stats_start = "<!-- GENERATED:STATS:START -->\n"
+    if stats_start not in text:
+        raise ValueError(f"template missing {stats_start!r} marker; cannot insert map block")
     block = (
         f"{H3_MAP_START_MARKER}\n![{H3_MAP_TITLE}]({asset_relative_path})\n{H3_MAP_END_MARKER}\n"
     )
-    new_text = text.replace(stats_end, stats_end + "\n" + block, 1)
+    new_text = text.replace(stats_start, block + stats_start, 1)
     tmp = template_path.with_name(f".{template_path.name}.{uuid.uuid4().hex}.tmp")
     try:
         tmp.write_text(new_text, encoding="utf-8")
