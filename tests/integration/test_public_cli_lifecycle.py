@@ -259,6 +259,10 @@ def test_run_two_resumes_and_publishes_remaining_and_metadata(
     )
     (data_root / "README.md").write_text("# README")
     (data_root / "stats.json").write_text("{}")
+    (data_root / "assets").mkdir()
+    (data_root / "assets" / "description_polygon_density.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + b"map" * 1024
+    )
     state = {
         "schema_version": 1,
         "published": {
@@ -396,6 +400,10 @@ def test_run_three_is_pure_no_op(
     )
     (data_root / "README.md").write_text("# README")
     (data_root / "stats.json").write_text("{}")
+    (data_root / "assets").mkdir()
+    (data_root / "assets" / "description_polygon_density.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + b"map" * 1024
+    )
     plan_meta = _build_metadata_only_upload_plan(data_root)
     state = {
         "schema_version": 1,
@@ -427,6 +435,10 @@ def test_run_three_is_pure_no_op(
             "stats_sha256": file_sha256(data_root / "stats.json"),
             "readme_size_bytes": (data_root / "README.md").stat().st_size,
             "stats_size_bytes": (data_root / "stats.json").stat().st_size,
+            "h3_map_sha256": file_sha256(data_root / "assets" / "description_polygon_density.png"),
+            "h3_map_size_bytes": (data_root / "assets" / "description_polygon_density.png")
+            .stat()
+            .st_size,
             "verified_revision": "pre-rev-meta",
             "completed_at": "2026-07-28T00:00:00+00:00",
         },
@@ -510,5 +522,6 @@ def test_uploads_only_contain_per_pbf_and_metadata_files(
                 in {
                     "README.md",
                     "stats.json",
+                    "assets/description_polygon_density.png",
                 }
             )

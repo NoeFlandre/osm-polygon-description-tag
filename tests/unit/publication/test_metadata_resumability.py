@@ -112,6 +112,10 @@ def _plant_resumable_artifact(data_root: Path, source_root: Path, source_name: s
 def _plant_metadata(data_root: Path) -> None:
     (data_root / "README.md").write_text("# README")
     (data_root / "stats.json").write_text("{}")
+    (data_root / "assets").mkdir(exist_ok=True)
+    (data_root / "assets" / "description_polygon_density.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + b"map" * 1024
+    )
 
 
 def _patch_external_boundaries(

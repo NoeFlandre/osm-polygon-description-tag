@@ -304,6 +304,10 @@ def test_logs_directory_never_appears_in_upload_plan(tmp_path: Path, logger_fact
     (data_root / "manifests").mkdir()
     (data_root / "README.md").write_text("# R")
     (data_root / "stats.json").write_text("{}")
+    (data_root / "assets").mkdir()
+    (data_root / "assets" / "description_polygon_density.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + b"map" * 1024
+    )
     parquet_path = data_root / "data" / "a.parquet"
     has_parquet = parquet_path.exists()
     per_pbf_plan = _build_per_pbf_upload_plan(data_root, "a.osm.pbf") if has_parquet else None

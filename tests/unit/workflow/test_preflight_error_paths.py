@@ -284,6 +284,10 @@ def test_execute_publication_rejects_empty_revision(
     (paths.source_root / "a.osm.pbf").write_bytes(b"a-bytes")
     (paths.data_root / "README.md").write_text("# R")
     (paths.data_root / "stats.json").write_text("{}")
+    (paths.data_root / "assets").mkdir()
+    (paths.data_root / "assets" / "description_polygon_density.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + b"map" * 1024
+    )
     (paths.data_root / "data").mkdir()
     (paths.data_root / "manifests").mkdir()
     write_geoparquet(

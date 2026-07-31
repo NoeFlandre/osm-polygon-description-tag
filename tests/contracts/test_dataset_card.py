@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from shapely.geometry import Polygon
 
 from osm_polygon_description_tag.manifest import (
@@ -71,32 +72,69 @@ def _populate(tmp_path: Path) -> Path:
     return data_root
 
 
-def test_generation_preserves_handwritten_sections(tmp_path: Path) -> None:
+def test_generation_preserves_handwritten_sections(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     data_root = _populate(tmp_path)
+
+    # Stub the H3 map hooks so the test focuses on the dataset card
+    # generation, not on matplotlib or the assets/ directory.
+    monkeypatch.setattr(
+        "osm_polygon_description_tag.dataset.reporting._render_h3_map_block",
+        lambda data_root,
+        total_rows,
+        occupied_cells: "![H3 map](assets/description_polygon_density.png)\n",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "osm_polygon_description_tag.dataset.reporting._write_h3_map_png",
+        lambda data_root, total_rows, occupied_cells: None,
+        raising=False,
+    )
 
     generate_dataset_docs(data_root, TEMPLATE, clock=lambda: "2026-07-27T00:00:00+00:00")
 
     readme = (data_root / "README.md").read_text(encoding="utf-8")
     template = TEMPLATE.read_text(encoding="utf-8")
 
-    start = readme.index("<!-- GENERATED:STATS:START -->")
-    end = readme.index("<!-- GENERATED:STATS:END -->") + len("<!-- GENERATED:STATS:END -->")
-    handwritten_actual = readme[:start] + readme[end:]
-    handwritten_template = (
-        template[: template.index("<!-- GENERATED:STATS:START -->")]
-        + template[
-            template.index("<!-- GENERATED:STATS:END -->") + len("<!-- GENERATED:STATS:END -->") :
-        ]
-    )
-    # Only the marked generated block changes; everything else is verbatim.
+    def _strip_generated(text: str) -> str:
+        for start_marker, end_marker in (
+            ("<!-- GENERATED:STATS:START -->", "<!-- GENERATED:STATS:END -->"),
+            ("<!-- GENERATED:H3_MAP:START -->", "<!-- GENERATED:H3_MAP:END -->"),
+        ):
+            start = text.index(start_marker)
+            end = text.index(end_marker) + len(end_marker)
+            text = text[:start] + text[end:]
+        return text
+
+    handwritten_actual = _strip_generated(readme)
+    handwritten_template = _strip_generated(template)
+    # Only the marked generated blocks change; everything else is verbatim.
     assert handwritten_actual == handwritten_template
     # Attribution and obligations survive generation.
     assert "OpenStreetMap contributors" in readme
     assert "Open Database License" in readme
 
 
-def test_generated_block_contains_only_backed_numbers(tmp_path: Path) -> None:
+def test_generated_block_contains_only_backed_numbers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     data_root = _populate(tmp_path)
+
+    # Stub the H3 map hooks so the test focuses on the dataset card
+    # generation, not on matplotlib or the assets/ directory.
+    monkeypatch.setattr(
+        "osm_polygon_description_tag.dataset.reporting._render_h3_map_block",
+        lambda data_root,
+        total_rows,
+        occupied_cells: "![H3 map](assets/description_polygon_density.png)\n",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "osm_polygon_description_tag.dataset.reporting._write_h3_map_png",
+        lambda data_root, total_rows, occupied_cells: None,
+        raising=False,
+    )
 
     stats = generate_dataset_docs(data_root, TEMPLATE, clock=lambda: "2026-07-27T00:00:00+00:00")
 

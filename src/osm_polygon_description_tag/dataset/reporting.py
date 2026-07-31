@@ -501,6 +501,36 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
     return "\n".join(lines)
 
 
+def _render_h3_map_block(data_root: Path, total_rows: int, occupied_cells: int) -> str:
+    """Render the dataset-card map body referencing the H3 density PNG.
+
+    Returns only the body of the map block (the image markdown line), not
+    the surrounding marker block. :func:`install_map_block` is responsible
+    for placing the body between the start and end markers.
+    """
+    from osm_polygon_description_tag.dataset.geography.card import (
+        H3_MAP_ASSET_RELATIVE_PATH,
+        H3_MAP_TITLE,
+    )
+
+    return f"![{H3_MAP_TITLE}]({H3_MAP_ASSET_RELATIVE_PATH})\n"
+
+
+def _write_h3_map_png(data_root: Path, total_rows: int, occupied_cells: int) -> None:
+    """Render the H3 density PNG into ``data_root/assets/``."""
+    from osm_polygon_description_tag.dataset.geography import (
+        aggregate_h3_density,
+        render_density_map,
+    )
+    from osm_polygon_description_tag.dataset.geography.card import (
+        H3_MAP_ASSET_RELATIVE_PATH,
+    )
+
+    output = data_root / H3_MAP_ASSET_RELATIVE_PATH
+    counts = aggregate_h3_density(data_root)
+    render_density_map(counts, output)
+
+
 def generate_dataset_docs(
     data_root: Path,
     template_path: Path,
@@ -523,6 +553,25 @@ def generate_dataset_docs(
     readme = _GENERATED_PATTERN.sub(
         lambda match: match.group(1) + rendered_block + match.group(3), template
     )
+
+    # Install the H3 density map block. The aggregator streams every
+    # Parquet in bounded memory; the renderer writes a self-contained PNG
+    # into ``assets/`` and the block references it via the relative
+    # dataset-repository path.
+    total_rows = int(stats["rows"])
+    from osm_polygon_description_tag.dataset.geography import aggregate_h3_density
+    from osm_polygon_description_tag.dataset.geography.card import (
+        H3_MAP_END_MARKER,
+        H3_MAP_START_MARKER,
+        install_map_block,
+    )
+
+    occupied_cells = len(aggregate_h3_density(data_root))
+    map_body = _render_h3_map_block(data_root, total_rows, occupied_cells)
+    if H3_MAP_START_MARKER in readme and H3_MAP_END_MARKER in readme:
+        readme = install_map_block(readme, map_body)
+    _write_h3_map_png(data_root, total_rows, occupied_cells)
+
     _write_if_changed(data_root / "stats.json", stats_json)
     _write_if_changed(data_root / "README.md", readme)
     return stats

@@ -18,13 +18,14 @@ from osm_polygon_description_tag.publication.models import (
 )
 from osm_polygon_description_tag.publication.upload import _build_command
 
-_ALLOWED_TOP_LEVEL = {
+ALLOWED_TOP_LEVEL = {
     "README.md",
-    "stats.json",
+    "assets",
     "data",
+    "logs",
     "manifests",
     "publication-state.json",
-    "logs",
+    "stats.json",
 }
 
 # The exact uploader-owned cache directory layout. ``hf upload-large-folder``
@@ -33,6 +34,13 @@ _ALLOWED_TOP_LEVEL = {
 # NEVER appear in any upload plan or include flag.
 _UPLOADER_CACHE_RELATIVE = ".cache/huggingface"
 _LOCAL_WORK_RELATIVE = ".work"
+
+# The single, exact asset filename that may appear under ``assets/``. The
+# allowlist below rejects every other entry to keep the publication
+# surface explicit and bounded.
+H3_MAP_FILENAME = "description_polygon_density.png"
+H3_MAP_ASSET_RELATIVE = f"assets/{H3_MAP_FILENAME}"
+_ALLOWED_ASSET_FILES = frozenset({H3_MAP_FILENAME})
 
 
 def file_sha256_bytes(data: bytes) -> str:
@@ -73,11 +81,57 @@ def _validate_manifest(manifest_path: Path, parquet_path: Path) -> None:
         raise PublicationError(f"parquet fails validation for publication: {error}") from error
 
 
+def _validate_assets_directory(assets_dir: Path) -> list[UploadItem]:
+    """Validate every entry under ``assets/`` and return upload items.
+
+    Only the exact intended map filename is permitted. Hidden files,
+    temporary files, symlinks, and unrelated files are rejected.
+    """
+    if assets_dir.is_symlink():
+        raise PublicationError(f"assets directory must be a real directory: {assets_dir}")
+    if not assets_dir.is_dir():
+        raise PublicationError(f"assets directory missing: {assets_dir}")
+    items: list[UploadItem] = []
+    for entry in sorted(assets_dir.iterdir(), key=lambda path: path.name):
+        if entry.name.startswith("."):
+            raise PublicationError(f"hidden file under assets/ not allowed: {entry}")
+        if entry.name.endswith(".tmp"):
+            raise PublicationError(f"temporary file under assets/ not allowed: {entry}")
+        if entry.name not in _ALLOWED_ASSET_FILES:
+            raise PublicationError(f"unrelated file under assets/ not allowed: {entry}")
+        if entry.is_symlink():
+            raise PublicationError(f"symlink not allowed under assets/: {entry}")
+        if not entry.is_file():
+            raise PublicationError(f"not a regular file under assets/: {entry}")
+        items.append(_build_item(entry, f"assets/{entry.name}"))
+    if not items:
+        raise PublicationError(f"assets directory must contain the H3 density map: {assets_dir}")
+    return items
+
+
+def _validate_assets_for_publication(data_root: Path) -> UploadItem:
+    """Validate the entire ``assets/`` directory and return the H3 map item.
+
+    Both the per-PBF and metadata-only plans must pass through the full
+    directory validation so hidden, temporary, symlinked, and unrelated
+    files are always rejected, even when the canonical map file alone
+    would otherwise satisfy the plan.
+    """
+    assets_dir = data_root / "assets"
+    items = _validate_assets_directory(assets_dir)
+    for item in items:
+        if item.relative_path == H3_MAP_ASSET_RELATIVE:
+            return item
+    raise PublicationError(
+        f"assets directory must contain the H3 density map at {H3_MAP_ASSET_RELATIVE}"
+    )
+
+
 def _collect_allowlisted_files(data_root: Path) -> tuple[UploadItem, ...]:
     if not data_root.is_dir() or data_root.is_symlink():
         raise PublicationError(f"data root is not a regular directory: {data_root}")
     for entry in data_root.iterdir():
-        if entry.name in _ALLOWED_TOP_LEVEL:
+        if entry.name in ALLOWED_TOP_LEVEL:
             continue
         if entry.name == ".cache":
             # The exact uploader-owned layout ``.cache/huggingface`` is
@@ -113,6 +167,10 @@ def _collect_allowlisted_files(data_root: Path) -> tuple[UploadItem, ...]:
         raise PublicationError(f"missing required file: {stats}")
     items.append(_build_item(readme, "README.md"))
     items.append(_build_item(stats, "stats.json"))
+
+    assets_dir = data_root / "assets"
+    if assets_dir.is_dir():
+        items.extend(_validate_assets_directory(assets_dir))
 
     data_dir = data_root / "data"
     if data_dir.is_dir():
@@ -163,8 +221,16 @@ def create_upload_plan(data_root: Path) -> UploadPlan:
     )
 
 
+def _require_h3_map(data_root: Path) -> UploadItem:
+    """Return the canonical H3 map upload item, failing if it is missing or invalid."""
+    map_path = data_root / H3_MAP_ASSET_RELATIVE
+    if not map_path.is_file():
+        raise PublicationError(f"required file missing for H3 map: {map_path}")
+    return _build_item(map_path, H3_MAP_ASSET_RELATIVE)
+
+
 def _build_per_pbf_upload_plan(data_root: Path, source_name: str) -> UploadPlan:
-    """Build an :class:`UploadPlan` for one PBF containing exactly 4 files.
+    """Build an :class:`UploadPlan` for one PBF containing exactly 5 files.
 
     The plan items are always:
 
@@ -172,6 +238,7 @@ def _build_per_pbf_upload_plan(data_root: Path, source_name: str) -> UploadPlan:
     - ``manifests/<stem>.manifest.json``
     - ``README.md``
     - ``stats.json``
+    - ``assets/description_polygon_density.png``
 
     This is the single source of truth for the production and test runner
     paths. Production and tests must not diverge.
@@ -188,7 +255,11 @@ def _build_per_pbf_upload_plan(data_root: Path, source_name: str) -> UploadPlan:
     for path in required:
         if not path.is_file():
             raise PublicationError(f"required file missing for per-PBF plan: {path}")
-    items = tuple(_build_item(path, path.relative_to(data_root).as_posix()) for path in required)
+    map_item = _validate_assets_for_publication(data_root)
+    items = (
+        *(_build_item(path, path.relative_to(data_root).as_posix()) for path in required),
+        map_item,
+    )
     resolved_root = data_root.resolve(strict=False)
     provisional = UploadPlan(
         repo_id=REPO_ID,
@@ -206,12 +277,19 @@ def _build_per_pbf_upload_plan(data_root: Path, source_name: str) -> UploadPlan:
 
 
 def _build_metadata_only_upload_plan(data_root: Path) -> UploadPlan:
-    """Build an :class:`UploadPlan` containing only README.md and stats.json."""
-    required = (data_root / "README.md", data_root / "stats.json")
+    """Build an :class:`UploadPlan` containing README.md, stats.json, and the H3 map."""
+    required = (
+        data_root / "README.md",
+        data_root / "stats.json",
+    )
     for path in required:
         if not path.is_file():
             raise PublicationError(f"required file missing for metadata plan: {path}")
-    items = tuple(_build_item(path, path.relative_to(data_root).as_posix()) for path in required)
+    map_item = _validate_assets_for_publication(data_root)
+    items = (
+        *(_build_item(path, path.relative_to(data_root).as_posix()) for path in required),
+        map_item,
+    )
     resolved_root = data_root.resolve(strict=False)
     provisional = UploadPlan(
         repo_id=REPO_ID,

@@ -180,6 +180,10 @@ def test_full_run_no_rebuild_on_doc_only_commit(
 
     (paths.data_root / "README.md").write_text("stub")
     (paths.data_root / "stats.json").write_text("{}")
+    (paths.data_root / "assets").mkdir(exist_ok=True)
+    (paths.data_root / "assets" / "description_polygon_density.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + b"map" * 1024
+    )
 
     # Mark a.osm.pbf as already published AND mark the metadata as
     # already published so the fully-completed run is a no-op.
@@ -205,6 +209,12 @@ def test_full_run_no_rebuild_on_doc_only_commit(
             "stats_sha256": file_sha256(paths.data_root / "stats.json"),
             "readme_size_bytes": (paths.data_root / "README.md").stat().st_size,
             "stats_size_bytes": (paths.data_root / "stats.json").stat().st_size,
+            "h3_map_sha256": file_sha256(
+                paths.data_root / "assets" / "description_polygon_density.png"
+            ),
+            "h3_map_size_bytes": (paths.data_root / "assets" / "description_polygon_density.png")
+            .stat()
+            .st_size,
             "verified_revision": "rev-meta",
             "completed_at": "2026-07-27T00:00:00+00:00",
         },

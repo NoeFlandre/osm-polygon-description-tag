@@ -44,3 +44,8 @@ artifact-derived.
 Run `uv run pytest tests/unit/dataset tests/contracts/test_schema_contract.py
 tests/contracts/test_dataset_card.py tests/contracts/test_import_compatibility.py -q`.
 Contract and integration tests additionally cover artifact schemas and repeatable output.
+
+The H3 density map produced by `osm_polygon_description_tag.dataset.geography`
+is a derived publication artifact, not a Parquet field. It is generated
+alongside `stats.json` and the dataset card on every `generate_dataset_docs`
+invocation.

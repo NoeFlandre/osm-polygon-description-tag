@@ -895,7 +895,9 @@ def _upload_final_metadata(
 
     # Write the metadata state atomically only after verification succeeds.
     from osm_polygon_description_tag.dataset.manifest import file_sha256
+    from osm_polygon_description_tag.publication.planning import H3_MAP_ASSET_RELATIVE
 
+    map_path = paths.data_root / H3_MAP_ASSET_RELATIVE
     _write_metadata_state(
         paths.data_root,
         identity_sha256=metadata_plan.identity_sha256,
@@ -903,6 +905,8 @@ def _upload_final_metadata(
         stats_sha256=file_sha256(paths.data_root / "stats.json"),
         readme_size_bytes=(paths.data_root / "README.md").stat().st_size,
         stats_size_bytes=(paths.data_root / "stats.json").stat().st_size,
+        h3_map_sha256=file_sha256(map_path),
+        h3_map_size_bytes=map_path.stat().st_size,
         verified_revision=verified,
         completed_at=clock(),
     )
