@@ -18,6 +18,9 @@ asset.
 * The colour scale is logarithmic (`matplotlib.colors.LogNorm`).
 * Natural Earth 110m landmasses are bundled in the package and drawn in
   beige over the blue ocean. Rendering never downloads basemap data.
+* The map cache identity is derived from finalized Parquet hashes, the H3
+  resolution, renderer revision, and basemap hash. README-only regeneration
+  reuses the existing PNG; data or rendering-input changes invalidate it.
 * The map caption reports the total dataset row count and the number
   of occupied H3 cells, derived from the aggregation.
 * Re-rendering identical input produces byte-identical PNGs and

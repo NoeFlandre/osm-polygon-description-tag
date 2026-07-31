@@ -15,10 +15,11 @@ of the validated Parquets, the matching manifests, and the card template.
 Wall-clock values are not serialized. Atomic, write-if-changed writes
 preserve mtimes when bytes are byte-identical.
 
-Single-aggregation contract: every call to :func:`generate_dataset_docs`
-performs exactly one H3 aggregation pass per generation. The resulting
-count mapping is reused for the occupied-cell count, the dataset-card
-caption, and the deterministic PNG render.
+H3 aggregation contract: every call to :func:`generate_dataset_docs` performs
+at most one H3 aggregation pass. A deterministic input identity derived from
+the finalized Parquet hashes, renderer revision, H3 resolution, and bundled
+basemap lets README-only regeneration reuse the existing PNG without reading
+the Parquets again for map counts.
 """
 
 from __future__ import annotations
@@ -35,7 +36,11 @@ from typing import Any, cast
 import duckdb
 import pyarrow.parquet as pq
 
-from osm_polygon_description_tag.dataset.geography import aggregate_h3_density
+from osm_polygon_description_tag.dataset.geography import (
+    DEFAULT_H3_RESOLUTION,
+    aggregate_h3_density,
+)
+from osm_polygon_description_tag.dataset.geography.basemap import bundled_basemap_path
 from osm_polygon_description_tag.dataset.geography.card import (
     H3_MAP_ASSET_RELATIVE_PATH,
     H3_MAP_END_MARKER,
@@ -52,7 +57,9 @@ from osm_polygon_description_tag.dataset.manifest import (
 )
 from osm_polygon_description_tag.dataset.schema import SCHEMA_VERSION
 
-_STATS_SCHEMA_VERSION = 3
+_STATS_SCHEMA_VERSION = 4
+_H3_MAP_CACHE_SCHEMA_VERSION = 1
+_H3_MAP_RENDER_VERSION = 2
 _QUANTILE_PROBABILITIES = [0.25, 0.5, 0.75]
 _GENERATED_PATTERN = re.compile(
     r"(<!-- GENERATED:STATS:START -->\n)(.*?)(<!-- GENERATED:STATS:END -->)", re.DOTALL
@@ -72,6 +79,38 @@ _FEATURE_COLUMNS = [
 
 class ReportingError(ValueError):
     """Raised when artifacts/manifests are missing, stale, or inconsistent."""
+
+
+def _read_json_object(path: Path) -> dict[str, Any]:
+    """Read a JSON object for cache metadata, treating invalid data as absent."""
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _h3_map_input_sha256(stats: Mapping[str, Any]) -> str:
+    """Return the stable identity of every input that can affect the map."""
+    files = stats.get("files", [])
+    file_inputs = [
+        {
+            "parquet": str(entry["parquet"]),
+            "output_sha256": str(entry["output_sha256"]),
+        }
+        for entry in files
+        if isinstance(entry, Mapping)
+    ]
+    file_inputs.sort(key=lambda entry: entry["parquet"])
+    payload = {
+        "cache_schema_version": _H3_MAP_CACHE_SCHEMA_VERSION,
+        "render_version": _H3_MAP_RENDER_VERSION,
+        "h3_resolution": DEFAULT_H3_RESOLUTION,
+        "basemap_sha256": file_sha256(bundled_basemap_path()),
+        "files": file_inputs,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def utc_now_iso() -> str:
@@ -561,11 +600,35 @@ def generate_dataset_docs(
     manifests, and the card template. Wall-clock values are never serialized.
     Identical regeneration is a no-op for file bytes and mtimes.
 
-    The H3 density map is aggregated in exactly one pass per generation
-    and the same count mapping drives the occupied-cell count, the
-    dataset-card caption, and the deterministic PNG render.
+    The H3 density map is aggregated only when its deterministic input
+    identity is absent or stale. The existing PNG is reused for README-only
+    changes and when finalized Parquet bytes are unchanged.
     """
     stats = collect_stats(data_root, clock=clock)
+    map_input_sha256 = _h3_map_input_sha256(stats)
+    total_rows = int(stats["rows"])
+    map_path = data_root / H3_MAP_ASSET_RELATIVE_PATH
+    previous_stats = _read_json_object(data_root / "stats.json")
+    previous_identity = previous_stats.get("h3_map_input_sha256")
+    previous_occupied = previous_stats.get("h3_occupied_cells")
+    can_reuse_map = (
+        map_path.is_file()
+        and previous_identity == map_input_sha256
+        and isinstance(previous_occupied, int)
+        and not isinstance(previous_occupied, bool)
+        and previous_occupied >= 0
+    )
+    if can_reuse_map:
+        occupied_cells = previous_occupied
+        h3_counts: Mapping[str, int] | None = None
+    else:
+        h3_counts = aggregate_h3_density(data_root)
+        occupied_cells = len(h3_counts)
+        _write_h3_map_png(data_root, total_rows, occupied_cells, counts=h3_counts)
+
+    stats["h3_map_input_sha256"] = map_input_sha256
+    stats["h3_occupied_cells"] = occupied_cells
+
     stats_json = json.dumps(stats, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     stats_sha256 = hashlib.sha256(stats_json.encode("utf-8")).hexdigest()
     template = template_path.read_text(encoding="utf-8")
@@ -576,17 +639,9 @@ def generate_dataset_docs(
         lambda match: match.group(1) + rendered_block + match.group(3), template
     )
 
-    # Single H3 aggregation pass; the resulting count mapping is reused
-    # for the dataset-card caption, the deterministic PNG render, and any
-    # other dependent value computed in this generation.
-    total_rows = int(stats["rows"])
-    h3_counts = aggregate_h3_density(data_root)
-    occupied_cells = sum(1 for _ in h3_counts)
-
     map_body = _render_h3_map_block(data_root, total_rows, occupied_cells)
     if H3_MAP_START_MARKER in readme and H3_MAP_END_MARKER in readme:
         readme = install_map_block(readme, map_body)
-    _write_h3_map_png(data_root, total_rows, occupied_cells, counts=h3_counts)
 
     _write_if_changed(data_root / "stats.json", stats_json)
     _write_if_changed(data_root / "README.md", readme)

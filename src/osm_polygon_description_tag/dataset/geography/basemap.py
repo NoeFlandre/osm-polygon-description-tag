@@ -24,6 +24,11 @@ def _bundled_basemap_path() -> Path:
     return Path(__file__).parents[2] / "_data" / LAND_BASEMAP_FILENAME
 
 
+def bundled_basemap_path() -> Path:
+    """Return the immutable package path for the bundled land reference."""
+    return _bundled_basemap_path()
+
+
 def load_land_basemap(path: Path | None = None) -> list[Any]:
     """Load bundled Natural Earth land features without network access.
 
@@ -83,6 +88,7 @@ def draw_landmasses(ax: Any, features: Sequence[Any]) -> None:
 
 __all__ = [
     "LAND_BASEMAP_FILENAME",
+    "bundled_basemap_path",
     "draw_landmasses",
     "load_land_basemap",
 ]

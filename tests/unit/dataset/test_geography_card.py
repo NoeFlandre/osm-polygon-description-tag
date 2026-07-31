@@ -239,6 +239,48 @@ def test_generation_aggregates_h3_once_and_reuses_counts(
     assert captured["counts"] == {"85280003fffffff": 2}
 
 
+def test_readme_only_regeneration_reuses_existing_h3_map(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Changing the card template does not reaggregate or rewrite the map."""
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    _populate_dataset(data_root, source_root)
+
+    import osm_polygon_description_tag.dataset.reporting as reporting
+
+    aggregate_calls: list[Path] = []
+
+    def fake_aggregate(root: Path) -> dict[str, int]:
+        aggregate_calls.append(root)
+        return {"85280003fffffff": 2}
+
+    def fake_render(_counts: dict[str, int], output_path: Path) -> None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"stable-map")
+
+    monkeypatch.setattr(reporting, "aggregate_h3_density", fake_aggregate)
+    monkeypatch.setattr(reporting, "render_density_map", fake_render)
+
+    template = dataset_card_template()
+    reporting.generate_dataset_docs(data_root, template)
+    map_path = data_root / H3_MAP_ASSET_RELATIVE_PATH
+    first_map_bytes = map_path.read_bytes()
+    first_map_mtime = map_path.stat().st_mtime_ns
+
+    changed_template = tmp_path / "changed-template.md"
+    changed_template.write_text(
+        template.read_text(encoding="utf-8") + "\n<!-- editorial prose changed -->\n",
+        encoding="utf-8",
+    )
+    reporting.generate_dataset_docs(data_root, changed_template)
+
+    assert aggregate_calls == [data_root]
+    assert map_path.read_bytes() == first_map_bytes
+    assert map_path.stat().st_mtime_ns == first_map_mtime
+    assert "editorial prose changed" in (data_root / "README.md").read_text(encoding="utf-8")
+
+
 def test_generation_preserves_existing_stats_block(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
