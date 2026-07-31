@@ -191,7 +191,7 @@ def test_generation_installs_map_block_with_correct_relative_path(
     # Patch the dataset.reporting module to also use a stub for the PNG.
     monkeypatch.setattr(
         "osm_polygon_description_tag.dataset.reporting._write_h3_map_png",
-        lambda data_root, total_rows, occupied_cells: None,
+        lambda data_root, total_rows, occupied_cells, counts=None: None,
         raising=False,
     )
 
@@ -204,6 +204,39 @@ def test_generation_installs_map_block_with_correct_relative_path(
     assert H3_MAP_ASSET_RELATIVE_PATH in readme
     # The map asset path is relative to the dataset repository root.
     assert not H3_MAP_ASSET_RELATIVE_PATH.startswith("/")
+
+
+def test_generation_aggregates_h3_once_and_reuses_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The card and PNG must share one bounded H3 aggregation pass."""
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    _populate_dataset(data_root, source_root)
+
+    import osm_polygon_description_tag.dataset.reporting as reporting
+
+    calls: list[Path] = []
+    captured: dict[str, object] = {}
+
+    def fake_aggregate(root: Path) -> dict[str, int]:
+        calls.append(root)
+        return {"85280003fffffff": 2}
+
+    def fake_render(counts: dict[str, int], output_path: Path) -> None:
+        captured["counts"] = counts
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"deterministic-map")
+
+    monkeypatch.setattr(reporting, "aggregate_h3_density", fake_aggregate)
+    monkeypatch.setattr(reporting, "render_density_map", fake_render)
+
+    reporting.generate_dataset_docs(
+        data_root, dataset_card_template(), clock=lambda: "2026-01-01T00:00:00+00:00"
+    )
+
+    assert calls == [data_root]
+    assert captured["counts"] == {"85280003fffffff": 2}
 
 
 def test_generation_preserves_existing_stats_block(
@@ -223,7 +256,7 @@ def test_generation_preserves_existing_stats_block(
     )
     monkeypatch.setattr(
         "osm_polygon_description_tag.dataset.reporting._write_h3_map_png",
-        lambda data_root, total_rows, occupied_cells: None,
+        lambda data_root, total_rows, occupied_cells, counts=None: None,
         raising=False,
     )
 
@@ -260,7 +293,7 @@ def test_byte_level_regression_only_map_block_changes(
     )
     monkeypatch.setattr(
         "osm_polygon_description_tag.dataset.reporting._write_h3_map_png",
-        lambda data_root, total_rows, occupied_cells: None,
+        lambda data_root, total_rows, occupied_cells, counts=None: None,
         raising=False,
     )
     generate_dataset_docs(data_root, template)
@@ -302,7 +335,7 @@ def test_idempotent_regeneration_does_not_duplicate_map_block(
     )
     monkeypatch.setattr(
         "osm_polygon_description_tag.dataset.reporting._write_h3_map_png",
-        lambda data_root, total_rows, occupied_cells: None,
+        lambda data_root, total_rows, occupied_cells, counts=None: None,
         raising=False,
     )
     for _ in range(3):

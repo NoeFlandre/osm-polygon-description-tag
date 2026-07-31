@@ -586,7 +586,7 @@ def generate_dataset_docs(
     map_body = _render_h3_map_block(data_root, total_rows, occupied_cells)
     if H3_MAP_START_MARKER in readme and H3_MAP_END_MARKER in readme:
         readme = install_map_block(readme, map_body)
-    _write_h3_map_png(data_root, total_rows, occupied_cells)
+    _write_h3_map_png(data_root, total_rows, occupied_cells, counts=h3_counts)
 
     _write_if_changed(data_root / "stats.json", stats_json)
     _write_if_changed(data_root / "README.md", readme)

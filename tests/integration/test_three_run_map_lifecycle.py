@@ -175,7 +175,12 @@ def _stub_h3_render(monkeypatch: pytest.MonkeyPatch, data_root: Path) -> None:
     """
     from PIL import Image
 
-    def _write_png(data_root_arg: Path, total_rows: int, occupied_cells: int) -> None:
+    def _write_png(
+        data_root_arg: Path,
+        total_rows: int,
+        occupied_cells: int,
+        counts: dict[str, int] | None = None,
+    ) -> None:
         assets_dir = data_root_arg / "assets"
         assets_dir.mkdir(parents=True, exist_ok=True)
         target = assets_dir / "description_polygon_density.png"

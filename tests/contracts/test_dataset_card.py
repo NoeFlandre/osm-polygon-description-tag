@@ -88,7 +88,7 @@ def test_generation_preserves_handwritten_sections(
     )
     monkeypatch.setattr(
         "osm_polygon_description_tag.dataset.reporting._write_h3_map_png",
-        lambda data_root, total_rows, occupied_cells: None,
+        lambda data_root, total_rows, occupied_cells, counts=None: None,
         raising=False,
     )
 
@@ -132,7 +132,7 @@ def test_generated_block_contains_only_backed_numbers(
     )
     monkeypatch.setattr(
         "osm_polygon_description_tag.dataset.reporting._write_h3_map_png",
-        lambda data_root, total_rows, occupied_cells: None,
+        lambda data_root, total_rows, occupied_cells, counts=None: None,
         raising=False,
     )
 

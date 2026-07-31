@@ -149,7 +149,12 @@ def _setup_pre_h3_dataset(tmp_path: Path) -> tuple[Paths, Path, Path]:
 def _stub_png_render(monkeypatch: pytest.MonkeyPatch, data_root: Path) -> None:
     """Stub matplotlib to a no-op so the test does not pull in matplotlib's image backend."""
 
-    def _stub_write_h3_map_png(data_root_arg: Path, total_rows: int, occupied_cells: int) -> None:
+    def _stub_write_h3_map_png(
+        data_root_arg: Path,
+        total_rows: int,
+        occupied_cells: int,
+        counts: dict[str, int] | None = None,
+    ) -> None:
         from PIL import Image
 
         target = data_root_arg / "assets" / "description_polygon_density.png"
