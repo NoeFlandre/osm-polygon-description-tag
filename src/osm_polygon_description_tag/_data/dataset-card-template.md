@@ -19,8 +19,27 @@ MultiPolygon geometry, WGS84 geodesic area, bounding box, and OSM provenance.
 <!-- GENERATED:H3_MAP:START -->
 ![H3 density of description-tagged polygons](assets/description_polygon_density.png)
 <!-- GENERATED:H3_MAP:END -->
+Hexbin density of every described polygon at H3 resolution 3, drawn from each
+row's geometry centroid on a logarithmic scale. Darker cells contain more
+polygons.
 <!-- GENERATED:STATS:START -->
 <!-- GENERATED:STATS:END -->
+
+## Terminology
+
+- **Closed way**: an OSM way whose first and last nodes share an identifier
+  and that `osmium export` emits as an area when its tags mark it as a
+  polygon feature.
+- **Relation**: an OSM object (here `type=multipolygon` or `type=boundary`)
+  grouping several ways into one logical feature; kept when it assembles into
+  a valid polygon.
+- **Polygon**: a single outer-ring area geometry.
+- **MultiPolygon**: a geometry of one or more disjoint Polygon parts,
+  produced for assembled multipolygon and boundary relations.
+- **Base description**: the exact text of the `description=*` tag on a feature.
+- **Localized description**: the exact text of a suffixed
+  `description:<suffix>=*` tag; the suffix is preserved verbatim and is not
+  validated as a language code.
 
 ## What is included
 
