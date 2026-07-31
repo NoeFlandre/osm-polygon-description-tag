@@ -116,6 +116,9 @@ def _plant_metadata(data_root: Path) -> None:
     (data_root / "assets" / "description_polygon_density.png").write_bytes(
         b"\x89PNG\r\n\x1a\n" + b"map" * 1024
     )
+    (data_root / "assets" / "area_distribution.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + b"hist" * 1024
+    )
 
 
 def _patch_external_boundaries(

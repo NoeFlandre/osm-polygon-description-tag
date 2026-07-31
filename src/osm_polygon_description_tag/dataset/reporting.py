@@ -39,6 +39,12 @@ import pyarrow.parquet as pq
 from osm_polygon_description_tag.dataset.geography import (
     DEFAULT_H3_RESOLUTION,
     aggregate_h3_density,
+    render_area_histogram,
+)
+from osm_polygon_description_tag.dataset.geography.area_histogram import (
+    AREA_HISTOGRAM_RENDER_VERSION,
+    aggregate_area_histogram,
+    area_histogram_input_sha256,
 )
 from osm_polygon_description_tag.dataset.geography.basemap import bundled_basemap_path
 from osm_polygon_description_tag.dataset.geography.card import (
@@ -60,6 +66,9 @@ from osm_polygon_description_tag.dataset.schema import SCHEMA_VERSION
 _STATS_SCHEMA_VERSION = 4
 _H3_MAP_CACHE_SCHEMA_VERSION = 1
 _H3_MAP_RENDER_VERSION = 2
+_AREA_HISTOGRAM_FILENAME = "area_distribution.png"
+_AREA_HISTOGRAM_ASSET_RELATIVE_PATH = f"assets/{_AREA_HISTOGRAM_FILENAME}"
+_AREA_HISTOGRAM_TITLE = "Area distribution of description-tagged polygons"
 _QUANTILE_PROBABILITIES = [0.25, 0.5, 0.75]
 _GENERATED_PATTERN = re.compile(
     r"(<!-- GENERATED:STATS:START -->\n)(.*?)(<!-- GENERATED:STATS:END -->)", re.DOTALL
@@ -523,13 +532,14 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
 
     lines.extend(
         [
-            "### Spatial summary",
+            "### Area distribution",
             "",
-            "| Area statistic | Square metres |",
-            "| --- | ---: |",
-            f"| Minimum | {_fmt_area(stats['area_m2_min_m2'])} |",
-            f"| Median | {_fmt_area(stats['area_m2_median_m2'])} |",
-            f"| Maximum | {_fmt_area(stats['area_m2_max_m2'])} |",
+            f"![{_AREA_HISTOGRAM_TITLE}]({_AREA_HISTOGRAM_ASSET_RELATIVE_PATH})",
+            "",
+            "Area buckets span "
+            "<1 m² to >100B m² on a logarithmic scale; "
+            f"each bar shows the number of polygons in that bucket "
+            f"(total {_fmt_int(stats['rows'])}).",
             "",
         ]
     )
@@ -588,6 +598,26 @@ def _write_h3_map_png(
     render_density_map(counts, output)
 
 
+def _area_histogram_input_sha256(stats: Mapping[str, Any]) -> str:
+    """Stable identity for the area-histogram cache derived from finalized Parquets."""
+    files = stats.get("files", [])
+    mapping = {str(entry["parquet"]): str(entry["output_sha256"]) for entry in files}
+    return area_histogram_input_sha256(mapping)
+
+
+def _write_area_histogram_png(
+    data_root: Path,
+    *,
+    counts: Mapping[str, int] | None = None,
+) -> dict[str, int]:
+    """Aggregate the area histogram and render it into ``assets/``."""
+    if counts is None:
+        counts = aggregate_area_histogram(data_root)
+    output = data_root / _AREA_HISTOGRAM_ASSET_RELATIVE_PATH
+    render_area_histogram(counts, output)
+    return dict(counts)
+
+
 def generate_dataset_docs(
     data_root: Path,
     template_path: Path,
@@ -603,6 +633,10 @@ def generate_dataset_docs(
     The H3 density map is aggregated only when its deterministic input
     identity is absent or stale. The existing PNG is reused for README-only
     changes and when finalized Parquet bytes are unchanged.
+
+    The area distribution histogram follows the same cache discipline:
+    recomputation happens only when finalized Parquet output identities
+    change or the renderer version is bumped.
     """
     stats = collect_stats(data_root, clock=clock)
     map_input_sha256 = _h3_map_input_sha256(stats)
@@ -628,6 +662,24 @@ def generate_dataset_docs(
 
     stats["h3_map_input_sha256"] = map_input_sha256
     stats["h3_occupied_cells"] = occupied_cells
+
+    histogram_path = data_root / _AREA_HISTOGRAM_ASSET_RELATIVE_PATH
+    histogram_input_sha256 = _area_histogram_input_sha256(stats)
+    previous_histogram_identity = previous_stats.get("area_histogram_input_sha256")
+    previous_histogram_total = previous_stats.get("area_histogram_total_rows")
+    can_reuse_histogram = (
+        histogram_path.is_file()
+        and previous_histogram_identity == histogram_input_sha256
+        and isinstance(previous_histogram_total, int)
+        and not isinstance(previous_histogram_total, bool)
+        and previous_histogram_total >= 0
+    )
+    if not can_reuse_histogram:
+        _write_area_histogram_png(data_root)
+
+    stats["area_histogram_input_sha256"] = histogram_input_sha256
+    stats["area_histogram_render_version"] = AREA_HISTOGRAM_RENDER_VERSION
+    stats["area_histogram_total_rows"] = total_rows
 
     stats_json = json.dumps(stats, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     stats_sha256 = hashlib.sha256(stats_json.encode("utf-8")).hexdigest()

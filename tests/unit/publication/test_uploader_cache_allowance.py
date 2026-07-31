@@ -47,6 +47,9 @@ def _setup_data_root(tmp_path: Path) -> Path:
     (data_root / "assets" / "description_polygon_density.png").write_bytes(
         b"\x89PNG\r\n\x1a\n" + b"map" * 1024
     )
+    (data_root / "assets" / "area_distribution.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + b"hist" * 1024
+    )
     (data_root / "data").mkdir()
     (data_root / "manifests").mkdir()
     return data_root
@@ -145,6 +148,7 @@ def test_macos_ds_store_is_ignored_locally_and_never_uploaded(tmp_path: Path) ->
     assert {item.relative_path for item in items} == {
         "README.md",
         "assets/description_polygon_density.png",
+        "assets/area_distribution.png",
         "stats.json",
     }
 
@@ -175,6 +179,7 @@ def test_uploader_cache_never_in_per_pbf_plan(tmp_path: Path) -> None:
         [
             "README.md",
             "assets/description_polygon_density.png",
+            "assets/area_distribution.png",
             "data/a.parquet",
             "manifests/a.manifest.json",
             "stats.json",
@@ -190,7 +195,14 @@ def test_uploader_cache_never_in_metadata_only_plan(tmp_path: Path) -> None:
 
     plan = _build_metadata_only_upload_plan(data_root)
     relative = sorted(item.relative_path for item in plan.files)
-    assert relative == sorted(["README.md", "assets/description_polygon_density.png", "stats.json"])
+    assert relative == sorted(
+        [
+            "README.md",
+            "assets/description_polygon_density.png",
+            "assets/area_distribution.png",
+            "stats.json",
+        ]
+    )
 
 
 def test_uploader_cache_never_in_upload_command(tmp_path: Path) -> None:

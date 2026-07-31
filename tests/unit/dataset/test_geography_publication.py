@@ -108,6 +108,7 @@ def _plant_metadata(paths: Paths) -> None:
     (paths.data_root / "stats.json").write_text("{}")
     (paths.data_root / "assets").mkdir(exist_ok=True)
     (paths.data_root / "assets" / "description_polygon_density.png").write_bytes(MAP_BYTES_A)
+    (paths.data_root / "assets" / "area_distribution.png").write_bytes(MAP_BYTES_A)
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +131,7 @@ def test_per_pbf_plan_contains_exactly_five_items_including_map(tmp_path: Path) 
             "README.md",
             "stats.json",
             "assets/description_polygon_density.png",
+            "assets/area_distribution.png",
         ]
     )
 
@@ -160,6 +162,7 @@ def test_per_pbf_command_lists_all_five_files(tmp_path: Path) -> None:
             "README.md",
             "stats.json",
             "assets/description_polygon_density.png",
+            "assets/area_distribution.png",
         ]
     )
 
@@ -179,6 +182,7 @@ def test_metadata_plan_contains_exactly_three_items_including_map(tmp_path: Path
             "README.md",
             "stats.json",
             "assets/description_polygon_density.png",
+            "assets/area_distribution.png",
         ]
     )
 
@@ -188,6 +192,17 @@ def test_metadata_plan_fails_when_map_missing(tmp_path: Path) -> None:
     (paths.data_root / "README.md").write_text("# README")
     (paths.data_root / "stats.json").write_text("{}")
     # No map.
+    with pytest.raises(PublicationError):
+        _build_metadata_only_upload_plan(paths.data_root)
+
+
+def test_metadata_plan_fails_when_area_histogram_missing(tmp_path: Path) -> None:
+    paths, _source_root, _data_root = _setup_two_sources(tmp_path)
+    (paths.data_root / "README.md").write_text("# README")
+    (paths.data_root / "stats.json").write_text("{}")
+    (paths.data_root / "assets").mkdir()
+    (paths.data_root / "assets" / "description_polygon_density.png").write_bytes(MAP_BYTES_A)
+    # No histogram.
     with pytest.raises(PublicationError):
         _build_metadata_only_upload_plan(paths.data_root)
 
@@ -292,6 +307,10 @@ def test_metadata_state_matches_requires_unchanged_map(tmp_path: Path) -> None:
         h3_map_size_bytes=(paths.data_root / "assets" / "description_polygon_density.png")
         .stat()
         .st_size,
+        area_histogram_sha256=file_sha256(paths.data_root / "assets" / "area_distribution.png"),
+        area_histogram_size_bytes=(paths.data_root / "assets" / "area_distribution.png")
+        .stat()
+        .st_size,
         verified_revision="rev",
         completed_at="2026-01-01T00:00:00+00:00",
     )
@@ -299,6 +318,38 @@ def test_metadata_state_matches_requires_unchanged_map(tmp_path: Path) -> None:
 
     # Mutate the map.
     (paths.data_root / "assets" / "description_polygon_density.png").write_bytes(MAP_BYTES_B)
+    assert _metadata_state_matches(paths.data_root, plan) is False
+
+
+def test_metadata_state_matches_requires_unchanged_area_histogram(tmp_path: Path) -> None:
+    """Mutating the histogram PNG must invalidate the metadata no-op too."""
+    paths, _source_root, _data_root = _setup_two_sources(tmp_path)
+    _plant_metadata(paths)
+    plan = _build_metadata_only_upload_plan(paths.data_root)
+    from osm_polygon_description_tag.publication.state import _write_metadata_state
+
+    _write_metadata_state(
+        paths.data_root,
+        identity_sha256=plan.identity_sha256,
+        readme_sha256=file_sha256(paths.data_root / "README.md"),
+        stats_sha256=file_sha256(paths.data_root / "stats.json"),
+        readme_size_bytes=(paths.data_root / "README.md").stat().st_size,
+        stats_size_bytes=(paths.data_root / "stats.json").stat().st_size,
+        h3_map_sha256=file_sha256(paths.data_root / "assets" / "description_polygon_density.png"),
+        h3_map_size_bytes=(paths.data_root / "assets" / "description_polygon_density.png")
+        .stat()
+        .st_size,
+        area_histogram_sha256=file_sha256(paths.data_root / "assets" / "area_distribution.png"),
+        area_histogram_size_bytes=(paths.data_root / "assets" / "area_distribution.png")
+        .stat()
+        .st_size,
+        verified_revision="rev",
+        completed_at="2026-01-01T00:00:00+00:00",
+    )
+    assert _metadata_state_matches(paths.data_root, plan) is True
+
+    # Mutate the histogram.
+    (paths.data_root / "assets" / "area_distribution.png").write_bytes(MAP_BYTES_B)
     assert _metadata_state_matches(paths.data_root, plan) is False
 
 
@@ -319,6 +370,10 @@ def test_state_records_map_sha_and_size_fields(tmp_path: Path) -> None:
         h3_map_size_bytes=(paths.data_root / "assets" / "description_polygon_density.png")
         .stat()
         .st_size,
+        area_histogram_sha256=file_sha256(paths.data_root / "assets" / "area_distribution.png"),
+        area_histogram_size_bytes=(paths.data_root / "assets" / "area_distribution.png")
+        .stat()
+        .st_size,
         verified_revision="rev",
         completed_at="2026-01-01T00:00:00+00:00",
     )
@@ -328,6 +383,10 @@ def test_state_records_map_sha_and_size_fields(tmp_path: Path) -> None:
         paths.data_root / "assets" / "description_polygon_density.png"
     )
     assert metadata[_H3_MAP_SIZE_FIELD] == MAP_BYTES_A.__len__()
+    assert metadata["area_histogram_sha256"] == file_sha256(
+        paths.data_root / "assets" / "area_distribution.png"
+    )
+    assert metadata["area_histogram_size_bytes"] == MAP_BYTES_A.__len__()
 
 
 def test_unchanged_map_preserves_no_op(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -547,6 +606,17 @@ def test_global_plan_rejects_missing_map(tmp_path: Path) -> None:
         create_upload_plan(data_root)
 
 
+def test_global_plan_rejects_missing_area_histogram(tmp_path: Path) -> None:
+    """``assets/`` exists but the area distribution histogram is missing."""
+    paths, _source_root, data_root = _setup_two_sources(tmp_path)
+    (data_root / "README.md").write_text("# README")
+    (data_root / "stats.json").write_text("{}")
+    (data_root / "assets").mkdir()
+    (data_root / "assets" / "description_polygon_density.png").write_bytes(MAP_BYTES_A)
+    with pytest.raises(PublicationError, match="area distribution"):
+        create_upload_plan(data_root)
+
+
 def test_global_plan_includes_map_in_identity_hash(tmp_path: Path) -> None:
     """The dataset-wide plan includes the map in items and identity SHA-256."""
     paths, _source_root, data_root = _setup_two_sources(tmp_path)
@@ -581,6 +651,7 @@ def test_global_plan_includes_readme_stats_map_data_manifests(tmp_path: Path) ->
             "README.md",
             "stats.json",
             "assets/description_polygon_density.png",
+            "assets/area_distribution.png",
             "data/a.parquet",
             "data/b.parquet",
             "manifests/a.manifest.json",

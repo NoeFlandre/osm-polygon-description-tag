@@ -395,7 +395,7 @@ def test_idempotent_regeneration_does_not_duplicate_map_block(
 def test_metadata_only_plan_includes_map_when_present(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The metadata plan contains the map when assets/description_polygon_density.png exists."""
+    """The metadata plan contains both visual assets when they exist."""
     data_root = tmp_path / "generated"
     source_root = tmp_path / "raw"
     _populate_dataset(data_root, source_root)
@@ -403,9 +403,11 @@ def test_metadata_only_plan_includes_map_when_present(
     (data_root / "stats.json").write_text("{}")
     (data_root / "assets").mkdir()
     (data_root / "assets" / "description_polygon_density.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (data_root / "assets" / "area_distribution.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     plan = _build_metadata_only_upload_plan(data_root)
     relative = sorted(item.relative_path for item in plan.files)
     assert "assets/description_polygon_density.png" in relative
+    assert "assets/area_distribution.png" in relative
 
 
 # ---------------------------------------------------------------------------

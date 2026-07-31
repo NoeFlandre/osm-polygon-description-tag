@@ -29,6 +29,9 @@ def _make_dataset(data_root: Path) -> None:
     (data_root / "assets" / "description_polygon_density.png").write_bytes(
         b"\x89PNG\r\n\x1a\n" + b"map" * 1024
     )
+    (data_root / "assets" / "area_distribution.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + b"hist" * 1024
+    )
     source_root = data_root.parent / "raw"
     source_root.mkdir(exist_ok=True)
     source = source_root / "a-latest.osm.pbf"
@@ -68,6 +71,7 @@ def test_create_upload_plan_lists_allowlisted_files(tmp_path: Path) -> None:
 
     assert [item.relative_path for item in plan.files] == [
         "README.md",
+        "assets/area_distribution.png",
         "assets/description_polygon_density.png",
         "data/a-latest.parquet",
         "manifests/a-latest.manifest.json",

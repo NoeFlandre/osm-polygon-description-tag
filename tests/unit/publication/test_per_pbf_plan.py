@@ -102,12 +102,15 @@ def _plant_resumable_artifact(paths: Paths, source_root: Path, source_name: str)
 
 
 def _plant_metadata(paths: Paths) -> None:
-    """Plant README.md, stats.json, and the H3 density map in the data root."""
+    """Plant README.md, stats.json, and both visual assets in the data root."""
     (paths.data_root / "README.md").write_text("# README")
     (paths.data_root / "stats.json").write_text("{}")
     (paths.data_root / "assets").mkdir(exist_ok=True)
     (paths.data_root / "assets" / "description_polygon_density.png").write_bytes(
         b"\x89PNG\r\n\x1a\n" + b"map" * 1024
+    )
+    (paths.data_root / "assets" / "area_distribution.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + b"hist" * 1024
     )
 
 
@@ -131,8 +134,9 @@ def test_per_pbf_plan_contains_exactly_five_items(tmp_path: Path) -> None:
             "README.md",
             "stats.json",
             "assets/description_polygon_density.png",
+            "assets/area_distribution.png",
         ]
-    ), f"per-PBF plan must contain exactly 5 files; got {expected_relative}"
+    ), f"per-PBF plan must contain exactly 6 files; got {expected_relative}"
 
     # The command the runner receives equals the canonical command.
     expected_command = per_pbf_command(paths.data_root, "a.osm.pbf")
@@ -278,9 +282,16 @@ def test_second_pbf_upload_does_not_re_upload_first_pbf(
 
 
 def test_metadata_only_plan_contains_exactly_three_items(tmp_path: Path) -> None:
-    """The metadata-only UploadPlan contains exactly README.md, stats.json, and the map."""
+    """The metadata-only UploadPlan contains README.md, stats.json, and both visual assets."""
     paths, source_root, data_root = _setup_two_sources(tmp_path)
     _plant_metadata(paths)
     plan = _build_metadata_only_upload_plan(paths.data_root)
     relative = sorted([item.relative_path for item in plan.files])
-    assert relative == sorted(["README.md", "stats.json", "assets/description_polygon_density.png"])
+    assert relative == sorted(
+        [
+            "README.md",
+            "stats.json",
+            "assets/description_polygon_density.png",
+            "assets/area_distribution.png",
+        ]
+    )

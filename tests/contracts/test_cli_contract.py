@@ -149,6 +149,7 @@ def test_publish_rejects_wrong_plan_identity(
     (data / "assets" / "description_polygon_density.png").write_bytes(
         b"\x89PNG\r\n\x1a\n" + b"map" * 1024
     )
+    (data / "assets" / "area_distribution.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"hist" * 1024)
 
     args = SimpleNamespace(
         plan="deadbeef",  # wrong on purpose
@@ -241,6 +242,7 @@ def test_publish_plan_handler_reports_identity(
     (data / "assets" / "description_polygon_density.png").write_bytes(
         b"\x89PNG\r\n\x1a\n" + b"map" * 1024
     )
+    (data / "assets" / "area_distribution.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"hist" * 1024)
     args = SimpleNamespace(
         source_root=tmp_path / "raw",
         data_root=data,
@@ -308,6 +310,7 @@ def test_handle_publish_invokes_execute_upload(
     (data / "assets" / "description_polygon_density.png").write_bytes(
         b"\x89PNG\r\n\x1a\n" + b"map" * 1024
     )
+    (data / "assets" / "area_distribution.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"hist" * 1024)
 
     import osm_polygon_description_tag.cli as cli
 

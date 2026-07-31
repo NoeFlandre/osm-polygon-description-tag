@@ -263,6 +263,9 @@ def test_run_two_resumes_and_publishes_remaining_and_metadata(
     (data_root / "assets" / "description_polygon_density.png").write_bytes(
         b"\x89PNG\r\n\x1a\n" + b"map" * 1024
     )
+    (data_root / "assets" / "area_distribution.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + b"hist" * 1024
+    )
     state = {
         "schema_version": 1,
         "published": {
@@ -404,6 +407,9 @@ def test_run_three_is_pure_no_op(
     (data_root / "assets" / "description_polygon_density.png").write_bytes(
         b"\x89PNG\r\n\x1a\n" + b"map" * 1024
     )
+    (data_root / "assets" / "area_distribution.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + b"hist" * 1024
+    )
     # Plant the canonical card that ``generate_dataset_docs`` would
     # produce so the metadata identity remains stable after the
     # orchestrator's refresh step.
@@ -449,6 +455,10 @@ def test_run_three_is_pure_no_op(
             "stats_size_bytes": (data_root / "stats.json").stat().st_size,
             "h3_map_sha256": file_sha256(data_root / "assets" / "description_polygon_density.png"),
             "h3_map_size_bytes": (data_root / "assets" / "description_polygon_density.png")
+            .stat()
+            .st_size,
+            "area_histogram_sha256": file_sha256(data_root / "assets" / "area_distribution.png"),
+            "area_histogram_size_bytes": (data_root / "assets" / "area_distribution.png")
             .stat()
             .st_size,
             "verified_revision": "pre-rev-meta",
@@ -535,5 +545,6 @@ def test_uploads_only_contain_per_pbf_and_metadata_files(
                     "README.md",
                     "stats.json",
                     "assets/description_polygon_density.png",
+                    "assets/area_distribution.png",
                 }
             )

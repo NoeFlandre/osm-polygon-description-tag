@@ -9,12 +9,18 @@ from pathlib import Path
 from typing import cast
 
 from osm_polygon_description_tag.publication.models import UploadPlan
-from osm_polygon_description_tag.publication.planning import H3_MAP_ASSET_RELATIVE
+from osm_polygon_description_tag.publication.planning import (
+    AREA_HISTOGRAM_ASSET_RELATIVE,
+    H3_MAP_ASSET_RELATIVE,
+)
 
 PUBLICATION_STATE_FILENAME = "publication-state.json"
 H3_MAP_ASSET_RELATIVE_PATH = H3_MAP_ASSET_RELATIVE
+AREA_HISTOGRAM_ASSET_RELATIVE_PATH = AREA_HISTOGRAM_ASSET_RELATIVE
 _H3_MAP_SHA256_FIELD = "h3_map_sha256"
 _H3_MAP_SIZE_FIELD = "h3_map_size_bytes"
+_AREA_HISTOGRAM_SHA256_FIELD = "area_histogram_sha256"
+_AREA_HISTOGRAM_SIZE_FIELD = "area_histogram_size_bytes"
 
 
 class PublicationStateError(RuntimeError):
@@ -88,23 +94,33 @@ def _metadata_state_matches(data_root: Path, metadata_plan: UploadPlan) -> bool:
     readme_path = data_root / "README.md"
     stats_path = data_root / "stats.json"
     map_path = data_root / H3_MAP_ASSET_RELATIVE_PATH
-    if not readme_path.is_file() or not stats_path.is_file() or not map_path.is_file():
+    histogram_path = data_root / AREA_HISTOGRAM_ASSET_RELATIVE_PATH
+    if (
+        not readme_path.is_file()
+        or not stats_path.is_file()
+        or not map_path.is_file()
+        or not histogram_path.is_file()
+    ):
         return False
     from osm_polygon_description_tag.dataset.manifest import file_sha256
 
     expected_readme_sha = file_sha256(readme_path)
     expected_stats_sha = file_sha256(stats_path)
     expected_map_sha = file_sha256(map_path)
+    expected_histogram_sha = file_sha256(histogram_path)
     if metadata.get("readme_sha256") != expected_readme_sha:
         return False
     if metadata.get("stats_sha256") != expected_stats_sha:
         return False
     if metadata.get(_H3_MAP_SHA256_FIELD) != expected_map_sha:
         return False
+    if metadata.get(_AREA_HISTOGRAM_SHA256_FIELD) != expected_histogram_sha:
+        return False
     return (
         metadata.get("readme_size_bytes") == readme_path.stat().st_size
         and metadata.get("stats_size_bytes") == stats_path.stat().st_size
         and metadata.get(_H3_MAP_SIZE_FIELD) == map_path.stat().st_size
+        and metadata.get(_AREA_HISTOGRAM_SIZE_FIELD) == histogram_path.stat().st_size
     )
 
 
@@ -118,6 +134,8 @@ def _write_metadata_state(
     stats_size_bytes: int,
     h3_map_sha256: str | None = None,
     h3_map_size_bytes: int | None = None,
+    area_histogram_sha256: str | None = None,
+    area_histogram_size_bytes: int | None = None,
     verified_revision: str,
     completed_at: str,
 ) -> dict[str, object]:
@@ -139,6 +157,10 @@ def _write_metadata_state(
         payload[_H3_MAP_SHA256_FIELD] = h3_map_sha256
     if h3_map_size_bytes is not None:
         payload[_H3_MAP_SIZE_FIELD] = h3_map_size_bytes
+    if area_histogram_sha256 is not None:
+        payload[_AREA_HISTOGRAM_SHA256_FIELD] = area_histogram_sha256
+    if area_histogram_size_bytes is not None:
+        payload[_AREA_HISTOGRAM_SIZE_FIELD] = area_histogram_size_bytes
     state["metadata"] = payload
     state["last_updated_at"] = completed_at
     _atomic_write_json(data_root / PUBLICATION_STATE_FILENAME, state)
