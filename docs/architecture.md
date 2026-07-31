@@ -52,3 +52,12 @@ uv owns dependency resolution and command execution. Ruff is the formatter and
 linter, ty is the type checker, and pytest is the test runner. pre-commit and
 Just expose the same local gates that GitHub Actions runs in CI. These tools do
 not cross the operational boundary into real-data processing or publication.
+
+## Documentation boundary
+
+MkDocs pages describe stable public contracts and operator workflows. Package
+READMEs document canonical module responsibilities. The generated dataset-card
+template describes the published artifact and is intentionally kept separate
+from the site. Historical design and plan records are retained under
+`docs/superpowers/` for project provenance but are excluded from public
+navigation.

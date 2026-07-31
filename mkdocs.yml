@@ -1,0 +1,58 @@
+site_name: OSM Polygon Description Tag
+site_description: Reproducible GeoParquet of OpenStreetMap polygons carrying description tags.
+site_url: https://noeflandre.github.io/osm-polygon-description-tag/
+repo_name: NoeFlandre/osm-polygon-description-tag
+repo_url: https://github.com/NoeFlandre/osm-polygon-description-tag
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - search.share
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - tables
+  - toc:
+      permalink: true
+
+exclude_docs: |
+  .DS_Store
+  dataset-card-template.md
+  superpowers/*
+
+strict: true
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Dataset contract: dataset-contract.md
+  - Operations: operations.md
+  - CLI reference: cli.md
+  - Development: development.md
+  - Architecture: architecture.md
