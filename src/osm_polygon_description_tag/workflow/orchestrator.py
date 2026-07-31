@@ -719,6 +719,13 @@ def _run_and_publish(
 
     _verify_final_completeness(paths, sources)
 
+    # Refresh the canonical README, stats, and H3 map before constructing
+    # the dataset-wide reconciliation plan. This ordering is required for
+    # migration of a completed pre-H3 dataset: reconciliation must see the
+    # same complete allowlisted surface that metadata publication will see.
+    # The byte-stable writers preserve a true no-op when nothing changed.
+    _refresh_dataset_docs_for_metadata(paths, clock=clock, logger=logger)
+
     # The production verifier owns a narrowly scoped reconciliation hook.
     # It removes remote artifacts that no longer exist locally, but only
     # below data/ and manifests/; unrelated repository files are preserved.
@@ -745,17 +752,6 @@ def _run_and_publish(
     # whenever its current plan identity differs from the verified
     # metadata state. This is independent of per-PBF upload count, so a
     # failed intermediate metadata upload is retried on the next run.
-    #
-    # When all sources are STATUS_PUBLISHED the per-source loop never
-    # called ``generate_dataset_docs``; the orchestrator must always
-    # refresh the canonical ``README.md``, ``stats.json``, and
-    # ``assets/description_polygon_density.png`` from the validated
-    # local Parquet/manifest set before the metadata plan is built.
-    # The byte-stable ``_write_if_changed`` semantics preserve mtimes
-    # when nothing changed, so a fully-completed run that finds every
-    # artifact byte-identical ends up with zero file writes.
-    _refresh_dataset_docs_for_metadata(paths, clock=clock, logger=logger)
-
     final_metadata_revision = _upload_final_metadata(
         paths,
         verifier=active_verifier,

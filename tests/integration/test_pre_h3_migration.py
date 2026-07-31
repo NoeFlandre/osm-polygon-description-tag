@@ -313,6 +313,46 @@ def test_pre_h3_migration_refreshes_readme_writes_map_and_uploads_metadata(
     assert _file_sha(map_path) == snapshot_map
 
 
+def test_pre_h3_migration_refreshes_before_remote_reconciliation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The map must exist before the production reconciliation plan is built."""
+    paths, _source_root, data_root = _setup_pre_h3_dataset(tmp_path)
+    _stub_png_render(monkeypatch, data_root)
+
+    uploads: list[list[str]] = []
+    reconciliations: list[set[str]] = []
+
+    class Verifier:
+        def __call__(self, _repo_id: str, _files: tuple[object, ...]) -> str:
+            return "verified"
+
+        def reconcile_managed_files(self, _repo_id: str, managed: set[str]) -> str:
+            reconciliations.append(managed)
+            return "reconciled"
+
+    verifier = Verifier()
+
+    def upload_runner(command: list[str]) -> str:
+        uploads.append(command)
+        return "uploaded"
+
+    report = run_and_publish(
+        paths=paths,
+        confirm_repo=REPO_ID,
+        preflight=lambda: {"preflight": "stub", "source_count": 2},
+        clock=_frozen_clock,
+        upload_runner=upload_runner,
+        verifier=verifier,
+    )
+
+    assert all(outcome.status == "already-published" for outcome in report.outcomes)
+    assert len(reconciliations) == 1
+    assert "assets/description_polygon_density.png" in reconciliations[0]
+    assert len(uploads) == 1
+    assert (data_root / "assets" / "description_polygon_density.png").is_file()
+
+
 def test_orchestrator_repairs_stale_readme_before_metadata_publish(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
