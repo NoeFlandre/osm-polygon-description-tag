@@ -404,6 +404,18 @@ def test_run_three_is_pure_no_op(
     (data_root / "assets" / "description_polygon_density.png").write_bytes(
         b"\x89PNG\r\n\x1a\n" + b"map" * 1024
     )
+    # Plant the canonical card that ``generate_dataset_docs`` would
+    # produce so the metadata identity remains stable after the
+    # orchestrator's refresh step.
+    from osm_polygon_description_tag._resources import dataset_card_template
+    from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
+
+    generate_dataset_docs(
+        data_root,
+        dataset_card_template(),
+        clock=lambda: "2026-07-28T00:00:00+00:00",
+    )
+    assert (data_root / "assets" / "description_polygon_density.png").is_file()
     plan_meta = _build_metadata_only_upload_plan(data_root)
     state = {
         "schema_version": 1,

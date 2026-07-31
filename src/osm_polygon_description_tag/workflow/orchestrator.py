@@ -745,6 +745,17 @@ def _run_and_publish(
     # whenever its current plan identity differs from the verified
     # metadata state. This is independent of per-PBF upload count, so a
     # failed intermediate metadata upload is retried on the next run.
+    #
+    # When all sources are STATUS_PUBLISHED the per-source loop never
+    # called ``generate_dataset_docs``; the orchestrator must always
+    # refresh the canonical ``README.md``, ``stats.json``, and
+    # ``assets/description_polygon_density.png`` from the validated
+    # local Parquet/manifest set before the metadata plan is built.
+    # The byte-stable ``_write_if_changed`` semantics preserve mtimes
+    # when nothing changed, so a fully-completed run that finds every
+    # artifact byte-identical ends up with zero file writes.
+    _refresh_dataset_docs_for_metadata(paths, clock=clock, logger=logger)
+
     final_metadata_revision = _upload_final_metadata(
         paths,
         verifier=active_verifier,
@@ -764,6 +775,43 @@ def _run_and_publish(
     )
     logger.flush()
     return report
+
+
+def _refresh_dataset_docs_for_metadata(
+    paths: Paths,
+    *,
+    clock: Callable[[], str],
+    logger: RunLogger,
+) -> None:
+    """Refresh the canonical ``README.md``, ``stats.json``, and H3 map.
+
+    The refresh is byte-stable: identical inputs produce identical
+    outputs, so the underlying atomic write-if-changed helpers leave
+    the existing files untouched on disk. This step exists so that a
+    dataset that was published before the H3 map feature exists
+    (pre-feature ``README.md``, no ``assets/`` directory) is repaired
+    in the next run: the canonical card is regenerated and the H3 map
+    is rendered, even when no per-PBF artifacts changed.
+
+    The refresh is also called for normal runs so that the metadata
+    plan always reflects the current validated dataset.
+    """
+    data_dir = paths.data_root / "data"
+    if not data_dir.is_dir() or not list(data_dir.glob("*.parquet")):
+        # No data root to refresh from; the metadata plan will be skipped
+        # by ``_upload_final_metadata``.
+        return
+    try:
+        generate_dataset_docs(paths.data_root, dataset_card_template(), clock=clock)
+    except Exception as error:
+        raise OrchestratorError(f"dataset card refresh failed: {error}") from error
+    logger.event(
+        "dataset_docs_refreshed",
+        level="INFO",
+        readme=paths.data_root / "README.md",
+        stats=paths.data_root / "stats.json",
+        assets=paths.data_root / "assets" / "description_polygon_density.png",
+    )
 
 
 def _verify_final_completeness(paths: Paths, sources: Iterable[Source]) -> None:

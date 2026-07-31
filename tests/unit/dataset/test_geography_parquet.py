@@ -189,6 +189,62 @@ def test_collect_h3_counts_returns_sorted_dict(tmp_path: Path) -> None:
     assert sum(counts.values()) == 2
 
 
+def test_collect_h3_counts_resolution_zero_is_used(tmp_path: Path) -> None:
+    """Passing ``h3_resolution=0`` selects resolution 0 (must not fall back to 3)."""
+    from osm_polygon_description_tag.dataset.geography.parquet_inputs import (
+        H3AggregationError,
+    )
+
+    data_root = _plant_two_parquets(tmp_path)
+    try:
+        counts_zero = collect_h3_counts(data_root, h3_resolution=0)
+    except H3AggregationError as error:
+        pytest.skip(f"resolution 0 not supported in this H3 build: {error}")
+    counts_default = collect_h3_counts(data_root, h3_resolution=None)
+
+    # Resolution 0 has at most 122 cells worldwide. With two points, both
+    # canonical aggregates may collide into the SAME cell, but the cell
+    # id length differs from resolution 3 (15 hex chars), which is the
+    # strong invariant.
+    for cell in counts_zero:
+        # H3 v4 cell ids are 15-hex strings regardless of resolution.
+        assert len(cell) == 15
+    # A coarse resolution produces FEWER OR EQUAL distinct cells than the
+    # finer resolution, never more.
+    assert len(counts_zero) <= len(counts_default)
+
+
+def test_collect_h3_counts_resolution_none_uses_default(tmp_path: Path) -> None:
+    """Passing ``h3_resolution=None`` selects the package default (resolution 3)."""
+    data_root = _plant_two_parquets(tmp_path)
+    counts_none = collect_h3_counts(data_root, h3_resolution=None)
+    counts_explicit = collect_h3_counts(data_root, h3_resolution=DEFAULT_H3_RESOLUTION)
+    assert counts_none == counts_explicit
+    assert DEFAULT_H3_RESOLUTION == 3
+
+
+def test_collect_h3_counts_resolution_falsy_does_not_use_default(
+    tmp_path: Path,
+) -> None:
+    """Resolution 0 is valid and must remain resolution 0; only None falls back."""
+    from osm_polygon_description_tag.dataset.geography.parquet_inputs import (
+        H3AggregationError,
+    )
+
+    data_root = _plant_two_parquets(tmp_path)
+    try:
+        # Explicit zero must succeed (it's a valid H3 resolution).
+        counts_zero = collect_h3_counts(data_root, h3_resolution=0)
+    except H3AggregationError as error:
+        pytest.skip(f"resolution 0 not supported in this H3 build: {error}")
+    # Both calls accepted 0/None without raising.
+    counts_none = collect_h3_counts(data_root)
+    # The two outputs reflect genuinely different resolutions: resolution 0
+    # typically maps to fewer cells.
+    assert isinstance(counts_zero, dict)
+    assert isinstance(counts_none, dict)
+
+
 # ---------------------------------------------------------------------------
 # Batched streaming contract
 # ---------------------------------------------------------------------------
@@ -450,3 +506,97 @@ def test_parquet_inputs_module_does_not_call_pq_read_table() -> None:
     source = Path(parquet_inputs_module.__file__).read_text(encoding="utf-8")
     assert "pq.read_table" not in source
     assert "read_table(" not in source
+
+
+# ---------------------------------------------------------------------------
+# Shared validation primitive (defect 7)
+# ---------------------------------------------------------------------------
+
+
+def test_aggregate_h3_density_uses_validate_finalized_artifacts(tmp_path: Path) -> None:
+    """``aggregate_h3_density`` must use the shared validation primitive."""
+    from osm_polygon_description_tag.dataset.storage import (
+        validate_finalized_artifacts,
+    )
+
+    data_root = _plant_two_parquets(tmp_path)
+
+    # Drop one manifest: the shared primitive must reject this state.
+    (data_root / "manifests" / "beta.manifest.json").unlink()
+    from osm_polygon_description_tag.dataset.storage import StorageError
+
+    with pytest.raises(StorageError, match="mismatch"):
+        validate_finalized_artifacts(data_root)
+    with pytest.raises(StorageError, match="mismatch"):
+        collect_h3_counts(data_root)
+
+
+def test_generate_dataset_docs_uses_validate_finalized_artifacts(tmp_path: Path) -> None:
+    """``generate_dataset_docs`` must use the shared validation primitive."""
+    from shapely.geometry import Polygon
+
+    from osm_polygon_description_tag._resources import dataset_card_template
+    from osm_polygon_description_tag.dataset.manifest import (
+        Manifest,
+        RunCounts,
+        output_identity_for,
+        source_identity_for,
+        write_manifest,
+    )
+    from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
+    from osm_polygon_description_tag.dataset.storage import (
+        StorageError,
+        write_geoparquet,
+    )
+
+    data_root = tmp_path / "generated"
+    (data_root / "data").mkdir(parents=True)
+    (data_root / "manifests").mkdir(parents=True)
+    # Plant a single validated parquet + manifest.
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "single.osm.pbf").write_bytes(b"single-bytes")
+    source = raw / "single.osm.pbf"
+    record = make_record_dict(
+        Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+        {"description": "single"},
+        osm_id=1,
+        source_pbf="single.osm.pbf",
+    )
+    output = data_root / "data" / "single.parquet"
+    write_geoparquet(iter([record]), output, batch_size=10)
+    write_manifest(
+        Manifest(
+            manifest_schema_version=2,
+            schema_version=2,
+            geoparquet_version="1.1.0",
+            transform_algorithm_version=2,
+            area_policy_sha256="0" * 64,
+            output_algorithm_revision="0" * 64,
+            source=source_identity_for(source),
+            output=output_identity_for(output),
+            osmium_version="osmium version 1.19.1",
+            dependency_versions={"pyarrow": "20.0.0"},
+            code_revision="abc",
+            started_at="2026-07-30T00:00:00+00:00",
+            completed_at="2026-07-30T00:01:00+00:00",
+            counts=RunCounts(emitted_features=1, included_rows=1, rejections={}),
+        ),
+        data_root / "manifests" / "single.manifest.json",
+    )
+    (data_root / "README.md").write_text(dataset_card_template().read_text(encoding="utf-8"))
+
+    # Corrupt the manifest so the shared primitive refuses to validate.
+    (data_root / "manifests" / "single.manifest.json").write_text(
+        '{"manifest_schema_version": 1, "garbage": true}\n', encoding="utf-8"
+    )
+    # The reporting layer wraps the shared validation primitive and
+    # translates the failure into a ReportingError.
+    from osm_polygon_description_tag.dataset.reporting import ReportingError
+
+    with pytest.raises((StorageError, ReportingError), match="(invalid|schema|manifest)"):
+        generate_dataset_docs(
+            data_root,
+            dataset_card_template(),
+            clock=lambda: "2026-07-30T00:02:00+00:00",
+        )

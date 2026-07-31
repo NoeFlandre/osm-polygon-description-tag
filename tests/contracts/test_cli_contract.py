@@ -145,6 +145,10 @@ def test_publish_rejects_wrong_plan_identity(
     (data / "manifests").mkdir(parents=True)
     (data / "README.md").write_text("# Card\n", encoding="utf-8")
     (data / "stats.json").write_text("{}\n", encoding="utf-8")
+    (data / "assets").mkdir()
+    (data / "assets" / "description_polygon_density.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + b"map" * 1024
+    )
 
     args = SimpleNamespace(
         plan="deadbeef",  # wrong on purpose
@@ -233,6 +237,10 @@ def test_publish_plan_handler_reports_identity(
     (data / "manifests").mkdir(parents=True)
     (data / "README.md").write_text("# Card\n", encoding="utf-8")
     (data / "stats.json").write_text("{}\n", encoding="utf-8")
+    (data / "assets").mkdir()
+    (data / "assets" / "description_polygon_density.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + b"map" * 1024
+    )
     args = SimpleNamespace(
         source_root=tmp_path / "raw",
         data_root=data,
@@ -296,6 +304,10 @@ def test_handle_publish_invokes_execute_upload(
     (data / "manifests").mkdir(parents=True)
     (data / "README.md").write_text("# Card\n", encoding="utf-8")
     (data / "stats.json").write_text("{}\n", encoding="utf-8")
+    (data / "assets").mkdir()
+    (data / "assets" / "description_polygon_density.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + b"map" * 1024
+    )
 
     import osm_polygon_description_tag.cli as cli
 

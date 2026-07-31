@@ -18,8 +18,8 @@ MultiPolygon geometry, WGS84 geodesic area, bounding box, and OSM provenance.
 
 <!-- GENERATED:STATS:START -->
 <!-- GENERATED:STATS:END -->
-
 <!-- GENERATED:H3_MAP:START -->
+![H3 density of description-tagged polygons](assets/description_polygon_density.png)
 <!-- GENERATED:H3_MAP:END -->
 
 ## What is included
@@ -71,25 +71,6 @@ artifacts atomically.
 
 All displayed statistics are generated from validated Parquet files and their
 matching manifests. No counts are handwritten.
-
-## Geographic distribution
-
-The dataset card includes one deterministic H3 hexagon density map showing
-where the description-tagged polygons are concentrated. The map:
-
-* uses H3 resolution 3;
-* assigns every polygon to a cell by its Shapely geometry centroid;
-* uses a logarithmic colour scale so sparse and dense areas remain visible;
-* counts every dataset row exactly once, preserving regional overlap
-  semantics (the same OSM object appearing in two regional extracts is
-  counted as two dataset rows);
-* reports the total row count and the number of occupied H3 cells in the
-  caption;
-* is a derived publication artifact; no centroid or H3 column is added to
-  the Parquet schema.
-
-The map is regenerated from the complete validated local dataset on every
-publication run and uploaded as a first-class asset whenever it changes.
 
 ## Limitations
 

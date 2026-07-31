@@ -144,10 +144,21 @@ def _draw_cell(
 def _atomic_save_png(fig: Any, output_path: Path) -> None:
     """Save ``fig`` to ``output_path`` via a temporary file then atomic rename.
 
-    Cleans up the temporary file on success and failure. When the
-    destination already exists and is byte-identical to the freshly
-    rendered PNG, the existing file is preserved so the mtime is
-    untouched.
+    Guarantees:
+
+    * The temporary file is created in the same directory as
+      ``output_path`` so :func:`os.replace` is atomic on the same
+      filesystem.
+    * The temporary file is ``fsync``-ed before the rename so the bytes
+      survive a crash mid-write.
+    * When the destination already exists and is byte-identical to the
+      freshly rendered PNG, the existing file is preserved so the mtime
+      and inode are untouched.
+    * When the destination differs, :func:`os.replace` performs the
+      atomic swap and the parent directory is ``fsync``-ed so the
+      rename is durable.
+    * The temporary file is removed on every code path, including the
+      byte-identical short-circuit and the catch-all failure path.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(
@@ -164,14 +175,22 @@ def _atomic_save_png(fig: Any, output_path: Path) -> None:
             facecolor="white",
             metadata={"Software": _METADATA_SOFTWARE},
         )
+        with open(tmp_path, "rb") as handle:
+            os.fsync(handle.fileno())
         if output_path.exists():
             existing_bytes = output_path.read_bytes()
             new_bytes = tmp_path.read_bytes()
             if existing_bytes == new_bytes:
-                # Byte-identical regeneration; leave the existing file alone.
+                # Byte-identical regeneration; preserve the existing
+                # file's mtime and inode.
                 tmp_path.unlink(missing_ok=True)
                 return
         os.replace(tmp_path, output_path)
+        dir_fd = os.open(str(output_path.parent), os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
     except BaseException:
         tmp_path.unlink(missing_ok=True)
         raise
@@ -250,6 +269,14 @@ def render_density_map(
         plt.close(fig)
 
     return RenderResult(output_path=output_path, caption=caption)
+
+
+def atomic_save_png_for_testing(
+    fig: Any,
+    output_path: Path,
+) -> None:
+    """Test-only re-export of :func:`_atomic_save_png` for failure-path coverage."""
+    _atomic_save_png(fig, output_path)
 
 
 __all__ = [

@@ -39,6 +39,7 @@ from osm_polygon_description_tag.publication import (
     PublicationError,
     _build_metadata_only_upload_plan,
     _build_per_pbf_upload_plan,
+    create_upload_plan,
     per_pbf_command,
 )
 from osm_polygon_description_tag.publication.state import (
@@ -498,3 +499,92 @@ def test_changed_map_forces_metadata_upload(
     assert len(captured_uploads) == 4
     # The 4th upload is the metadata one and contains the new map.
     assert "assets/description_polygon_density.png" in captured_uploads[3]
+
+
+# ---------------------------------------------------------------------------
+# Dataset-wide plan requires assets/ (defect 2)
+# ---------------------------------------------------------------------------
+
+
+def test_global_plan_requires_assets_directory(tmp_path: Path) -> None:
+    """``create_upload_plan`` must reject a data root without ``assets/``."""
+    paths, _source_root, data_root = _setup_two_sources(tmp_path)
+    (data_root / "README.md").write_text("# README")
+    (data_root / "stats.json").write_text("{}")
+    with pytest.raises(PublicationError, match="assets"):
+        create_upload_plan(data_root)
+
+
+def test_global_plan_rejects_assets_as_file(tmp_path: Path) -> None:
+    """``assets`` that is a regular file (not a directory) must be rejected."""
+    paths, _source_root, data_root = _setup_two_sources(tmp_path)
+    (data_root / "README.md").write_text("# README")
+    (data_root / "stats.json").write_text("{}")
+    (data_root / "assets").write_bytes(b"NOT A DIRECTORY")
+    with pytest.raises(PublicationError, match="assets"):
+        create_upload_plan(data_root)
+
+
+def test_global_plan_rejects_assets_symlink(tmp_path: Path) -> None:
+    """An ``assets`` symlink must be rejected; the assets entry must be a real directory."""
+    paths, _source_root, data_root = _setup_two_sources(tmp_path)
+    (data_root / "README.md").write_text("# README")
+    (data_root / "stats.json").write_text("{}")
+    outside = tmp_path / "external_assets"
+    outside.mkdir()
+    (data_root / "assets").symlink_to(outside)
+    with pytest.raises(PublicationError, match="assets"):
+        create_upload_plan(data_root)
+
+
+def test_global_plan_rejects_missing_map(tmp_path: Path) -> None:
+    """``assets/`` exists but the canonical map file is missing."""
+    paths, _source_root, data_root = _setup_two_sources(tmp_path)
+    (data_root / "README.md").write_text("# README")
+    (data_root / "stats.json").write_text("{}")
+    (data_root / "assets").mkdir()
+    with pytest.raises(PublicationError, match="H3 density map"):
+        create_upload_plan(data_root)
+
+
+def test_global_plan_includes_map_in_identity_hash(tmp_path: Path) -> None:
+    """The dataset-wide plan includes the map in items and identity SHA-256."""
+    paths, _source_root, data_root = _setup_two_sources(tmp_path)
+    _plant_resumable_artifact(paths, paths.data_root.parent / "raw", "a.osm.pbf")
+    _plant_metadata(paths)
+
+    plan_a = create_upload_plan(data_root)
+    relative_a = sorted(item.relative_path for item in plan_a.files)
+    assert "assets/description_polygon_density.png" in relative_a
+
+    # The map must be in the identity hash: a map change must change the identity.
+    (data_root / "assets" / "description_polygon_density.png").write_bytes(MAP_BYTES_B)
+    plan_b = create_upload_plan(data_root)
+    assert plan_a.identity_sha256 != plan_b.identity_sha256
+    map_item = next(
+        item for item in plan_b.files if item.relative_path == H3_MAP_ASSET_RELATIVE_PATH
+    )
+    assert map_item.sha256 != plan_a.identity_sha256
+
+
+def test_global_plan_includes_readme_stats_map_data_manifests(tmp_path: Path) -> None:
+    """The dataset-wide plan contains every required entry."""
+    paths, _source_root, data_root = _setup_two_sources(tmp_path)
+    _plant_resumable_artifact(paths, paths.data_root.parent / "raw", "a.osm.pbf")
+    _plant_resumable_artifact(paths, paths.data_root.parent / "raw", "b.osm.pbf")
+    _plant_metadata(paths)
+
+    plan = create_upload_plan(data_root)
+    relative = sorted(item.relative_path for item in plan.files)
+    expected = sorted(
+        [
+            "README.md",
+            "stats.json",
+            "assets/description_polygon_density.png",
+            "data/a.parquet",
+            "data/b.parquet",
+            "manifests/a.manifest.json",
+            "manifests/b.manifest.json",
+        ]
+    )
+    assert relative == expected

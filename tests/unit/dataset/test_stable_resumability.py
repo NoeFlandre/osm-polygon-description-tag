@@ -178,12 +178,22 @@ def test_full_run_no_rebuild_on_doc_only_commit(
     )
     # Defensive double-write for tests that follow before this edit.
 
-    (paths.data_root / "README.md").write_text("stub")
-    (paths.data_root / "stats.json").write_text("{}")
-    (paths.data_root / "assets").mkdir(exist_ok=True)
-    (paths.data_root / "assets" / "description_polygon_density.png").write_bytes(
-        b"\x89PNG\r\n\x1a\n" + b"map" * 1024
+    # Plant the canonical card that ``generate_dataset_docs`` would
+    # produce so the metadata identity remains stable after the
+    # orchestrator's refresh step.
+    from osm_polygon_description_tag._resources import dataset_card_template
+    from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
+
+    generate_dataset_docs(
+        paths.data_root,
+        dataset_card_template(),
+        clock=lambda: "2026-07-27T00:00:00+00:00",
     )
+    # ``generate_dataset_docs`` already wrote the README, stats.json,
+    # and assets/description_polygon_density.png atomically. The
+    # doc-only-commit test asserts zero uploads on a fully-published
+    # workspace whose regenerated artifacts match the recorded state.
+    assert (paths.data_root / "assets" / "description_polygon_density.png").is_file()
 
     # Mark a.osm.pbf as already published AND mark the metadata as
     # already published so the fully-completed run is a no-op.

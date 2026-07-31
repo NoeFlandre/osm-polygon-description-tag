@@ -331,8 +331,78 @@ def validate_geoparquet(path: Path) -> int:
     return row_count
 
 
+def validate_finalized_artifacts(data_root):
+    """Validate every finalized Parquet/manifest pair under data_root.
+
+    The validation is intentionally minimal: it only checks that every
+    Parquet has a matching, parseable, schema-current manifest whose
+    output identity matches the Parquet. It does NOT call
+    :func:`validate_geoparquet`; that stricter byte-level validation is
+    performed separately, downstream, when the artifact is loaded.
+    """
+    from osm_polygon_description_tag.dataset.manifest import (
+        MANIFEST_SCHEMA_VERSION,
+        ManifestError,
+        output_identity_for,
+        read_manifest,
+    )
+
+    data_dir = data_root / "data"
+    manifests_dir = data_root / "manifests"
+    if not data_dir.is_dir():
+        raise StorageError(f"missing data directory: {data_dir}")
+    if not manifests_dir.is_dir():
+        raise StorageError(f"missing manifests directory: {manifests_dir}")
+
+    parquets = sorted(data_dir.glob("*.parquet"), key=lambda p: p.name)
+    manifest_paths = sorted(manifests_dir.glob("*.manifest.json"), key=lambda p: p.name)
+    parquet_stems = {p.name.removesuffix(".parquet") for p in parquets}
+    manifest_stems = {p.name.removesuffix(".manifest.json") for p in manifest_paths}
+    mismatch = parquet_stems.symmetric_difference(manifest_stems)
+    if mismatch:
+        raise StorageError(f"artifact/manifest mismatch (missing or extra): {sorted(mismatch)}")
+
+    validated_parquets = []
+    validated_manifests = []
+    for parquet in parquets:
+        stem = parquet.name.removesuffix(".parquet")
+        manifest_path = manifests_dir / f"{stem}.manifest.json"
+        try:
+            manifest = read_manifest(manifest_path)
+        except ManifestError as error:
+            raise StorageError(f"invalid manifest {manifest_path}: {error}") from error
+        if manifest.manifest_schema_version != MANIFEST_SCHEMA_VERSION:
+            raise StorageError(
+                f"manifest uses unsupported schema version: {manifest.manifest_schema_version}"
+            )
+        actual_output = output_identity_for(parquet)
+        if manifest.output != actual_output:
+            raise StorageError(f"stale output identity for {parquet.name}")
+        validated_parquets.append(parquet)
+        validated_manifests.append(manifest_path)
+
+    return {
+        "parquets": tuple(validated_parquets),
+        "manifests": tuple(validated_manifests),
+    }
+
+
+def _validate_finalized_artifacts_strict(data_root):
+    """Run :func:`validate_finalized_artifacts` followed by :func:`validate_geoparquet`.
+
+    Use this when downstream code is about to load the validated
+    Parquets and so the additional byte-level guarantees of
+    :func:`validate_geoparquet` are required.
+    """
+    result = validate_finalized_artifacts(data_root)
+    for parquet in result["parquets"]:
+        validate_geoparquet(parquet)
+    return result
+
+
 __all__ = [
     "StorageError",
+    "validate_finalized_artifacts",
     "validate_geoparquet",
     "write_geoparquet",
 ]

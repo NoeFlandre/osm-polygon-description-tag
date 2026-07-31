@@ -18,9 +18,6 @@ MultiPolygon geometry, WGS84 geodesic area, bounding box, and OSM provenance.
 
 <!-- GENERATED:STATS:START -->
 <!-- GENERATED:STATS:END -->
-<!-- GENERATED:H3_MAP:START -->
-![H3 density of description-tagged polygons](assets/description_polygon_density.png)
-<!-- GENERATED:H3_MAP:END -->
 
 ## What is included
 

@@ -40,14 +40,26 @@ class H3AggregationError(RuntimeError):
 
 
 def sorted_parquets(directory: Path) -> list[Path]:
-    """Return the deterministic sorted list of parquet files in ``directory``."""
+    """Return the deterministic sorted list of parquet files in ``directory``.
+
+    This helper intentionally does NOT validate manifest matches; that
+    step is the responsibility of
+    :func:`osm_polygon_description_tag.dataset.storage.validate_finalized_artifacts`,
+    which is the shared validation primitive.
+    """
     if not directory.exists():
         return []
     return sorted(directory.glob("*.parquet"))
 
 
 def require_directory(path: Path, *, label: str) -> Path:
-    """Return ``path`` after asserting it exists and is a directory."""
+    """Return ``path`` after asserting it exists and is a directory.
+
+    A missing directory is acceptable only when ``data_root`` is empty:
+    the H3 aggregator then yields an empty count mapping. The
+    :func:`aggregate_h3_density` entry point validates finalized
+    artifacts (Parquet/manifest pairs) before streaming.
+    """
     if not path.exists() or not path.is_dir():
         raise H3AggregationError(
             f"Required {label} directory does not exist: {path}. "
@@ -121,10 +133,30 @@ def collect_h3_counts(
     *,
     h3_resolution: int | None = None,
 ) -> dict[str, int]:
-    """Aggregate H3 cell counts from every validated Parquet in ``data_root``."""
+    """Aggregate H3 cell counts from every validated Parquet in ``data_root``.
+
+    Resolution handling uses an explicit ``None`` check: passing
+    ``h3_resolution=0`` selects resolution 0 (valid), while passing
+    ``h3_resolution=None`` falls back to the package default
+    :data:`DEFAULT_H3_RESOLUTION`. The default itself is selected by
+    leaving the parameter unset.
+
+    The aggregated artifacts are first validated via
+    :func:`osm_polygon_description_tag.dataset.storage.validate_finalized_artifacts`
+    so that mismatched, stale, or corrupt parquet/manifest pairs cannot
+    be observed as a partial map.
+    """
+    from osm_polygon_description_tag.dataset.geography.h3_policy import (
+        DEFAULT_H3_RESOLUTION,
+    )
+    from osm_polygon_description_tag.dataset.storage import validate_finalized_artifacts
+
+    validate_finalized_artifacts(data_root)
+
     counts: dict[str, int] = {}
+    resolution = DEFAULT_H3_RESOLUTION if h3_resolution is None else h3_resolution
     for _path, lon, lat in iter_centroids(data_root):
-        cell = assign_h3_cell(lat, lon, resolution=h3_resolution or 3)
+        cell = assign_h3_cell(lat, lon, resolution=resolution)
         counts[cell] = counts.get(cell, 0) + 1
     return dict(sorted(counts.items()))
 

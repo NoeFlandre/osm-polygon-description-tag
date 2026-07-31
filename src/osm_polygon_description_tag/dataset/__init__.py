@@ -32,6 +32,7 @@ from osm_polygon_description_tag.dataset.schema import (
 )
 from osm_polygon_description_tag.dataset.storage import (
     StorageError,
+    validate_finalized_artifacts,
     validate_geoparquet,
     write_geoparquet,
 )
@@ -73,6 +74,7 @@ __all__ = [
     "read_manifest",
     "source_identity_for",
     "transform_record",
+    "validate_finalized_artifacts",
     "validate_geoparquet",
     "write_geoparquet",
     "write_manifest",

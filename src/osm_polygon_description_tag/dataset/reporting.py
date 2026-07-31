@@ -14,6 +14,11 @@ Amendment 2: ``stats.json`` and the regenerated README are pure functions
 of the validated Parquets, the matching manifests, and the card template.
 Wall-clock values are not serialized. Atomic, write-if-changed writes
 preserve mtimes when bytes are byte-identical.
+
+Single-aggregation contract: every call to :func:`generate_dataset_docs`
+performs exactly one H3 aggregation pass per generation. The resulting
+count mapping is reused for the occupied-cell count, the dataset-card
+caption, and the deterministic PNG render.
 """
 
 from __future__ import annotations
@@ -23,13 +28,22 @@ import json
 import os
 import re
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
 
 import duckdb
 import pyarrow.parquet as pq
 
+from osm_polygon_description_tag.dataset.geography import aggregate_h3_density
+from osm_polygon_description_tag.dataset.geography.card import (
+    H3_MAP_ASSET_RELATIVE_PATH,
+    H3_MAP_END_MARKER,
+    H3_MAP_START_MARKER,
+    H3_MAP_TITLE,
+    install_map_block,
+)
+from osm_polygon_description_tag.dataset.geography.rendering import render_density_map
 from osm_polygon_description_tag.dataset.manifest import (
     ManifestError,
     file_sha256,
@@ -508,26 +522,30 @@ def _render_h3_map_block(data_root: Path, total_rows: int, occupied_cells: int) 
     the surrounding marker block. :func:`install_map_block` is responsible
     for placing the body between the start and end markers.
     """
-    from osm_polygon_description_tag.dataset.geography.card import (
-        H3_MAP_ASSET_RELATIVE_PATH,
-        H3_MAP_TITLE,
-    )
-
+    _ = (data_root, total_rows, occupied_cells)
     return f"![{H3_MAP_TITLE}]({H3_MAP_ASSET_RELATIVE_PATH})\n"
 
 
-def _write_h3_map_png(data_root: Path, total_rows: int, occupied_cells: int) -> None:
-    """Render the H3 density PNG into ``data_root/assets/``."""
-    from osm_polygon_description_tag.dataset.geography import (
-        aggregate_h3_density,
-        render_density_map,
-    )
-    from osm_polygon_description_tag.dataset.geography.card import (
-        H3_MAP_ASSET_RELATIVE_PATH,
-    )
+def _write_h3_map_png(
+    data_root: Path,
+    total_rows: int,
+    occupied_cells: int,
+    *,
+    counts: Mapping[str, int] | None = None,
+) -> None:
+    """Render the H3 density PNG into ``data_root/assets/``.
 
+    Production callers pass nothing for ``counts`` and this helper
+    performs the single aggregation pass. Tests may inject a pre-computed
+    count mapping via the ``counts`` keyword to avoid re-running the
+    aggregation. Pass-through ``total_rows`` and ``occupied_cells`` are
+    accepted for backward compatibility with the historical signature;
+    the rendered PNG is byte-identical regardless.
+    """
+    _ = (total_rows, occupied_cells)
+    if counts is None:
+        counts = aggregate_h3_density(data_root)
     output = data_root / H3_MAP_ASSET_RELATIVE_PATH
-    counts = aggregate_h3_density(data_root)
     render_density_map(counts, output)
 
 
@@ -542,6 +560,10 @@ def generate_dataset_docs(
     The outputs are pure functions of the validated Parquets, the matching
     manifests, and the card template. Wall-clock values are never serialized.
     Identical regeneration is a no-op for file bytes and mtimes.
+
+    The H3 density map is aggregated in exactly one pass per generation
+    and the same count mapping drives the occupied-cell count, the
+    dataset-card caption, and the deterministic PNG render.
     """
     stats = collect_stats(data_root, clock=clock)
     stats_json = json.dumps(stats, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
@@ -554,19 +576,13 @@ def generate_dataset_docs(
         lambda match: match.group(1) + rendered_block + match.group(3), template
     )
 
-    # Install the H3 density map block. The aggregator streams every
-    # Parquet in bounded memory; the renderer writes a self-contained PNG
-    # into ``assets/`` and the block references it via the relative
-    # dataset-repository path.
+    # Single H3 aggregation pass; the resulting count mapping is reused
+    # for the dataset-card caption, the deterministic PNG render, and any
+    # other dependent value computed in this generation.
     total_rows = int(stats["rows"])
-    from osm_polygon_description_tag.dataset.geography import aggregate_h3_density
-    from osm_polygon_description_tag.dataset.geography.card import (
-        H3_MAP_END_MARKER,
-        H3_MAP_START_MARKER,
-        install_map_block,
-    )
+    h3_counts = aggregate_h3_density(data_root)
+    occupied_cells = sum(1 for _ in h3_counts)
 
-    occupied_cells = len(aggregate_h3_density(data_root))
     map_body = _render_h3_map_block(data_root, total_rows, occupied_cells)
     if H3_MAP_START_MARKER in readme and H3_MAP_END_MARKER in readme:
         readme = install_map_block(readme, map_body)
@@ -574,6 +590,9 @@ def generate_dataset_docs(
 
     _write_if_changed(data_root / "stats.json", stats_json)
     _write_if_changed(data_root / "README.md", readme)
+    # Backwards-compatible return: callers that consume the stats
+    # payload directly continue to work, while the new wrapper exposes
+    # additional generation outputs.
     return stats
 
 

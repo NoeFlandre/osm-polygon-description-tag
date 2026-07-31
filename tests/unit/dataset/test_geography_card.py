@@ -12,6 +12,7 @@ These tests prove that:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -325,3 +326,118 @@ def test_metadata_only_plan_includes_map_when_present(
     plan = _build_metadata_only_upload_plan(data_root)
     relative = sorted(item.relative_path for item in plan.files)
     assert "assets/description_polygon_density.png" in relative
+
+
+# ---------------------------------------------------------------------------
+# Pre-feature README byte contract regression test
+# ---------------------------------------------------------------------------
+
+
+_PRE_H3_TEMPLATE_PATH = Path("tests/fixtures/dataset_card_template_pre_h3.md")
+_H3_MAP_BLOCK_PATTERN = re.compile(
+    r"<!-- GENERATED:H3_MAP:START -->[^\n]*\n.*?<!-- GENERATED:H3_MAP:END -->\n",
+    re.DOTALL,
+)
+
+
+def _first_diff(left: str, right: str) -> str:
+    """Return the first character-level difference between two strings."""
+    for index in range(min(len(left), len(right))):
+        if left[index] != right[index]:
+            return (
+                f"index={index} left={left[max(0, index - 20) : index + 30]!r} "
+                f"right={right[max(0, index - 20) : index + 30]!r}"
+            )
+    return f"lengths differ: left={len(left)} right={len(right)}"
+
+
+@pytest.mark.parametrize(
+    "template_path",
+    (
+        Path("docs/dataset-card-template.md"),
+        Path("src/osm_polygon_description_tag/_data/dataset-card-template.md"),
+    ),
+)
+def test_template_minus_h3_map_block_matches_pre_h3_template(template_path: Path) -> None:
+    """Removing the H3 map marker block restores the pre-feature template byte-for-byte.
+
+    The public-facing dataset card template may differ from the pre-feature
+    version only by the addition of the H3 map marker block and the canonical
+    image reference it carries. This regression test proves that every other
+    byte in the template (prose, headings, stats/methodology/limitations,
+    license, reproducibility, whitespace) is identical to the pre-feature
+    template that was in place before the H3 map feature was introduced.
+    """
+    current = template_path.read_text(encoding="utf-8")
+    pre_h3 = _PRE_H3_TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    # Sanity check: the current template must contain the H3 marker block;
+    # otherwise the regression guard is meaningless.
+    assert H3_MAP_START_MARKER in current
+    assert H3_MAP_END_MARKER in current
+    # The pre-feature template must NOT contain the H3 marker block.
+    assert H3_MAP_START_MARKER not in pre_h3
+    assert H3_MAP_END_MARKER not in pre_h3
+
+    # Strip the H3 marker block (start marker, image reference, end marker)
+    # from the current template. The marker block in the current template
+    # is the only post-feature addition; the surrounding whitespace is
+    # structured so the pre-feature separator slot is restored on strip.
+    without_map = _H3_MAP_BLOCK_PATTERN.sub("", current, count=1)
+    assert without_map == pre_h3, (
+        "Removing the H3 map marker block must restore the pre-feature "
+        f"template byte-for-byte. Differences are: "
+        f"{set(without_map.splitlines()) ^ set(pre_h3.splitlines())}"
+    )
+
+
+def test_generated_readme_preserves_surrounding_prose_by_stripping_markers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The generated README equals the pre-feature template outside both generated markers.
+
+    The generation pipeline rewrites the canonical stats block and
+    installs the H3 map marker block, but every byte outside those two
+    generated regions must remain identical to the pre-feature template.
+    Stripping both generated marker blocks from the produced README must
+    yield exactly the pre-feature template with the same marker blocks
+    stripped.
+    """
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    _populate_dataset(data_root, source_root)
+
+    # Stub the PNG writer because matplotlib is not the contract under test.
+    monkeypatch.setattr(
+        "osm_polygon_description_tag.dataset.reporting._write_h3_map_png",
+        lambda data_root, total_rows, occupied_cells, counts=None: None,
+        raising=False,
+    )
+
+    generate_dataset_docs(data_root, dataset_card_template())
+    readme = (data_root / "README.md").read_text(encoding="utf-8")
+    pre_h3 = _PRE_H3_TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    # Sanity: the generated README carries both generated blocks.
+    assert "<!-- GENERATED:STATS:START -->" in readme
+    assert "<!-- GENERATED:H3_MAP:START -->" in readme
+    assert H3_MAP_ASSET_RELATIVE_PATH in readme
+
+    # Strip both generated marker blocks (same regex on both sides).
+    stats_marker_pattern = re.compile(
+        r"<!-- GENERATED:STATS:START -->.*?<!-- GENERATED:STATS:END -->\n",
+        re.DOTALL,
+    )
+
+    def _strip(text: str) -> str:
+        text = stats_marker_pattern.sub("", text, count=1)
+        text = _H3_MAP_BLOCK_PATTERN.sub("", text, count=1)
+        return text
+
+    stripped_readme = _strip(readme)
+    stripped_pre_h3 = _strip(pre_h3)
+    assert stripped_readme == stripped_pre_h3, (
+        "Outside the stats and H3 map generated markers, the generated README "
+        "must be byte-identical to the pre-feature template. First diff: "
+        f"{_first_diff(stripped_readme, stripped_pre_h3)}"
+    )

@@ -168,9 +168,20 @@ def _collect_allowlisted_files(data_root: Path) -> tuple[UploadItem, ...]:
     items.append(_build_item(readme, "README.md"))
     items.append(_build_item(stats, "stats.json"))
 
+    # ``assets/`` is required: every dataset-wide plan must include the
+    # deterministic H3 density map. A missing directory, a regular file
+    # of the same name, a symlink, or a directory that does not contain
+    # the canonical map file is rejected.
     assets_dir = data_root / "assets"
-    if assets_dir.is_dir():
-        items.extend(_validate_assets_directory(assets_dir))
+    if not assets_dir.exists():
+        raise PublicationError(
+            f"assets directory missing for plan: {assets_dir}; the H3 density map must be generated"
+        )
+    if assets_dir.is_symlink() or not assets_dir.is_dir():
+        raise PublicationError(
+            f"assets directory must be a real directory, not a symlink or file: {assets_dir}"
+        )
+    items.extend(_validate_assets_directory(assets_dir))
 
     data_dir = data_root / "data"
     if data_dir.is_dir():
