@@ -26,7 +26,7 @@ def test_public_uv_project_foundation_is_complete() -> None:
     readme = readme_path.read_text(encoding="utf-8")
     assert readme.startswith("# OSM Polygon Description Tag")
     assert "Open Database License" in readme
-    assert "explicit operational action" in readme
+    assert "just run-and-publish" in readme
 
 
 def test_foundation_excludes_external_data_from_git() -> None:
