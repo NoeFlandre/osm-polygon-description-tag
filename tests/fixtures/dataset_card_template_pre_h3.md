@@ -18,7 +18,7 @@ MultiPolygon geometry, WGS84 geodesic area, bounding box, and OSM provenance.
 
 Source repository: [github.com/NoeFlandre/osm-polygon-description-tag](https://github.com/NoeFlandre/osm-polygon-description-tag).
 
-Explore the pipeline metrics in the [Trackio dashboard](https://noeflandre-osm-polygon-description-tag-trackio.hf.space/?project=osm-polygon-description-tag&sidebar=hidden).
+Explore the pipeline metrics in the [Trackio dashboard](https://noeflandre-osm-polygon-description-tag-trackio.static.hf.space/?project=osm-polygon-description-tag&sidebar=hidden).
 
 Hexbin density of every described polygon at H3 resolution 3, drawn from each
 row's geometry centroid on a logarithmic scale. Lighter cells contain more

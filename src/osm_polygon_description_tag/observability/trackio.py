@@ -24,7 +24,7 @@ from osm_polygon_description_tag.dataset.reporting import collect_stats
 DEFAULT_TRACKIO_PROJECT = "osm-polygon-description-tag"
 DEFAULT_TRACKIO_SPACE_ID = "NoeFlandre/osm-polygon-description-tag-trackio"
 TRACKIO_DASHBOARD_URL = (
-    "https://noeflandre-osm-polygon-description-tag-trackio.hf.space/"
+    "https://noeflandre-osm-polygon-description-tag-trackio.static.hf.space/"
     "?project=osm-polygon-description-tag&sidebar=hidden"
 )
 
@@ -48,7 +48,7 @@ def dashboard_url(
     if not owner or not name:
         raise ValueError(f"space_id must be '<owner>/<name>': {space_id!r}")
     host = f"{owner}-{name}".lower().replace("_", "-")
-    return f"https://{host}.hf.space/?project={quote(project, safe='-_.~')}&sidebar=hidden"
+    return f"https://{host}.static.hf.space/?project={quote(project, safe='-_.~')}&sidebar=hidden"
 
 
 def retrospective_run_name(stats_sha256: str) -> str:
@@ -127,17 +127,19 @@ class TrackioRecorder:
         ).lower() in {"0", "false", "off", "no"}:
             self.failure_reason = "trackio disabled by environment"
             return False
-        backend = self.backend or _load_backend()
-        if backend is None:
-            self.failure_reason = "trackio is not installed"
-            return False
         try:
             trackio_dir = self.data_root / "logs" / "trackio"
             trackio_dir.mkdir(parents=True, exist_ok=True)
             os.environ["TRACKIO_DIR"] = str(trackio_dir)
+            backend = self.backend or _load_backend()
+            if backend is None:
+                self.failure_reason = "trackio is not installed"
+                return False
+            # The public dashboard is a static Space, which is free and
+            # serves a durable snapshot. Runs log locally during execution;
+            # ``finish`` synchronizes that local database to the static Space.
             kwargs: dict[str, object] = {
                 "project": self.project,
-                "space_id": self.space_id,
                 "config": dict(config),
             }
             if self.run_name is not None:
@@ -169,6 +171,16 @@ class TrackioRecorder:
             return
         try:
             self.backend.finish()
+            sync = getattr(self.backend, "sync", None)
+            if callable(sync):
+                owner, _, name = self.space_id.partition("/")
+                sync(
+                    project=self.project,
+                    space_id=self.space_id,
+                    bucket_id=f"{owner}/{name}-bucket",
+                    sdk="static",
+                    force=True,
+                )
         except Exception as error:  # pragma: no cover - defensive integration boundary
             self.failure_reason = f"trackio finish failed: {error}"
         finally:

@@ -49,12 +49,58 @@ def test_recorder_logs_metrics_and_finishes_without_global_state(tmp_path: Path)
         {
             "project": DEFAULT_TRACKIO_PROJECT,
             "name": "retrospective-test",
-            "space_id": DEFAULT_TRACKIO_SPACE_ID,
             "config": {"source_count": 2},
         }
     ]
     assert backend.logs == [({"rows": 10}, 1)]
     assert backend.finished == 1
+
+
+def test_recorder_syncs_local_run_to_static_space(tmp_path: Path) -> None:
+    class _SyncBackend(_FakeBackend):
+        def __init__(self) -> None:
+            super().__init__()
+            self.sync_calls: list[dict[str, object]] = []
+
+        def sync(self, **kwargs: object) -> str:
+            self.sync_calls.append(kwargs)
+            return "NoeFlandre/osm-polygon-description-tag-trackio"
+
+    backend = _SyncBackend()
+    recorder = TrackioRecorder(data_root=tmp_path, backend=backend)
+    assert recorder.start(config={}) is True
+    recorder.finish()
+
+    assert backend.sync_calls == [
+        {
+            "project": DEFAULT_TRACKIO_PROJECT,
+            "space_id": DEFAULT_TRACKIO_SPACE_ID,
+            "bucket_id": "NoeFlandre/osm-polygon-description-tag-trackio-bucket",
+            "sdk": "static",
+            "force": True,
+        }
+    ]
+
+
+def test_recorder_sets_trackio_dir_before_loading_backend(tmp_path: Path, monkeypatch) -> None:
+    observed: list[str | None] = []
+    backend = _FakeBackend()
+
+    def load_backend() -> _FakeBackend:
+        import os
+
+        observed.append(os.environ.get("TRACKIO_DIR"))
+        return backend
+
+    monkeypatch.delenv("TRACKIO_DIR", raising=False)
+    monkeypatch.setenv("OSM_POLYGON_DESCRIPTION_TAG_TRACKIO", "1")
+    monkeypatch.setattr(
+        "osm_polygon_description_tag.observability.trackio._load_backend", load_backend
+    )
+
+    recorder = TrackioRecorder(data_root=tmp_path)
+    assert recorder.start(config={}) is True
+    assert observed == [str(tmp_path / "logs" / "trackio")]
 
 
 def test_publish_retrospective_logs_file_curve_and_summary(tmp_path: Path, monkeypatch) -> None:
@@ -150,7 +196,7 @@ def test_retrospective_points_are_ordered_and_cumulative() -> None:
 
 def test_trackio_urls_and_run_names_are_stable() -> None:
     assert dashboard_url(DEFAULT_TRACKIO_PROJECT, DEFAULT_TRACKIO_SPACE_ID) == (
-        "https://noeflandre-osm-polygon-description-tag-trackio.hf.space/"
+        "https://noeflandre-osm-polygon-description-tag-trackio.static.hf.space/"
         "?project=osm-polygon-description-tag&sidebar=hidden"
     )
     assert retrospective_run_name("a" * 64) == "retrospective-aaaaaaaaaaaa"
