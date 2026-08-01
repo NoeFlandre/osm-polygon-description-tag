@@ -48,6 +48,7 @@ from osm_polygon_description_tag.dataset.manifest import (
 )
 from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
 from osm_polygon_description_tag.dataset.storage import StorageError, validate_geoparquet
+from osm_polygon_description_tag.observability.trackio import TrackioRecorder
 from osm_polygon_description_tag.osm.discovery import Source, discover_sources
 from osm_polygon_description_tag.osm.extraction import ExportRecord
 from osm_polygon_description_tag.publication.models import (
@@ -471,6 +472,7 @@ def run_and_publish(
     subprocess_runner: Callable[[list[str]], None] | None = None,
     progress_interval: int = 100_000,
     logger: RunLogger | None = None,
+    tracker: TrackioRecorder | None = None,
     osmium_executable: str = "osmium",
 ) -> OrchestrationReport:
     """Stoppable, resumable build + publish for every discovered PBF.
@@ -543,6 +545,7 @@ def run_and_publish(
                     upload_timeout=upload_timeout,
                     progress_interval=progress_interval,
                     logger=logger,
+                    tracker=tracker,
                     osmium_executable=osmium_executable,
                 )
             finally:
@@ -562,6 +565,7 @@ def run_and_publish(
             upload_timeout=upload_timeout,
             progress_interval=progress_interval,
             logger=logger,
+            tracker=tracker,
             osmium_executable=osmium_executable,
         )
     except KeyboardInterrupt:
@@ -570,6 +574,8 @@ def run_and_publish(
     finally:
         if owns_logger:
             logger.close()
+        if tracker is not None:
+            tracker.finish()
 
 
 def _run_and_publish(
@@ -587,6 +593,7 @@ def _run_and_publish(
     upload_timeout: float | None,
     progress_interval: int,
     logger: RunLogger,
+    tracker: TrackioRecorder | None,
     osmium_executable: str,
 ) -> OrchestrationReport:
     if paths is None:
@@ -629,6 +636,8 @@ def _run_and_publish(
         level="INFO",
         total=total_sources,
     )
+    if tracker is not None:
+        tracker.start(config={"source_count": total_sources})
 
     # Resolve the verifier exactly once so a single HfApi instance is used.
     active_verifier: HubVerifier | None = verifier
@@ -661,6 +670,15 @@ def _run_and_publish(
         )
         if outcome.status == STATUS_PUBLISHED:
             report.outcomes.append(outcome)
+            if tracker is not None:
+                tracker.log(
+                    {
+                        "step": index,
+                        "source_rows": outcome.included_rows,
+                        "source_output_bytes": outcome.output_bytes,
+                        "source_status": 0,
+                    }
+                )
             continue
         if outcome.status in {STATUS_BUILT, STATUS_REUSED}:
             logger.event(
@@ -716,6 +734,15 @@ def _run_and_publish(
             outcome.note = "published after verified upload"
             per_pbf_upload_count += 1
         report.outcomes.append(outcome)
+        if tracker is not None:
+            tracker.log(
+                {
+                    "step": index,
+                    "source_rows": outcome.included_rows,
+                    "source_output_bytes": outcome.output_bytes,
+                    "source_status": 1 if outcome.status == STATUS_BUILT else 2,
+                }
+            )
 
     _verify_final_completeness(paths, sources)
 
@@ -769,6 +796,16 @@ def _run_and_publish(
         source_count=total_sources,
         per_pbf_uploads=per_pbf_upload_count,
     )
+    if tracker is not None:
+        tracker.log(
+            {
+                "step": total_sources + 1,
+                "dataset_rows": sum(outcome.included_rows for outcome in report.outcomes),
+                "dataset_output_bytes": sum(outcome.output_bytes for outcome in report.outcomes),
+                "completed_sources": len(report.outcomes),
+                "per_pbf_uploads": per_pbf_upload_count,
+            }
+        )
     logger.flush()
     return report
 

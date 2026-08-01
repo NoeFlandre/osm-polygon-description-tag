@@ -57,6 +57,7 @@ def _reject_live_hf_command(command: object) -> None:
 def _fail_closed_hf_subprocess_guard(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> Iterator[None]:
+    monkeypatch.setenv("OSM_POLYGON_DESCRIPTION_TAG_TRACKIO", "0")
     real_popen = subprocess.Popen
     real_which = shutil.which
     fake_hf = tmp_path / "hf"

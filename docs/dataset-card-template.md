@@ -18,6 +18,8 @@ MultiPolygon geometry, WGS84 geodesic area, bounding box, and OSM provenance.
 
 Source repository: [github.com/NoeFlandre/osm-polygon-description-tag](https://github.com/NoeFlandre/osm-polygon-description-tag).
 
+Explore the pipeline metrics in the [Trackio dashboard](https://noeflandre-osm-polygon-description-tag-trackio.hf.space/?project=osm-polygon-description-tag&sidebar=hidden).
+
 <!-- GENERATED:H3_MAP:START -->
 ![H3 density of description-tagged polygons](assets/description_polygon_density.png)
 <!-- GENERATED:H3_MAP:END -->

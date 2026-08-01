@@ -16,7 +16,8 @@ CANONICAL_DEPENDENCIES = {
     "osm": {"runtime", "osm"},
     "dataset": {"runtime", "osm", "dataset"},
     "publication": {"runtime", "dataset", "publication"},
-    "workflow": {"runtime", "osm", "dataset", "publication", "workflow"},
+    "observability": {"runtime", "dataset", "observability"},
+    "workflow": {"runtime", "osm", "dataset", "publication", "observability", "workflow"},
 }
 COMPATIBILITY_MODULES = (
     "_logging",

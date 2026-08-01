@@ -20,6 +20,10 @@ from typer._click.exceptions import ClickException, Exit, UsageError
 from osm_polygon_description_tag.dataset.manifest import ManifestError
 from osm_polygon_description_tag.dataset.reporting import ReportingError, generate_dataset_docs
 from osm_polygon_description_tag.dataset.storage import StorageError, validate_geoparquet
+from osm_polygon_description_tag.observability.trackio import (
+    TrackioRecorder,
+    publish_retrospective,
+)
 from osm_polygon_description_tag.osm.discovery import discover_sources
 from osm_polygon_description_tag.osm.extraction import OsmiumExportError
 from osm_polygon_description_tag.publication import (
@@ -225,6 +229,7 @@ def handle_publish(args: SimpleNamespace) -> int:
 
 def handle_run_and_publish(args: SimpleNamespace) -> int:
     paths = _resolve_paths(args)
+    tracker = TrackioRecorder(data_root=paths.data_root)
     presenter = getattr(args, "presenter", None)
     logger = (
         RunLogger(
@@ -243,10 +248,22 @@ def handle_run_and_publish(args: SimpleNamespace) -> int:
             confirm_repo=args.confirm_repo,
             osmium_executable=args.osmium,
             logger=logger,
+            tracker=tracker,
         )
     finally:
         if logger is not None:
             logger.close()
+    _print_json(report.to_payload())
+    return 0
+
+
+def handle_trackio_report(args: SimpleNamespace) -> int:
+    paths = _resolve_paths(args)
+    report = publish_retrospective(
+        paths.data_root,
+        project=args.project,
+        space_id=args.space_id,
+    )
     _print_json(report.to_payload())
     return 0
 
@@ -314,6 +331,28 @@ def generate_card_command(
     _invoke(
         handle_card,
         _namespace(source_root=source_root, data_root=data_root, osmium=osmium),
+    )
+
+
+@app.command("trackio-report", help="Log retrospective dataset metrics to Trackio")
+def trackio_report_command(
+    project: Annotated[str, typer.Option("--project")] = "osm-polygon-description-tag",
+    space_id: Annotated[str, typer.Option("--space-id")] = (
+        "NoeFlandre/osm-polygon-description-tag-trackio"
+    ),
+    source_root: SourceRoot = None,
+    data_root: DataRoot = None,
+    osmium: Osmium = "osmium",
+) -> None:
+    _invoke(
+        handle_trackio_report,
+        _namespace(
+            source_root=source_root,
+            data_root=data_root,
+            osmium=osmium,
+            project=project,
+            space_id=space_id,
+        ),
     )
 
 

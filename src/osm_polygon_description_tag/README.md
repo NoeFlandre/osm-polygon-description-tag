@@ -6,6 +6,7 @@ The canonical implementation is organized by operational domain:
 - `osm`: deterministic PBF discovery and bounded export;
 - `dataset`: schema, transformation, storage, manifests, and reporting;
 - `publication`: upload planning, state, execution, and Hub verification;
+- `observability`: optional Trackio retrospective and live pipeline metrics;
 - `workflow`: preflight, resumable builds, completeness, and lifecycle composition;
 - `cli.py`: the stable console entry point.
 

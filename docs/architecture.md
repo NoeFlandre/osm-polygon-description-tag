@@ -18,6 +18,8 @@ higher-level packages, and circular imports are forbidden.
 - `dataset` owns schemas, transformations, GeoParquet storage, manifests, and reporting.
 - `publication` owns allowlisted upload plans, publication state, retry execution, and Hub
   verification.
+- `observability` owns optional Trackio metrics for retrospective snapshots and live resumable
+  runs; Trackio failures never affect dataset artifacts.
 - `workflow` composes preflight, builds, resumability, completeness, and publication.
 - `cli` exposes the Typer command surface, invokes canonical APIs, and reports results.
 

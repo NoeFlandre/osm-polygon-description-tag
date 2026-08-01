@@ -31,6 +31,8 @@ def test_template_contains_required_handwritten_sections() -> None:
     assert "ODbL" in text
     assert "overlap" in text.lower()
     assert "language code" in text.lower() or "language" in text.lower()
+    assert "Trackio" in text
+    assert "osm-polygon-description-tag-trackio" in text
 
 
 def _populate(tmp_path: Path) -> Path:
