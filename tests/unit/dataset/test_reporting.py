@@ -191,6 +191,29 @@ def test_collect_stats_rejects_stale_output(tmp_path: Path) -> None:
         collect_stats(data_root, clock=_frozen_clock)
 
 
+def test_generate_dataset_docs_installs_hero_image(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    source_root.mkdir()
+    _populate_dataset(data_root, source_root)
+    template_path = Path("docs/dataset-card-template.md")
+
+    generate_dataset_docs(data_root, template_path, clock=_frozen_clock)
+
+    hero = data_root / "assets" / "dataset-card-hero.png"
+    assert hero.read_bytes() == (Path("assets/dataset-card-hero.png").read_bytes())
+    first_mtime = hero.stat().st_mtime_ns
+
+    readme = (data_root / "README.md").read_text(encoding="utf-8")
+    assert "![OSM Polygon Description Tag dataset hero](assets/dataset-card-hero.png)" in readme
+
+    # Re-running with identical inputs leaves the hero byte-identical and
+    # preserves its on-disk mtime.
+    generate_dataset_docs(data_root, template_path, clock=_frozen_clock)
+    assert hero.read_bytes() == (Path("assets/dataset-card-hero.png").read_bytes())
+    assert hero.stat().st_mtime_ns == first_mtime
+
+
 def test_generate_dataset_docs_writes_stats_and_card(tmp_path: Path) -> None:
     data_root = tmp_path / "generated"
     source_root = tmp_path / "raw"

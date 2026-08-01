@@ -62,6 +62,7 @@ from osm_polygon_description_tag.dataset.manifest import (
     read_manifest,
 )
 from osm_polygon_description_tag.dataset.schema import SCHEMA_VERSION
+from osm_polygon_description_tag.runtime.resources import dataset_card_hero
 
 _STATS_SCHEMA_VERSION = 5
 _H3_MAP_CACHE_SCHEMA_VERSION = 1
@@ -69,6 +70,8 @@ _H3_MAP_RENDER_VERSION = 2
 _AREA_HISTOGRAM_FILENAME = "area_distribution.png"
 _AREA_HISTOGRAM_ASSET_RELATIVE_PATH = f"assets/{_AREA_HISTOGRAM_FILENAME}"
 _AREA_HISTOGRAM_TITLE = "Area distribution of description-tagged polygons"
+_DATASET_CARD_HERO_FILENAME = "dataset-card-hero.png"
+_DATASET_CARD_HERO_ASSET_RELATIVE_PATH = f"assets/{_DATASET_CARD_HERO_FILENAME}"
 _QUANTILE_PROBABILITIES = [0.25, 0.5, 0.75]
 _GENERATED_PATTERN = re.compile(
     r"(<!-- GENERATED:STATS:START -->\n)(.*?)(<!-- GENERATED:STATS:END -->)", re.DOTALL
@@ -140,6 +143,36 @@ def _write_if_changed(path: Path, text: str) -> bool:
     temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         temp.write_text(text, encoding="utf-8")
+        with open(temp, "rb") as handle:
+            os.fsync(handle.fileno())
+        try:
+            dir_fd = os.open(str(path.parent), os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            pass
+        os.replace(temp, path)
+        return True
+    finally:
+        if temp.exists():
+            temp.unlink()
+
+
+def _write_bytes_if_changed(path: Path, data: bytes) -> bool:
+    """Atomically write ``data`` to ``path`` only when bytes differ.
+
+    Mirrors :func:`_write_if_changed` for binary asset files so identical
+    regeneration preserves mtime and avoids touching the underlying
+    directory entry. Returns ``True`` when a write occurred.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_file() and path.read_bytes() == data:
+        return False
+    temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temp.write_bytes(data)
         with open(temp, "rb") as handle:
             os.fsync(handle.fileno())
         try:
@@ -689,6 +722,9 @@ def generate_dataset_docs(
     stats["area_histogram_input_sha256"] = histogram_input_sha256
     stats["area_histogram_render_version"] = AREA_HISTOGRAM_RENDER_VERSION
     stats["area_histogram_total_rows"] = total_rows
+
+    hero_bytes = dataset_card_hero().read_bytes()
+    _write_bytes_if_changed(data_root / _DATASET_CARD_HERO_ASSET_RELATIVE_PATH, hero_bytes)
 
     stats_json = json.dumps(stats, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     stats_sha256 = hashlib.sha256(stats_json.encode("utf-8")).hexdigest()

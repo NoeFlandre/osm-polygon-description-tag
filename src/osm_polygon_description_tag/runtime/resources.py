@@ -40,6 +40,11 @@ def dataset_card_template() -> Path:
     return resource_path("dataset-card-template.md")
 
 
+def dataset_card_hero() -> Path:
+    """Return the canonical dataset-card hero image packaged with the project."""
+    return resource_path("dataset-card-hero.png")
+
+
 def project_root() -> Path:
     """Locate the project checkout root from the installed package location.
 
