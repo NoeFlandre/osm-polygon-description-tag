@@ -1,5 +1,14 @@
 """Canonical dataset artifact APIs."""
 
+from osm_polygon_description_tag.dataset.deduplication import (
+    DEDUPLICATION_POLICY_SHA256,
+    DEDUPLICATION_POLICY_VERSION,
+    DUPLICATE_REJECTION_REASON,
+    DeduplicationError,
+    DeduplicationResult,
+    deduplicate_dataset,
+    select_canonical_row,
+)
 from osm_polygon_description_tag.dataset.manifest import (
     MANIFEST_SCHEMA_VERSION,
     TRANSFORM_ALGORITHM_VERSION,
@@ -45,11 +54,16 @@ from osm_polygon_description_tag.dataset.transform import (
 )
 
 __all__ = [
+    "DEDUPLICATION_POLICY_SHA256",
+    "DEDUPLICATION_POLICY_VERSION",
+    "DUPLICATE_REJECTION_REASON",
     "GEOPARQUET_VERSION",
     "MANIFEST_SCHEMA_VERSION",
     "SCHEMA",
     "SCHEMA_VERSION",
     "TRANSFORM_ALGORITHM_VERSION",
+    "DeduplicationError",
+    "DeduplicationResult",
     "Manifest",
     "ManifestError",
     "OutputIdentity",
@@ -63,6 +77,7 @@ __all__ = [
     "current_code_revision",
     "current_dependency_versions",
     "current_output_algorithm_revision",
+    "deduplicate_dataset",
     "descriptions_from_tags",
     "file_sha256",
     "generate_dataset_docs",
@@ -72,6 +87,7 @@ __all__ = [
     "names_from_tags",
     "output_identity_for",
     "read_manifest",
+    "select_canonical_row",
     "source_identity_for",
     "transform_record",
     "validate_finalized_artifacts",

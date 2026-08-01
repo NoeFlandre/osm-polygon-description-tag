@@ -79,7 +79,7 @@ def _plant_resumable_artifact(data_root: Path, source_root: Path, source_name: s
                 make_record_dict(
                     Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
                     {"description": "x"},
-                    osm_id=1,
+                    osm_id=1 if source_name.startswith("a") else 2,
                     source_pbf=source_name,
                 )
             ]

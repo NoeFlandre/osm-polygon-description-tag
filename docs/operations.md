@@ -30,13 +30,14 @@ None of these local-state paths enters an upload plan.
 2. read-only preflight, including real `osmium`, `hf`, authentication, and Hub
    write-permission checks;
 3. build or validated local reuse for each source;
-4. atomic Parquet and manifest promotion;
-5. an exact six-file per-PBF upload plan (Parquet, manifest, README, stats,
+4. global `(osm_type, osm_id)` deduplication with atomic resumable promotion;
+5. deterministic README, stats, and visual-asset refresh;
+6. an exact six-file per-PBF upload plan (Parquet, manifest, README, stats,
    H3 map, and area histogram) and remote verification;
-6. atomic publication-state update, including the H3 map identity;
-7. deterministic final `README.md` and `stats.json` generation and independent
+7. atomic publication-state update, including the H3 map identity;
+8. deterministic final `README.md` and `stats.json` generation and independent
    metadata publication, including both visual assets;
-8. atomic record of publication state with map SHA-256, size, and verified
+9. atomic record of publication state with map SHA-256, size, and verified
    revision.
 
 Preflight fails before opening a PBF or creating generated artifacts. Once it
@@ -57,6 +58,11 @@ just run-and-publish
 The orchestrator classifies each source as `build`, `reuse-local`, or
 `already-published`. It never rebuilds a verified local artifact whose source,
 schema, transform, area-policy, and output identities still agree.
+
+If interrupted during deduplication, the staged canonical files remain under
+`.work/dedup/` and the next invocation finishes promotion before continuing to
+publication. A completed deduplication state is reused when all input output
+identities and the policy hash still match.
 
 ## Logs and diagnostics
 

@@ -34,6 +34,7 @@ source PBFs
   → bounded osmium export
   → schema-preserving transformation
   → atomic GeoParquet and manifest generation
+  → global OSM identity deduplication
   → completeness and publication preflight
   → explicit allowlisted Hugging Face Hub upload
   → remote verification

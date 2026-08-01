@@ -7,16 +7,14 @@ iterates discovered sources in deterministic filename order, and for each one:
    source/output identity, schema versions, area-policy checksum, transform
    algorithm version, and output algorithm revision.
 2. Otherwise rebuilds exactly that PBF with the real osmium binary.
-3. Validates the produced GeoParquet and manifest, regenerates
-   ``stats.json`` and ``README.md``, and computes a per-PBF upload plan
-   containing exactly four files (Parquet, manifest, README, stats).
-4. Uploads through :func:`publication.execute_upload` (or the in-process
-   test runner), with optional ``upload_timeout`` forwarded to
-   ``subprocess.run``.
-5. Verifies every uploaded file exists on the Hub with matching identity via
-   the default Hub verifier (built on ``huggingface_hub.HfApi``) and
-   records the verified remote commit SHA in ``publication-state.json``
-   atomically.
+3. Validates all local artifacts and globally deduplicates OSM identities with
+   an atomic, resumable promotion.
+4. Regenerates ``stats.json`` and ``README.md``, then computes per-PBF upload
+   plans containing the final Parquet, manifest, README, stats, and visual
+   assets.
+5. Uploads through :func:`publication.execute_upload` (or the in-process
+   test runner), verifies every uploaded file via the default Hub verifier,
+   and records each verified remote commit SHA atomically.
 
 Three mutually exclusive per-source outcomes are exposed:
 
@@ -39,6 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from osm_polygon_description_tag.dataset.deduplication import deduplicate_dataset
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     is_resumable,
@@ -275,7 +274,6 @@ def _process_one(
                 source_total=source_total,
                 decision="reuse-local",
             )
-        generate_dataset_docs(paths.data_root, dataset_card_template(), clock=clock)
         return SourceOutcome(
             source_name=source.name,
             status=STATUS_REUSED,
@@ -337,7 +335,6 @@ def _process_one(
             rows=result.included_rows,
             bytes=result.output_path.stat().st_size,
         )
-    generate_dataset_docs(paths.data_root, dataset_card_template(), clock=clock)
     return SourceOutcome(
         source_name=source.name,
         status=STATUS_BUILT,
@@ -449,6 +446,88 @@ def _execute_publication(
             verified_revision=verified,
         )
     return verified
+
+
+def _publish_source_if_needed(
+    paths: Paths,
+    source: Source,
+    outcome: SourceOutcome,
+    *,
+    verifier: HubVerifier | None,
+    upload_timeout: float | None,
+    upload_runner: Callable[[list[str]], str] | None,
+    clock: Callable[[], str],
+    logger: RunLogger,
+    source_index: int,
+    source_total: int,
+) -> tuple[SourceOutcome, bool]:
+    """Upload one final deduplicated source artifact when its state is stale."""
+    output_path = paths.data_root / "data" / source.output_name
+    manifest_name = f"{source.output_name.removesuffix('.parquet')}.manifest.json"
+    manifest = read_manifest(paths.data_root / "manifests" / manifest_name)
+    outcome.included_rows = manifest.counts.included_rows
+    outcome.output_bytes = output_path.stat().st_size
+    state = _state_read_publication_state(paths.data_root)
+    published = _state_cast_dict(state.get("published", {}))
+    existing = _state_cast_dict(published.get(source.name, {}))
+    if _published_state_matches(existing, manifest, source, output_path):
+        outcome.status = STATUS_PUBLISHED
+        outcome.note = "already published; nothing to do"
+        return outcome, False
+
+    if outcome.status == STATUS_PUBLISHED:
+        outcome.status = STATUS_REUSED
+        outcome.note = "deduplicated artifact requires upload"
+    logger.event(
+        "upload_start",
+        level="INFO",
+        source=source.name,
+        source_index=source_index,
+        source_total=source_total,
+    )
+    try:
+        revision = _execute_publication(
+            paths,
+            source,
+            verifier=verifier,
+            timeout=upload_timeout,
+            upload_runner=upload_runner,
+            logger=logger,
+        )
+    except OrchestratorError as error:
+        outcome.status = STATUS_FAILED
+        outcome.note = str(error)
+        logger.event(
+            "upload_failed",
+            level="ERROR",
+            source=source.name,
+            source_index=source_index,
+            source_total=source_total,
+            reason=str(error),
+        )
+        raise
+    output_identity = output_identity_for(output_path)
+    plan_identity = _build_per_pbf_upload_plan(paths.data_root, source.name).identity_sha256
+    _write_publication_state(
+        paths.data_root,
+        source_name=source.name,
+        source_sha256=source_identity_for(source.path).sha256,
+        output_sha256=output_identity.sha256,
+        output_bytes=output_path.stat().st_size,
+        remote_revision=revision,
+        artifact_identity=plan_identity,
+        completed_at=clock(),
+    )
+    logger.event(
+        "state_written",
+        level="INFO",
+        source=source.name,
+        source_index=source_index,
+        source_total=source_total,
+    )
+    outcome.remote_revision = revision
+    outcome.note = "published after verified upload"
+    return outcome, True
 
 
 # ---------------------------------------------------------------------------
@@ -663,6 +742,7 @@ def _run_and_publish(
     per_pbf_upload_count = 0
     cumulative_rows = 0
     cumulative_output_bytes = 0
+    outcomes_by_source: dict[str, SourceOutcome] = {}
     for index, source in enumerate(sources, start=1):
         outcome = _process_one(
             source,
@@ -675,72 +755,46 @@ def _run_and_publish(
             source_total=total_sources,
             osmium_executable=osmium_executable,
         )
-        if outcome.status == STATUS_PUBLISHED:
-            report.outcomes.append(outcome)
-            cumulative_rows += outcome.included_rows
-            cumulative_output_bytes += outcome.output_bytes
-            if tracker is not None:
-                tracker.log(
-                    {
-                        "step": index,
-                        "cumulative_rows": cumulative_rows,
-                        "cumulative_output_bytes": cumulative_output_bytes,
-                    }
-                )
-            continue
-        if outcome.status in {STATUS_BUILT, STATUS_REUSED}:
-            logger.event(
-                "upload_start",
-                level="INFO",
-                source=source.name,
-                source_index=index,
-                source_total=total_sources,
-            )
-            try:
-                revision = _execute_publication(
-                    paths,
-                    source,
-                    verifier=active_verifier,
-                    timeout=upload_timeout,
-                    upload_runner=upload_runner,
-                    logger=logger,
-                )
-            except OrchestratorError as error:
-                outcome.status = STATUS_FAILED
-                outcome.note = str(error)
-                report.outcomes.append(outcome)
-                logger.event(
-                    "upload_failed",
-                    level="ERROR",
-                    source=source.name,
-                    source_index=index,
-                    source_total=total_sources,
-                    reason=str(error),
-                )
-                raise
-            output_path = paths.data_root / "data" / source.output_name
-            output_identity = output_identity_for(output_path)
-            plan_identity = _build_per_pbf_upload_plan(paths.data_root, source.name).identity_sha256
-            _write_publication_state(
-                paths.data_root,
-                source_name=source.name,
-                source_sha256=source_identity_for(source.path).sha256,
-                output_sha256=output_identity.sha256,
-                output_bytes=output_path.stat().st_size,
-                remote_revision=revision,
-                artifact_identity=plan_identity,
-                completed_at=clock(),
-            )
-            logger.event(
-                "state_written",
-                level="INFO",
-                source=source.name,
-                source_index=index,
-                source_total=total_sources,
-            )
-            outcome.remote_revision = revision
-            outcome.note = "published after verified upload"
-            per_pbf_upload_count += 1
+        outcomes_by_source[source.name] = outcome
+
+    # Reject stray or incomplete artifacts before the global pass can inspect
+    # them.  The second check below validates the atomically promoted results.
+    _verify_final_completeness(paths, sources)
+    dedup_result = deduplicate_dataset(paths.data_root)
+    logger.event(
+        "deduplication_complete",
+        level="INFO",
+        input_rows=dedup_result.input_rows,
+        output_rows=dedup_result.output_rows,
+        duplicate_rows=dedup_result.duplicate_rows,
+        files_changed=dedup_result.files_changed,
+        status=dedup_result.status,
+    )
+
+    _verify_final_completeness(paths, sources)
+
+    # Refresh the canonical README, stats, and H3 map before constructing
+    # the dataset-wide reconciliation plan. This ordering is required for
+    # migration of a completed pre-H3 dataset: reconciliation must see the
+    # same complete allowlisted surface that metadata publication will see.
+    # The byte-stable writers preserve a true no-op when nothing changed.
+    _refresh_dataset_docs_for_metadata(paths, clock=clock, logger=logger)
+
+    for index, source in enumerate(sources, start=1):
+        outcome = outcomes_by_source[source.name]
+        outcome, uploaded = _publish_source_if_needed(
+            paths,
+            source,
+            outcome,
+            verifier=active_verifier,
+            upload_timeout=upload_timeout,
+            upload_runner=upload_runner,
+            clock=clock,
+            logger=logger,
+            source_index=index,
+            source_total=total_sources,
+        )
+        per_pbf_upload_count += int(uploaded)
         report.outcomes.append(outcome)
         cumulative_rows += outcome.included_rows
         cumulative_output_bytes += outcome.output_bytes
@@ -752,15 +806,6 @@ def _run_and_publish(
                     "cumulative_output_bytes": cumulative_output_bytes,
                 }
             )
-
-    _verify_final_completeness(paths, sources)
-
-    # Refresh the canonical README, stats, and H3 map before constructing
-    # the dataset-wide reconciliation plan. This ordering is required for
-    # migration of a completed pre-H3 dataset: reconciliation must see the
-    # same complete allowlisted surface that metadata publication will see.
-    # The byte-stable writers preserve a true no-op when nothing changed.
-    _refresh_dataset_docs_for_metadata(paths, clock=clock, logger=logger)
 
     # The production verifier owns a narrowly scoped reconciliation hook.
     # It removes remote artifacts that no longer exist locally, but only

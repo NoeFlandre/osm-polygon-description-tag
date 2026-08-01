@@ -64,7 +64,7 @@ from osm_polygon_description_tag.dataset.manifest import (
 from osm_polygon_description_tag.dataset.schema import SCHEMA_VERSION
 from osm_polygon_description_tag.runtime.resources import dataset_card_hero
 
-_STATS_SCHEMA_VERSION = 5
+_STATS_SCHEMA_VERSION = 6
 _H3_MAP_CACHE_SCHEMA_VERSION = 1
 _H3_MAP_RENDER_VERSION = 2
 _AREA_HISTOGRAM_FILENAME = "area_distribution.png"
@@ -484,6 +484,7 @@ def collect_stats(
         "base_name_rows": base_name_rows,
         "localized_name_rows": localized_name_rows,
         "rejections": dict(sorted(rejections.items())),
+        "deduplicated_rows": rejections.get("duplicate_osm_object", 0),
         "source_bytes_total": source_bytes,
         "output_bytes_total": output_bytes,
         "area_m2_count": rows,
@@ -534,6 +535,7 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
         f"| Polygons | {_fmt_int(stats['rows'])} |",
         f"| Parquet files | {_fmt_int(stats['output_files'])} |",
         f"| Download size | {_fmt_bytes(stats['output_bytes_total'])} |",
+        f"| Duplicate rows removed | {_fmt_int(stats['deduplicated_rows'])} |",
         f"| Closed ways | {_fmt_int(stats['osm_types'].get('way', 0))} |",
         f"| Relations | {_fmt_int(stats['osm_types'].get('relation', 0))} |",
         f"| Polygon geometries | {_fmt_int(stats['geometry_types'].get('Polygon', 0))} |",

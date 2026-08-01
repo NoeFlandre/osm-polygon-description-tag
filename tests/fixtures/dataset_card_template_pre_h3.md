@@ -100,7 +100,7 @@ matching manifests. No counts are handwritten.
   as language codes.
 - Text comes directly from OpenStreetMap and may vary in quality, language,
   formatting, and completeness.
-- Regional overlap means this is not a globally deduplicated table.
+- Cross-region overlaps are globally deduplicated by `(osm_type, osm_id)` before publication.
 - Geometry and tags reflect the source extracts at their recorded OSM
   timestamps.
 

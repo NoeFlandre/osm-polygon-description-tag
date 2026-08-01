@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from osm_polygon_description_tag.dataset.deduplication import DeduplicationResult
 from osm_polygon_description_tag.observability.trackio import TrackioRecorder
+from osm_polygon_description_tag.workflow import orchestrator
 from osm_polygon_description_tag.workflow.orchestrator import run_and_publish
 
 
@@ -71,3 +73,30 @@ def test_run_and_publish_starts_trackio_only_after_preflight(tmp_path: Path) -> 
 
 def test_trackio_recorder_is_the_public_live_tracker_type() -> None:
     assert TrackioRecorder.__name__ == "TrackioRecorder"
+
+
+def test_run_and_publish_runs_global_deduplication_before_metadata(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source_root = tmp_path / "raw"
+    data_root = tmp_path / "generated"
+    source_root.mkdir()
+    data_root.mkdir()
+    calls: list[Path] = []
+
+    def fake_deduplicate(root: Path) -> object:
+        calls.append(root)
+        return DeduplicationResult("skipped", 0, 0, 0, 0)
+
+    monkeypatch.setattr(orchestrator, "deduplicate_dataset", fake_deduplicate)
+
+    run_and_publish(
+        source_root=source_root,
+        data_root=data_root,
+        confirm_repo="NoeFlandre/osm-polygon-description-tag",
+        preflight=lambda: {"source_count": 0, "osmium_version": "fake"},
+        upload_runner=lambda _command: "revision",
+        verifier=lambda _repo_id, _files: "revision",
+    )
+
+    assert calls == [data_root]

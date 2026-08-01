@@ -110,7 +110,7 @@ def test_collect_stats_aggregates_from_validated_artifacts(tmp_path: Path) -> No
     assert "generation_timestamp_utc" not in stats
     assert stats["area_m2_min_m2"] is not None and stats["area_m2_min_m2"] > 0
     assert stats["area_m2_max_m2"] >= stats["area_m2_min_m2"]
-    assert stats["stats_schema_version"] == 5
+    assert stats["stats_schema_version"] == 6
 
 
 def test_collect_stats_separates_base_and_localized_description_words(
@@ -143,7 +143,7 @@ def test_collect_stats_separates_base_and_localized_description_words(
 
     stats = collect_stats(data_root)
 
-    assert stats["stats_schema_version"] == 5
+    assert stats["stats_schema_version"] == 6
     assert stats["base_description_values"] == 2
     assert stats["base_description_words_total"] == 3
     assert stats["base_description_words_median"] == 1.5

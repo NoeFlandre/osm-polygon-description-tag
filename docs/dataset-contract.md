@@ -63,6 +63,17 @@ Artifacts are written and promoted atomically. Statistics and the dataset card
 are regenerated only from validated artifacts and matching manifests, with
 byte-stable write-if-changed behavior.
 
+## Global identity deduplication
+
+Before publication, the workflow keeps exactly one row for each
+`(osm_type, osm_id)` across all regional extracts. The canonical row is chosen
+by highest OSM `version`, then latest `timestamp`, then lexicographically
+smallest `source_pbf`, with a stable row fingerprint as the final tie-breaker.
+Only affected per-PBF Parquets and manifests are rewritten. The operation is
+atomic and resumable through local `.work/dedup-state.json`; raw PBFs are never
+modified. Deduplicated rows are recorded as the factual
+`duplicate_osm_object` rejection reason in manifests and `stats.json`.
+
 ## Map asset
 
 In addition to the Parquet files, the dataset repository contains a single
@@ -75,9 +86,7 @@ The map:
 * uses H3 resolution 3;
 * assigns each polygon to a cell by its Shapely geometry centroid;
 * uses a logarithmic colour scale so sparse and dense areas remain visible;
-* counts every dataset row exactly once, preserving regional overlap
-  semantics (the same OSM object appearing in two regional extracts is
-  counted as two dataset rows);
+* counts every deduplicated dataset row exactly once;
 * is uploaded as part of every per-PBF plan and as part of the final
   metadata plan;
 * is included in the publication allowlist under the exact filename
