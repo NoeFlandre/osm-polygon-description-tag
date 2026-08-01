@@ -51,6 +51,7 @@ include = [
     "src/osm_polygon_description_tag/_data/*.json",
     "src/osm_polygon_description_tag/_data/*.geojson",
     "src/osm_polygon_description_tag/_data/*.md",
+    "src/osm_polygon_description_tag/_data/*.png",
 ]
 
 [dependency-groups]
