@@ -1,3 +1,5 @@
+![OSM Polygon Description Tag dataset hero](assets/dataset-card-hero.png)
+
 # OSM Polygon Description Tag
 
 Reproducible OpenStreetMap polygon extraction with complete tags, full
