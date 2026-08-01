@@ -97,6 +97,9 @@ def test_collect_stats_aggregates_from_validated_artifacts(tmp_path: Path) -> No
 
     assert stats["output_files"] == 2
     assert stats["rows"] == 3
+    assert stats["unique_osm_objects"] == 3
+    assert stats["regional_overlap_duplicate_rows"] == 0
+    assert stats["regional_overlap_duplicate_rate"] == 0.0
     assert stats["osm_types"] == {"relation": 1, "way": 2}
     assert stats["geometry_types"] == {"MultiPolygon": 1, "Polygon": 2}
     assert stats["description_suffixes"] == {"en": 2, "pt-BR": 1}
@@ -107,7 +110,7 @@ def test_collect_stats_aggregates_from_validated_artifacts(tmp_path: Path) -> No
     assert "generation_timestamp_utc" not in stats
     assert stats["area_m2_min_m2"] is not None and stats["area_m2_min_m2"] > 0
     assert stats["area_m2_max_m2"] >= stats["area_m2_min_m2"]
-    assert stats["stats_schema_version"] == 4
+    assert stats["stats_schema_version"] == 5
 
 
 def test_collect_stats_separates_base_and_localized_description_words(
@@ -140,7 +143,7 @@ def test_collect_stats_separates_base_and_localized_description_words(
 
     stats = collect_stats(data_root)
 
-    assert stats["stats_schema_version"] == 4
+    assert stats["stats_schema_version"] == 5
     assert stats["base_description_values"] == 2
     assert stats["base_description_words_total"] == 3
     assert stats["base_description_words_median"] == 1.5
@@ -227,4 +230,6 @@ def test_generate_dataset_docs_writes_stats_and_card(tmp_path: Path) -> None:
     assert "Transformation rejections by reason" not in generated
     assert stats["files"][0]["source_sha256"]
     assert stats["files"][0]["output_sha256"]
+    assert stats["files"][0]["emitted_features"] == 4
+    assert stats["files"][0]["rejections"] == {"no_nonempty_description": 2}
     assert stats["rejections"] == {"no_nonempty_description": 4}

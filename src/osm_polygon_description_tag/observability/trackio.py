@@ -4,7 +4,7 @@ Trackio is deliberately isolated behind :class:`TrackioRecorder`.  A missing
 installation, missing Hugging Face credentials, or a dashboard outage disables
 metrics and never fails extraction, validation, resumability, or publication.
 When enabled, local Trackio data lives below ``<data-root>/logs/trackio`` and
-the configured Space receives the same metrics for a persistent dashboard.
+the completed run is synchronized to the public static Space.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import json
 import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, cast
 from urllib.parse import quote
@@ -51,11 +52,13 @@ def dashboard_url(
     return f"https://{host}.static.hf.space/?project={quote(project, safe='-_.~')}&sidebar=hidden"
 
 
-def retrospective_run_name(stats_sha256: str) -> str:
-    """Return a stable run name for one exact dataset snapshot."""
-    if len(stats_sha256) < 12:
-        raise ValueError("stats_sha256 must contain at least 12 characters")
-    return f"retrospective-{stats_sha256[:12]}"
+def retrospective_run_name(snapshot_date: str) -> str:
+    """Return an explicit, human-readable name for a dataset snapshot."""
+    try:
+        datetime.strptime(snapshot_date, "%Y-%m-%d")
+    except ValueError as error:
+        raise ValueError("snapshot_date must use YYYY-MM-DD") from error
+    return f"snapshot-{snapshot_date}"
 
 
 def _integer(value: object) -> int:
@@ -73,27 +76,220 @@ def build_retrospective_points(stats: Mapping[str, Any]) -> list[dict[str, objec
     )
     cumulative_rows = 0
     cumulative_output_bytes = 0
-    cumulative_source_bytes = 0
     points: list[dict[str, object]] = []
     for step, entry in enumerate(ordered, start=1):
         source_rows = _integer(entry.get("rows"))
         source_output_bytes = _integer(entry.get("output_bytes"))
-        source_bytes = _integer(entry.get("source_bytes"))
         cumulative_rows += source_rows
         cumulative_output_bytes += source_output_bytes
-        cumulative_source_bytes += source_bytes
         points.append(
             {
                 "step": step,
-                "source_rows": source_rows,
                 "cumulative_rows": cumulative_rows,
-                "source_output_bytes": source_output_bytes,
                 "cumulative_output_bytes": cumulative_output_bytes,
-                "source_bytes": source_bytes,
-                "cumulative_source_bytes": cumulative_source_bytes,
             }
         )
     return points
+
+
+def _number(value: object) -> float:
+    return float(value) if isinstance(value, int | float) else 0.0
+
+
+def _rejections(entry: Mapping[str, Any]) -> dict[str, int]:
+    raw = entry.get("rejections", {})
+    if not isinstance(raw, Mapping):
+        return {}
+    return {str(key): _integer(value) for key, value in sorted(raw.items())}
+
+
+def build_per_pbf_rows(stats: Mapping[str, Any]) -> list[dict[str, object]]:
+    """Build the factual per-PBF table used by the static dashboard.
+
+    A description candidate is an exported polygon that did not fail the
+    non-empty-description filter. Technical acceptance is the fraction of
+    candidates that survived all subsequent geometry/schema checks.
+    """
+    files = stats.get("files", [])
+    if not isinstance(files, Sequence) or isinstance(files, str | bytes | bytearray):
+        return []
+    rows: list[dict[str, object]] = []
+    for entry in sorted(
+        (item for item in files if isinstance(item, Mapping)),
+        key=lambda item: str(item.get("parquet", "")),
+    ):
+        included = _integer(entry.get("rows"))
+        emitted = _integer(entry.get("emitted_features"))
+        rejection_counts = _rejections(entry)
+        no_description = rejection_counts.get("no_nonempty_description", 0)
+        candidates = max(emitted - no_description, 0)
+        technical_rejections = sum(
+            count
+            for reason, count in rejection_counts.items()
+            if reason != "no_nonempty_description"
+        )
+        source_bytes = _integer(entry.get("source_bytes"))
+        output_bytes = _integer(entry.get("output_bytes"))
+        rows.append(
+            {
+                "source": str(entry.get("source_pbf", entry.get("parquet", ""))),
+                "rows": included,
+                "input_pbf_gib": source_bytes / (1024**3),
+                "output_parquet_mib": output_bytes / (1024**2),
+                "description_candidate_rate": candidates / emitted if emitted else 0.0,
+                "technical_acceptance_rate": included / candidates if candidates else 0.0,
+                "output_bytes_per_row": output_bytes / included if included else 0.0,
+                "rejections_by_reason": json.dumps(
+                    rejection_counts, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                ),
+                "_technical_rejections": technical_rejections,
+                "_rows_per_input_gib": included / (source_bytes / (1024**3))
+                if source_bytes
+                else 0.0,
+                "_technical_rejection_rate": (
+                    technical_rejections / candidates if candidates else 0.0
+                ),
+            }
+        )
+    return rows
+
+
+def build_dataset_summary(stats: Mapping[str, Any]) -> list[dict[str, object]]:
+    """Build one concise summary table from the validated stats payload."""
+    rows = _integer(stats.get("rows"))
+    base_values = _integer(stats.get("base_description_values"))
+    localized_values = _integer(stats.get("localized_description_values"))
+    technical_rejections = sum(
+        count for reason, count in _rejections(stats).items() if reason != "no_nonempty_description"
+    )
+    unique_objects = _integer(stats.get("unique_osm_objects", rows))
+    duplicate_rate = _number(
+        stats.get(
+            "regional_overlap_duplicate_rate",
+            (rows - unique_objects) / rows if rows else 0.0,
+        )
+    )
+    return [
+        {"metric": "Total rows", "value": rows},
+        {"metric": "Unique (osm_type, osm_id)", "value": unique_objects},
+        {
+            "metric": "Regional-overlap duplicate rate",
+            "value": duplicate_rate,
+        },
+        {"metric": "Base description values", "value": base_values},
+        {"metric": "Localized description values", "value": localized_values},
+        {
+            "metric": "Total description words",
+            "value": _integer(stats.get("base_description_words_total"))
+            + _integer(stats.get("localized_description_words_total")),
+        },
+        {
+            "metric": "Output size (GiB)",
+            "value": _integer(stats.get("output_bytes_total")) / (1024**3),
+        },
+        {"metric": "PBFs", "value": _integer(stats.get("output_files"))},
+        {"metric": "Total technical rejections", "value": technical_rejections},
+    ]
+
+
+def _public_per_pbf_rows(rows: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    return [{key: value for key, value in row.items() if not key.startswith("_")} for row in rows]
+
+
+def _ranked_figure(
+    rows: Sequence[Mapping[str, object]],
+    value_key: str,
+    title: str,
+    xlabel: str,
+) -> Any:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    ranked = sorted(
+        rows,
+        key=lambda row: (-_number(row.get(value_key)), str(row.get("source", ""))),
+    )[:30]
+    ranked = list(reversed(ranked))
+    figure, axis = plt.subplots(figsize=(10, max(6, len(ranked) * 0.24)), dpi=120)
+    labels = [str(row.get("source", "")) for row in ranked]
+    values = [_number(row.get(value_key)) for row in ranked]
+    axis.barh(labels, values, color="#4a6fa5")
+    axis.set_title(title)
+    axis.set_xlabel(xlabel)
+    axis.grid(axis="x", alpha=0.25)
+    figure.tight_layout()
+    return figure
+
+
+def build_snapshot_payload(
+    backend: TrackioBackend,
+    data_root: Path,
+    stats: Mapping[str, Any],
+) -> dict[str, object]:
+    """Build Trackio tables, media, and ranked plots for one dataset snapshot."""
+    per_pbf_rows = build_per_pbf_rows(stats)
+    payload: dict[str, object] = {}
+
+    table_factory = getattr(backend, "Table", None)
+    if callable(table_factory):
+        payload["per_pbf_table"] = table_factory(data=_public_per_pbf_rows(per_pbf_rows))
+        payload["dataset_summary"] = table_factory(data=build_dataset_summary(stats))
+
+    markdown_factory = getattr(backend, "Markdown", None)
+    if callable(markdown_factory):
+        payload["step_definition"] = markdown_factory(
+            "Step is the 1-based PBF index after sorting source filenames; it is not time."
+        )
+
+    image_factory = getattr(backend, "Image", None)
+    if callable(image_factory):
+        media = (
+            ("h3_density_map", "assets/description_polygon_density.png", "H3 density map"),
+            (
+                "area_distribution_histogram",
+                "assets/area_distribution.png",
+                "Area distribution histogram",
+            ),
+        )
+        for key, relative_path, caption in media:
+            path = data_root / relative_path
+            if path.is_file():
+                payload[key] = image_factory(path, caption=caption)
+
+    html_factory = getattr(backend, "Html", None)
+    if callable(html_factory) and per_pbf_rows:
+        plot_specs = (
+            (
+                "description_candidate_rate_by_region",
+                "Description candidate rate by region (top 30)",
+                "Candidate rate",
+            ),
+            (
+                "rows_per_input_gib_by_region",
+                "Described polygon rows per input GiB (top 30)",
+                "Rows per input GiB",
+            ),
+            (
+                "technical_rejection_rate_by_region",
+                "Technical rejection rate by region (top 30)",
+                "Technical rejection rate",
+            ),
+        )
+        key_to_value = {
+            plot_specs[0][0]: "description_candidate_rate",
+            plot_specs[1][0]: "_rows_per_input_gib",
+            plot_specs[2][0]: "_technical_rejection_rate",
+        }
+        for key, title, xlabel in plot_specs:
+            figure = _ranked_figure(per_pbf_rows, key_to_value[key], title, xlabel)
+            try:
+                payload[key] = html_factory(figure, caption=title)
+            finally:
+                figure.clf()
+
+    return payload
 
 
 def _load_backend() -> TrackioBackend | None:
@@ -165,6 +361,22 @@ class TrackioRecorder:
             self.failure_reason = f"trackio logging failed: {error}"
             self.enabled = False
 
+    def log_snapshot(
+        self,
+        data_root: Path,
+        *,
+        stats: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Log the summary tables, media, and ranked plots for a completed run."""
+        if not self.enabled or self.backend is None:
+            return
+        try:
+            snapshot_stats = stats if stats is not None else _read_stats(data_root)
+            self.log(build_snapshot_payload(self.backend, data_root, snapshot_stats))
+        except Exception as error:  # pragma: no cover - defensive integration boundary
+            self.failure_reason = f"trackio snapshot failed: {error}"
+            self.enabled = False
+
     def finish(self) -> None:
         """Flush and close the run without propagating Trackio failures."""
         if not self._started or self.backend is None:
@@ -211,6 +423,11 @@ class TrackioReport:
         }
 
 
+def _read_stats(data_root: Path) -> dict[str, Any]:
+    path = data_root / "stats.json"
+    return cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
+
+
 def _stats_sha256(stats: Mapping[str, Any]) -> str:
     encoded = json.dumps(stats, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -222,17 +439,18 @@ def publish_retrospective(
     backend: TrackioBackend | None = None,
     project: str = DEFAULT_TRACKIO_PROJECT,
     space_id: str = DEFAULT_TRACKIO_SPACE_ID,
+    run_name: str | None = None,
 ) -> TrackioReport:
     """Log one completed dataset snapshot and its per-file metric curve."""
     stats = collect_stats(data_root)
     stats_sha256 = _stats_sha256(stats)
-    run_name = retrospective_run_name(stats_sha256)
+    resolved_run_name = run_name or retrospective_run_name(datetime.now(UTC).date().isoformat())
     recorder = TrackioRecorder(
         data_root=data_root,
         backend=backend,
         project=project,
         space_id=space_id,
-        run_name=run_name,
+        run_name=resolved_run_name,
     )
     points = build_retrospective_points(stats)
     config = {
@@ -240,29 +458,17 @@ def publish_retrospective(
         "dataset_stats_sha256": stats_sha256,
         "schema_version": _integer(stats.get("schema_version")),
         "source_count": len(points),
+        "step_definition": "PBF index sorted by filename; not time",
     }
     recorder.start(config=config)
     for point in points:
         recorder.log(point)
-    recorder.log(
-        {
-            "step": len(points) + 1,
-            "dataset_rows": _integer(stats.get("rows")),
-            "dataset_output_bytes": _integer(stats.get("output_bytes_total")),
-            "dataset_source_bytes": _integer(stats.get("source_bytes_total")),
-            "base_description_values": _integer(stats.get("base_description_values")),
-            "localized_description_values": _integer(stats.get("localized_description_values")),
-            "base_description_words": _integer(stats.get("base_description_words_total")),
-            "localized_description_words": _integer(stats.get("localized_description_words_total")),
-            "h3_occupied_cells": _integer(stats.get("h3_occupied_cells")),
-            "area_histogram_rows": _integer(stats.get("area_histogram_total_rows")),
-        }
-    )
+    recorder.log_snapshot(data_root, stats=stats)
     recorder.finish()
     return TrackioReport(
         project=project,
         space_id=space_id,
-        run_name=run_name,
+        run_name=resolved_run_name,
         dashboard_url=dashboard_url(project, space_id),
         enabled=recorder.started_successfully,
         point_count=len(points) + 1,
@@ -276,7 +482,10 @@ __all__ = [
     "TRACKIO_DASHBOARD_URL",
     "TrackioRecorder",
     "TrackioReport",
+    "build_dataset_summary",
+    "build_per_pbf_rows",
     "build_retrospective_points",
+    "build_snapshot_payload",
     "dashboard_url",
     "publish_retrospective",
     "retrospective_run_name",

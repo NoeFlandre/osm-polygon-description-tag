@@ -165,6 +165,8 @@ def test_stats_payload_retains_deterministic_per_file_provenance(tmp_path: Path)
             "rows",
             "source_bytes",
             "output_bytes",
+            "emitted_features",
+            "rejections",
             "source_sha256",
             "output_sha256",
         }

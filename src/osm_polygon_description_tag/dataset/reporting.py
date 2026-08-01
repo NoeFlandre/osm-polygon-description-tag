@@ -63,7 +63,7 @@ from osm_polygon_description_tag.dataset.manifest import (
 )
 from osm_polygon_description_tag.dataset.schema import SCHEMA_VERSION
 
-_STATS_SCHEMA_VERSION = 4
+_STATS_SCHEMA_VERSION = 5
 _H3_MAP_CACHE_SCHEMA_VERSION = 1
 _H3_MAP_RENDER_VERSION = 2
 _AREA_HISTOGRAM_FILENAME = "area_distribution.png"
@@ -321,6 +321,10 @@ def collect_stats(
 
         rows_result = connection.execute("SELECT COUNT(*) FROM features").fetchone()
         rows = int(rows_result[0] if rows_result else 0)
+        unique_result = connection.execute(
+            "SELECT COUNT(*) FROM (SELECT DISTINCT osm_type, osm_id FROM features)"
+        ).fetchone()
+        unique_osm_objects = int(unique_result[0] if unique_result else 0)
         if rows == 0:
             osm_types: dict[str, int] = {}
             geometry_types: dict[str, int] = {}
@@ -415,6 +419,8 @@ def collect_stats(
                 "rows": rows_in_file,
                 "source_bytes": manifest.source.size_bytes,
                 "output_bytes": parquet.stat().st_size,
+                "emitted_features": manifest.counts.emitted_features,
+                "rejections": dict(sorted(manifest.counts.rejections.items())),
                 "source_sha256": manifest.source.sha256,
                 "output_sha256": file_sha256(parquet),
             }
@@ -426,6 +432,9 @@ def collect_stats(
         "schema_version": SCHEMA_VERSION,
         "output_files": len(parquets),
         "rows": rows,
+        "unique_osm_objects": unique_osm_objects,
+        "regional_overlap_duplicate_rows": rows - unique_osm_objects,
+        "regional_overlap_duplicate_rate": ((rows - unique_osm_objects) / rows if rows else 0.0),
         "emitted_features": emitted_features,
         "osm_types": osm_types,
         "geometry_types": geometry_types,

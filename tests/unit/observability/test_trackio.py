@@ -8,6 +8,8 @@ from osm_polygon_description_tag.observability.trackio import (
     DEFAULT_TRACKIO_PROJECT,
     DEFAULT_TRACKIO_SPACE_ID,
     TrackioRecorder,
+    build_dataset_summary,
+    build_per_pbf_rows,
     build_retrospective_points,
     dashboard_url,
     retrospective_run_name,
@@ -29,6 +31,12 @@ class _FakeBackend:
 
     def finish(self) -> None:
         self.finished += 1
+
+    def Table(self, **kwargs: object) -> dict[str, object]:
+        return {"type": "table", **kwargs}
+
+    def Markdown(self, text: str) -> dict[str, object]:
+        return {"type": "markdown", "text": text}
 
 
 def test_recorder_logs_metrics_and_finishes_without_global_state(tmp_path: Path) -> None:
@@ -133,7 +141,58 @@ def test_publish_retrospective_logs_file_curve_and_summary(tmp_path: Path, monke
     assert report.enabled is True
     assert report.point_count == 3
     assert backend.finished == 1
-    assert backend.logs[-1][0]["dataset_rows"] == 13
+    assert set(backend.logs[-1][0]) == {
+        "per_pbf_table",
+        "dataset_summary",
+        "step_definition",
+    }
+    assert backend.logs[-1][0]["dataset_summary"]["type"] == "table"
+
+
+def test_snapshot_tables_use_explicit_units_and_rates() -> None:
+    stats = {
+        "rows": 8,
+        "unique_osm_objects": 6,
+        "regional_overlap_duplicate_rate": 0.25,
+        "base_description_values": 5,
+        "localized_description_values": 3,
+        "base_description_words_total": 10,
+        "localized_description_words_total": 4,
+        "output_bytes_total": 1024**3,
+        "output_files": 1,
+        "rejections": {"no_nonempty_description": 4, "invalid_geometry": 2},
+        "files": [
+            {
+                "source_pbf": "alpha.osm.pbf",
+                "rows": 8,
+                "source_bytes": 1024**3,
+                "output_bytes": 2048,
+                "emitted_features": 14,
+                "rejections": {"no_nonempty_description": 4, "invalid_geometry": 2},
+            }
+        ],
+    }
+
+    rows = build_per_pbf_rows(stats)
+    assert rows[0]["source"] == "alpha.osm.pbf"
+    assert rows[0]["input_pbf_gib"] == 1.0
+    assert rows[0]["output_parquet_mib"] == 2048 / (1024**2)
+    assert rows[0]["description_candidate_rate"] == 10 / 14
+    assert rows[0]["technical_acceptance_rate"] == 8 / 10
+    assert rows[0]["output_bytes_per_row"] == 256
+    assert rows[0]["rejections_by_reason"] == '{"invalid_geometry":2,"no_nonempty_description":4}'
+    summary = build_dataset_summary(stats)
+    assert {row["metric"] for row in summary} == {
+        "Total rows",
+        "Unique (osm_type, osm_id)",
+        "Regional-overlap duplicate rate",
+        "Base description values",
+        "Localized description values",
+        "Total description words",
+        "Output size (GiB)",
+        "PBFs",
+        "Total technical rejections",
+    }
 
 
 def test_recorder_disables_itself_when_trackio_fails(tmp_path: Path) -> None:
@@ -175,21 +234,13 @@ def test_retrospective_points_are_ordered_and_cumulative() -> None:
     assert points == [
         {
             "step": 1,
-            "source_rows": 10,
             "cumulative_rows": 10,
-            "source_output_bytes": 1000,
             "cumulative_output_bytes": 1000,
-            "source_bytes": 2000,
-            "cumulative_source_bytes": 2000,
         },
         {
             "step": 2,
-            "source_rows": 3,
             "cumulative_rows": 13,
-            "source_output_bytes": 300,
             "cumulative_output_bytes": 1300,
-            "source_bytes": 600,
-            "cumulative_source_bytes": 2600,
         },
     ]
 
@@ -199,4 +250,4 @@ def test_trackio_urls_and_run_names_are_stable() -> None:
         "https://noeflandre-osm-polygon-description-tag-trackio.static.hf.space/"
         "?project=osm-polygon-description-tag&sidebar=hidden"
     )
-    assert retrospective_run_name("a" * 64) == "retrospective-aaaaaaaaaaaa"
+    assert retrospective_run_name("2026-07-31") == "snapshot-2026-07-31"

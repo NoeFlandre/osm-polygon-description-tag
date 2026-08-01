@@ -263,6 +263,7 @@ def handle_trackio_report(args: SimpleNamespace) -> int:
         paths.data_root,
         project=args.project,
         space_id=args.space_id,
+        run_name=args.run_name,
     )
     _print_json(report.to_payload())
     return 0
@@ -340,6 +341,7 @@ def trackio_report_command(
     space_id: Annotated[str, typer.Option("--space-id")] = (
         "NoeFlandre/osm-polygon-description-tag-trackio"
     ),
+    run_name: Annotated[str | None, typer.Option("--run-name")] = None,
     source_root: SourceRoot = None,
     data_root: DataRoot = None,
     osmium: Osmium = "osmium",
@@ -352,6 +354,7 @@ def trackio_report_command(
             osmium=osmium,
             project=project,
             space_id=space_id,
+            run_name=run_name,
         ),
     )
 

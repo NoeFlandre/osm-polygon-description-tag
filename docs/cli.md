@@ -75,11 +75,15 @@ dashboard:
 
 ```bash
 uv run osm-polygon-description-tag trackio-report \
-  --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag"
+  --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag" \
+  --run-name snapshot-2026-07-31
 ```
 
 The same recorder is used by `run-and-publish`: it logs source and aggregate
 points during a live run and syncs the completed local database after the run.
+The cumulative curves use PBF index steps sorted by filename, never elapsed
+time. The dashboard also contains the per-PBF table, summary, ranked regional
+plots, H3 map, and area histogram.
 
 ## Output and exit codes
 

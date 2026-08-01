@@ -23,6 +23,9 @@ class _FakeTracker:
     def log(self, metrics: dict[str, object]) -> None:
         self.logs.append(metrics)
 
+    def log_snapshot(self, _data_root: Path) -> None:
+        self.logs.append({"snapshot": True})
+
     def finish(self) -> None:
         self.finished = True
 
@@ -54,15 +57,14 @@ def test_run_and_publish_starts_trackio_only_after_preflight(tmp_path: Path) -> 
     assert preflight_called is True
     assert tracker.started is True
     assert tracker.finished is True
-    assert tracker.config == {"source_count": 0}
+    assert tracker.config == {
+        "source_count": 0,
+        "step_definition": "PBF index sorted by filename; not time",
+    }
     assert tracker.logs == [
         {
-            "step": 1,
-            "dataset_rows": 0,
-            "dataset_output_bytes": 0,
-            "completed_sources": 0,
-            "per_pbf_uploads": 0,
-        }
+            "snapshot": True,
+        },
     ]
     assert report.source_count == 0
 

@@ -14,9 +14,13 @@ uv run osm-polygon-description-tag trackio-report \
   --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag"
 ```
 
-The command derives a deterministic per-Parquet curve and a final summary from
-validated Parquet files and `stats.json`. It stores local Trackio state below
-`<data-root>/logs/trackio` and syncs the run to the public dashboard:
+The command derives two cumulative curves (`cumulative_rows` and
+`cumulative_output_bytes`) from validated Parquet files and `stats.json`.
+Step is the 1-based PBF index after sorting source filenames; it is not time.
+The same snapshot contains a per-PBF table, a concise dataset summary, three
+ranked regional plots, and the existing H3 and area images. It stores local
+Trackio state below `<data-root>/logs/trackio` and syncs the run to the public
+dashboard:
 
 [Open the Trackio dashboard](https://noeflandre-osm-polygon-description-tag-trackio.static.hf.space/?project=osm-polygon-description-tag&sidebar=hidden).
 

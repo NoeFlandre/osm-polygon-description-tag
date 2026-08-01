@@ -21,6 +21,6 @@ repos:
         pass_filenames: false
       - id: contract-tests
         name: contract tests
-        entry: uv run pytest tests/contracts -q
+        entry: env PYTHONPATH=. uv run pytest tests/contracts -q
         language: system
         pass_filenames: false

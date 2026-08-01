@@ -637,7 +637,12 @@ def _run_and_publish(
         total=total_sources,
     )
     if tracker is not None:
-        tracker.start(config={"source_count": total_sources})
+        tracker.start(
+            config={
+                "source_count": total_sources,
+                "step_definition": "PBF index sorted by filename; not time",
+            }
+        )
 
     # Resolve the verifier exactly once so a single HfApi instance is used.
     active_verifier: HubVerifier | None = verifier
@@ -656,6 +661,8 @@ def _run_and_publish(
             active_verifier = default_hub_verifier_factory()
 
     per_pbf_upload_count = 0
+    cumulative_rows = 0
+    cumulative_output_bytes = 0
     for index, source in enumerate(sources, start=1):
         outcome = _process_one(
             source,
@@ -670,13 +677,14 @@ def _run_and_publish(
         )
         if outcome.status == STATUS_PUBLISHED:
             report.outcomes.append(outcome)
+            cumulative_rows += outcome.included_rows
+            cumulative_output_bytes += outcome.output_bytes
             if tracker is not None:
                 tracker.log(
                     {
                         "step": index,
-                        "source_rows": outcome.included_rows,
-                        "source_output_bytes": outcome.output_bytes,
-                        "source_status": 0,
+                        "cumulative_rows": cumulative_rows,
+                        "cumulative_output_bytes": cumulative_output_bytes,
                     }
                 )
             continue
@@ -734,13 +742,14 @@ def _run_and_publish(
             outcome.note = "published after verified upload"
             per_pbf_upload_count += 1
         report.outcomes.append(outcome)
+        cumulative_rows += outcome.included_rows
+        cumulative_output_bytes += outcome.output_bytes
         if tracker is not None:
             tracker.log(
                 {
                     "step": index,
-                    "source_rows": outcome.included_rows,
-                    "source_output_bytes": outcome.output_bytes,
-                    "source_status": 1 if outcome.status == STATUS_BUILT else 2,
+                    "cumulative_rows": cumulative_rows,
+                    "cumulative_output_bytes": cumulative_output_bytes,
                 }
             )
 
@@ -797,15 +806,7 @@ def _run_and_publish(
         per_pbf_uploads=per_pbf_upload_count,
     )
     if tracker is not None:
-        tracker.log(
-            {
-                "step": total_sources + 1,
-                "dataset_rows": sum(outcome.included_rows for outcome in report.outcomes),
-                "dataset_output_bytes": sum(outcome.output_bytes for outcome in report.outcomes),
-                "completed_sources": len(report.outcomes),
-                "per_pbf_uploads": per_pbf_upload_count,
-            }
-        )
+        tracker.log_snapshot(paths.data_root)
     logger.flush()
     return report
 
