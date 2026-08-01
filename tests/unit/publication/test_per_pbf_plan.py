@@ -286,7 +286,7 @@ def test_second_pbf_upload_does_not_re_upload_first_pbf(
 
 
 def test_metadata_only_plan_contains_exactly_three_items(tmp_path: Path) -> None:
-    """The metadata-only UploadPlan contains README.md, stats.json, and every required visual asset."""
+    """The metadata-only UploadPlan contains the README, stats, and all visual assets."""
     paths, source_root, data_root = _setup_two_sources(tmp_path)
     _plant_metadata(paths)
     plan = _build_metadata_only_upload_plan(paths.data_root)

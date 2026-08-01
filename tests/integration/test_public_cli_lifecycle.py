@@ -467,9 +467,7 @@ def test_run_three_is_pure_no_op(
             "area_histogram_size_bytes": (data_root / "assets" / "area_distribution.png")
             .stat()
             .st_size,
-            "dataset_card_hero_sha256": file_sha256(
-                data_root / "assets" / "dataset-card-hero.png"
-            ),
+            "dataset_card_hero_sha256": file_sha256(data_root / "assets" / "dataset-card-hero.png"),
             "dataset_card_hero_size_bytes": (data_root / "assets" / "dataset-card-hero.png")
             .stat()
             .st_size,

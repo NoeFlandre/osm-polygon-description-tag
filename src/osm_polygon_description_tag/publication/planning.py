@@ -336,7 +336,11 @@ def _build_per_pbf_upload_plan(data_root: Path, source_name: str) -> UploadPlan:
 
 
 def _build_metadata_only_upload_plan(data_root: Path) -> UploadPlan:
-    """Build an :class:`UploadPlan` containing README.md, stats.json, and every required visual asset."""
+    """Build an :class:`UploadPlan` containing the dataset card metadata.
+
+    The plan includes ``README.md``, ``stats.json``, and every required
+    visual asset under ``assets/``.
+    """
     required = (
         data_root / "README.md",
         data_root / "stats.json",

@@ -24,7 +24,10 @@ def test_public_uv_project_foundation_is_complete() -> None:
     }
 
     readme = readme_path.read_text(encoding="utf-8")
-    assert readme.startswith("![OSM Polygon Description Tag dataset hero](assets/dataset-card-hero.png)\n\n# OSM Polygon Description Tag")
+    assert readme.startswith(
+        "![OSM Polygon Description Tag dataset hero](assets/dataset-card-hero.png)\n\n"
+        "# OSM Polygon Description Tag"
+    )
     assert "Open Database License" in readme
     assert "just run-and-publish" in readme
 

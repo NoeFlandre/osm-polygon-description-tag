@@ -37,10 +37,8 @@ def test_template_contains_required_handwritten_sections() -> None:
     assert hero_markdown in text
     assert text.index(hero_markdown) < text.index("# OSM Polygon Description Tag")
     # The maintained docs mirror must be byte-identical to the packaged copy.
-    packaged = (
-        Path("src/osm_polygon_description_tag/_data/dataset-card-template.md").read_text(
-            encoding="utf-8"
-        )
+    packaged = Path("src/osm_polygon_description_tag/_data/dataset-card-template.md").read_text(
+        encoding="utf-8"
     )
     assert packaged == text
 
