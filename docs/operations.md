@@ -16,6 +16,8 @@ Local state under the data root is explicitly separated:
   downloads.
 - `.work/` contains validation SQLite and DuckDB spill files.
 - `logs/` contains the rotated redacted JSONL event stream.
+- `logs/trackio/` contains the local Trackio SQLite database; it is synced to
+  the public static dashboard and never enters an upload plan.
 - `publication-state.json` records only verified publication transitions.
 
 None of these local-state paths enters an upload plan.
@@ -29,11 +31,11 @@ None of these local-state paths enters an upload plan.
    write-permission checks;
 3. build or validated local reuse for each source;
 4. atomic Parquet and manifest promotion;
-5. an exact five-file per-PBF upload plan (Parquet, manifest, README, stats,
-   and `assets/description_polygon_density.png`) and remote verification;
+5. an exact six-file per-PBF upload plan (Parquet, manifest, README, stats,
+   H3 map, and area histogram) and remote verification;
 6. atomic publication-state update, including the H3 map identity;
 7. deterministic final `README.md` and `stats.json` generation and independent
-   metadata publication, including the regenerated H3 map asset;
+   metadata publication, including both visual assets;
 8. atomic record of publication state with map SHA-256, size, and verified
    revision.
 
@@ -71,16 +73,18 @@ JSON report. Logs are redacted, allowlisted, flushed, and never published.
 ## Hugging Face safety
 
 The target dataset is `NoeFlandre/osm-polygon-description-tag`. Every upload is
-an explicit allowlisted plan. Per-source plans contain exactly the Parquet,
-manifest, README, stats, and H3 density map needed for that source. Final
-metadata is uploaded separately as exactly `README.md`, `stats.json`, and
-`assets/description_polygon_density.png`.
+an explicit allowlisted plan. Final metadata is uploaded separately as exactly
+`README.md`, `stats.json`, `assets/description_polygon_density.png`, and
+`assets/area_distribution.png`.
 
-The map asset is regenerated from the complete validated local dataset on
-every run and is included in every per-PBF plan and in the final metadata
-plan. A change to the map bytes invalidates the metadata no-op path and
-forces a fresh metadata upload. An unchanged map preserves the true no-op
-metadata publication path.
+The H3 map is keyed by the identities of the complete validated local Parquet
+set. It is recomputed only when that dataset input identity changes. README-only
+or stats-only changes reuse the existing PNG bytes and preserve the true no-op
+metadata publication path when the allowlisted metadata is unchanged.
+
+Trackio is local-first: metrics are written under the generated-data root while
+the pipeline runs, and the completed database is synchronized to the public
+static dashboard. A Trackio outage never interrupts extraction or publication.
 
 Remote reconciliation removes only stale files below managed `data/` and
 `manifests/` namespaces. Unrelated repository files are preserved. The
