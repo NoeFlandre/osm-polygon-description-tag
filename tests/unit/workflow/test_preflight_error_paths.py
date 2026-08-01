@@ -291,6 +291,9 @@ def test_execute_publication_rejects_empty_revision(
     (paths.data_root / "assets" / "area_distribution.png").write_bytes(
         b"\x89PNG\r\n\x1a\n" + b"hist" * 1024
     )
+    (paths.data_root / "assets" / "dataset-card-hero.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + b"hero" * 1024
+    )
     (paths.data_root / "data").mkdir()
     (paths.data_root / "manifests").mkdir()
     write_geoparquet(

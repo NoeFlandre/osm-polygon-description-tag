@@ -131,9 +131,10 @@ def test_final_metadata_verifier_failure_is_reported(tmp_path: Path) -> None:
         return "ok"
 
     def verifier(repo_id: str, files: tuple[object, ...]) -> str:
-        # Allow the per-PBF verification; fail on final metadata (4 files:
-        # README.md, stats.json, H3 density map, area distribution histogram).
-        if len(files) == 4:
+        # Allow the per-PBF verification; fail on final metadata (5 files:
+        # README.md, stats.json, H3 density map, area distribution histogram,
+        # dataset card hero).
+        if len(files) == 5:
             raise RuntimeError("final hub query failed")
         return "verified"
 

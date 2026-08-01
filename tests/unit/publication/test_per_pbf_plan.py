@@ -102,7 +102,7 @@ def _plant_resumable_artifact(paths: Paths, source_root: Path, source_name: str)
 
 
 def _plant_metadata(paths: Paths) -> None:
-    """Plant README.md, stats.json, and both visual assets in the data root."""
+    """Plant README.md, stats.json, and all required visual assets in the data root."""
     (paths.data_root / "README.md").write_text("# README")
     (paths.data_root / "stats.json").write_text("{}")
     (paths.data_root / "assets").mkdir(exist_ok=True)
@@ -112,10 +112,13 @@ def _plant_metadata(paths: Paths) -> None:
     (paths.data_root / "assets" / "area_distribution.png").write_bytes(
         b"\x89PNG\r\n\x1a\n" + b"hist" * 1024
     )
+    (paths.data_root / "assets" / "dataset-card-hero.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + b"hero" * 1024
+    )
 
 
 def test_per_pbf_plan_contains_exactly_five_items(tmp_path: Path) -> None:
-    """A per-PBF plan must contain only the 5 canonical files for that PBF."""
+    """A per-PBF plan must contain only the canonical files for that PBF."""
     paths, source_root, _data_root = _setup_two_sources(tmp_path)
 
     # Drop b so only ``a`` is processed. Plant ``a`` so the orchestrator skips
@@ -124,7 +127,7 @@ def test_per_pbf_plan_contains_exactly_five_items(tmp_path: Path) -> None:
     _plant_resumable_artifact(paths, source_root, "a.osm.pbf")
     _plant_metadata(paths)
 
-    # Sanity: the plan builder produces exactly five items.
+    # Sanity: the plan builder produces exactly seven items.
     plan = _build_per_pbf_upload_plan(paths.data_root, "a.osm.pbf")
     expected_relative = sorted([item.relative_path for item in plan.files])
     assert expected_relative == sorted(
@@ -135,8 +138,9 @@ def test_per_pbf_plan_contains_exactly_five_items(tmp_path: Path) -> None:
             "stats.json",
             "assets/description_polygon_density.png",
             "assets/area_distribution.png",
+            "assets/dataset-card-hero.png",
         ]
-    ), f"per-PBF plan must contain exactly 6 files; got {expected_relative}"
+    ), f"per-PBF plan must contain exactly 7 files; got {expected_relative}"
 
     # The command the runner receives equals the canonical command.
     expected_command = per_pbf_command(paths.data_root, "a.osm.pbf")
@@ -282,7 +286,7 @@ def test_second_pbf_upload_does_not_re_upload_first_pbf(
 
 
 def test_metadata_only_plan_contains_exactly_three_items(tmp_path: Path) -> None:
-    """The metadata-only UploadPlan contains README.md, stats.json, and both visual assets."""
+    """The metadata-only UploadPlan contains README.md, stats.json, and every required visual asset."""
     paths, source_root, data_root = _setup_two_sources(tmp_path)
     _plant_metadata(paths)
     plan = _build_metadata_only_upload_plan(paths.data_root)
@@ -293,5 +297,6 @@ def test_metadata_only_plan_contains_exactly_three_items(tmp_path: Path) -> None
             "stats.json",
             "assets/description_polygon_density.png",
             "assets/area_distribution.png",
+            "assets/dataset-card-hero.png",
         ]
     )

@@ -311,6 +311,9 @@ def test_logs_directory_never_appears_in_upload_plan(tmp_path: Path, logger_fact
     (data_root / "assets" / "area_distribution.png").write_bytes(
         b"\x89PNG\r\n\x1a\n" + b"hist" * 1024
     )
+    (data_root / "assets" / "dataset-card-hero.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + b"hero" * 1024
+    )
     parquet_path = data_root / "data" / "a.parquet"
     has_parquet = parquet_path.exists()
     per_pbf_plan = _build_per_pbf_upload_plan(data_root, "a.osm.pbf") if has_parquet else None

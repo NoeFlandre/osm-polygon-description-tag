@@ -9,6 +9,8 @@ tags:
 - geoparquet
 ---
 
+![OSM Polygon Description Tag dataset hero](assets/dataset-card-hero.png)
+
 # OSM Polygon Description Tag
 
 OpenStreetMap polygons with a non-empty `description` or

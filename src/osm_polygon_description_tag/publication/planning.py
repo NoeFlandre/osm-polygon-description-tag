@@ -42,7 +42,11 @@ H3_MAP_FILENAME = "description_polygon_density.png"
 H3_MAP_ASSET_RELATIVE = f"assets/{H3_MAP_FILENAME}"
 AREA_HISTOGRAM_FILENAME = "area_distribution.png"
 AREA_HISTOGRAM_ASSET_RELATIVE = f"assets/{AREA_HISTOGRAM_FILENAME}"
-_ALLOWED_ASSET_FILES = frozenset({H3_MAP_FILENAME, AREA_HISTOGRAM_FILENAME})
+DATASET_CARD_HERO_FILENAME = "dataset-card-hero.png"
+DATASET_CARD_HERO_ASSET_RELATIVE = f"assets/{DATASET_CARD_HERO_FILENAME}"
+_ALLOWED_ASSET_FILES = frozenset(
+    {H3_MAP_FILENAME, AREA_HISTOGRAM_FILENAME, DATASET_CARD_HERO_FILENAME}
+)
 
 
 def file_sha256_bytes(data: bytes) -> str:
@@ -122,24 +126,27 @@ def _validate_assets_directory(assets_dir: Path) -> list[UploadItem]:
     return items
 
 
-def _validate_assets_for_publication(data_root: Path) -> tuple[UploadItem, UploadItem]:
+def _validate_assets_for_publication(data_root: Path) -> tuple[UploadItem, UploadItem, UploadItem]:
     """Validate the entire ``assets/`` directory and return the canonical items.
 
-    Returns a ``(h3_map, area_histogram)`` tuple. Both the per-PBF and
-    metadata-only plans must pass through the full directory validation
-    so hidden, temporary, symlinked, and unrelated files are always
-    rejected, even when the canonical files alone would otherwise satisfy
-    the plan.
+    Returns a ``(h3_map, area_histogram, dataset_card_hero)`` tuple. Both
+    the per-PBF and metadata-only plans must pass through the full
+    directory validation so hidden, temporary, symlinked, and unrelated
+    files are always rejected, even when the canonical files alone would
+    otherwise satisfy the plan.
     """
     assets_dir = data_root / "assets"
     items = _validate_assets_directory(assets_dir)
     h3_map: UploadItem | None = None
     area_histogram: UploadItem | None = None
+    dataset_card_hero: UploadItem | None = None
     for item in items:
         if item.relative_path == H3_MAP_ASSET_RELATIVE:
             h3_map = item
         elif item.relative_path == AREA_HISTOGRAM_ASSET_RELATIVE:
             area_histogram = item
+        elif item.relative_path == DATASET_CARD_HERO_ASSET_RELATIVE:
+            dataset_card_hero = item
     if h3_map is None:
         raise PublicationError(
             f"assets directory must contain the H3 density map at {H3_MAP_ASSET_RELATIVE}"
@@ -149,7 +156,12 @@ def _validate_assets_for_publication(data_root: Path) -> tuple[UploadItem, Uploa
             f"assets directory must contain the area distribution histogram at "
             f"{AREA_HISTOGRAM_ASSET_RELATIVE}"
         )
-    return h3_map, area_histogram
+    if dataset_card_hero is None:
+        raise PublicationError(
+            f"assets directory must contain the dataset card hero at "
+            f"{DATASET_CARD_HERO_ASSET_RELATIVE}"
+        )
+    return h3_map, area_histogram, dataset_card_hero
 
 
 def _collect_allowlisted_files(data_root: Path) -> tuple[UploadItem, ...]:
@@ -271,7 +283,7 @@ def _require_h3_map(data_root: Path) -> UploadItem:  # pragma: no cover - kept f
 
 
 def _build_per_pbf_upload_plan(data_root: Path, source_name: str) -> UploadPlan:
-    """Build an :class:`UploadPlan` for one PBF containing exactly 6 files.
+    """Build an :class:`UploadPlan` for one PBF containing exactly 7 files.
 
     The plan items are always:
 
@@ -281,6 +293,7 @@ def _build_per_pbf_upload_plan(data_root: Path, source_name: str) -> UploadPlan:
     - ``stats.json``
     - ``assets/description_polygon_density.png``
     - ``assets/area_distribution.png``
+    - ``assets/dataset-card-hero.png``
 
     This is the single source of truth for the production and test runner
     paths. Production and tests must not diverge.
@@ -297,11 +310,14 @@ def _build_per_pbf_upload_plan(data_root: Path, source_name: str) -> UploadPlan:
     for path in required:
         if not path.is_file():
             raise PublicationError(f"required file missing for per-PBF plan: {path}")
-    h3_map_item, area_histogram_item = _validate_assets_for_publication(data_root)
+    h3_map_item, area_histogram_item, dataset_card_hero_item = _validate_assets_for_publication(
+        data_root
+    )
     items = (
         *(_build_item(path, path.relative_to(data_root).as_posix()) for path in required),
         h3_map_item,
         area_histogram_item,
+        dataset_card_hero_item,
     )
     resolved_root = data_root.resolve(strict=False)
     provisional = UploadPlan(
@@ -320,7 +336,7 @@ def _build_per_pbf_upload_plan(data_root: Path, source_name: str) -> UploadPlan:
 
 
 def _build_metadata_only_upload_plan(data_root: Path) -> UploadPlan:
-    """Build an :class:`UploadPlan` containing README.md, stats.json, and both visual assets."""
+    """Build an :class:`UploadPlan` containing README.md, stats.json, and every required visual asset."""
     required = (
         data_root / "README.md",
         data_root / "stats.json",
@@ -328,11 +344,14 @@ def _build_metadata_only_upload_plan(data_root: Path) -> UploadPlan:
     for path in required:
         if not path.is_file():
             raise PublicationError(f"required file missing for metadata plan: {path}")
-    h3_map_item, area_histogram_item = _validate_assets_for_publication(data_root)
+    h3_map_item, area_histogram_item, dataset_card_hero_item = _validate_assets_for_publication(
+        data_root
+    )
     items = (
         *(_build_item(path, path.relative_to(data_root).as_posix()) for path in required),
         h3_map_item,
         area_histogram_item,
+        dataset_card_hero_item,
     )
     resolved_root = data_root.resolve(strict=False)
     provisional = UploadPlan(

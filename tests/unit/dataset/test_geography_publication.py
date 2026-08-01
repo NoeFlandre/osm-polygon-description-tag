@@ -109,6 +109,7 @@ def _plant_metadata(paths: Paths) -> None:
     (paths.data_root / "assets").mkdir(exist_ok=True)
     (paths.data_root / "assets" / "description_polygon_density.png").write_bytes(MAP_BYTES_A)
     (paths.data_root / "assets" / "area_distribution.png").write_bytes(MAP_BYTES_A)
+    (paths.data_root / "assets" / "dataset-card-hero.png").write_bytes(MAP_BYTES_A)
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +133,7 @@ def test_per_pbf_plan_contains_exactly_five_items_including_map(tmp_path: Path) 
             "stats.json",
             "assets/description_polygon_density.png",
             "assets/area_distribution.png",
+            "assets/dataset-card-hero.png",
         ]
     )
 
@@ -163,6 +165,7 @@ def test_per_pbf_command_lists_all_five_files(tmp_path: Path) -> None:
             "stats.json",
             "assets/description_polygon_density.png",
             "assets/area_distribution.png",
+            "assets/dataset-card-hero.png",
         ]
     )
 
@@ -183,6 +186,7 @@ def test_metadata_plan_contains_exactly_three_items_including_map(tmp_path: Path
             "stats.json",
             "assets/description_polygon_density.png",
             "assets/area_distribution.png",
+            "assets/dataset-card-hero.png",
         ]
     )
 
@@ -311,6 +315,10 @@ def test_metadata_state_matches_requires_unchanged_map(tmp_path: Path) -> None:
         area_histogram_size_bytes=(paths.data_root / "assets" / "area_distribution.png")
         .stat()
         .st_size,
+        dataset_card_hero_sha256=file_sha256(paths.data_root / "assets" / "dataset-card-hero.png"),
+        dataset_card_hero_size_bytes=(paths.data_root / "assets" / "dataset-card-hero.png")
+        .stat()
+        .st_size,
         verified_revision="rev",
         completed_at="2026-01-01T00:00:00+00:00",
     )
@@ -343,6 +351,10 @@ def test_metadata_state_matches_requires_unchanged_area_histogram(tmp_path: Path
         area_histogram_size_bytes=(paths.data_root / "assets" / "area_distribution.png")
         .stat()
         .st_size,
+        dataset_card_hero_sha256=file_sha256(paths.data_root / "assets" / "dataset-card-hero.png"),
+        dataset_card_hero_size_bytes=(paths.data_root / "assets" / "dataset-card-hero.png")
+        .stat()
+        .st_size,
         verified_revision="rev",
         completed_at="2026-01-01T00:00:00+00:00",
     )
@@ -372,6 +384,10 @@ def test_state_records_map_sha_and_size_fields(tmp_path: Path) -> None:
         .st_size,
         area_histogram_sha256=file_sha256(paths.data_root / "assets" / "area_distribution.png"),
         area_histogram_size_bytes=(paths.data_root / "assets" / "area_distribution.png")
+        .stat()
+        .st_size,
+        dataset_card_hero_sha256=file_sha256(paths.data_root / "assets" / "dataset-card-hero.png"),
+        dataset_card_hero_size_bytes=(paths.data_root / "assets" / "dataset-card-hero.png")
         .stat()
         .st_size,
         verified_revision="rev",
@@ -652,6 +668,7 @@ def test_global_plan_includes_readme_stats_map_data_manifests(tmp_path: Path) ->
             "stats.json",
             "assets/description_polygon_density.png",
             "assets/area_distribution.png",
+            "assets/dataset-card-hero.png",
             "data/a.parquet",
             "data/b.parquet",
             "manifests/a.manifest.json",

@@ -404,10 +404,12 @@ def test_metadata_only_plan_includes_map_when_present(
     (data_root / "assets").mkdir()
     (data_root / "assets" / "description_polygon_density.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     (data_root / "assets" / "area_distribution.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (data_root / "assets" / "dataset-card-hero.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     plan = _build_metadata_only_upload_plan(data_root)
     relative = sorted(item.relative_path for item in plan.files)
     assert "assets/description_polygon_density.png" in relative
     assert "assets/area_distribution.png" in relative
+    assert "assets/dataset-card-hero.png" in relative
 
 
 # ---------------------------------------------------------------------------

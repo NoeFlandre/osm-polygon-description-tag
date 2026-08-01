@@ -979,11 +979,13 @@ def _upload_final_metadata(
     from osm_polygon_description_tag.dataset.manifest import file_sha256
     from osm_polygon_description_tag.publication.planning import (
         AREA_HISTOGRAM_ASSET_RELATIVE,
+        DATASET_CARD_HERO_ASSET_RELATIVE,
         H3_MAP_ASSET_RELATIVE,
     )
 
     map_path = paths.data_root / H3_MAP_ASSET_RELATIVE
     histogram_path = paths.data_root / AREA_HISTOGRAM_ASSET_RELATIVE
+    hero_path = paths.data_root / DATASET_CARD_HERO_ASSET_RELATIVE
     _write_metadata_state(
         paths.data_root,
         identity_sha256=metadata_plan.identity_sha256,
@@ -995,6 +997,8 @@ def _upload_final_metadata(
         h3_map_size_bytes=map_path.stat().st_size,
         area_histogram_sha256=file_sha256(histogram_path),
         area_histogram_size_bytes=histogram_path.stat().st_size,
+        dataset_card_hero_sha256=file_sha256(hero_path),
+        dataset_card_hero_size_bytes=hero_path.stat().st_size,
         verified_revision=verified,
         completed_at=clock(),
     )

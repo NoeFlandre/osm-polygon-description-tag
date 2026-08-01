@@ -231,6 +231,12 @@ def test_full_run_no_rebuild_on_doc_only_commit(
             "area_histogram_size_bytes": (paths.data_root / "assets" / "area_distribution.png")
             .stat()
             .st_size,
+            "dataset_card_hero_sha256": file_sha256(
+                paths.data_root / "assets" / "dataset-card-hero.png"
+            ),
+            "dataset_card_hero_size_bytes": (paths.data_root / "assets" / "dataset-card-hero.png")
+            .stat()
+            .st_size,
             "verified_revision": "rev-meta",
             "completed_at": "2026-07-27T00:00:00+00:00",
         },
