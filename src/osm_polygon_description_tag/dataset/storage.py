@@ -400,9 +400,15 @@ def _validate_finalized_artifacts_strict(data_root):
     return result
 
 
+def validate_finalized_artifacts_strict(data_root):
+    """Validate finalized artifact pairs and every GeoParquet payload."""
+    return _validate_finalized_artifacts_strict(data_root)
+
+
 __all__ = [
     "StorageError",
     "validate_finalized_artifacts",
+    "validate_finalized_artifacts_strict",
     "validate_geoparquet",
     "write_geoparquet",
 ]

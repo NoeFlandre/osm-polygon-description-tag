@@ -152,21 +152,22 @@ def render_area_histogram(
     """
     labels, values = _bar_labels(counts)
     caption = _build_caption(counts)
-    total = sum(values)
-
     fig, ax = plt.subplots(figsize=_FIGSIZE, dpi=_DPI)
     try:
         fig.set_facecolor(_BG_COLOR)
         ax.set_facecolor(_PANEL_COLOR)
 
         positions = np.arange(len(labels))
-        # Some buckets may be empty (most prominently the smallest).
-        # Plotting them as zero-width bars keeps the y-axis uniform and
-        # the labels legible even when nothing falls in a given range.
-        bar_values = [max(v, 1) if total > 0 else 1 for v in values]
-        bars = ax.barh(
-            positions,
-            bar_values,
+        # Some buckets may be empty (most prominently the smallest). Keep
+        # their bars truly zero-width; substituting one would imply a
+        # polygon that does not exist on the logarithmic axis.
+        occupied_positions = [
+            position for position, value in zip(positions, values, strict=True) if value > 0
+        ]
+        occupied_values = [value for value in values if value > 0]
+        ax.barh(
+            occupied_positions,
+            occupied_values,
             color=_BAR_COLOR,
             edgecolor=_BAR_EDGE,
             linewidth=0.5,
@@ -186,12 +187,12 @@ def render_area_histogram(
 
         # Annotate each bar with its exact integer count so the chart is
         # readable at a glance even when the y-axis is log-scaled.
-        for bar, count in zip(bars, values, strict=False):
+        for position, count in zip(positions, values, strict=True):
             label_text = _format_count_tick(float(count))
-            width = max(bar.get_width(), 1.0)
+            width = max(float(count), 1.0)
             ax.text(
                 width * 1.08,
-                bar.get_y() + bar.get_height() / 2.0,
+                position,
                 label_text,
                 va="center",
                 ha="left",
@@ -222,7 +223,7 @@ def render_area_histogram(
 
         # Leave enough headroom on the right for the largest annotation.
         max_value = max(values) if values else 1
-        ax.set_xlim(right=max(max_value * 4.0, 10.0))
+        ax.set_xlim(left=1.0, right=max(max_value * 4.0, 10.0))
 
         fig.tight_layout(rect=(0, 0.05, 1, 0.97))
         _atomic_save_png(fig, output_path)

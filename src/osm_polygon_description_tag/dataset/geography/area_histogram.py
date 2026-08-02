@@ -55,7 +55,7 @@ AREA_BUCKET_LABELS: Final[tuple[str, ...]] = (
     "100M-1B m²",
     "1B-10B m²",
     "10B-100B m²",
-    ">100B m²",
+    ">=100B m²",
 )
 
 AREA_BUCKET_COUNT: Final[int] = len(AREA_BUCKET_LABELS)
@@ -100,16 +100,16 @@ def aggregate_area_histogram(
     full dataset: only the ``area_m2`` column is read from each Parquet
     via :meth:`ParquetFile.iter_batches`.
 
-    Parquet/manifest identity is validated via
-    :func:`osm_polygon_description_tag.dataset.storage.validate_finalized_artifacts`
+    Parquet/manifest identity and GeoParquet payloads are validated via
+    :func:`osm_polygon_description_tag.dataset.storage.validate_finalized_artifacts_strict`
     before streaming so mismatched, stale, or corrupt pairs cannot be
     observed as a partial histogram.
 
     An empty data directory yields all-zeros, preserving every label.
     """
-    from osm_polygon_description_tag.dataset.storage import validate_finalized_artifacts
+    from osm_polygon_description_tag.dataset.storage import validate_finalized_artifacts_strict
 
-    validate_finalized_artifacts(data_root)
+    validate_finalized_artifacts_strict(data_root)
     counts: list[int] = [0] * AREA_BUCKET_COUNT
     for parquet_path in sorted_parquets(data_root / "data"):
         reader = pq.ParquetFile(parquet_path)

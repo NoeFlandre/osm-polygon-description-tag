@@ -16,6 +16,7 @@ import matplotlib
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from shapely.geometry import Polygon
 
 matplotlib.use("Agg")
 
@@ -49,14 +50,25 @@ from osm_polygon_description_tag.dataset.reporting import (
     _area_histogram_input_sha256,
     generate_dataset_docs,
 )
+from osm_polygon_description_tag.dataset.storage import StorageError, write_geoparquet
+from tests.conftest import make_record_dict
 from tests.unit.dataset.test_reporting import _frozen_clock, _populate_dataset
 
 
 def _write_parquet_with_areas(directory: Path, name: str, areas: list[float]) -> Path:
-    """Write a single-column Parquet that the histogram can stream from."""
-    table = pa.table({"area_m2": pa.array(areas, type=pa.float64())})
+    """Write schema-valid GeoParquet rows with controlled area values."""
+    records: list[dict[str, object]] = []
+    for index, area in enumerate(areas, start=1):
+        record = make_record_dict(
+            Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+            {"description": "area"},
+            osm_id=index,
+            source_pbf=f"{name}.osm.pbf",
+        )
+        record["area_m2"] = area
+        records.append(record)
     target = directory / f"{name}.parquet"
-    pq.write_table(table, target)
+    write_geoparquet(iter(records), target)
     return target
 
 
@@ -126,6 +138,11 @@ def test_bucket_index_handles_above_highest_edge() -> None:
     assert _bucket_index(top * 1_000_000_000.0) == AREA_BUCKET_COUNT - 1
 
 
+def test_top_edge_uses_inclusive_last_bucket_label() -> None:
+    """The final bucket label describes values at the inclusive top edge."""
+    assert AREA_BUCKET_LABELS[-1] == ">=100B m²"
+
+
 def test_bucket_index_handles_negative_values() -> None:
     """Negative areas clamp to the smallest bucket (defensive: dataset rejects these)."""
     assert _bucket_index(-1.0) == 0
@@ -150,8 +167,8 @@ def test_aggregate_area_histogram_returns_zeroed_labels_for_empty_dataset(
 def test_aggregate_area_histogram_buckets_finite_areas(tmp_path: Path) -> None:
     """Every area in the dataset must land in exactly one bucket, summed exactly once."""
     # One area per bucket: the lower edge of every populated bucket plus a
-    # value above the top edge for the open-ended ``>100B m²`` bucket.
-    areas = [edge for edge in AREA_BUCKET_EDGES[:-1]] + [AREA_BUCKET_EDGES[-1] * 10.0]
+    # value above the top edge for the open-ended ``>=100B m²`` bucket.
+    areas = [0.5, *AREA_BUCKET_EDGES[1:-1], AREA_BUCKET_EDGES[-1] * 10.0]
     data_root = _make_finalized_area_histogram_data_root(tmp_path, {"regions": areas})
     counts = aggregate_area_histogram(data_root)
     assert all(counts[label] == 1 for label in AREA_BUCKET_LABELS)
@@ -159,10 +176,10 @@ def test_aggregate_area_histogram_buckets_finite_areas(tmp_path: Path) -> None:
 
 
 def test_aggregate_area_histogram_handles_large_areas(tmp_path: Path) -> None:
-    data_root = _make_finalized_area_histogram_data_root(tmp_path, {"big": [3.5e12, 1.2e10, 0.0]})
+    data_root = _make_finalized_area_histogram_data_root(tmp_path, {"big": [3.5e12, 1.2e10, 0.5]})
     counts = aggregate_area_histogram(data_root)
     assert counts["<1 m²"] == 1
-    assert counts[">100B m²"] == 1
+    assert counts[">=100B m²"] == 1
     assert counts["10B-100B m²"] == 1
 
 
@@ -178,7 +195,7 @@ def test_aggregate_area_histogram_sums_across_multiple_parquets(tmp_path: Path) 
 
 def test_aggregate_area_histogram_is_byte_stable(tmp_path: Path) -> None:
     data_root = _make_finalized_area_histogram_data_root(
-        tmp_path, {"x": [0.0, 1.0, 10.0, 100.0, 1_000.0]}
+        tmp_path, {"x": [0.5, 1.0, 10.0, 100.0, 1_000.0]}
     )
     first = aggregate_area_histogram(data_root)
     second = aggregate_area_histogram(data_root)
@@ -187,8 +204,8 @@ def test_aggregate_area_histogram_is_byte_stable(tmp_path: Path) -> None:
     assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
 
 
-def test_aggregate_area_histogram_skips_null_areas(tmp_path: Path) -> None:
-    """A null ``area_m2`` row is skipped; the rest lands in the right bucket."""
+def test_aggregate_area_histogram_rejects_invalid_area_rows(tmp_path: Path) -> None:
+    """Strict validation rejects null ``area_m2`` rows before bucketing."""
     data_root = tmp_path / "generated"
     source_root = tmp_path / "raw"
     (data_root / "data").mkdir(parents=True)
@@ -218,10 +235,8 @@ def test_aggregate_area_histogram_skips_null_areas(tmp_path: Path) -> None:
         ),
         data_root / "manifests" / "with_nulls.manifest.json",
     )
-    counts = aggregate_area_histogram(data_root)
-    assert counts["10-100 m²"] == 1
-    assert counts["100-1k m²"] == 1
-    assert sum(counts.values()) == 2
+    with pytest.raises(StorageError):
+        aggregate_area_histogram(data_root)
 
 
 def test_aggregate_area_histogram_rejects_orphan_parquet(tmp_path: Path) -> None:
@@ -354,6 +369,31 @@ def test_render_area_histogram_byte_stable_for_empty_dataset(tmp_path: Path) -> 
     render_area_histogram(counts, a)
     render_area_histogram(counts, b)
     assert a.read_bytes() == b.read_bytes()
+
+
+def test_render_area_histogram_does_not_draw_zero_count_bars(tmp_path: Path) -> None:
+    """Empty bins remain visually empty even though the x-axis is logarithmic."""
+    import osm_polygon_description_tag.dataset.geography.area_rendering as rendering
+
+    counts = {label: 0 for label in AREA_BUCKET_LABELS}
+    counts[AREA_BUCKET_LABELS[2]] = 4
+    captured: list[list[float]] = []
+    real_barh = rendering.plt.Axes.barh
+
+    def capture_barh(
+        self: object, _positions: object, widths: object, *args: object, **kwargs: object
+    ):
+        captured.append(list(widths))
+        return real_barh(self, _positions, widths, *args, **kwargs)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(rendering.plt.Axes, "barh", capture_barh)
+    try:
+        render_area_histogram(counts, tmp_path / "hist.png")
+    finally:
+        monkeypatch.undo()
+
+    assert captured == [[4]]
 
 
 # --- reporting integration ----------------------------------------------

@@ -581,7 +581,7 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
             f"![{_AREA_HISTOGRAM_TITLE}]({_AREA_HISTOGRAM_ASSET_RELATIVE_PATH})",
             "",
             "Area buckets span "
-            "<1 m² to >100B m² on a logarithmic scale; "
+            "<1 m² to >=100B m² on a logarithmic scale; "
             f"each bar shows the number of polygons in that bucket "
             f"(total {_fmt_int(stats['rows'])}).",
             "",
