@@ -41,7 +41,59 @@ custom_css: |
   .rule { border-top: 2px solid #17624f; width: 5rem; margin: 1.2rem 0; }
   .accent { color: #17624f; }
   .muted { color: #5e6862; }
-  .dark-note { background: #e9eeea; border-left: 4px solid #17624f; padding: 0.75rem 1rem; }
+  .dark-note {
+    background: #eef2ee;
+    border-left: 4px solid #17624f;
+    padding: 0.75rem 1rem;
+    margin-top: 0.75rem;
+    margin-bottom: 0.25rem;
+  }
+  .pad-roomy.active { padding: 72px; }
+  .slide--content { justify-content: center; }
+  .slide--content > .slide-content,
+  .slide--section-break > .slide-content {
+    flex: 0 0 auto;
+  }
+  .slide--content > .slide-content {
+    width: min(100%, 70rem);
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .slide--section-break { justify-content: center; }
+  .slide--section-break > .slide-content {
+    width: min(100%, 70rem);
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .source-note {
+    bottom: 3.1rem;
+    letter-spacing: 0.01em;
+  }
+  .slide--content.cols-2 .colloquium-grid,
+  .slide--content.cols-3 .colloquium-grid { align-items: start; }
+  .slide--content.cols-2 .colloquium-grid > .col + .col,
+  .slide--content.cols-3 .colloquium-grid > .col + .col {
+    border-left: 1px solid var(--colloquium-border);
+    padding-left: 2.25rem;
+  }
+  .slide pre { margin: 1rem auto; }
+  .slide--content:not(.cols-2):not(.cols-3) .slide-content > pre {
+    width: min(100%, 70rem);
+  }
+  .slide--title .slide-content pre {
+    width: max-content;
+    max-width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .slide--section-break .slide-content > pre {
+    width: min(100%, 58rem);
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .contract-slide .colloquium-grid > .col + .col { padding-top: 4.75rem; }
+  .quality-slide .colloquium-grid > .col + .col { padding-top: 2.75rem; }
+  .slide--section-break .source-note { color: rgba(246, 245, 240, 0.68); }
 ---
 
 <!-- padding: roomy -->
@@ -64,6 +116,7 @@ every boundary.
 ---
 
 <!-- padding: compact -->
+<!-- class: contract-slide -->
 
 ## The codebase has one job: make the dataset repeatable
 
@@ -304,6 +357,7 @@ root.</div>
 ---
 
 <!-- padding: compact -->
+<!-- class: quality-slide -->
 
 ## The quality bar is executable
 

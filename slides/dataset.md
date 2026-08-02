@@ -31,7 +31,10 @@ custom_css: |
   .slide h1, .slide h2 { letter-spacing: -0.025em; }
   .slide h1 { font-size: 3.25rem; line-height: 1.02; }
   .slide h2 { font-size: 2.25rem; line-height: 1.06; }
-  .balanced { padding-top: 110px; }
+  .balanced {
+    justify-content: center;
+  }
+  .balanced > .slide-content { flex: 0 0 auto; }
   .metric-slide {
     justify-content: center;
   }
@@ -49,7 +52,7 @@ custom_css: |
     width: 100%;
   }
   .metric-slide .metric-block {
-    min-height: 8.5rem;
+    min-height: 7rem;
   }
   .metric-slide .metric-block + .metric-block {
     border-left: 1px solid var(--colloquium-border);
@@ -66,7 +69,7 @@ custom_css: |
     max-width: 54rem;
     margin: 1.25rem auto 0;
     padding-top: 1rem;
-    border-top: 1px solid var(--colloquium-border);
+    border-top: 2px solid var(--colloquium-accent);
     color: var(--colloquium-muted);
     text-align: center;
   }
@@ -86,6 +89,93 @@ custom_css: |
     margin-left: auto;
     margin-right: auto;
   }
+  .pad-roomy.active { padding: 72px; }
+  .slide--content { justify-content: center; }
+  .slide--content > .slide-content,
+  .slide--section-break > .slide-content {
+    flex: 0 0 auto;
+  }
+  .slide--content > .slide-content {
+    width: min(100%, 70rem);
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .slide--section-break { justify-content: center; }
+  .slide--section-break > .slide-content {
+    width: min(100%, 70rem);
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .source-note {
+    bottom: 3.1rem;
+    letter-spacing: 0.01em;
+  }
+  .slide--content.cols-2 .colloquium-grid,
+  .slide--content.cols-3 .colloquium-grid { align-items: start; }
+  .slide--content.cols-2 .colloquium-grid > .col + .col,
+  .slide--content.cols-3 .colloquium-grid > .col + .col {
+    border-left: 1px solid var(--colloquium-border);
+    padding-left: 2.25rem;
+  }
+  .slide pre { margin: 1rem auto; }
+  .slide--content:not(.cols-2):not(.cols-3) .slide-content > pre {
+    max-width: 70rem;
+  }
+  .slide--title .slide-content pre {
+    width: max-content;
+    max-width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .dark-note {
+    margin-top: 0.75rem;
+    margin-bottom: 0.25rem;
+    background: #eef2ee;
+  }
+  .slide--section-break .source-note { color: rgba(246, 245, 240, 0.68); }
+  .inclusion-slide .colloquium-grid > .col + .col {
+    padding-top: 4.75rem;
+  }
+  .snapshot-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4rem;
+    align-items: start;
+    width: 100%;
+  }
+  .snapshot-metric + .snapshot-metric {
+    border-left: 1px solid var(--colloquium-border);
+    padding-left: 2.25rem;
+  }
+  .snapshot-summary {
+    grid-column: 1 / -1;
+    max-width: 68rem;
+    margin: 1.25rem auto 0;
+    padding-top: 1rem;
+    border-top: 2px solid var(--colloquium-accent);
+    color: var(--colloquium-muted);
+    text-align: center;
+  }
+  .cols-3 .big-number + .metric-label,
+  .metric-slide .big-number + .metric-label { margin-top: 0.35rem; }
+  .plot-slide .slide-content > p:first-child { margin-bottom: 0.65rem; }
+  .plot-slide .slide-content > p:nth-child(2) { margin-top: 0; text-align: center; }
+  .guardrail-slide > .slide-content {
+    width: min(100%, 62rem);
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .guardrail-slide .slide-content > p { margin-bottom: 1.05rem; }
+  .timestamp-slide .colloquium-grid > .col { min-height: 7rem; }
+  .timestamp-slide .colloquium-grid > .col:first-child {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .timestamp-slide .colloquium-grid > .col + .col {
+    display: flex;
+    align-items: center;
+  }
 ---
 
 <!-- padding: roomy -->
@@ -104,7 +194,7 @@ Open dataset · GeoParquet 1.1 · ODbL-derived OpenStreetMap data
 ---
 
 <!-- padding: compact -->
-<!-- class: balanced -->
+<!-- class: balanced inclusion-slide -->
 
 ## The inclusion rule is simple and deliberately narrow
 
@@ -134,28 +224,25 @@ non-empty.
 ---
 
 <!-- padding: compact -->
-<!-- class: balanced -->
+<!-- class: balanced snapshot-slide -->
 
 ## The snapshot is large in input, selective in output
 
-<!-- columns: 3 -->
-
-<div class="big-number">83.0 GB</div>
-<div class="metric-label">source PBF bytes</div>
-
-|||
-
-<div class="big-number">869.9M</div>
-<div class="metric-label">emitted OSM features</div>
-
-|||
-
-<div class="big-number">906.6k</div>
-<div class="metric-label">published rows</div>
-
-386 regional PBF extracts become 386 Parquet files totaling 712.4 MiB. The
-final rows are unique by `(osm_type, osm_id)`; 38,851 duplicate candidates were
-removed during global deduplication.
+<div class="snapshot-metrics">
+  <div class="snapshot-metric">
+    <div class="big-number">83.0 GB</div>
+    <div class="metric-label">source PBF bytes</div>
+  </div>
+  <div class="snapshot-metric">
+    <div class="big-number">869.9M</div>
+    <div class="metric-label">emitted OSM features</div>
+  </div>
+  <div class="snapshot-metric">
+    <div class="big-number">906.6k</div>
+    <div class="metric-label">published rows</div>
+  </div>
+  <p class="snapshot-summary">386 regional PBF extracts become 386 Parquet files totaling 712.4 MiB. The final rows are unique by <code>(osm_type, osm_id)</code>; 38,851 duplicate candidates were removed during global deduplication.</p>
+</div>
 
 <div class="source-note">Source: generated stats.json; values rounded for presentation, exact values remain in stats.json</div>
 
@@ -250,7 +337,7 @@ Median area: **501 m²** · middle 50%: **85–10,391 m²** · range:
 ---
 
 <!-- padding: compact -->
-<!-- class: balanced -->
+<!-- class: balanced timestamp-slide -->
 
 ## The timestamps span the history of modern OSM mapping
 
@@ -269,7 +356,7 @@ geometry reflect the source extracts at their recorded OSM timestamps.
 ---
 
 <!-- padding: compact -->
-<!-- class: balanced -->
+<!-- class: balanced guardrail-slide -->
 
 ## Interpretation needs three guardrails
 
