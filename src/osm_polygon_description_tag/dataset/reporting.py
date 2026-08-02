@@ -711,9 +711,11 @@ def generate_dataset_docs(
     histogram_input_sha256 = _area_histogram_input_sha256(stats)
     previous_histogram_identity = previous_stats.get("area_histogram_input_sha256")
     previous_histogram_total = previous_stats.get("area_histogram_total_rows")
+    previous_histogram_render_version = previous_stats.get("area_histogram_render_version")
     can_reuse_histogram = (
         histogram_path.is_file()
         and previous_histogram_identity == histogram_input_sha256
+        and previous_histogram_render_version == AREA_HISTOGRAM_RENDER_VERSION
         and isinstance(previous_histogram_total, int)
         and not isinstance(previous_histogram_total, bool)
         and previous_histogram_total >= 0

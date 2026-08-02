@@ -62,7 +62,7 @@ AREA_BUCKET_COUNT: Final[int] = len(AREA_BUCKET_LABELS)
 
 # Rendering version. Bump when bucket layout or visual constants change
 # to invalidate every cached PNG at once.
-AREA_HISTOGRAM_RENDER_VERSION: Final[int] = 1
+AREA_HISTOGRAM_RENDER_VERSION: Final[int] = 2
 
 
 def _bucket_index(area_m2: float) -> int:

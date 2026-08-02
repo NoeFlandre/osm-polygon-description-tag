@@ -439,6 +439,32 @@ def test_generate_dataset_docs_reuses_histogram_when_unchanged(tmp_path: Path) -
     assert histogram_path.stat().st_size == size
 
 
+def test_generate_dataset_docs_recomputes_when_render_version_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A renderer change invalidates the cached PNG even when Parquet bytes match."""
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    source_root.mkdir()
+    _populate_dataset(data_root, source_root)
+    template_path = Path("docs/dataset-card-template.md")
+
+    generate_dataset_docs(data_root, template_path, clock=_frozen_clock)
+    stats_path = data_root / "stats.json"
+    stats = json.loads(stats_path.read_text(encoding="utf-8"))
+    stats["area_histogram_render_version"] = AREA_HISTOGRAM_RENDER_VERSION - 1
+    stats_path.write_text(json.dumps(stats), encoding="utf-8")
+
+    calls: list[Path] = []
+    monkeypatch.setattr(
+        "osm_polygon_description_tag.dataset.reporting._write_area_histogram_png",
+        lambda root: calls.append(root),
+    )
+    generate_dataset_docs(data_root, template_path, clock=_frozen_clock)
+
+    assert calls == [data_root]
+
+
 def test_generate_dataset_docs_recomputes_histogram_when_parquet_changes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
