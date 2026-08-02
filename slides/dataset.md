@@ -32,6 +32,44 @@ custom_css: |
   .slide h1 { font-size: 3.25rem; line-height: 1.02; }
   .slide h2 { font-size: 2.25rem; line-height: 1.06; }
   .balanced { padding-top: 110px; }
+  .metric-slide {
+    justify-content: center;
+  }
+  .metric-slide > .slide-content {
+    flex: 0 0 auto;
+  }
+  .metric-slide h2 {
+    margin-bottom: 1.3rem;
+  }
+  .metric-slide .metric-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4rem;
+    align-items: start;
+    width: 100%;
+  }
+  .metric-slide .metric-block {
+    min-height: 8.5rem;
+  }
+  .metric-slide .metric-block + .metric-block {
+    border-left: 1px solid var(--colloquium-border);
+    padding-left: 4rem;
+  }
+  .metric-slide .metric-heading {
+    margin-bottom: 0.5rem;
+    font-size: 1.06rem;
+    line-height: 1.42;
+    font-weight: 700;
+  }
+  .metric-slide .metric-summary {
+    grid-column: 1 / -1;
+    max-width: 54rem;
+    margin: 1.25rem auto 0;
+    padding-top: 1rem;
+    border-top: 1px solid var(--colloquium-border);
+    color: var(--colloquium-muted);
+    text-align: center;
+  }
   .slide p, .slide li, .slide td, .slide th { font-size: 1.06rem; line-height: 1.42; }
   .kicker { color: #17624f; font-size: 0.82rem; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; }
   .source-note { color: #68716c; font-size: 0.66rem; line-height: 1.2; position: absolute; bottom: 2.7rem; left: 5.6rem; right: 5.6rem; }
@@ -162,27 +200,23 @@ The dataset keeps both the source authority and analysis-ready projections.
 ---
 
 <!-- padding: compact -->
-<!-- class: balanced -->
+<!-- class: metric-slide -->
 
 ## Descriptions are predominantly base text, with a multilingual tail
 
-<!-- columns: 2 -->
-
-**Base descriptions**
-
-<div class="big-number">887,077</div>
-<div class="metric-label">values · 5.11M words · median 4 words</div>
-
-|||
-
-**Localized descriptions**
-
-<div class="big-number">32,049</div>
-<div class="metric-label">values · 214k words · median 3 words</div>
-
-The most common exact localized suffixes are `de`, `en`, `it`, `fr`, and `ru`.
-Suffixes are preserved verbatim; they are not asserted to be valid language
-codes.
+<div class="metric-grid">
+  <div class="metric-block">
+    <div class="metric-heading">Base descriptions</div>
+    <div class="big-number">887,077</div>
+    <div class="metric-label">values · 5.11M words · median 4 words</div>
+  </div>
+  <div class="metric-block">
+    <div class="metric-heading">Localized descriptions</div>
+    <div class="big-number">32,049</div>
+    <div class="metric-label">values · 214k words · median 3 words</div>
+  </div>
+  <p class="metric-summary">The most common exact localized suffixes are <code>de</code>, <code>en</code>, <code>it</code>, <code>fr</code>, and <code>ru</code>. Suffixes are preserved verbatim; they are not asserted to be valid language codes.</p>
+</div>
 
 <div class="source-note">Source: generated stats.json; suffix interpretation from docs/dataset-contract.md</div>
 
