@@ -138,6 +138,17 @@ def test_run_and_publish_keeps_required_confirm_repo_option() -> None:
     assert "usage:" in missing_result.stderr
 
 
+def test_help_remains_visible_when_ci_reports_zero_columns(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Rich must not render an empty help page for a zero-width CI terminal."""
+    monkeypatch.setenv("COLUMNS", "0")
+    monkeypatch.delenv("TERM", raising=False)
+
+    assert run(["run-and-publish", "--help"]) == 0
+    assert "--confirm-repo" in capsys.readouterr().out
+
+
 def test_inspect_uses_approved_default_paths(capsys: pytest.CaptureFixture[str]) -> None:
     # inspect with a non-existent default source root exits non-zero but prints the path attempt.
     # Use a non-existent custom root so we only assert the parser accepted defaults.

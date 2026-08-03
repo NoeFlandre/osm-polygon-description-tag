@@ -7,6 +7,7 @@ operational events, and domain errors are confined to stderr.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import uuid
 from collections.abc import Callable, Sequence
@@ -477,6 +478,14 @@ def _show_click_error(error: ClickException) -> None:
 
 
 def run(argv: Sequence[str] | None = None) -> int:
+    columns = os.environ.get("COLUMNS")
+    if columns is not None:
+        try:
+            invalid_columns = int(columns) <= 0
+        except ValueError:
+            invalid_columns = True
+        if invalid_columns:
+            os.environ.pop("COLUMNS", None)
     try:
         app(
             args=list(argv) if argv is not None else None,
