@@ -19,173 +19,377 @@ custom_css: |
     --colloquium-heading: #10231d;
     --colloquium-accent: #17624f;
     --colloquium-link: #17624f;
-    --colloquium-progress-fill: #17624f;
     --colloquium-code-bg: #e9eeea;
     --colloquium-muted: #5e6862;
     --colloquium-border: #d7ddd7;
     --colloquium-progress-bg: #dde4dd;
+    --colloquium-progress-fill: #17624f;
+    --slide-pad-x: 86px;
+    --slide-pad-y: 70px;
+    --slide-safe-bottom: 62px;
+    --content-max: 1080px;
   }
-  .slide { background: #f6f5f0; }
-  .slide--section-break { background: #102f27; }
-  .slide--section-break h2, .slide--section-break p { color: #f6f5f0; }
-  .slide h1, .slide h2 { letter-spacing: -0.025em; }
-  .slide h1 { font-size: 3.25rem; line-height: 1.02; }
-  .slide h2 { font-size: 2.25rem; line-height: 1.06; }
-  .balanced {
-    justify-content: center;
+
+  .slide {
+    overflow: hidden;
+    background: var(--colloquium-bg);
+    color: var(--colloquium-text);
+    padding: var(--slide-pad-y) var(--slide-pad-x) var(--slide-safe-bottom);
   }
-  .balanced > .slide-content { flex: 0 0 auto; }
-  .metric-slide {
-    justify-content: center;
+
+  .pad-compact.active,
+  .pad-roomy.active {
+    padding: var(--slide-pad-y) var(--slide-pad-x) var(--slide-safe-bottom);
   }
-  .metric-slide > .slide-content {
-    flex: 0 0 auto;
-  }
-  .metric-slide h2 {
-    margin-bottom: 1.3rem;
-  }
-  .metric-slide .metric-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 4rem;
-    align-items: start;
-    width: 100%;
-  }
-  .metric-slide .metric-block {
-    min-height: 7rem;
-  }
-  .metric-slide .metric-block + .metric-block {
-    border-left: 1px solid var(--colloquium-border);
-    padding-left: 4rem;
-  }
-  .metric-slide .metric-heading {
-    margin-bottom: 0.5rem;
-    font-size: 1.06rem;
-    line-height: 1.42;
-    font-weight: 700;
-  }
-  .metric-slide .metric-summary {
-    grid-column: 1 / -1;
-    max-width: 54rem;
-    margin: 1.25rem auto 0;
-    padding-top: 1rem;
-    border-top: 2px solid var(--colloquium-accent);
-    color: var(--colloquium-muted);
-    text-align: center;
-  }
-  .slide p, .slide li, .slide td, .slide th { font-size: 1.06rem; line-height: 1.42; }
-  .kicker { color: #17624f; font-size: 0.82rem; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; }
-  .source-note { color: #68716c; font-size: 0.66rem; line-height: 1.2; position: absolute; bottom: 2.7rem; left: 5.6rem; right: 5.6rem; }
-  .big-number { color: #17624f; font-size: 3.1rem; line-height: 1; font-weight: 750; }
-  .metric-label { color: #5e6862; font-size: 0.82rem; line-height: 1.2; text-transform: uppercase; letter-spacing: 0.07em; }
-  .rule { border-top: 2px solid #17624f; width: 5rem; margin: 1.2rem 0; }
-  .accent { color: #17624f; }
-  .muted { color: #5e6862; }
-  .dark-note { background: #e9eeea; border-left: 4px solid #17624f; padding: 0.75rem 1rem; }
-  .slide img { max-height: 27rem; object-fit: contain; }
-  .plot-slide .slide-content > p:first-child,
-  .plot-slide .slide-content > p:nth-child(2) {
-    width: fit-content;
+
+  .slide h1,
+  .slide h2 {
+    max-width: var(--content-max);
     margin-left: auto;
     margin-right: auto;
+    color: var(--colloquium-heading);
+    font-weight: 780;
+    letter-spacing: -0.045em;
+    text-wrap: balance;
   }
-  .pad-roomy.active { padding: 72px; }
-  .slide--content { justify-content: center; }
+
+  .slide h1 {
+    font-size: 3.2rem;
+    line-height: 0.98;
+    margin-bottom: 0.85rem;
+  }
+
+  .slide h2 {
+    width: min(100%, var(--content-max));
+    font-size: 2.18rem;
+    line-height: 1.06;
+    margin-bottom: 1.35rem;
+  }
+
+  .slide p,
+  .slide li,
+  .slide td,
+  .slide th {
+    font-size: 1.02rem;
+    line-height: 1.42;
+  }
+
+  .slide p { margin-bottom: 0.75rem; }
+  .slide ul { margin-top: 0.5rem; padding-left: 1.1rem; }
+  .slide li { margin-bottom: 0.34rem; }
+  .slide li::marker { color: var(--colloquium-accent); }
+
+  .slide code {
+    background: var(--colloquium-code-bg);
+    border-radius: 0.28rem;
+    padding: 0.1rem 0.35rem;
+    color: var(--colloquium-text);
+  }
+
+  .slide--content,
+  .balanced,
+  .metric-slide,
+  .plot-slide {
+    justify-content: center;
+  }
+
   .slide--content > .slide-content,
   .slide--section-break > .slide-content {
     flex: 0 0 auto;
-  }
-  .slide--content > .slide-content {
-    width: min(100%, 70rem);
+    width: min(100%, var(--content-max));
     margin-left: auto;
     margin-right: auto;
   }
-  .slide--section-break { justify-content: center; }
-  .slide--section-break > .slide-content {
-    width: min(100%, 70rem);
-    margin-left: auto;
-    margin-right: auto;
+
+  .kicker {
+    color: var(--colloquium-accent);
+    font-size: 0.76rem;
+    line-height: 1.2;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    font-weight: 760;
   }
+
   .source-note {
-    bottom: 3.1rem;
+    position: absolute;
+    left: var(--slide-pad-x);
+    right: var(--slide-pad-x);
+    bottom: 3.05rem;
+    color: #68716c;
+    font-size: 0.58rem;
+    line-height: 1.25;
     letter-spacing: 0.01em;
   }
+
+  .big-number {
+    color: var(--colloquium-accent);
+    font-size: 3.25rem;
+    line-height: 0.95;
+    font-weight: 780;
+    letter-spacing: -0.04em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .metric-label {
+    margin-top: 0.42rem;
+    color: var(--colloquium-muted);
+    font-size: 0.76rem;
+    line-height: 1.24;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 560;
+  }
+
+  .accent { color: var(--colloquium-accent); }
+  .muted { color: var(--colloquium-muted); }
+
+  .slide--title {
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    padding: 76px 92px 68px;
+  }
+
+  .slide--title h1 {
+    width: min(100%, 1110px);
+    font-size: 3.28rem;
+    line-height: 0.98;
+    margin-bottom: 0.9rem;
+  }
+
+  .slide--title .slide-content {
+    flex: 0 0 auto;
+    width: min(100%, 1040px);
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .slide--title .slide-content p {
+    max-width: 980px;
+    margin: 0.72rem auto 0;
+    font-size: 1.22rem;
+    line-height: 1.38;
+    color: var(--colloquium-muted);
+  }
+
+  .slide--title .kicker {
+    margin: 0.05rem 0 0.2rem;
+  }
+
+  .slide--section-break {
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    background: #102f27;
+  }
+
+  .slide--section-break h2 {
+    width: min(100%, 920px);
+    color: #f6f5f0;
+    font-size: 2.35rem;
+    line-height: 1.08;
+    margin-bottom: 1rem;
+  }
+
+  .slide--section-break p {
+    color: rgba(246, 245, 240, 0.9);
+    font-size: 1.16rem;
+  }
+
+  .slide--section-break .source-note {
+    color: rgba(246, 245, 240, 0.62);
+  }
+
   .slide--content.cols-2 .colloquium-grid,
-  .slide--content.cols-3 .colloquium-grid { align-items: start; }
+  .slide--content.cols-3 .colloquium-grid {
+    align-items: start;
+    gap: 3.1rem;
+  }
+
   .slide--content.cols-2 .colloquium-grid > .col + .col,
   .slide--content.cols-3 .colloquium-grid > .col + .col {
     border-left: 1px solid var(--colloquium-border);
-    padding-left: 2.25rem;
+    padding-left: 3.1rem;
   }
-  .slide pre { margin: 1rem auto; }
-  .slide--content:not(.cols-2):not(.cols-3) .slide-content > pre {
-    max-width: 70rem;
+
+  .slide--content .colloquium-grid > .col > p:first-child strong {
+    font-size: 1.04rem;
   }
-  .slide--title .slide-content pre {
-    width: max-content;
-    max-width: 100%;
-    margin-left: auto;
-    margin-right: auto;
-  }
-  .dark-note {
-    margin-top: 0.75rem;
-    margin-bottom: 0.25rem;
-    background: #eef2ee;
-  }
-  .slide--section-break .source-note { color: rgba(246, 245, 240, 0.68); }
+
   .inclusion-slide .colloquium-grid > .col + .col {
-    padding-top: 4.75rem;
+    padding-top: 4.2rem;
   }
+
+  .dark-note {
+    margin-top: 1rem;
+    margin-bottom: 0;
+    background: #eef2ee;
+    border-left: 4px solid var(--colloquium-accent);
+    padding: 0.9rem 1.05rem;
+    color: var(--colloquium-text);
+  }
+
+  .dark-note,
+  .dark-note p {
+    font-size: 1.06rem;
+    line-height: 1.4;
+  }
+
   .snapshot-metrics {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 4rem;
+    gap: 3.1rem;
     align-items: start;
     width: 100%;
+    margin-top: 0.15rem;
   }
+
   .snapshot-metric + .snapshot-metric {
     border-left: 1px solid var(--colloquium-border);
-    padding-left: 2.25rem;
+    padding-left: 3.1rem;
   }
+
   .snapshot-summary {
     grid-column: 1 / -1;
-    max-width: 68rem;
-    margin: 1.25rem auto 0;
-    padding-top: 1rem;
+    max-width: 930px;
+    margin: 1.9rem auto 0;
+    padding-top: 1.05rem;
     border-top: 2px solid var(--colloquium-accent);
     color: var(--colloquium-muted);
     text-align: center;
   }
-  .cols-3 .big-number + .metric-label,
-  .metric-slide .big-number + .metric-label { margin-top: 0.35rem; }
-  .plot-slide .slide-content > p:first-child { margin-bottom: 0.65rem; }
-  .plot-slide .slide-content > p:nth-child(2) { margin-top: 0; text-align: center; }
-  .guardrail-slide > .slide-content {
-    width: min(100%, 62rem);
+
+  .metric-slide > .slide-content {
+    width: min(100%, 1060px);
+  }
+
+  .metric-slide .metric-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 3.6rem;
+    align-items: start;
+    width: 100%;
+  }
+
+  .metric-slide .metric-block {
+    min-height: 7.2rem;
+  }
+
+  .metric-slide .metric-block + .metric-block {
+    border-left: 1px solid var(--colloquium-border);
+    padding-left: 3.6rem;
+  }
+
+  .metric-slide .metric-heading {
+    margin-bottom: 0.62rem;
+    font-size: 1.04rem;
+    line-height: 1.36;
+    font-weight: 720;
+  }
+
+  .metric-slide .metric-summary {
+    grid-column: 1 / -1;
+    max-width: 820px;
+    margin: 1.7rem auto 0;
+    padding-top: 1.05rem;
+    border-top: 2px solid var(--colloquium-accent);
+    color: var(--colloquium-muted);
+    text-align: center;
+  }
+
+  .plot-slide > .slide-content {
+    width: min(100%, 1080px);
+    text-align: center;
+  }
+
+  .plot-slide .slide-content > p:first-child {
+    width: 100%;
+    margin: 0 auto 0.7rem;
+  }
+
+  .plot-slide .slide-content > p:nth-child(2) {
+    max-width: 920px;
+    margin: 0.25rem auto 0;
+    text-align: center;
+  }
+
+  .plot-slide img {
+    display: block;
+    width: auto;
+    max-width: 100%;
+    max-height: 390px;
     margin-left: auto;
     margin-right: auto;
+    object-fit: contain;
+    border-radius: 0.35rem;
   }
-  .guardrail-slide .slide-content > p { margin-bottom: 1.05rem; }
-  .timestamp-slide .colloquium-grid > .col { min-height: 7rem; }
+
+  .guardrail-slide > .slide-content {
+    width: min(100%, 900px);
+  }
+
+  .guardrail-slide .slide-content > p {
+    margin-bottom: 1.05rem;
+  }
+
+  .timestamp-slide .colloquium-grid {
+    align-items: center;
+  }
+
+  .timestamp-slide .colloquium-grid > .col {
+    min-height: 7.8rem;
+  }
+
   .timestamp-slide .colloquium-grid > .col:first-child {
     display: flex;
     flex-direction: column;
     justify-content: center;
   }
+
   .timestamp-slide .colloquium-grid > .col + .col {
     display: flex;
     align-items: center;
   }
+
+  .timestamp-slide .big-number {
+    font-size: 3.45rem;
+  }
+
+  .slide pre { margin: 1rem auto; }
+
+  @media print {
+    .pad-compact,
+    .pad-roomy {
+      padding: var(--slide-pad-y) var(--slide-pad-x) var(--slide-safe-bottom) !important;
+    }
+
+    .slide--content,
+    .balanced,
+    .metric-slide,
+    .plot-slide,
+    .slide--section-break {
+      justify-content: center !important;
+    }
+
+    .slide--content > .slide-content,
+    .slide--section-break > .slide-content {
+      flex: 0 0 auto !important;
+      width: min(100%, var(--content-max)) !important;
+      margin-left: auto !important;
+      margin-right: auto !important;
+    }
+  }
+
 ---
 
 <!-- padding: roomy -->
 
 <div class="kicker">Dataset briefing · snapshot 2026-08</div>
 
-# A global atlas of described OSM polygons
+# Worldwide OSM polygons with textual descriptions from the "description" tags
 
 906,631 deduplicated polygon rows, each carrying the source tags, geometry,
-area, provenance, and exact description text that made it discoverable.
+area, provenance, and exact description text.
 
 Open dataset · GeoParquet 1.1 · ODbL-derived OpenStreetMap data
 
@@ -196,10 +400,9 @@ Open dataset · GeoParquet 1.1 · ODbL-derived OpenStreetMap data
 <!-- padding: compact -->
 <!-- class: balanced inclusion-slide -->
 
-## The inclusion rule is simple and deliberately narrow
+## Which polygons do we keep?
 
-Keep a feature when it is a polygon and at least one exact description tag is
-non-empty.
+Keep a polygon if it has at least one non empty description tag.
 
 <!-- columns: 2 -->
 
@@ -248,14 +451,6 @@ non-empty.
 
 ---
 
-<!-- layout: section-break -->
-
-## Read each row as a small, queryable OSM record
-
-The dataset keeps both the source authority and analysis-ready projections.
-
----
-
 <!-- padding: compact -->
 <!-- class: balanced -->
 
@@ -278,9 +473,6 @@ The dataset keeps both the source authority and analysis-ready projections.
 - OGC:CRS84 longitude/latitude semantics
 - WGS84 geodesic `area_m2`
 - Bounding box covering the complete geometry
-
-<div class="dark-note">The convenience columns are exact derived views;
-`tags` is the authoritative source map.</div>
 
 <div class="source-note">Sources: docs/dataset-contract.md; generated stats.json</div>
 
@@ -316,7 +508,7 @@ The dataset keeps both the source authority and analysis-ready projections.
 
 ![H3 density of description-tagged polygons](assets/description_polygon_density.png)
 
-7,381 H3 resolution-3 cells contain rows; log scale keeps sparse and dense regions visible.
+7,381 H3 resolution-3 cells contain rows.
 
 <div class="source-note">Source: assets/description_polygon_density.png; docs/dataset-contract.md; generated stats.json</div>
 
@@ -367,7 +559,7 @@ codes.
 formatting, completeness, and quality.
 
 **Spatial meaning** — the H3 map counts polygon centroids and the extracts are
-regional snapshots; the dataset is not a population or land-cover estimate.
+regional snapshots.
 
 <div class="source-note">Sources: dataset-card-template.md; docs/dataset-contract.md</div>
 
@@ -377,13 +569,13 @@ regional snapshots; the dataset is not a population or land-cover estimate.
 
 <div class="kicker">Access and reuse</div>
 
-# Explore the rows, then reproduce the snapshot
+# Resources
 
 Dataset: [huggingface.co/datasets/NoeFlandre/osm-polygon-description-tag](https://huggingface.co/datasets/NoeFlandre/osm-polygon-description-tag)
 
 Metrics: [Trackio snapshot dashboard](https://noeflandre-osm-polygon-description-tag-trackio.static.hf.space/?project=osm-polygon-description-tag&sidebar=hidden)
 
-Source and methodology: [github.com/NoeFlandre/osm-polygon-description-tag](https://github.com/NoeFlandre/osm-polygon-description-tag)
+Github: [github.com/NoeFlandre/osm-polygon-description-tag](https://github.com/NoeFlandre/osm-polygon-description-tag)
 
 Derived data is © OpenStreetMap contributors and available under ODbL.
 

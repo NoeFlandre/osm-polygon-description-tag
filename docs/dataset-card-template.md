@@ -22,6 +22,8 @@ Source repository: [github.com/NoeFlandre/osm-polygon-description-tag](https://g
 
 Explore the pipeline metrics in the [Trackio dashboard](https://noeflandre-osm-polygon-description-tag-trackio.static.hf.space/?project=osm-polygon-description-tag&sidebar=hidden).
 
+Read the [dataset presentation](https://noeflandre.github.io/osm-polygon-description-tag/slides/dataset/dataset.html) for a concise visual overview of the snapshot, methodology, and findings.
+
 <!-- GENERATED:H3_MAP:START -->
 ![H3 density of description-tagged polygons](assets/description_polygon_density.png)
 <!-- GENERATED:H3_MAP:END -->

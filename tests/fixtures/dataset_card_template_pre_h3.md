@@ -22,6 +22,8 @@ Source repository: [github.com/NoeFlandre/osm-polygon-description-tag](https://g
 
 Explore the pipeline metrics in the [Trackio dashboard](https://noeflandre-osm-polygon-description-tag-trackio.static.hf.space/?project=osm-polygon-description-tag&sidebar=hidden).
 
+Read the [dataset presentation](https://noeflandre.github.io/osm-polygon-description-tag/slides/dataset/dataset.html) for a concise visual overview of the snapshot, methodology, and findings.
+
 Hexbin density of every described polygon at H3 resolution 3, drawn from each
 row's geometry centroid on a logarithmic scale. Lighter cells contain more
 polygons.

@@ -37,6 +37,16 @@ jobs:
       - name: Build documentation
         run: uv run mkdocs build --strict --site-dir site
 
+      - name: Install Colloquium
+        run: uv tool install colloquium
+
+      - name: Build presentation decks
+        run: |
+          ./slides/build.sh "$RUNNER_TEMP/osm-polygon-description-tag-slides"
+          mkdir -p site/slides
+          cp -R "$RUNNER_TEMP/osm-polygon-description-tag-slides/codebase" site/slides/codebase
+          cp -R "$RUNNER_TEMP/osm-polygon-description-tag-slides/dataset" site/slides/dataset
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
         with:

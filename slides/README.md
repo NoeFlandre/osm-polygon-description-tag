@@ -22,6 +22,10 @@ The output is written to `slides/build/codebase/codebase.html` and
 `slides/build/dataset/dataset.html`. The build script fails on the first invalid
 deck.
 
+The dataset deck is published with the MkDocs GitHub Pages site at
+`https://noeflandre.github.io/osm-polygon-description-tag/slides/dataset/dataset.html`.
+The docs workflow rebuilds and deploys both decks on every push to `main`.
+
 ## Review
 
 Render each deck to PNGs with the Colloquium build output, then inspect the

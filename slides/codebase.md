@@ -38,7 +38,7 @@ custom_css: |
   .source-note { color: #68716c; font-size: 0.66rem; line-height: 1.2; position: absolute; bottom: 2.7rem; left: 5.6rem; right: 5.6rem; }
   .big-number { color: #17624f; font-size: 3.1rem; line-height: 1; font-weight: 750; }
   .metric-label { color: #5e6862; font-size: 0.82rem; line-height: 1.2; text-transform: uppercase; letter-spacing: 0.07em; }
-  .rule { border-top: 2px solid #17624f; width: 5rem; margin: 1.2rem 0; }
+  .rule { border-top: 2px solid #17624f; width: 5rem; margin: 1.2rem auto; }
   .accent { color: #17624f; }
   .muted { color: #5e6862; }
   .dark-note {
@@ -91,7 +91,7 @@ custom_css: |
     margin-left: auto;
     margin-right: auto;
   }
-  .contract-slide .colloquium-grid > .col + .col { padding-top: 4.75rem; }
+  .contract-slide .colloquium-grid > .col + .col { padding-top: 0; }
   .quality-slide .colloquium-grid > .col + .col { padding-top: 2.75rem; }
   .slide--section-break .source-note { color: rgba(246, 245, 240, 0.68); }
 ---
@@ -104,7 +104,7 @@ custom_css: |
 
 ## OSM Polygon Description Tag
 
-One validated GeoParquet artifact per source PBF — with explicit contracts at
+One validated GeoParquet artifact per source PBF with explicit contracts at
 every boundary.
 
 <div class="rule"></div>
