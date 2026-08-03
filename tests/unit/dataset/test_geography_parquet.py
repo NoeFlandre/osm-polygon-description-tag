@@ -89,9 +89,9 @@ def _plant_two_parquets(tmp_path: Path) -> Path:
         write_manifest(
             Manifest(
                 manifest_schema_version=2,
-                schema_version=2,
+                schema_version=3,
                 geoparquet_version="1.1.0",
-                transform_algorithm_version=2,
+                transform_algorithm_version=3,
                 area_policy_sha256=current_area_policy_sha256(),
                 output_algorithm_revision=current_output_algorithm_revision(),
                 source=source_identity_for(source),
@@ -140,9 +140,9 @@ def test_aggregate_h3_density_preserves_regional_overlap(tmp_path: Path) -> None
         write_manifest(
             Manifest(
                 manifest_schema_version=2,
-                schema_version=2,
+                schema_version=3,
                 geoparquet_version="1.1.0",
-                transform_algorithm_version=2,
+                transform_algorithm_version=3,
                 area_policy_sha256=current_area_policy_sha256(),
                 output_algorithm_revision=current_output_algorithm_revision(),
                 source=source_identity_for(source),
@@ -321,9 +321,9 @@ def test_aggregate_rejects_malformed_wkb(tmp_path: Path) -> None:
     write_manifest(
         Manifest(
             manifest_schema_version=2,
-            schema_version=2,
+            schema_version=3,
             geoparquet_version="1.1.0",
-            transform_algorithm_version=2,
+            transform_algorithm_version=3,
             area_policy_sha256=current_area_policy_sha256(),
             output_algorithm_revision=current_output_algorithm_revision(),
             source=source_identity_for(source),
@@ -367,9 +367,9 @@ def test_aggregate_rejects_invalid_geometry(tmp_path: Path) -> None:
     write_manifest(
         Manifest(
             manifest_schema_version=2,
-            schema_version=2,
+            schema_version=3,
             geoparquet_version="1.1.0",
-            transform_algorithm_version=2,
+            transform_algorithm_version=3,
             area_policy_sha256=current_area_policy_sha256(),
             output_algorithm_revision=current_output_algorithm_revision(),
             source=source_identity_for(source),
@@ -411,9 +411,9 @@ def test_aggregate_rejects_null_geometry(tmp_path: Path) -> None:
     write_manifest(
         Manifest(
             manifest_schema_version=2,
-            schema_version=2,
+            schema_version=3,
             geoparquet_version="1.1.0",
-            transform_algorithm_version=2,
+            transform_algorithm_version=3,
             area_policy_sha256=current_area_policy_sha256(),
             output_algorithm_revision=current_output_algorithm_revision(),
             source=source_identity_for(source),
@@ -454,9 +454,9 @@ def test_iter_centroids_uses_geometry_centroid_not_bbox_center(
     write_manifest(
         Manifest(
             manifest_schema_version=2,
-            schema_version=2,
+            schema_version=3,
             geoparquet_version="1.1.0",
-            transform_algorithm_version=2,
+            transform_algorithm_version=3,
             area_policy_sha256=current_area_policy_sha256(),
             output_algorithm_revision=current_output_algorithm_revision(),
             source=source_identity_for(source),
@@ -568,9 +568,9 @@ def test_generate_dataset_docs_uses_validate_finalized_artifacts(tmp_path: Path)
     write_manifest(
         Manifest(
             manifest_schema_version=2,
-            schema_version=2,
+            schema_version=3,
             geoparquet_version="1.1.0",
-            transform_algorithm_version=2,
+            transform_algorithm_version=3,
             area_policy_sha256="0" * 64,
             output_algorithm_revision="0" * 64,
             source=source_identity_for(source),

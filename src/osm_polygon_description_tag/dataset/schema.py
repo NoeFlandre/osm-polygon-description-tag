@@ -4,15 +4,57 @@ The geometry column is OGC:CRS84 longitude/latitude. Omitting ``crs`` in the
 GeoParquet metadata deliberately signals CRS84; no claim is made about ring
 orientation beyond what geometry normalization (see transform) provides.
 
-The schema is versioned. Amendment 2 adds first-class ``name`` and
-``localized_names`` columns. The original ``tags`` map remains the
-authoritative source of every original OSM tag.
+The schema is versioned. The public key/value fields use a list of structs
+instead of Arrow's ``map`` type because Hugging Face Datasets cannot infer
+Arrow maps. Each list is sorted by key and preserves the complete original
+content while remaining viewable on the Hub.
 """
+
+from collections.abc import Mapping, Sequence
 
 import pyarrow as pa
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 GEOPARQUET_VERSION = "1.1.0"
+
+KEY_VALUE_STRUCT = pa.struct(
+    [
+        pa.field("key", pa.string(), nullable=False),
+        pa.field("value", pa.string()),
+    ]
+)
+KEY_VALUE_LIST = pa.list_(KEY_VALUE_STRUCT)
+
+KEY_VALUE_COLUMNS = ("localized_names", "localized_descriptions", "tags")
+
+
+def mapping_to_pairs(value: Mapping[str, str] | Sequence[object] | object) -> list[dict[str, str]]:
+    """Encode a string mapping as deterministic key/value records.
+
+    The transform layer continues to expose ordinary dictionaries. This
+    boundary representation is only for Arrow storage and the Hub viewer.
+    """
+    if value is None:
+        return []
+    if isinstance(value, Mapping):
+        items = value.items()
+    elif isinstance(value, Sequence) and not isinstance(value, str | bytes):
+        converted: dict[str, str] = {}
+        for item in value:
+            if isinstance(item, Mapping):
+                key, mapped = item.get("key"), item.get("value")
+            elif isinstance(item, Sequence) and len(item) == 2:
+                key, mapped = item
+            else:
+                raise TypeError(f"invalid key/value record: {item!r}")
+            if key is None or mapped is None:
+                continue
+            converted[str(key)] = str(mapped)
+        items = converted.items()
+    else:
+        raise TypeError(f"expected a string mapping, got {type(value).__name__}")
+    return [{"key": str(key), "value": str(item)} for key, item in sorted(items)]
+
 
 SCHEMA = pa.schema(
     [
@@ -24,10 +66,10 @@ SCHEMA = pa.schema(
         pa.field("changeset", pa.int64()),
         pa.field("timestamp", pa.timestamp("ms", tz="UTC")),
         pa.field("name", pa.string()),
-        pa.field("localized_names", pa.map_(pa.string(), pa.string()), nullable=False),
+        pa.field("localized_names", KEY_VALUE_LIST, nullable=False),
         pa.field("description", pa.string()),
-        pa.field("localized_descriptions", pa.map_(pa.string(), pa.string()), nullable=False),
-        pa.field("tags", pa.map_(pa.string(), pa.string()), nullable=False),
+        pa.field("localized_descriptions", KEY_VALUE_LIST, nullable=False),
+        pa.field("tags", KEY_VALUE_LIST, nullable=False),
         pa.field("geometry_type", pa.string(), nullable=False),
         pa.field("area_m2", pa.float64(), nullable=False),
         pa.field("bbox_min_x", pa.float64(), nullable=False),

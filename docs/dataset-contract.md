@@ -16,7 +16,7 @@ produces a valid Polygon or MultiPolygon.
 
 ## Row schema
 
-Every Parquet file uses the versioned GeoParquet schema (`SCHEMA_VERSION = 2`):
+Every Parquet file uses the versioned GeoParquet schema (`SCHEMA_VERSION = 3`):
 
 | Group | Columns |
 | --- | --- |
@@ -27,8 +27,10 @@ Every Parquet file uses the versioned GeoParquet schema (`SCHEMA_VERSION = 2`):
 | Source authority | `tags` |
 | Spatial | `geometry_type`, `area_m2`, `bbox_min_x`, `bbox_min_y`, `bbox_max_x`, `bbox_max_y`, `geometry` |
 
-`tags` is the complete original OSM tag map and remains authoritative. The
-name and description columns are exact derived views for convenient querying.
+`tags` is a complete, sorted list of `{key, value}` records for every original
+OSM tag and remains authoritative. The name and description columns are exact
+derived views for convenient querying. The list representation is used because
+the Hugging Face Dataset Viewer does not support Arrow map columns.
 Localized suffixes are preserved exactly and are not asserted to be valid
 language codes.
 

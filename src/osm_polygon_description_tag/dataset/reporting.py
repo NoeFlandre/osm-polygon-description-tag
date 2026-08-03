@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import duckdb
+import pyarrow as pa
 import pyarrow.parquet as pq
 
 from osm_polygon_description_tag.dataset.geography import (
@@ -240,6 +241,16 @@ def _suffix_counts(connection: duckdb.DuckDBPyConnection, map_column: str) -> di
     return {}
 
 
+def _map_sql_expression(batch: pa.RecordBatch, column: str) -> str:
+    """Normalize legacy Arrow maps and Hub-compatible key/value lists in SQL."""
+    field = batch.schema.field(column)
+    if pa.types.is_map(field.type):
+        return column
+    if pa.types.is_list(field.type):
+        return f"map_from_entries({column})"
+    raise ReportingError(f"unsupported mapping representation for {column}: {field.type}")
+
+
 def _description_word_stats(
     connection: duckdb.DuckDBPyConnection,
     *,
@@ -330,9 +341,11 @@ def collect_stats(
                 columns=_FEATURE_COLUMNS,
                 batch_size=4096,
             ):
+                localized_names_sql = _map_sql_expression(batch, "localized_names")
+                localized_descriptions_sql = _map_sql_expression(batch, "localized_descriptions")
                 connection.register("batch", batch)
                 connection.execute(
-                    """
+                    f"""
                     INSERT INTO features
                     SELECT
                         osm_type,
@@ -341,13 +354,14 @@ def collect_stats(
                         area_m2,
                         timestamp,
                         name,
-                        CASE WHEN localized_names IS NULL THEN MAP() ELSE localized_names END,
+                        CASE WHEN {localized_names_sql} IS NULL
+                             THEN MAP() ELSE {localized_names_sql} END,
                         description,
-                        CASE WHEN localized_descriptions IS NULL
-                             THEN MAP() ELSE localized_descriptions END,
+                        CASE WHEN {localized_descriptions_sql} IS NULL
+                             THEN MAP() ELSE {localized_descriptions_sql} END,
                         ? AS source
                     FROM batch
-                    """,
+                    """,  # noqa: S608 - expressions are internal fixed column names
                     [parquet.name],
                 )
                 connection.unregister("batch")

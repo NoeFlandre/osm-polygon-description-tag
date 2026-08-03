@@ -17,7 +17,7 @@ import math
 import os
 import sqlite3
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -26,7 +26,12 @@ import pyarrow.parquet as pq
 from shapely import from_wkb
 from shapely.errors import ShapelyError
 
-from osm_polygon_description_tag.dataset.schema import SCHEMA, geo_metadata
+from osm_polygon_description_tag.dataset.schema import (
+    KEY_VALUE_COLUMNS,
+    SCHEMA,
+    geo_metadata,
+    mapping_to_pairs,
+)
 
 _DICTIONARY_COLUMNS = ["source_pbf", "osm_type", "geometry_type"]
 _VALID_GEOMETRY_TYPES = {"Polygon", "MultiPolygon"}
@@ -46,6 +51,14 @@ _VALIDATION_COLUMNS = [
 
 class StorageError(ValueError):
     """Raised for integrity or infrastructure failures during storage."""
+
+
+def _arrow_record(record: Mapping[str, object]) -> dict[str, object]:
+    """Convert transform-layer mappings to the Hub-compatible Arrow shape."""
+    normalized = dict(record)
+    for column in KEY_VALUE_COLUMNS:
+        normalized[column] = mapping_to_pairs(record.get(column))
+    return normalized
 
 
 def _owned_temp(target: Path) -> Path:
@@ -118,7 +131,7 @@ def write_geoparquet(
         ) as writer:
             batch: list[dict[str, object]] = []
             for record in records:
-                batch.append(record)
+                batch.append(_arrow_record(record))
                 row_count += 1
                 geometry_types.add(str(record["geometry_type"]))
                 min_x = min(min_x, float(cast(float, record["bbox_min_x"])))
@@ -155,7 +168,8 @@ def _check_schema(file_schema: pa.Schema) -> None:
     for name in SCHEMA.names:
         expected = SCHEMA.field(name)
         actual = file_schema.field(name)
-        if actual.type != expected.type:
+        legacy_map = name in KEY_VALUE_COLUMNS and actual.type == pa.map_(pa.string(), pa.string())
+        if actual.type != expected.type and not legacy_map:
             raise StorageError(f"field type mismatch for {name}: {actual.type} != {expected.type}")
         if actual.nullable != expected.nullable:
             raise StorageError(f"field nullability mismatch for {name}")

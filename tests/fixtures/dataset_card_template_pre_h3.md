@@ -59,8 +59,7 @@ polygons.
 - Complete original OSM tags, full WKB geometry, `area_m2`, and bounding boxes.
 
 Nodes, open ways, undescribed features, and failed polygon assemblies are not
-included. Regional extracts can overlap, so the same OSM object may appear in
-more than one file.
+included. Cross-region duplicates are removed globally before publication.
 
 ## Schema
 
@@ -73,8 +72,8 @@ more than one file.
   `bbox_max_x`, `bbox_max_y`, `geometry`
 
 `geometry` is WKB with GeoParquet 1.1 metadata and OGC:CRS84 longitude/latitude
-semantics. The `tags` map is authoritative; convenience text fields are exact
-derived views.
+semantics. The `tags` key/value list is authoritative; convenience text fields
+are exact derived views.
 
 ## Load the data
 

@@ -28,6 +28,7 @@ from osm_polygon_description_tag.dataset.manifest import (
     source_identity_for,
     write_manifest,
 )
+from osm_polygon_description_tag.dataset.migration import MigrationError, migrate_dataset_schema
 from osm_polygon_description_tag.dataset.reporting import (
     ReportingError,
     collect_stats,
@@ -67,6 +68,7 @@ __all__ = [
     "DeduplicationResult",
     "Manifest",
     "ManifestError",
+    "MigrationError",
     "OutputIdentity",
     "RejectedFeature",
     "ReportingError",
@@ -85,6 +87,7 @@ __all__ = [
     "geo_metadata",
     "geodesic_area_m2",
     "is_resumable",
+    "migrate_dataset_schema",
     "names_from_tags",
     "output_identity_for",
     "read_manifest",

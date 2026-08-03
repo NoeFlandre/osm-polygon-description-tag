@@ -35,8 +35,9 @@ def test_arrow_field_types_and_nullability() -> None:
     assert SCHEMA.field("area_m2").type == pa.float64()
     assert SCHEMA.field("geometry").type == pa.binary()
     assert SCHEMA.field("geometry").nullable is False
-    assert SCHEMA.field("tags").type.key_type == pa.string()
-    assert SCHEMA.field("tags").type.item_type == pa.string()
+    assert SCHEMA.field("tags").type == pa.list_(
+        pa.struct([pa.field("key", pa.string(), nullable=False), pa.field("value", pa.string())])
+    )
     assert SCHEMA.field("tags").nullable is False
     assert SCHEMA.field("localized_descriptions").nullable is False
     assert SCHEMA.field("localized_names").nullable is False
@@ -46,7 +47,7 @@ def test_arrow_field_types_and_nullability() -> None:
 
 
 def test_schema_version_is_pinned() -> None:
-    assert SCHEMA_VERSION == 2
+    assert SCHEMA_VERSION == 3
 
 
 def test_geo_metadata_is_geoparquet_1_1() -> None:

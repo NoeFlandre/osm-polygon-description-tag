@@ -48,9 +48,9 @@ def test_is_resumable_with_mismatched_code_revision(tmp_path: Path) -> None:
 
     manifest = Manifest(
         manifest_schema_version=2,
-        schema_version=2,
+        schema_version=3,
         geoparquet_version="1.1.0",
-        transform_algorithm_version=2,
+        transform_algorithm_version=3,
         area_policy_sha256=current_area_policy_sha256(),
         output_algorithm_revision=current_output_algorithm_revision(),
         source=src_identity,
@@ -76,9 +76,9 @@ def test_is_resumable_with_missing_code_revision(tmp_path: Path) -> None:
 
     manifest = Manifest(
         manifest_schema_version=2,
-        schema_version=2,
+        schema_version=3,
         geoparquet_version="1.1.0",
-        transform_algorithm_version=2,
+        transform_algorithm_version=3,
         area_policy_sha256=current_area_policy_sha256(),
         output_algorithm_revision=current_output_algorithm_revision(),
         source=source_identity_for(source),
@@ -101,9 +101,9 @@ def test_behavioral_change_invalidates_resume(tmp_path: Path) -> None:
     output.write_bytes(b"out")
     manifest = Manifest(
         manifest_schema_version=2,
-        schema_version=2,
+        schema_version=3,
         geoparquet_version="1.1.0",
-        transform_algorithm_version=2,
+        transform_algorithm_version=3,
         area_policy_sha256=current_area_policy_sha256(),
         output_algorithm_revision="old:0000",
         source=source_identity_for(source),
@@ -160,9 +160,9 @@ def test_full_run_no_rebuild_on_doc_only_commit(
     write_manifest(
         Manifest(
             manifest_schema_version=2,
-            schema_version=2,
+            schema_version=3,
             geoparquet_version="1.1.0",
-            transform_algorithm_version=2,
+            transform_algorithm_version=3,
             area_policy_sha256=current_area_policy_sha256(),
             output_algorithm_revision=current_output_algorithm_revision(),
             source=source_identity_for(source_root / "a.osm.pbf"),

@@ -1,12 +1,13 @@
 """Arrow schema and transformation contract for the amendment dataset.
 
-These tests assert the new public first-class name and localized_names
-columns. The schema and transform algorithm versions are bumped to 2.
+These tests assert the public first-class name and localized_names columns.
+The schema and transform algorithm versions are bumped to 3 for the
+Hugging Face-compatible key/value list representation.
 
 Contract:
 
 - ``name`` is a nullable string containing the exact ``name`` value.
-- ``localized_names`` is a non-null map<string,string> of exact
+- ``localized_names`` is a non-null list of key/value records containing exact
   non-empty ``name:<suffix>`` values keyed by the unmodified suffix.
 - ``tags`` remains complete and authoritative.
 - ``description`` and ``localized_descriptions`` retain their semantics.
@@ -45,12 +46,18 @@ def _record(
     )
 
 
-def test_schema_version_is_bumped_to_two() -> None:
-    """The new public columns require a schema version bump to 2."""
-    assert SCHEMA_VERSION == 2
+def test_schema_version_is_bumped_to_three() -> None:
+    """The viewer-compatible representation requires a schema version bump."""
+    assert SCHEMA_VERSION == 3
     assert SCHEMA.field("name") == pa.field("name", pa.string(), nullable=True)
     assert SCHEMA.field("localized_names") == pa.field(
-        "localized_names", pa.map_(pa.string(), pa.string()), nullable=False
+        "localized_names",
+        pa.list_(
+            pa.struct(
+                [pa.field("key", pa.string(), nullable=False), pa.field("value", pa.string())]
+            )
+        ),
+        nullable=False,
     )
 
 
@@ -187,10 +194,15 @@ def test_arrow_map_array_round_trip() -> None:
         {"name": "X", "name:pt-BR": "X BR", "description": "y"},
     )
     result = transform_record(record, "x.osm.pbf")
-    batch = pa.RecordBatch.from_pylist([result], schema=SCHEMA)
+    from osm_polygon_description_tag.dataset.schema import mapping_to_pairs
+
+    arrow_result = dict(result)
+    for column in ("localized_names", "localized_descriptions", "tags"):
+        arrow_result[column] = mapping_to_pairs(result[column])
+    batch = pa.RecordBatch.from_pylist([arrow_result], schema=SCHEMA)
     table = pa.Table.from_batches([batch])
     localized = table.column("localized_names").to_pylist()
-    assert localized == [[("pt-BR", "X BR")]]
+    assert localized == [[{"key": "pt-BR", "value": "X BR"}]]
 
 
 def test_e2e_parquet_round_trip_preserves_name_columns(tmp_path) -> None:
@@ -209,4 +221,4 @@ def test_e2e_parquet_round_trip_preserves_name_columns(tmp_path) -> None:
     assert "name" in table.column_names
     assert "localized_names" in table.column_names
     assert table.column("name").to_pylist() == ["Round Trip"]
-    assert table.column("localized_names").to_pylist() == [[("fr", "Aller-Retour")]]
+    assert table.column("localized_names").to_pylist() == [[{"key": "fr", "value": "Aller-Retour"}]]

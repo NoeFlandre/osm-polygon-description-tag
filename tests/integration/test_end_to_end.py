@@ -50,8 +50,14 @@ def _real_osmium_path() -> str:
 
 
 def _to_map(pairs: object) -> dict[str, str]:
-    """Convert PyArrow map<string,string> (serialized as list of tuples) into a dict."""
-    return dict(pairs or [])  # type: ignore[arg-type]
+    """Convert legacy maps or Hub-compatible key/value records into a dict."""
+    if isinstance(pairs, dict):
+        return {str(key): str(value) for key, value in pairs.items()}
+    return {
+        str(item["key"]): str(item["value"])
+        for item in (pairs or [])  # type: ignore[union-attr]
+        if isinstance(item, dict)
+    } or dict(pairs or [])  # type: ignore[arg-type]
 
 
 @pytest.mark.integration

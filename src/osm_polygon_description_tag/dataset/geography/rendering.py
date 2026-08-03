@@ -111,7 +111,7 @@ def _build_caption(
         return _NO_DATA_CAPTION
     return (
         "H3 density of description-tagged polygons. "
-        f"Each dataset row is counted exactly once (regional overlap retained). "
+        f"Each globally deduplicated OSM identity is counted exactly once. "
         f"{total_rows:,} polygons across {occupied_cells:,} H3 cells at "
         "resolution 3 on a logarithmic colour scale."
     )

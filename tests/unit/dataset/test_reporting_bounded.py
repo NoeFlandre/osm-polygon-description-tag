@@ -37,9 +37,9 @@ def _build_pair(
     write_manifest(
         Manifest(
             manifest_schema_version=2,
-            schema_version=2,
+            schema_version=3,
             geoparquet_version="1.1.0",
-            transform_algorithm_version=2,
+            transform_algorithm_version=3,
             output_algorithm_revision="x" * 64,
             area_policy_sha256="0" * 64,
             source=source_identity_for(source),

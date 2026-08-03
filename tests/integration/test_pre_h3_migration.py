@@ -83,9 +83,9 @@ def _setup_pre_h3_dataset(tmp_path: Path) -> tuple[Paths, Path, Path]:
         write_geoparquet(iter([record]), output, batch_size=10)
         manifest = Manifest(
             manifest_schema_version=2,
-            schema_version=2,
+            schema_version=3,
             geoparquet_version="1.1.0",
-            transform_algorithm_version=2,
+            transform_algorithm_version=3,
             area_policy_sha256=current_area_policy_sha256(),
             output_algorithm_revision=current_output_algorithm_revision(),
             source=source_identity_for(source_root / source_name),

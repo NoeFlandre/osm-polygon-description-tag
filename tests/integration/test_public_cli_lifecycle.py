@@ -241,9 +241,9 @@ def test_run_two_resumes_and_publishes_remaining_and_metadata(
     write_manifest(
         Manifest(
             manifest_schema_version=2,
-            schema_version=2,
+            schema_version=3,
             geoparquet_version="1.1.0",
-            transform_algorithm_version=2,
+            transform_algorithm_version=3,
             area_policy_sha256=current_area_policy_sha256(),
             output_algorithm_revision=current_output_algorithm_revision(),
             source=source_identity_for(source_root / "amendment.osm.pbf"),
@@ -355,9 +355,9 @@ def test_run_three_is_pure_no_op(
     write_manifest(
         Manifest(
             manifest_schema_version=2,
-            schema_version=2,
+            schema_version=3,
             geoparquet_version="1.1.0",
-            transform_algorithm_version=2,
+            transform_algorithm_version=3,
             area_policy_sha256=current_area_policy_sha256(),
             output_algorithm_revision=current_output_algorithm_revision(),
             source=source_identity_for(source_root / "amendment.osm.pbf"),
@@ -388,9 +388,9 @@ def test_run_three_is_pure_no_op(
     write_manifest(
         Manifest(
             manifest_schema_version=2,
-            schema_version=2,
+            schema_version=3,
             geoparquet_version="1.1.0",
-            transform_algorithm_version=2,
+            transform_algorithm_version=3,
             area_policy_sha256=current_area_policy_sha256(),
             output_algorithm_revision=current_output_algorithm_revision(),
             source=source_identity_for(source_root / "duplicate.osm.pbf"),

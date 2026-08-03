@@ -23,7 +23,7 @@ from osm_polygon_description_tag.runtime.resources import (
 )
 
 MANIFEST_SCHEMA_VERSION = 2
-TRANSFORM_ALGORITHM_VERSION = 2
+TRANSFORM_ALGORITHM_VERSION = 3
 _AREA_POLICY_SOURCE: tuple[str, ...] = (
     "linear_tags:true",
     "area_tags:true",

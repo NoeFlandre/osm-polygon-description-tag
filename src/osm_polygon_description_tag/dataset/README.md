@@ -34,8 +34,9 @@ and their matching manifests.
 
 ## Safety and determinism invariants
 
-Every original OSM tag remains in `tags`; base and localized descriptions and names are also
-projected into dedicated columns. Geometry remains Polygon or MultiPolygon WKB, with a strictly
+Every original OSM tag remains in `tags` as a sorted `{key, value}` record;
+base and localized descriptions and names are also projected into dedicated
+columns. Geometry remains Polygon or MultiPolygon WKB, with a strictly
 positive WGS84 geodesic `area_m2`. GeoParquet writing and validation are bounded and atomic.
 Manifest identity, statistics, and generated dataset-card content are deterministic and
 artifact-derived.

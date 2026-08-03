@@ -18,6 +18,7 @@ from osm_polygon_description_tag import storage as legacy_storage
 from osm_polygon_description_tag import transform as legacy_transform
 from osm_polygon_description_tag.dataset import deduplication as dataset_deduplication
 from osm_polygon_description_tag.dataset import manifest as dataset_manifest
+from osm_polygon_description_tag.dataset import migration as dataset_migration
 from osm_polygon_description_tag.dataset import reporting as dataset_reporting
 from osm_polygon_description_tag.dataset import schema as dataset_schema
 from osm_polygon_description_tag.dataset import storage as dataset_storage
@@ -93,6 +94,7 @@ def test_dataset_package_exports_exact_stable_module_api() -> None:
         dataset_transform,
         dataset_storage,
         dataset_manifest,
+        dataset_migration,
         dataset_deduplication,
         dataset_reporting,
     )

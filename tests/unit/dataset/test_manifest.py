@@ -61,9 +61,9 @@ def _manifest() -> Manifest:
 
     return Manifest(
         manifest_schema_version=MANIFEST_SCHEMA_VERSION,
-        schema_version=2,
+        schema_version=3,
         geoparquet_version="1.1.0",
-        transform_algorithm_version=2,
+        transform_algorithm_version=3,
         area_policy_sha256=current_area_policy_sha256(),
         output_algorithm_revision=current_output_algorithm_revision(),
         source=SourceIdentity("region.osm.pbf", 128, 1000, "a" * 64),

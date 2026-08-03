@@ -18,6 +18,7 @@ import typer
 from typer._click.exceptions import ClickException, Exit, UsageError
 
 from osm_polygon_description_tag.dataset.manifest import ManifestError
+from osm_polygon_description_tag.dataset.migration import MigrationError, migrate_dataset_schema
 from osm_polygon_description_tag.dataset.reporting import ReportingError, generate_dataset_docs
 from osm_polygon_description_tag.dataset.storage import StorageError, validate_geoparquet
 from osm_polygon_description_tag.observability.trackio import (
@@ -204,6 +205,14 @@ def handle_card(args: SimpleNamespace) -> int:
     return 0
 
 
+def handle_migrate_schema(args: SimpleNamespace) -> int:
+    """Upgrade existing legacy map Parquets without reading raw PBFs."""
+    paths = _resolve_paths(args)
+    migrated = migrate_dataset_schema(paths.data_root)
+    _print_json({"data_root": str(paths.data_root), "migrated_files": migrated})
+    return 0
+
+
 def handle_publish_plan(args: SimpleNamespace) -> int:
     paths = _resolve_paths(args)
     plan = create_upload_plan(paths.data_root)
@@ -335,6 +344,21 @@ def generate_card_command(
     )
 
 
+@app.command(
+    "migrate-schema",
+    help="Migrate legacy Parquets for Hub viewer compatibility",
+)
+def migrate_schema_command(
+    source_root: SourceRoot = None,
+    data_root: DataRoot = None,
+    osmium: Osmium = "osmium",
+) -> None:
+    _invoke(
+        handle_migrate_schema,
+        _namespace(source_root=source_root, data_root=data_root, osmium=osmium),
+    )
+
+
 @app.command("trackio-report", help="Log retrospective dataset metrics to Trackio")
 def trackio_report_command(
     project: Annotated[str, typer.Option("--project")] = "osm-polygon-description-tag",
@@ -437,6 +461,7 @@ _ERROR_TYPES = (
     PublicationError,
     PreflightError,
     OrchestratorError,
+    MigrationError,
 )
 
 
