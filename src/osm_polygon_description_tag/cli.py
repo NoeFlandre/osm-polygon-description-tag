@@ -481,11 +481,11 @@ def run(argv: Sequence[str] | None = None) -> int:
     columns = os.environ.get("COLUMNS")
     if columns is not None:
         try:
-            invalid_columns = int(columns) <= 0
+            invalid_columns = int(columns) < 80
         except ValueError:
             invalid_columns = True
         if invalid_columns:
-            os.environ.pop("COLUMNS", None)
+            os.environ["COLUMNS"] = "80"
     try:
         app(
             args=list(argv) if argv is not None else None,
