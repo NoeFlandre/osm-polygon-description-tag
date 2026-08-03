@@ -15,6 +15,9 @@ It is published automatically from `main` with GitHub Pages at
 [noeflandre.github.io/osm-polygon-description-tag](https://noeflandre.github.io/osm-polygon-description-tag/).
 The deployment workflow builds the strict site from the locked uv environment.
 
+Read the [codebase presentation](https://noeflandre.github.io/osm-polygon-description-tag/slides/codebase/codebase.html)
+for a concise visual overview of the architecture, contracts, and workflow.
+
 Read the documentation:
 
 - [Getting started](docs/getting-started.md)
