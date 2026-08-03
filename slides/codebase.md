@@ -336,7 +336,7 @@ never enter a plan.
 
 <!-- padding: compact -->
 
-## One command is enough — and Ctrl-C is part of the design
+## One command is enough and Ctrl-C is part of the design
 
 ```bash
 just run-and-publish
