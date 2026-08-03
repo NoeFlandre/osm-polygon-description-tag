@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from shapely.geometry import Polygon
+from typer import rich_utils
 
 from osm_polygon_description_tag.cli import (
     handle_inspect,
@@ -144,6 +145,16 @@ def test_help_remains_visible_when_ci_reports_zero_columns(
     """Rich must not render an empty help page for a zero-width CI terminal."""
     monkeypatch.setenv("COLUMNS", "0")
     monkeypatch.delenv("TERM", raising=False)
+
+    assert run(["run-and-publish", "--help"]) == 0
+    assert "--confirm-repo" in capsys.readouterr().out
+
+
+def test_help_remains_visible_when_rich_cached_a_narrow_width(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The CLI must repair Rich's cached width, not only ``COLUMNS``."""
+    monkeypatch.setattr(rich_utils, "MAX_WIDTH", 1)
 
     assert run(["run-and-publish", "--help"]) == 0
     assert "--confirm-repo" in capsys.readouterr().out

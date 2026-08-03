@@ -16,6 +16,7 @@ from types import SimpleNamespace
 from typing import Annotated, Any
 
 import typer
+from typer import rich_utils
 from typer._click.exceptions import ClickException, Exit, UsageError
 
 from osm_polygon_description_tag.dataset.manifest import ManifestError
@@ -478,6 +479,9 @@ def _show_click_error(error: ClickException) -> None:
 
 
 def run(argv: Sequence[str] | None = None) -> int:
+    # Rich may cache a zero-width value before the entry point runs (notably in
+    # CI/pre-commit subprocesses). Keep captured help deterministic and readable.
+    rich_utils.MAX_WIDTH = 80
     columns = os.environ.get("COLUMNS")
     if columns is not None:
         try:
