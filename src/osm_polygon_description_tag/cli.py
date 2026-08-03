@@ -482,6 +482,8 @@ def run(argv: Sequence[str] | None = None) -> int:
     # Rich may cache a zero-width value before the entry point runs (notably in
     # CI/pre-commit subprocesses). Keep captured help deterministic and readable.
     rich_utils.MAX_WIDTH = 80
+    if not sys.stdout.isatty():
+        rich_utils.FORCE_TERMINAL = False
     columns = os.environ.get("COLUMNS")
     if columns is not None:
         try:

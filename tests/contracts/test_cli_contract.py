@@ -160,6 +160,26 @@ def test_help_remains_visible_when_rich_cached_a_narrow_width(
     assert "--confirm-repo" in capsys.readouterr().out
 
 
+def test_help_remains_visible_when_color_is_forced_in_ci(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Forced ANSI rendering must not collapse captured Rich help."""
+    monkeypatch.setenv("FORCE_COLOR", "1")
+
+    assert run(["run-and-publish", "--help"]) == 0
+    assert "--confirm-repo" in capsys.readouterr().out
+
+
+def test_captured_help_disables_rich_terminal_forcing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A non-TTY capture must win over a stale forced-terminal setting."""
+    monkeypatch.setattr(rich_utils, "FORCE_TERMINAL", True)
+
+    assert run(["run-and-publish", "--help"]) == 0
+    assert "--confirm-repo" in capsys.readouterr().out
+
+
 def test_inspect_uses_approved_default_paths(capsys: pytest.CaptureFixture[str]) -> None:
     # inspect with a non-existent default source root exits non-zero but prints the path attempt.
     # Use a non-existent custom root so we only assert the parser accepted defaults.
