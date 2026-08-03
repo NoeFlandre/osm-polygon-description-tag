@@ -7,6 +7,11 @@ tags:
 - geospatial
 - openstreetmap
 - geoparquet
+configs:
+- config_name: default
+  data_files:
+  - split: train
+    path: data/*.parquet
 ---
 
 ![OSM Polygon Description Tag dataset hero](assets/dataset-card-hero.png)

@@ -23,6 +23,9 @@ def test_template_contains_required_handwritten_sections() -> None:
     assert text.startswith("---\n")
     assert "pretty_name: OSM Polygon Description Tag" in text
     assert "license: odbl" in text
+    assert "config_name: default" in text
+    assert "split: train" in text
+    assert "path: data/*.parquet" in text
     assert "<!-- GENERATED:STATS:START -->" in text
     assert "<!-- GENERATED:STATS:END -->" in text
     # Required provenance and obligation text.
