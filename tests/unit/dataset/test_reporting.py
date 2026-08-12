@@ -2,96 +2,22 @@ import json
 from pathlib import Path
 
 import pytest
-from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry import Polygon
 
-from osm_polygon_description_tag.dataset.manifest import (
-    Manifest,
-    RunCounts,
-    output_identity_for,
-    source_identity_for,
-    write_manifest,
-)
 from osm_polygon_description_tag.dataset.reporting import collect_stats, generate_dataset_docs
-from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from tests.conftest import make_record_dict
+from tests.helpers.dataset import write_finalized_dataset, write_reporting_fixture
 
 
 def _frozen_clock() -> str:
     return "2026-07-27T00:00:00+00:00"
 
 
-def _build_pair(
-    data_root: Path,
-    source_root: Path,
-    name: str,
-    records: list[dict[str, object]],
-    rejections: dict[str, int],
-) -> None:
-    source_path = source_root / f"{name}.osm.pbf"
-    source_path.write_bytes(name.encode("utf-8"))
-    output_path = data_root / "data" / f"{name}.parquet"
-    manifest_path = data_root / "manifests" / f"{name}.manifest.json"
-    included = write_geoparquet(iter(records), output_path, batch_size=10)
-    manifest = Manifest(
-        manifest_schema_version=2,
-        schema_version=3,
-        geoparquet_version="1.1.0",
-        transform_algorithm_version=3,
-        output_algorithm_revision="x" * 64,
-        area_policy_sha256="0" * 64,
-        source=source_identity_for(source_path),
-        output=output_identity_for(output_path),
-        osmium_version="osmium version 1.16.0",
-        dependency_versions={"pyarrow": "20.0.0"},
-        code_revision="abc123",
-        started_at="2026-07-27T00:00:00+00:00",
-        completed_at="2026-07-27T00:01:00+00:00",
-        counts=RunCounts(
-            emitted_features=included + sum(rejections.values()),
-            included_rows=included,
-            rejections=rejections,
-        ),
-    )
-    write_manifest(manifest, manifest_path)
-
-
-def _populate_dataset(data_root: Path, source_root: Path) -> None:
-    (data_root / "data").mkdir(parents=True)
-    (data_root / "manifests").mkdir(parents=True)
-    region_a = [
-        make_record_dict(
-            Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-            {"description:en": "EN"},
-            osm_type="way",
-            osm_id=1,
-            source_pbf="region-a.osm.pbf",
-        ),
-        make_record_dict(
-            MultiPolygon([Polygon([(10, 10), (10, 11), (11, 11), (11, 10)])]),
-            {"description:pt-BR": "PT"},
-            osm_type="relation",
-            osm_id=2,
-            source_pbf="region-a.osm.pbf",
-        ),
-    ]
-    region_b = [
-        make_record_dict(
-            Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-            {"description:en": "EN"},
-            osm_type="way",
-            osm_id=3,
-            source_pbf="region-b.osm.pbf",
-        )
-    ]
-    _build_pair(data_root, source_root, "region-a", region_a, {"no_nonempty_description": 2})
-    _build_pair(data_root, source_root, "region-b", region_b, {"no_nonempty_description": 2})
-
-
 def test_collect_stats_aggregates_from_validated_artifacts(tmp_path: Path) -> None:
     data_root = tmp_path / "generated"
     source_root = tmp_path / "raw"
     source_root.mkdir()
-    _populate_dataset(data_root, source_root)
+    write_reporting_fixture(data_root, source_root)
 
     stats = collect_stats(data_root, clock=_frozen_clock)
 
@@ -139,7 +65,7 @@ def test_collect_stats_separates_base_and_localized_description_words(
             source_pbf="words.osm.pbf",
         ),
     ]
-    _build_pair(data_root, source_root, "words", records, {})
+    write_finalized_dataset(data_root, source_root, {"words": records})
 
     stats = collect_stats(data_root)
 
@@ -183,7 +109,7 @@ def test_collect_stats_rejects_stale_output(tmp_path: Path) -> None:
     data_root = tmp_path / "generated"
     source_root = tmp_path / "raw"
     source_root.mkdir()
-    _populate_dataset(data_root, source_root)
+    write_reporting_fixture(data_root, source_root)
     # Corrupt one output after the manifest was written.
     (data_root / "data" / "region-a.parquet").write_bytes(b"mutated")
 
@@ -195,7 +121,7 @@ def test_generate_dataset_docs_installs_hero_image(tmp_path: Path) -> None:
     data_root = tmp_path / "generated"
     source_root = tmp_path / "raw"
     source_root.mkdir()
-    _populate_dataset(data_root, source_root)
+    write_reporting_fixture(data_root, source_root)
     template_path = Path("docs/dataset-card-template.md")
 
     generate_dataset_docs(data_root, template_path, clock=_frozen_clock)
@@ -218,7 +144,7 @@ def test_generate_dataset_docs_writes_stats_and_card(tmp_path: Path) -> None:
     data_root = tmp_path / "generated"
     source_root = tmp_path / "raw"
     source_root.mkdir()
-    _populate_dataset(data_root, source_root)
+    write_reporting_fixture(data_root, source_root)
     template_path = Path("docs/dataset-card-template.md")
 
     generate_dataset_docs(data_root, template_path, clock=_frozen_clock)

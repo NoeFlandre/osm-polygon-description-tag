@@ -52,7 +52,8 @@ from osm_polygon_description_tag.dataset.reporting import (
 )
 from osm_polygon_description_tag.dataset.storage import StorageError, write_geoparquet
 from tests.conftest import make_record_dict
-from tests.unit.dataset.test_reporting import _frozen_clock, _populate_dataset
+from tests.helpers.dataset import frozen_clock as _frozen_clock
+from tests.helpers.dataset import write_reporting_fixture as _populate_dataset
 
 
 def _write_parquet_with_areas(directory: Path, name: str, areas: list[float]) -> Path:

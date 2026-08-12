@@ -38,6 +38,7 @@ from osm_polygon_description_tag.dataset.reporting import (
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import REPO_ID
 from tests.conftest import make_record_dict
+from tests.helpers.dataset import write_finalized_dataset
 
 
 def _sha256_text(text: str) -> str:
@@ -45,42 +46,25 @@ def _sha256_text(text: str) -> str:
 
 
 def _populate_dataset(data_root: Path, source_root: Path) -> None:
-    (data_root / "data").mkdir(parents=True)
-    (data_root / "manifests").mkdir(parents=True)
-    source_root.mkdir(exist_ok=True)
-    for stem, (osm_id, tags) in {
+    shards = {
         "alpha": (1, {"name": "Alpha", "description": "First", "name:en": "EN"}),
         "beta": (2, {"name:fr": "Beta FR", "description": "Second"}),
-    }.items():
-        source = source_root / f"{stem}.osm.pbf"
-        source.write_bytes(stem.encode("utf-8"))
-        record = make_record_dict(
-            Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-            tags,
-            osm_id=osm_id,
-            source_pbf=source.name,
-        )
-        output = data_root / "data" / f"{stem}.parquet"
-        write_geoparquet(iter([record]), output, batch_size=10)
-        write_manifest(
-            Manifest(
-                manifest_schema_version=2,
-                schema_version=3,
-                geoparquet_version="1.1.0",
-                transform_algorithm_version=3,
-                area_policy_sha256=current_area_policy_sha256(),
-                output_algorithm_revision=current_output_algorithm_revision(),
-                source=source_identity_for(source),
-                output=output_identity_for(output),
-                osmium_version=None,
-                dependency_versions={"pyarrow": "20.0.0"},
-                code_revision=None,
-                started_at="2026-01-01T00:00:00+00:00",
-                completed_at="2026-01-01T00:00:01+00:00",
-                counts=RunCounts(emitted_features=1, included_rows=1, rejections={}),
-            ),
-            data_root / "manifests" / f"{stem}.manifest.json",
-        )
+    }
+    write_finalized_dataset(
+        data_root,
+        source_root,
+        {
+            stem: [
+                make_record_dict(
+                    Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+                    tags,
+                    osm_id=osm_id,
+                    source_pbf=f"{stem}.osm.pbf",
+                )
+            ]
+            for stem, (osm_id, tags) in shards.items()
+        },
+    )
 
 
 def test_generation_is_byte_stable_across_clocks(tmp_path: Path) -> None:

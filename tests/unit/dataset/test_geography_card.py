@@ -30,55 +30,25 @@ from osm_polygon_description_tag.dataset.geography import (
 from osm_polygon_description_tag.dataset.geography.card import (
     write_map_block_marker_to_template,
 )
-from osm_polygon_description_tag.dataset.manifest import (
-    Manifest,
-    RunCounts,
-    current_area_policy_sha256,
-    current_output_algorithm_revision,
-    output_identity_for,
-    source_identity_for,
-    write_manifest,
-)
 from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
-from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.workflow.orchestrator import _build_metadata_only_upload_plan
 from tests.conftest import make_record_dict
+from tests.helpers.dataset import write_finalized_dataset
 
 
 def _populate_dataset(data_root: Path, source_root: Path) -> None:
-    (data_root / "data").mkdir(parents=True)
-    (data_root / "manifests").mkdir(parents=True)
-    source_root.mkdir(exist_ok=True)
-    for stem, osm_id in [("alpha", 1), ("beta", 2)]:
-        source = source_root / f"{stem}.osm.pbf"
-        source.write_bytes(stem.encode("utf-8"))
-        record = make_record_dict(
-            Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-            {"description": stem},
-            osm_id=osm_id,
-            source_pbf=source.name,
-        )
-        output = data_root / "data" / f"{stem}.parquet"
-        write_geoparquet(iter([record]), output, batch_size=10)
-        write_manifest(
-            Manifest(
-                manifest_schema_version=2,
-                schema_version=3,
-                geoparquet_version="1.1.0",
-                transform_algorithm_version=3,
-                area_policy_sha256=current_area_policy_sha256(),
-                output_algorithm_revision=current_output_algorithm_revision(),
-                source=source_identity_for(source),
-                output=output_identity_for(output),
-                osmium_version=None,
-                dependency_versions={"pyarrow": "20.0.0"},
-                code_revision=None,
-                started_at="2026-01-01T00:00:00+00:00",
-                completed_at="2026-01-01T00:00:01+00:00",
-                counts=RunCounts(emitted_features=1, included_rows=1, rejections={}),
-            ),
-            data_root / "manifests" / f"{stem}.manifest.json",
-        )
+    shards = {
+        stem: [
+            make_record_dict(
+                Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+                {"description": stem},
+                osm_id=osm_id,
+                source_pbf=f"{stem}.osm.pbf",
+            )
+        ]
+        for stem, osm_id in [("alpha", 1), ("beta", 2)]
+    }
+    write_finalized_dataset(data_root, source_root, shards)
 
 
 def _stub_map_block(stats_sha256: str, total_rows: int, occupied_cells: int) -> str:
