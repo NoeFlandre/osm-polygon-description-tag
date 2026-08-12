@@ -42,6 +42,12 @@ def test_unit_tests_mirror_source_domains() -> None:
         assert (tests_root / "unit" / domain).is_dir()
 
 
+def test_unused_top_level_deduplication_shim_is_not_packaged() -> None:
+    """Deduplication has one canonical module under the dataset package."""
+    package_root = Path(osm_polygon_description_tag.__file__).parent
+    assert not (package_root / "deduplication.py").exists()
+
+
 def test_active_docs_name_the_complete_toolchain() -> None:
     package_root = Path(osm_polygon_description_tag.__file__).parent
     project_root = package_root.parents[1]
