@@ -7,7 +7,8 @@ Provide the canonical boundary for constructing and validating dataset artifacts
 ## Responsibilities
 
 Own the versioned Arrow and GeoParquet schema, record transformation, atomic storage, manifests,
-global identity deduplication, statistics, and deterministic dataset-card generation.
+global identity deduplication, artifact-derived statistics, and deterministic dataset-card
+generation. Statistics live in `stats.py`; documentation and derived media live in `docs.py`.
 
 ## Non-responsibilities
 
@@ -29,8 +30,8 @@ library.
 `transform_record` converts an exported OSM record into a schema row. `write_geoparquet` streams
 bounded batches through owned temporary files and atomically promotes only a validated artifact.
 Manifests identify source and output bytes; the deduplication stage removes cross-PBF duplicate
-OSM identities atomically; reporting derives statistics and documentation from final artifacts
-and their matching manifests.
+OSM identities atomically. `stats.py` derives statistics from final artifacts and their matching
+manifests, while `docs.py` renders the dataset card and derived media from those statistics.
 
 ## Safety and determinism invariants
 

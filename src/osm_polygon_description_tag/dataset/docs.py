@@ -1,0 +1,321 @@
+"""Deterministic dataset-card and derived-media generation."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import uuid
+from collections.abc import Callable, Mapping
+from pathlib import Path
+from typing import Any
+
+from osm_polygon_description_tag.dataset.geography import (
+    DEFAULT_H3_RESOLUTION,
+    aggregate_h3_density,
+    render_area_histogram,
+)
+from osm_polygon_description_tag.dataset.geography.area_histogram import (
+    AREA_HISTOGRAM_RENDER_VERSION,
+    aggregate_area_histogram,
+    area_histogram_input_sha256,
+)
+from osm_polygon_description_tag.dataset.geography.basemap import bundled_basemap_path
+from osm_polygon_description_tag.dataset.geography.card import (
+    H3_MAP_ASSET_RELATIVE_PATH,
+    H3_MAP_END_MARKER,
+    H3_MAP_START_MARKER,
+    H3_MAP_TITLE,
+    install_map_block,
+)
+from osm_polygon_description_tag.dataset.geography.rendering import render_density_map
+from osm_polygon_description_tag.dataset.manifest import file_sha256
+from osm_polygon_description_tag.dataset.stats import ReportingError, collect_stats, utc_now_iso
+from osm_polygon_description_tag.runtime.resources import dataset_card_hero
+
+_H3_MAP_CACHE_SCHEMA_VERSION = 1
+_H3_MAP_RENDER_VERSION = 2
+_AREA_HISTOGRAM_FILENAME = "area_distribution.png"
+_AREA_HISTOGRAM_ASSET_RELATIVE_PATH = f"assets/{_AREA_HISTOGRAM_FILENAME}"
+_AREA_HISTOGRAM_TITLE = "Area distribution of description-tagged polygons"
+_DATASET_CARD_HERO_FILENAME = "dataset-card-hero.png"
+_DATASET_CARD_HERO_ASSET_RELATIVE_PATH = f"assets/{_DATASET_CARD_HERO_FILENAME}"
+_GENERATED_PATTERN = re.compile(
+    r"(<!-- GENERATED:STATS:START -->\n)(.*?)(<!-- GENERATED:STATS:END -->)", re.DOTALL
+)
+
+
+def _read_json_object(path: Path) -> dict[str, Any]:
+    """Read cache metadata, treating invalid data as absent."""
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _h3_map_input_sha256(stats: Mapping[str, Any]) -> str:
+    """Return the stable identity of every input that can affect the map."""
+    file_inputs = [
+        {"parquet": str(entry["parquet"]), "output_sha256": str(entry["output_sha256"])}
+        for entry in stats.get("files", [])
+        if isinstance(entry, Mapping)
+    ]
+    file_inputs.sort(key=lambda entry: entry["parquet"])
+    payload = {
+        "cache_schema_version": _H3_MAP_CACHE_SCHEMA_VERSION,
+        "render_version": _H3_MAP_RENDER_VERSION,
+        "h3_resolution": DEFAULT_H3_RESOLUTION,
+        "basemap_sha256": file_sha256(bundled_basemap_path()),
+        "files": file_inputs,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _write_if_changed(path: Path, text: str) -> bool:
+    """Atomically write text only when bytes differ."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_file() and path.read_text(encoding="utf-8") == text:
+        return False
+    temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temp.write_text(text, encoding="utf-8")
+        with temp.open("rb") as handle:
+            os.fsync(handle.fileno())
+        os.replace(temp, path)
+        return True
+    finally:
+        if temp.exists():
+            temp.unlink()
+
+
+_base_write_if_changed = _write_if_changed
+
+
+def _write_bytes_if_changed(path: Path, data: bytes) -> bool:
+    """Atomically write binary data only when bytes differ."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_file() and path.read_bytes() == data:
+        return False
+    temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temp.write_bytes(data)
+        with temp.open("rb") as handle:
+            os.fsync(handle.fileno())
+        os.replace(temp, path)
+        return True
+    finally:
+        if temp.exists():
+            temp.unlink()
+
+
+def _fmt_int(value: int) -> str:
+    return f"{value:,}"
+
+
+def _fmt_bytes(value: int) -> str:
+    size = float(value)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if size < 1024 or unit == "TiB":
+            return f"{size:,.0f} {unit}" if unit == "B" else f"{size:,.1f} {unit}"
+        size /= 1024
+    raise AssertionError("unreachable")
+
+
+def _fmt_median(value: float | None) -> str:
+    if value is None:
+        return "—"
+    return _fmt_int(int(value)) if value.is_integer() else f"{value:,.1f}"
+
+
+def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
+    lines: list[str] = [
+        f"<!-- stats_sha256: {stats_sha256} -->",
+        f"<!-- stats_schema_version: {stats['stats_schema_version']} -->",
+        f"<!-- schema_version: {stats['schema_version']} -->",
+        "",
+        "## Dataset at a glance",
+        "",
+        "| Metric | Value |",
+        "| --- | --- |",
+        f"| Polygons | {_fmt_int(stats['rows'])} |",
+        f"| Parquet files | {_fmt_int(stats['output_files'])} |",
+        f"| Download size | {_fmt_bytes(stats['output_bytes_total'])} |",
+        f"| Duplicate rows removed | {_fmt_int(stats['deduplicated_rows'])} |",
+        f"| Closed ways | {_fmt_int(stats['osm_types'].get('way', 0))} |",
+        f"| Relations | {_fmt_int(stats['osm_types'].get('relation', 0))} |",
+        f"| Polygon geometries | {_fmt_int(stats['geometry_types'].get('Polygon', 0))} |",
+        f"| MultiPolygon geometries | {_fmt_int(stats['geometry_types'].get('MultiPolygon', 0))} |",
+        "",
+        "## Description coverage",
+        "",
+        "| Description type | Values | Total words | Median words per description |",
+        "| --- | ---: | ---: | ---: |",
+        "| Base descriptions | "
+        f"{_fmt_int(stats['base_description_values'])} | "
+        f"{_fmt_int(stats['base_description_words_total'])} | "
+        f"{_fmt_median(stats['base_description_words_median'])} |",
+        "| Localized descriptions | "
+        f"{_fmt_int(stats['localized_description_values'])} | "
+        f"{_fmt_int(stats['localized_description_words_total'])} | "
+        f"{_fmt_median(stats['localized_description_words_median'])} |",
+        "",
+    ]
+    top_suffixes = sorted(
+        stats["description_suffixes"].items(), key=lambda item: (-item[1], item[0])
+    )[:10]
+    if top_suffixes:
+        lines.extend(
+            [
+                "### Most common localized suffixes",
+                "",
+                "These are exact OSM tag suffixes and are not validated language codes.",
+                "",
+                "| Suffix | Description values |",
+                "| --- | ---: |",
+            ]
+        )
+        lines.extend(f"| `{suffix}` | {_fmt_int(count)} |" for suffix, count in top_suffixes)
+        lines.append("")
+    lines.extend(
+        [
+            "### Area distribution",
+            "",
+            f"![{_AREA_HISTOGRAM_TITLE}]({_AREA_HISTOGRAM_ASSET_RELATIVE_PATH})",
+            "",
+            "Area buckets span <1 m² to >=100B m² on a logarithmic scale; "
+            "each bar shows the number of polygons in that bucket "
+            f"(total {_fmt_int(stats['rows'])}).",
+            "",
+        ]
+    )
+    if stats["data_min_timestamp_utc"] and stats["data_max_timestamp_utc"]:
+        lines.extend(
+            [
+                "**OSM object timestamps (UTC):** "
+                f"{stats['data_min_timestamp_utc']} to {stats['data_max_timestamp_utc']}",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "Detailed machine-readable statistics, exact suffix frequencies, rejection counts, "
+            "and per-file SHA-256 provenance are available in [`stats.json`](stats.json).",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _render_h3_map_block(data_root: Path, total_rows: int, occupied_cells: int) -> str:
+    """Render the dataset-card map body."""
+    _ = (data_root, total_rows, occupied_cells)
+    return f"![{H3_MAP_TITLE}]({H3_MAP_ASSET_RELATIVE_PATH})\n"
+
+
+def _write_h3_map_png(
+    data_root: Path,
+    total_rows: int,
+    occupied_cells: int,
+    *,
+    counts: Mapping[str, int] | None = None,
+) -> None:
+    """Render the H3 density PNG, accepting precomputed counts for tests."""
+    _ = (total_rows, occupied_cells)
+    render_density_map(
+        counts if counts is not None else aggregate_h3_density(data_root),
+        data_root / H3_MAP_ASSET_RELATIVE_PATH,
+    )
+
+
+def _area_histogram_input_sha256(stats: Mapping[str, Any]) -> str:
+    """Return the stable area-histogram cache identity."""
+    mapping = {
+        str(entry["parquet"]): str(entry["output_sha256"]) for entry in stats.get("files", [])
+    }
+    return area_histogram_input_sha256(mapping)
+
+
+def _write_area_histogram_png(
+    data_root: Path,
+    *,
+    counts: Mapping[str, int] | None = None,
+) -> dict[str, int]:
+    """Aggregate and render the area histogram."""
+    values = counts if counts is not None else aggregate_area_histogram(data_root)
+    render_area_histogram(values, data_root / _AREA_HISTOGRAM_ASSET_RELATIVE_PATH)
+    return dict(values)
+
+
+def generate_dataset_docs(
+    data_root: Path,
+    template_path: Path,
+    *,
+    clock: Callable[[], str] = utc_now_iso,
+) -> dict[str, Any]:
+    """Write deterministic stats, README, and derived media artifacts."""
+    stats = collect_stats(data_root, clock=clock)
+    map_input_sha256 = _h3_map_input_sha256(stats)
+    total_rows = int(stats["rows"])
+    map_path = data_root / H3_MAP_ASSET_RELATIVE_PATH
+    previous_stats = _read_json_object(data_root / "stats.json")
+    previous_identity = previous_stats.get("h3_map_input_sha256")
+    previous_occupied = previous_stats.get("h3_occupied_cells")
+    can_reuse_map = (
+        map_path.is_file()
+        and previous_identity == map_input_sha256
+        and isinstance(previous_occupied, int)
+        and not isinstance(previous_occupied, bool)
+        and previous_occupied >= 0
+    )
+    if can_reuse_map:
+        occupied_cells = previous_occupied
+    else:
+        h3_counts = aggregate_h3_density(data_root)
+        occupied_cells = len(h3_counts)
+        _write_h3_map_png(data_root, total_rows, occupied_cells, counts=h3_counts)
+    stats["h3_map_input_sha256"] = map_input_sha256
+    stats["h3_occupied_cells"] = occupied_cells
+
+    histogram_path = data_root / _AREA_HISTOGRAM_ASSET_RELATIVE_PATH
+    histogram_input_sha256 = _area_histogram_input_sha256(stats)
+    can_reuse_histogram = (
+        histogram_path.is_file()
+        and previous_stats.get("area_histogram_input_sha256") == histogram_input_sha256
+        and previous_stats.get("area_histogram_render_version") == AREA_HISTOGRAM_RENDER_VERSION
+        and isinstance(previous_stats.get("area_histogram_total_rows"), int)
+        and not isinstance(previous_stats.get("area_histogram_total_rows"), bool)
+        and previous_stats["area_histogram_total_rows"] >= 0
+    )
+    if not can_reuse_histogram:
+        _write_area_histogram_png(data_root)
+    stats["area_histogram_input_sha256"] = histogram_input_sha256
+    stats["area_histogram_render_version"] = AREA_HISTOGRAM_RENDER_VERSION
+    stats["area_histogram_total_rows"] = total_rows
+
+    _write_bytes_if_changed(
+        data_root / _DATASET_CARD_HERO_ASSET_RELATIVE_PATH,
+        dataset_card_hero().read_bytes(),
+    )
+    stats_json = json.dumps(stats, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    stats_sha256 = hashlib.sha256(stats_json.encode("utf-8")).hexdigest()
+    template = template_path.read_text(encoding="utf-8")
+    if not _GENERATED_PATTERN.search(template):
+        raise ReportingError(f"template missing GENERATED:STATS markers: {template_path}")
+    readme = _GENERATED_PATTERN.sub(
+        lambda match: match.group(1) + _render_stats_block(stats, stats_sha256) + match.group(3),
+        template,
+    )
+    if H3_MAP_START_MARKER in readme and H3_MAP_END_MARKER in readme:
+        readme = install_map_block(
+            readme,
+            _render_h3_map_block(data_root, total_rows, occupied_cells),
+        )
+    _write_if_changed(data_root / "stats.json", stats_json)
+    _write_if_changed(data_root / "README.md", readme)
+    return stats
+
+
+__all__ = ["generate_dataset_docs"]
