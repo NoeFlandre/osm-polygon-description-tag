@@ -87,7 +87,7 @@ def test_validation_index_is_created_below_data_root(tmp_path: Path) -> None:
 
 
 def test_reporting_spill_directory_is_below_data_root(tmp_path: Path) -> None:
-    from osm_polygon_description_tag.dataset.reporting import _new_connection
+    from osm_polygon_description_tag.dataset.stats import _new_connection
 
     data_root = tmp_path / "generated"
     connection = _new_connection(data_root)

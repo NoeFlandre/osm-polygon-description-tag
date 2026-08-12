@@ -20,6 +20,10 @@ from shapely.geometry import Polygon
 
 matplotlib.use("Agg")
 
+from osm_polygon_description_tag.dataset.docs import (
+    _area_histogram_input_sha256,
+    generate_dataset_docs,
+)
 from osm_polygon_description_tag.dataset.geography import (
     AREA_BUCKET_COUNT,
     AREA_BUCKET_EDGES,
@@ -45,10 +49,6 @@ from osm_polygon_description_tag.dataset.manifest import (
     output_identity_for,
     source_identity_for,
     write_manifest,
-)
-from osm_polygon_description_tag.dataset.reporting import (
-    _area_histogram_input_sha256,
-    generate_dataset_docs,
 )
 from osm_polygon_description_tag.dataset.storage import StorageError, write_geoparquet
 from tests.conftest import make_record_dict
@@ -458,7 +458,7 @@ def test_generate_dataset_docs_recomputes_when_render_version_changes(
 
     calls: list[Path] = []
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.reporting._write_area_histogram_png",
+        "osm_polygon_description_tag.dataset.docs._write_area_histogram_png",
         lambda root: calls.append(root),
     )
     generate_dataset_docs(data_root, template_path, clock=_frozen_clock)
@@ -476,7 +476,7 @@ def test_generate_dataset_docs_recomputes_histogram_when_parquet_changes(
     _populate_dataset(data_root, source_root)
     template_path = Path("docs/dataset-card-template.md")
 
-    import osm_polygon_description_tag.dataset.reporting as reporting
+    import osm_polygon_description_tag.dataset.docs as reporting
 
     aggregate_calls: list[Path] = []
     render_calls: list[Path] = []

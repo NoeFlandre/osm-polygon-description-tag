@@ -93,14 +93,14 @@ def test_generation_preserves_handwritten_sections(
     # Stub the H3 map hooks so the test focuses on the dataset card
     # generation, not on matplotlib or the assets/ directory.
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.reporting._render_h3_map_block",
+        "osm_polygon_description_tag.dataset.docs._render_h3_map_block",
         lambda data_root,
         total_rows,
         occupied_cells: "![H3 map](assets/description_polygon_density.png)\n",
         raising=False,
     )
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.reporting._write_h3_map_png",
+        "osm_polygon_description_tag.dataset.docs._write_h3_map_png",
         lambda data_root, total_rows, occupied_cells, counts=None: None,
         raising=False,
     )
@@ -137,14 +137,14 @@ def test_generated_block_contains_only_backed_numbers(
     # Stub the H3 map hooks so the test focuses on the dataset card
     # generation, not on matplotlib or the assets/ directory.
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.reporting._render_h3_map_block",
+        "osm_polygon_description_tag.dataset.docs._render_h3_map_block",
         lambda data_root,
         total_rows,
         occupied_cells: "![H3 map](assets/description_polygon_density.png)\n",
         raising=False,
     )
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.reporting._write_h3_map_png",
+        "osm_polygon_description_tag.dataset.docs._write_h3_map_png",
         lambda data_root, total_rows, occupied_cells, counts=None: None,
         raising=False,
     )

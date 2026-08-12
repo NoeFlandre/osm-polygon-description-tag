@@ -187,7 +187,7 @@ def _stub_h3_render(monkeypatch: pytest.MonkeyPatch, data_root: Path) -> None:
         Image.new("RGB", (16, 8), (255, 255, 255)).save(target)
 
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.reporting._write_h3_map_png",
+        "osm_polygon_description_tag.dataset.docs._write_h3_map_png",
         _write_png,
         raising=False,
     )

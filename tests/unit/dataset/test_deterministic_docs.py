@@ -20,6 +20,11 @@ from shapely.geometry import Polygon
 from osm_polygon_description_tag._resources import dataset_card_template
 from osm_polygon_description_tag.cli import run as cli_run
 from osm_polygon_description_tag.config import Paths
+from osm_polygon_description_tag.dataset.docs import (
+    _render_stats_block,
+    collect_stats,
+    generate_dataset_docs,
+)
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     RunCounts,
@@ -29,11 +34,6 @@ from osm_polygon_description_tag.dataset.manifest import (
     output_identity_for,
     source_identity_for,
     write_manifest,
-)
-from osm_polygon_description_tag.dataset.reporting import (
-    _render_stats_block,
-    collect_stats,
-    generate_dataset_docs,
 )
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import REPO_ID

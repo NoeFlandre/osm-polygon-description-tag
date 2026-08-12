@@ -155,7 +155,7 @@ def test_generation_installs_map_block_with_correct_relative_path(
     # Patch the rendering helper used inside generate_dataset_docs to a
     # deterministic stub so the test does not require matplotlib.
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.reporting._render_h3_map_block",
+        "osm_polygon_description_tag.dataset.docs._render_h3_map_block",
         lambda data_root, total_rows, occupied_cells: _stub_map_block(
             "deadbeef", total_rows, occupied_cells
         ),
@@ -163,7 +163,7 @@ def test_generation_installs_map_block_with_correct_relative_path(
     )
     # Patch the dataset.reporting module to also use a stub for the PNG.
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.reporting._write_h3_map_png",
+        "osm_polygon_description_tag.dataset.docs._write_h3_map_png",
         lambda data_root, total_rows, occupied_cells, counts=None: None,
         raising=False,
     )
@@ -187,7 +187,7 @@ def test_generation_aggregates_h3_once_and_reuses_counts(
     source_root = tmp_path / "raw"
     _populate_dataset(data_root, source_root)
 
-    import osm_polygon_description_tag.dataset.reporting as reporting
+    import osm_polygon_description_tag.dataset.docs as reporting
 
     calls: list[Path] = []
     captured: dict[str, object] = {}
@@ -220,7 +220,7 @@ def test_readme_only_regeneration_reuses_existing_h3_map(
     source_root = tmp_path / "raw"
     _populate_dataset(data_root, source_root)
 
-    import osm_polygon_description_tag.dataset.reporting as reporting
+    import osm_polygon_description_tag.dataset.docs as reporting
 
     aggregate_calls: list[Path] = []
 
@@ -263,14 +263,14 @@ def test_generation_preserves_existing_stats_block(
     _populate_dataset(data_root, source_root)
 
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.reporting._render_h3_map_block",
+        "osm_polygon_description_tag.dataset.docs._render_h3_map_block",
         lambda data_root, total_rows, occupied_cells: _stub_map_block(
             "deadbeef", total_rows, occupied_cells
         ),
         raising=False,
     )
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.reporting._write_h3_map_png",
+        "osm_polygon_description_tag.dataset.docs._write_h3_map_png",
         lambda data_root, total_rows, occupied_cells, counts=None: None,
         raising=False,
     )
@@ -304,12 +304,12 @@ def test_byte_level_regression_only_map_block_changes(
 
     # First generation: install the map block with text A.
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.reporting._render_h3_map_block",
+        "osm_polygon_description_tag.dataset.docs._render_h3_map_block",
         lambda data_root, total_rows, occupied_cells: "![alt version A](map.png)\n",
         raising=False,
     )
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.reporting._write_h3_map_png",
+        "osm_polygon_description_tag.dataset.docs._write_h3_map_png",
         lambda data_root, total_rows, occupied_cells, counts=None: None,
         raising=False,
     )
@@ -318,7 +318,7 @@ def test_byte_level_regression_only_map_block_changes(
 
     # Second generation: same surrounding prose, different map text.
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.reporting._render_h3_map_block",
+        "osm_polygon_description_tag.dataset.docs._render_h3_map_block",
         lambda data_root, total_rows, occupied_cells: "![alt version B](map.png)\n",
         raising=False,
     )
@@ -344,14 +344,14 @@ def test_idempotent_regeneration_does_not_duplicate_map_block(
     _populate_dataset(data_root, source_root)
 
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.reporting._render_h3_map_block",
+        "osm_polygon_description_tag.dataset.docs._render_h3_map_block",
         lambda data_root, total_rows, occupied_cells: _stub_map_block(
             "deadbeef", total_rows, occupied_cells
         ),
         raising=False,
     )
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.reporting._write_h3_map_png",
+        "osm_polygon_description_tag.dataset.docs._write_h3_map_png",
         lambda data_root, total_rows, occupied_cells, counts=None: None,
         raising=False,
     )
@@ -463,7 +463,7 @@ def test_generated_readme_preserves_surrounding_prose_by_stripping_markers(
 
     # Stub the PNG writer because matplotlib is not the contract under test.
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.reporting._write_h3_map_png",
+        "osm_polygon_description_tag.dataset.docs._write_h3_map_png",
         lambda data_root, total_rows, occupied_cells, counts=None: None,
         raising=False,
     )
@@ -658,7 +658,7 @@ def test_readme_only_regeneration_does_not_rewrite_h3_png_when_cache_identity_un
     source_root = tmp_path / "raw"
     _populate_dataset(data_root, source_root)
 
-    import osm_polygon_description_tag.dataset.reporting as reporting
+    import osm_polygon_description_tag.dataset.docs as reporting
 
     aggregate_calls: list[Path] = []
     render_calls: list[Path] = []
@@ -699,7 +699,7 @@ def test_map_is_recomputed_when_finalized_parquet_data_changes(
     source_root = tmp_path / "raw"
     _populate_dataset(data_root, source_root)
 
-    import osm_polygon_description_tag.dataset.reporting as reporting
+    import osm_polygon_description_tag.dataset.docs as reporting
 
     aggregate_calls: list[Path] = []
     render_calls: list[Path] = []

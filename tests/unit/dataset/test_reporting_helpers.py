@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from osm_polygon_description_tag.dataset.reporting import _safe_map, _write_if_changed
+from osm_polygon_description_tag.dataset.docs import _write_if_changed
+from osm_polygon_description_tag.dataset.stats import _safe_map
 
 
 def test_safe_map_returns_empty_for_none() -> None:
