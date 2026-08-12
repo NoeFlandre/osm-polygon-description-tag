@@ -39,7 +39,6 @@ from typing import Any
 
 from osm_polygon_description_tag.dataset.deduplication import deduplicate_dataset
 from osm_polygon_description_tag.dataset.manifest import (
-    Manifest,
     is_resumable,
     output_identity_for,
     read_manifest,
@@ -88,34 +87,33 @@ from osm_polygon_description_tag.publication.verification import (
 from osm_polygon_description_tag.runtime.cleanup import cleanup_stale_owned_temps
 from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.runtime.logging import RunLogger
-from osm_polygon_description_tag.runtime.resources import (
-    dataset_card_template,
-    osmium_export_config,
-)
-from osm_polygon_description_tag.workflow.build import build_one
+from osm_polygon_description_tag.runtime.resources import dataset_card_template
+from osm_polygon_description_tag.workflow.build import build_one  # noqa: F401
 from osm_polygon_description_tag.workflow.preflight import (
     Preflight,
     PreflightError,
     default_preflight,
 )
+from osm_polygon_description_tag.workflow.source_runner import (
+    STATUS_BUILT,
+    STATUS_PUBLISHED,
+    STATUS_REUSED,
+    OrchestratorError,
+    SourceOutcome,
+)
+from osm_polygon_description_tag.workflow.source_runner import (
+    local_artifact_is_complete as _local_artifact_is_complete,  # noqa: F401
+)
+from osm_polygon_description_tag.workflow.source_runner import (
+    process_one as _process_one,
+)
+from osm_polygon_description_tag.workflow.source_runner import (
+    published_state_matches as _published_state_matches,
+)
 
 INTERRUPT_EXIT_CODE = 130
 
-# Per-source state-machine labels (mutually exclusive).
-STATUS_BUILT = "built-needs-upload"
-STATUS_REUSED = "reused-local-needs-upload"
-STATUS_PUBLISHED = "already-published"
 STATUS_FAILED = "failed"
-
-# Files that the LFS threshold applies to in the default Hub verifier.
-ExportRecordLike = ExportRecord
-
-
-class OrchestratorError(RuntimeError):
-    """Raised for orchestrator-level failures after preflight succeeds."""
-
-
-OrchestratorError.__module__ = "osm_polygon_description_tag.orchestrator"
 
 
 def _translate_state_error(error: PublicationStateError) -> OrchestratorError:
@@ -158,16 +156,6 @@ def _write_metadata_state(*args: Any, **kwargs: Any) -> dict[str, object]:
 
 
 @dataclass
-class SourceOutcome:
-    source_name: str
-    status: str
-    included_rows: int = 0
-    output_bytes: int = 0
-    remote_revision: str | None = None
-    note: str | None = None
-
-
-@dataclass
 class OrchestrationReport:
     source_count: int
     preflight: dict[str, object]
@@ -191,175 +179,6 @@ class OrchestrationReport:
             ],
             "final_remote_revision": self.final_remote_revision,
         }
-
-
-# ---------------------------------------------------------------------------
-# Per-source processing
-# ---------------------------------------------------------------------------
-
-
-def _local_artifact_is_complete(paths: Paths, source: Source) -> tuple[bool, Manifest | None]:
-    """Return (True, manifest) only when the local artifact is fully resumable."""
-    output_path = paths.data_root / "data" / source.output_name
-    manifest_path = (
-        paths.data_root
-        / "manifests"
-        / f"{source.output_name.removesuffix('.parquet')}.manifest.json"
-    )
-    if not output_path.is_file() or not manifest_path.is_file():
-        return False, None
-    try:
-        validate_geoparquet(output_path)
-        manifest = read_manifest(manifest_path)
-    except (StorageError, Exception):
-        return False, None
-    if not is_resumable(
-        manifest,
-        source_identity_for(source.path),
-        output_identity_for(output_path),
-    ):
-        return False, None
-    return True, manifest
-
-
-def _process_one(
-    source: Source,
-    paths: Paths,
-    *,
-    clock: Callable[[], str],
-    exporter: Callable[..., Iterable[ExportRecordLike]] | None = None,
-    progress_interval: int = 100_000,
-    logger: RunLogger | None = None,
-    source_index: int = 0,
-    source_total: int = 0,
-    osmium_executable: str = "osmium",
-) -> SourceOutcome:
-    """Build or reuse one PBF and return the resulting per-source state."""
-    complete, manifest = _local_artifact_is_complete(paths, source)
-    state = read_publication_state(paths.data_root)
-    published = cast_dict(state.get("published", {}))
-    existing = cast_dict(published.get(source.name, {}))
-    output_path = paths.data_root / "data" / source.output_name
-
-    if (
-        complete
-        and manifest is not None
-        and _published_state_matches(existing, manifest, source, output_path)
-    ):
-        if logger is not None:
-            logger.event(
-                "source_decision",
-                level="INFO",
-                source=source.name,
-                source_index=source_index,
-                source_total=source_total,
-                decision="already-published",
-            )
-        return SourceOutcome(
-            source_name=source.name,
-            status=STATUS_PUBLISHED,
-            included_rows=manifest.counts.included_rows,
-            output_bytes=output_path.stat().st_size,
-            remote_revision=None,
-            note="already published; nothing to do",
-        )
-
-    if complete and manifest is not None:
-        if logger is not None:
-            logger.event(
-                "source_decision",
-                level="INFO",
-                source=source.name,
-                source_index=source_index,
-                source_total=source_total,
-                decision="reuse-local",
-            )
-        return SourceOutcome(
-            source_name=source.name,
-            status=STATUS_REUSED,
-            included_rows=manifest.counts.included_rows,
-            output_bytes=output_path.stat().st_size,
-            remote_revision=None,
-            note="local artifact reused; upload required",
-        )
-
-    if logger is not None:
-        logger.event(
-            "source_decision",
-            level="INFO",
-            source=source.name,
-            source_index=source_index,
-            source_total=source_total,
-            decision="build",
-        )
-        logger.event(
-            "build_start",
-            level="INFO",
-            source=source.name,
-            source_index=source_index,
-            source_total=source_total,
-        )
-    if logger is not None:
-
-        def _on_progress(emitted: int, included: int) -> None:
-            assert logger is not None
-            logger.event(
-                "build_progress",
-                level="INFO",
-                source=source.name,
-                source_index=source_index,
-                source_total=source_total,
-                emitted=emitted,
-                included=included,
-            )
-
-        progress_callback = _on_progress
-    else:
-        progress_callback = None
-    result = build_one(
-        source,
-        paths,
-        export_config=osmium_export_config(),
-        executable=osmium_executable,
-        exporter=exporter,
-        progress_interval=progress_interval,
-        progress_callback=progress_callback,
-    )
-    if logger is not None:
-        logger.event(
-            "build_complete",
-            level="INFO",
-            source=source.name,
-            source_index=source_index,
-            source_total=source_total,
-            rows=result.included_rows,
-            bytes=result.output_path.stat().st_size,
-        )
-    return SourceOutcome(
-        source_name=source.name,
-        status=STATUS_BUILT,
-        included_rows=result.included_rows,
-        output_bytes=result.output_path.stat().st_size,
-        remote_revision=None,
-        note="freshly built; upload required",
-    )
-
-
-def _published_state_matches(
-    existing: dict[str, object],
-    manifest: Manifest,
-    source: Source,
-    output_path: Path,
-) -> bool:
-    source_identity = source_identity_for(source.path)
-    output_identity = output_identity_for(output_path)
-    if existing.get("source_sha256") != source_identity.sha256:
-        return False
-    if existing.get("output_sha256") != output_identity.sha256:
-        return False
-    if manifest.source != source_identity:
-        return False
-    return manifest.output == output_identity
 
 
 # ---------------------------------------------------------------------------
@@ -544,7 +363,7 @@ def run_and_publish(
     upload_runner: Callable[[list[str]], str] | None = None,
     clock: Callable[[], str] | None = None,
     paths: Paths | None = None,
-    exporter: Callable[..., Iterable[ExportRecordLike]] | None = None,
+    exporter: Callable[..., Iterable[ExportRecord]] | None = None,
     verifier: HubVerifier | None = None,
     verifier_factory: Callable[[], HubVerifier] | None = None,
     upload_timeout: float | None = None,
@@ -666,7 +485,7 @@ def _run_and_publish(
     upload_runner: Callable[[list[str]], str] | None,
     clock: Callable[[], str],
     paths: Paths | None,
-    exporter: Callable[..., Iterable[ExportRecordLike]] | None,
+    exporter: Callable[..., Iterable[ExportRecord]] | None,
     verifier: HubVerifier | None,
     verifier_factory: Callable[[], HubVerifier] | None,
     upload_timeout: float | None,
