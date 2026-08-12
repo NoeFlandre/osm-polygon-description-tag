@@ -6,8 +6,10 @@ Provide the canonical boundary for composing the complete resumable pipeline.
 
 ## Responsibilities
 
-Preflight, one-PBF build composition, per-source state transitions, completeness checks, and the
-`run-and-publish` lifecycle live here.
+Preflight, one-PBF build composition, per-source state transitions, finalization, and the
+`run-and-publish` lifecycle live here. `source_runner.py` owns local build/reuse decisions;
+`finalization.py` owns documentation refresh, completeness validation, and final metadata
+publication.
 
 ## Non-responsibilities
 

@@ -39,13 +39,11 @@ from typing import Any
 
 from osm_polygon_description_tag.dataset.deduplication import deduplicate_dataset
 from osm_polygon_description_tag.dataset.manifest import (
-    is_resumable,
     output_identity_for,
     read_manifest,
     source_identity_for,
 )
 from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
-from osm_polygon_description_tag.dataset.storage import StorageError, validate_geoparquet
 from osm_polygon_description_tag.observability.trackio import TrackioRecorder
 from osm_polygon_description_tag.osm.discovery import Source, discover_sources
 from osm_polygon_description_tag.osm.extraction import ExportRecord
@@ -54,7 +52,7 @@ from osm_polygon_description_tag.publication.models import (
     PublicationError,
 )
 from osm_polygon_description_tag.publication.planning import (
-    _build_metadata_only_upload_plan,
+    _build_metadata_only_upload_plan,  # noqa: F401
     _build_per_pbf_upload_plan,
     create_upload_plan,
     per_pbf_command,
@@ -87,7 +85,7 @@ from osm_polygon_description_tag.publication.verification import (
 from osm_polygon_description_tag.runtime.cleanup import cleanup_stale_owned_temps
 from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.runtime.logging import RunLogger
-from osm_polygon_description_tag.runtime.resources import dataset_card_template
+from osm_polygon_description_tag.workflow import finalization
 from osm_polygon_description_tag.workflow.build import build_one  # noqa: F401
 from osm_polygon_description_tag.workflow.preflight import (
     Preflight,
@@ -681,75 +679,18 @@ def _refresh_dataset_docs_for_metadata(
     clock: Callable[[], str],
     logger: RunLogger,
 ) -> None:
-    """Refresh the canonical ``README.md``, ``stats.json``, and H3 map.
-
-    The refresh is byte-stable: identical inputs produce identical
-    outputs, so the underlying atomic write-if-changed helpers leave
-    the existing files untouched on disk. This step exists so that a
-    dataset that was published before the H3 map feature exists
-    (pre-feature ``README.md``, no ``assets/`` directory) is repaired
-    in the next run: the canonical card is regenerated and the H3 map
-    is rendered, even when no per-PBF artifacts changed.
-
-    The refresh is also called for normal runs so that the metadata
-    plan always reflects the current validated dataset.
-    """
-    data_dir = paths.data_root / "data"
-    if not data_dir.is_dir() or not list(data_dir.glob("*.parquet")):
-        # No data root to refresh from; the metadata plan will be skipped
-        # by ``_upload_final_metadata``.
-        return
-    try:
-        generate_dataset_docs(paths.data_root, dataset_card_template(), clock=clock)
-    except Exception as error:
-        raise OrchestratorError(f"dataset card refresh failed: {error}") from error
-    logger.event(
-        "dataset_docs_refreshed",
-        level="INFO",
-        readme=paths.data_root / "README.md",
-        stats=paths.data_root / "stats.json",
-        assets=paths.data_root / "assets" / "description_polygon_density.png",
+    """Compatibility wrapper for the canonical finalization module."""
+    finalization.refresh_dataset_docs(
+        paths,
+        clock=clock,
+        logger=logger,
+        docs_generator=generate_dataset_docs,
     )
 
 
 def _verify_final_completeness(paths: Paths, sources: Iterable[Source]) -> None:
-    """Every discovered source must have a complete, resumable local artifact."""
-    discovered = {source.name: source for source in sources}
-    completed: set[str] = set()
-    extra_artifacts: list[str] = []
-    missing_artifacts: list[str] = []
-    for parquet in sorted((paths.data_root / "data").glob("*.parquet")):
-        stem = parquet.name.removesuffix(".parquet")
-        source_name = f"{stem}.osm.pbf"
-        if source_name not in discovered:
-            extra_artifacts.append(stem)
-            continue
-        manifest_path = paths.data_root / "manifests" / f"{stem}.manifest.json"
-        if not manifest_path.is_file():
-            missing_artifacts.append(f"{stem}.manifest.json")
-            continue
-        try:
-            validate_geoparquet(parquet)
-            manifest = read_manifest(manifest_path)
-        except (StorageError, Exception):
-            missing_artifacts.append(f"{stem} (invalid manifest or parquet)")
-            continue
-        source = discovered[source_name]
-        if is_resumable(
-            manifest,
-            source_identity_for(source.path),
-            output_identity_for(parquet),
-        ):
-            completed.add(source_name)
-        else:
-            missing_artifacts.append(f"{stem} (not resumable)")
-    missing = set(discovered) - completed
-    if missing or extra_artifacts or missing_artifacts:
-        raise OrchestratorError(
-            "final completeness failed: "
-            f"missing={sorted(missing)} extra={sorted(extra_artifacts)} "
-            f"incomplete={sorted(missing_artifacts)}"
-        )
+    """Compatibility wrapper for final artifact validation."""
+    finalization.verify_final_completeness(paths, sources)
 
 
 def _upload_final_metadata(
@@ -761,118 +702,18 @@ def _upload_final_metadata(
     clock: Callable[[], str] | None = None,
     logger: RunLogger | None = None,
 ) -> str | None:
-    """Upload README.md + stats.json and verify the result via Hub API.
-
-    The metadata is uploaded only when its current plan identity differs
-    from the recorded, verified metadata state. The metadata state is
-    written atomically only after remote verification succeeds.
-
-    Raises :class:`OrchestratorError` on any failure. Returns the verified
-    remote revision.
-    """
+    """Compatibility wrapper for final metadata publication."""
     if clock is None:
         clock = _default_clock
-    data_dir = paths.data_root / "data"
-    if not data_dir.is_dir() or not list(data_dir.glob("*.parquet")):
-        return None
-    metadata_plan = _build_metadata_only_upload_plan(paths.data_root)
-    # Revalidate the dataset-wide upload plan immediately before upload to
-    # catch in-place mutations between per-PBF uploads and final metadata.
-    create_upload_plan(paths.data_root)
-
-    # Independently resumable: if the verified metadata state matches the
-    # current plan identity, skip the upload entirely.
-    if _metadata_state_matches(paths.data_root, metadata_plan):
-        state_payload = read_publication_state(paths.data_root)
-        metadata_state = cast_dict(state_payload.get("metadata", {}))
-        revision = metadata_state.get("verified_revision")
-        if logger is not None:
-            logger.event(
-                "metadata_skip",
-                level="INFO",
-                verified_revision=str(revision) if revision else "",
-            )
-        return str(revision) if revision else None
-
-    if logger is not None:
-        logger.event("metadata_upload_start", level="INFO")
-    try:
-        if upload_runner is None:
-            execute_upload(
-                metadata_plan,
-                confirmation=metadata_plan.identity_sha256,
-                timeout=upload_timeout,
-                retry_observer=(
-                    None
-                    if logger is None
-                    else lambda **fields: logger.event("upload_retry", stage="metadata", **fields)
-                ),
-            )
-        else:
-            from osm_polygon_description_tag.publication.planning import metadata_only_command
-
-            command = metadata_only_command(paths.data_root)
-            revision = upload_runner(command)
-            if not revision:
-                raise PublicationError("upload runner returned empty revision")
-    except KeyboardInterrupt:
-        raise
-    except (PublicationError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
-        raise OrchestratorError(f"final metadata upload failed: {error}") from error
-    if verifier is None:
-        raise OrchestratorError("no Hub verifier supplied; cannot record final revision")
-    if logger is not None:
-        logger.event("metadata_upload_complete", level="INFO")
-        logger.event("metadata_verification_start", level="INFO")
-    try:
-        verified = verifier(REPO_ID, metadata_plan.files)
-    except KeyboardInterrupt:
-        raise
-    except Exception as error:
-        raise OrchestratorError(f"final Hub verifier failed: {error}") from error
-    if not verified:
-        raise OrchestratorError("Hub verifier returned no revision for final metadata")
-    if logger is not None:
-        logger.event(
-            "metadata_verification_complete",
-            level="INFO",
-            verified_revision=verified,
-        )
-
-    # Write the metadata state atomically only after verification succeeds.
-    from osm_polygon_description_tag.dataset.manifest import file_sha256
-    from osm_polygon_description_tag.publication.planning import (
-        AREA_HISTOGRAM_ASSET_RELATIVE,
-        DATASET_CARD_HERO_ASSET_RELATIVE,
-        H3_MAP_ASSET_RELATIVE,
+    return finalization.upload_final_metadata(
+        paths,
+        verifier=verifier,
+        upload_runner=upload_runner,
+        upload_timeout=upload_timeout,
+        clock=clock,
+        logger=logger,
+        plan_validator=create_upload_plan,
     )
-
-    map_path = paths.data_root / H3_MAP_ASSET_RELATIVE
-    histogram_path = paths.data_root / AREA_HISTOGRAM_ASSET_RELATIVE
-    hero_path = paths.data_root / DATASET_CARD_HERO_ASSET_RELATIVE
-    _write_metadata_state(
-        paths.data_root,
-        identity_sha256=metadata_plan.identity_sha256,
-        readme_sha256=file_sha256(paths.data_root / "README.md"),
-        stats_sha256=file_sha256(paths.data_root / "stats.json"),
-        readme_size_bytes=(paths.data_root / "README.md").stat().st_size,
-        stats_size_bytes=(paths.data_root / "stats.json").stat().st_size,
-        h3_map_sha256=file_sha256(map_path),
-        h3_map_size_bytes=map_path.stat().st_size,
-        area_histogram_sha256=file_sha256(histogram_path),
-        area_histogram_size_bytes=histogram_path.stat().st_size,
-        dataset_card_hero_sha256=file_sha256(hero_path),
-        dataset_card_hero_size_bytes=hero_path.stat().st_size,
-        verified_revision=verified,
-        completed_at=clock(),
-    )
-    if logger is not None:
-        logger.event(
-            "metadata_state_written",
-            level="INFO",
-            verified_revision=verified,
-        )
-    return verified
 
 
 def _default_clock() -> str:

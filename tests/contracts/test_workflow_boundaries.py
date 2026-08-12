@@ -1,6 +1,6 @@
 """Keep per-source orchestration in its focused workflow module."""
 
-from osm_polygon_description_tag.workflow import orchestrator, source_runner
+from osm_polygon_description_tag.workflow import finalization, orchestrator, source_runner
 
 
 def test_orchestrator_delegates_per_source_state_machine() -> None:
@@ -9,3 +9,10 @@ def test_orchestrator_delegates_per_source_state_machine() -> None:
     assert orchestrator._local_artifact_is_complete is source_runner.local_artifact_is_complete
     assert orchestrator._process_one is source_runner.process_one
     assert orchestrator._published_state_matches is source_runner.published_state_matches
+
+
+def test_finalization_has_a_dedicated_workflow_module() -> None:
+    """Dataset finalization lives outside the run-level orchestrator."""
+    assert callable(finalization.refresh_dataset_docs)
+    assert callable(finalization.verify_final_completeness)
+    assert callable(finalization.upload_final_metadata)
