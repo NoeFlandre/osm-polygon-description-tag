@@ -8,7 +8,6 @@ area assembly can be memory-intensive.
 
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 
 from osm_polygon_description_tag.dataset.manifest import (
@@ -42,6 +41,7 @@ from osm_polygon_description_tag.osm.extraction import (
     stream_export,
 )
 from osm_polygon_description_tag.runtime.config import Paths
+from osm_polygon_description_tag.runtime.time import utc_now_iso
 
 _GEOPARQUET_VERSION = "1.1.0"
 
@@ -71,10 +71,6 @@ class BuildResult:
 class _Counts:
     emitted: int = 0
     rejections: dict[str, int] = field(default_factory=dict)
-
-
-def utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 def safe_osmium_version(executable: str) -> str | None:

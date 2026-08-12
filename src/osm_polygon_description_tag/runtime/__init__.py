@@ -12,6 +12,7 @@ from osm_polygon_description_tag.runtime.resources import (
     project_root,
     resource_path,
 )
+from osm_polygon_description_tag.runtime.time import utc_now_iso
 
 __all__ = [
     "Paths",
@@ -26,4 +27,5 @@ __all__ = [
     "project_code_revision",
     "project_root",
     "resource_path",
+    "utc_now_iso",
 ]

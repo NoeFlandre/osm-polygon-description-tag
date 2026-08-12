@@ -29,6 +29,7 @@ from osm_polygon_description_tag.dataset.manifest import (
     read_manifest,
 )
 from osm_polygon_description_tag.dataset.schema import SCHEMA_VERSION
+from osm_polygon_description_tag.runtime.time import utc_now_iso
 
 STATS_SCHEMA_VERSION = 6
 _QUANTILE_PROBABILITIES = [0.25, 0.5, 0.75]
@@ -47,12 +48,6 @@ _FEATURE_COLUMNS = [
 
 class ReportingError(ValueError):
     """Raised when artifacts/manifests are missing, stale, or inconsistent."""
-
-
-def utc_now_iso() -> str:
-    from datetime import UTC, datetime
-
-    return datetime.now(UTC).isoformat()
 
 
 def _new_connection(data_root: Path) -> duckdb.DuckDBPyConnection:
