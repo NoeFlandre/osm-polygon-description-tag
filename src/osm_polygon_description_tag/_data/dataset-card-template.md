@@ -125,3 +125,9 @@ requirements. Pipeline code is Apache-2.0.
 The public source repository contains the versioned extraction policy,
 deterministic reporting code, validation contracts, and the stoppable,
 resumable `just run-and-publish` workflow.
+
+## Citation
+
+If you use this software or its dataset, please cite the repository using the
+metadata in [`CITATION.cff`](https://github.com/NoeFlandre/osm-polygon-description-tag/blob/main/CITATION.cff).
+GitHub provides formatted citation downloads through **Cite this repository**.
