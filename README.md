@@ -50,3 +50,9 @@ the real PBF corpus or publish to Hugging Face.
 
 Project code is Apache-2.0. Derived OpenStreetMap data is © OpenStreetMap
 contributors and subject to the Open Database License (ODbL).
+
+## Citation
+
+If you use this software or its dataset, please cite the repository using the
+metadata in [`CITATION.cff`](CITATION.cff). GitHub uses this file to provide
+formatted citation downloads through **Cite this repository**.

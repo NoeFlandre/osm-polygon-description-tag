@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+title: "osm-polygon-description-tag"
+message: "If you use this software or its dataset, please cite this repository."
+type: software
+authors:
+  - family-names: Flandre
+    given-names: Noé
+    website: https://noeflandre.com
+version: 0.1.0
+date-released: 2026-08-13
+abstract: >-
+  Reproducible GeoParquet of OpenStreetMap polygons carrying non-empty base or
+  localized description tags, including complete source tags, geometry, and area.
+repository-code: https://github.com/NoeFlandre/osm-polygon-description-tag
+repository-artifact: https://huggingface.co/datasets/NoeFlandre/osm-polygon-description-tag
+url: https://github.com/NoeFlandre/osm-polygon-description-tag
+license: Apache-2.0
+keywords:
+  - openstreetmap
+  - geoparquet
+  - geospatial
+  - dataset
