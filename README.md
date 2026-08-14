@@ -38,6 +38,31 @@ just run-and-publish
 The workflow is stoppable with Ctrl-C and resumable by rerunning the same
 command after the terminal prompt returns.
 
+### Reproducible Docker runtime
+
+The repository also provides a non-root Docker image with the locked Python
+environment and the real `osmium-tool` binary. Build and inspect its harmless
+default command without mounting data:
+
+```bash
+just docker-build
+just docker-help
+```
+
+Run the complete resumable build-and-publish workflow with one explicit
+command. It builds or reuses the cached image, mounts the generated-data root
+at `/data`, and mounts `/data/raw` read-only:
+
+```bash
+just docker-run "/Volumes/Seagate M3/projects/osm-polygon-description-tag"
+```
+
+The host data root retains checkpoints and publication state, so `Ctrl-C` and
+rerunning the same command resumes safely. `HF_TOKEN` is passed through only
+at runtime and is never copied into the image. See the [Docker reproducibility
+guide](docs/development.md#docker-reproducibility) for test/check commands and
+the container boundary.
+
 ## Boundaries
 
 - Code: `/Users/noeflandre/osm-polygon-description-tag`

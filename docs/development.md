@@ -29,6 +29,39 @@ just check
 pytest coverage gate, and the package build. It never reads the real PBF root
 or contacts Hugging Face.
 
+## Docker reproducibility
+
+The checked-in `Dockerfile` uses the version-pinned
+`ghcr.io/astral-sh/uv:0.11.16-python3.12-bookworm-slim` base, installs the
+runtime graph from `uv.lock`, and includes Debian's `osmium-tool` binary. The
+runtime image contains only the non-editable installed package, runs as an
+unprivileged `app` user, and defaults to `--help` so it cannot start the
+pipeline accidentally. For immutable image provenance, pass a verified base
+digest with `--build-arg UV_IMAGE=...@sha256:...`.
+
+Build and run the safe container checks:
+
+```bash
+just docker-build
+just docker-help
+just docker-test
+just docker-check
+```
+
+The single production command builds or reuses the runtime image, mounts the
+external generated-data root at `/data`, and mounts its `/data/raw` source
+directory read-only:
+
+```bash
+just docker-run "/Volumes/Seagate M3/projects/osm-polygon-description-tag"
+```
+
+The mounted data root retains Parquets, manifests, logs, caches, and
+publication state. `Ctrl-C` is safe; rerunning the command resumes completed
+sources. `HF_TOKEN` is passed from the host only for the explicit Hub
+publication step. Docker build, help, and test commands do not read real PBFs
+or contact Hugging Face.
+
 Install hooks once per checkout:
 
 ```bash

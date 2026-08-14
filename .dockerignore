@@ -1,0 +1,40 @@
+# Source-control and local tooling state.
+.git/
+.venv/
+.uv-cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.DS_Store
+
+# Local presentation deliverables are not part of the application image.
+slides/
+
+# Raw and generated data must be mounted at runtime, never copied into image
+# layers.
+data/
+manifests/
+.cache/
+.work/
+logs/
+*.osm.pbf
+*.pbf
+*.parquet
+*.arrow
+*.tmp
+
+# Credentials and private local material.
+.env
+.env.*
+.huggingface/
+*.pem
+*.key
+*.token
+*.secret
+
+# Build and distribution artifacts.
+build/
+dist/
+*.egg-info/

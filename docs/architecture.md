@@ -11,6 +11,17 @@ runtime → osm → dataset → publication
 `A → B` means B may import A. It does not mean A imports B. Lower-level packages must not import
 higher-level packages, and circular imports are forbidden.
 
+## Container boundary
+
+The `Dockerfile` separates application code from operator data. Its base stage
+installs the real `osmium-tool`; the build stage installs the locked Python
+environment; development adds the checkout and test dependencies; runtime
+copies only the non-editable installed package into a non-root image. `/data`
+is the sole mounted state boundary. The default command is `--help`, while
+`run-and-publish --source-root /data/raw --data-root /data` is required to start
+processing. The raw source mount is read-only, and resumable state survives
+container removal because it remains on the host.
+
 ## Package boundaries
 
 - `runtime` owns paths, resources, logging, Rich/tqdm terminal presentation, and safe cleanup.
