@@ -32,11 +32,11 @@ None of these local-state paths enters an upload plan.
 3. build or validated local reuse for each source;
 4. global `(osm_type, osm_id)` deduplication with atomic resumable promotion;
 5. deterministic README, stats, and visual-asset refresh;
-6. an exact six-file per-PBF upload plan (Parquet, manifest, README, stats,
-   H3 map, and area histogram) and remote verification;
+6. an exact seven-file per-PBF upload plan (Parquet, manifest, README, stats,
+   H3 map, area histogram, and dataset-card hero) and remote verification;
 7. atomic publication-state update, including the H3 map identity;
 8. deterministic final `README.md` and `stats.json` generation and independent
-   metadata publication, including both visual assets;
+   metadata publication, including all three visual assets;
 9. atomic record of publication state with map SHA-256, size, and verified
    revision.
 
@@ -79,9 +79,10 @@ JSON report. Logs are redacted, allowlisted, flushed, and never published.
 ## Hugging Face safety
 
 The target dataset is `NoeFlandre/osm-polygon-description-tag`. Every upload is
-an explicit allowlisted plan. Final metadata is uploaded separately as exactly
-`README.md`, `stats.json`, `assets/description_polygon_density.png`, and
-`assets/area_distribution.png`.
+an explicit allowlisted plan. Final metadata is uploaded separately as exactly five files:
+`README.md`, `stats.json`,
+`assets/description_polygon_density.png`, `assets/area_distribution.png`, and
+`assets/dataset-card-hero.png`.
 
 The H3 map is keyed by the identities of the complete validated local Parquet
 set. It is recomputed only when that dataset input identity changes. README-only

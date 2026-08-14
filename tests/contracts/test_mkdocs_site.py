@@ -49,6 +49,23 @@ def test_public_docs_state_operational_boundaries() -> None:
     assert "localized_descriptions" in text
 
 
+def test_public_docs_describe_the_current_publication_surface() -> None:
+    operations = (ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "docs" / "architecture.md").read_text(encoding="utf-8")
+    development = (ROOT / "docs" / "development.md").read_text(encoding="utf-8")
+
+    assert "exact seven-file per-PBF upload plan" in operations
+    for asset in (
+        "assets/description_polygon_density.png",
+        "assets/area_distribution.png",
+        "assets/dataset-card-hero.png",
+    ):
+        assert asset in operations
+    assert "exactly five files" in operations
+    assert "docs/superpowers/" not in architecture
+    assert "docs/superpowers/" not in development
+
+
 def test_github_pages_workflow_deploys_the_strict_site() -> None:
     workflow = (ROOT / ".github" / "workflows" / "docs.yml").read_text(encoding="utf-8")
 

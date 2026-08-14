@@ -72,6 +72,5 @@ not cross the operational boundary into real-data processing or publication.
 MkDocs pages describe stable public contracts and operator workflows. Package
 READMEs document canonical module responsibilities. The generated dataset-card
 template describes the published artifact and is intentionally kept separate
-from the site. Historical design and plan records are retained under
-`docs/superpowers/` for project provenance but are excluded from public
-navigation.
+from the site. Internal planning material is not part of the public
+documentation site.
