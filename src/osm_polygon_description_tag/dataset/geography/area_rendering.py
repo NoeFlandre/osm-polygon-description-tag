@@ -8,8 +8,6 @@ determinism.
 
 from __future__ import annotations
 
-import os
-import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +22,9 @@ import numpy as np
 
 from osm_polygon_description_tag.dataset.geography.area_histogram import (
     AREA_BUCKET_LABELS,
+)
+from osm_polygon_description_tag.dataset.geography.atomic import (
+    atomic_save_png as _atomic_save_png,
 )
 
 # Shared palette with the H3 density map so the dataset card feels like
@@ -44,9 +45,6 @@ _TITLE_FONTSIZE: Final[int] = 14
 _LABEL_FONTSIZE: Final[int] = 10
 _TICK_FONTSIZE: Final[int] = 9
 _CAPTION_FONTSIZE: Final[int] = 8
-
-# PNG metadata.
-_METADATA_SOFTWARE: Final[str] = "osm-polygon-description-tag"
 
 # Caption templates.
 _TITLE: Final[str] = "Area distribution of description-tagged polygons"
@@ -102,42 +100,6 @@ def _bar_labels(counts: Mapping[str, int]) -> tuple[list[str], list[int]]:
         labels.append(label)
         values.append(count)
     return labels, values
-
-
-def _atomic_save_png(fig: Any, output_path: Path) -> None:
-    """Save ``fig`` to ``output_path`` via a temporary file then atomic rename."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(
-        prefix=f".{output_path.name}.",
-        suffix=".tmp",
-        dir=str(output_path.parent),
-    )
-    os.close(fd)
-    tmp_path = Path(tmp_name)
-    try:
-        fig.savefig(
-            str(tmp_path),
-            format="png",
-            facecolor="white",
-            metadata={"Software": _METADATA_SOFTWARE},
-        )
-        with open(tmp_path, "rb") as handle:
-            os.fsync(handle.fileno())
-        if output_path.exists():
-            existing_bytes = output_path.read_bytes()
-            new_bytes = tmp_path.read_bytes()
-            if existing_bytes == new_bytes:
-                tmp_path.unlink(missing_ok=True)
-                return
-        os.replace(tmp_path, output_path)
-        dir_fd = os.open(str(output_path.parent), os.O_RDONLY)
-        try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
 
 
 def render_area_histogram(

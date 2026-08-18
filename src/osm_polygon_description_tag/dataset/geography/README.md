@@ -47,10 +47,13 @@ coordinates raise a descriptive error and are never silently skipped.
   under `data/` and returns a sorted `{h3_cell: count}` mapping.
 * `basemap` owns loading and drawing the bundled Natural Earth 110m
   landmasses. It never performs network I/O.
-* `rendering` owns the deterministic PNG output. It is a pure
-  function of the cell counts, the bundled land reference, and the fixed
+* `rendering` and `area_rendering` own the deterministic visual output.
+  They are pure functions of their inputs, bundled references, and fixed
   visual constants. Land is drawn beneath H3 cells so geographic context
   remains visible at sparse densities.
+* `atomic` owns the shared crash-safe PNG write. It fsyncs temporary
+  output, atomically replaces changed files, and preserves the mtime for
+  byte-identical rerenders used by both visualizations.
 * `card` owns the dataset-card marker block (`<!-- GENERATED:H3_MAP:START/END -->`)
   and the byte-stable substitution that keeps the surrounding
   handwritten prose verbatim across regenerations.

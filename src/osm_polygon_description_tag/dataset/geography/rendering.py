@@ -8,8 +8,6 @@ constants for byte-for-byte determinism.
 
 from __future__ import annotations
 
-import os
-import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +22,12 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 
+from osm_polygon_description_tag.dataset.geography.atomic import (
+    PNG_METADATA_SOFTWARE as _METADATA_SOFTWARE,
+)
+from osm_polygon_description_tag.dataset.geography.atomic import (
+    atomic_save_png as _atomic_save_png,
+)
 from osm_polygon_description_tag.dataset.geography.basemap import (
     _LAND_COLOR,
     _LAND_EDGE,
@@ -54,9 +58,6 @@ _TITLE_FONTSIZE: Final[int] = 14
 _CAPTION_FONTSIZE: Final[int] = 7
 _COLORBAR_FRACTION: Final[float] = 0.025
 _COLORBAR_PAD: Final[float] = 0.02
-
-# PNG metadata.
-_METADATA_SOFTWARE: Final[str] = "osm-polygon-description-tag"
 
 # Caption templates.
 _TITLE: Final[str] = "H3 Density of Description-Tagged Polygons"
@@ -145,61 +146,6 @@ def _draw_cell(
             zorder=3,
         )
         ax.add_patch(patch)
-
-
-def _atomic_save_png(fig: Any, output_path: Path) -> None:
-    """Save ``fig`` to ``output_path`` via a temporary file then atomic rename.
-
-    Guarantees:
-
-    * The temporary file is created in the same directory as
-      ``output_path`` so :func:`os.replace` is atomic on the same
-      filesystem.
-    * The temporary file is ``fsync``-ed before the rename so the bytes
-      survive a crash mid-write.
-    * When the destination already exists and is byte-identical to the
-      freshly rendered PNG, the existing file is preserved so the mtime
-      and inode are untouched.
-    * When the destination differs, :func:`os.replace` performs the
-      atomic swap and the parent directory is ``fsync``-ed so the
-      rename is durable.
-    * The temporary file is removed on every code path, including the
-      byte-identical short-circuit and the catch-all failure path.
-    """
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(
-        prefix=f".{output_path.name}.",
-        suffix=".tmp",
-        dir=str(output_path.parent),
-    )
-    os.close(fd)
-    tmp_path = Path(tmp_name)
-    try:
-        fig.savefig(
-            str(tmp_path),
-            format="png",
-            facecolor="white",
-            metadata={"Software": _METADATA_SOFTWARE},
-        )
-        with open(tmp_path, "rb") as handle:
-            os.fsync(handle.fileno())
-        if output_path.exists():
-            existing_bytes = output_path.read_bytes()
-            new_bytes = tmp_path.read_bytes()
-            if existing_bytes == new_bytes:
-                # Byte-identical regeneration; preserve the existing
-                # file's mtime and inode.
-                tmp_path.unlink(missing_ok=True)
-                return
-        os.replace(tmp_path, output_path)
-        dir_fd = os.open(str(output_path.parent), os.O_RDONLY)
-        try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
 
 
 def render_density_map(
