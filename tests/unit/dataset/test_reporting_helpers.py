@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import osm_polygon_description_tag.dataset.docs as docs
 from osm_polygon_description_tag.dataset.docs import _write_if_changed
 from osm_polygon_description_tag.dataset.stats import _safe_map
 
@@ -43,3 +44,20 @@ def test_write_if_changed_preserves_file_when_bytes_match(tmp_path: Path) -> Non
     assert _write_if_changed(target, "hello") is False
     assert target.stat().st_mtime_ns == original_mtime
     assert target.read_text(encoding="utf-8") == "hello"
+
+
+def test_text_and_binary_writers_share_atomic_byte_helper(tmp_path: Path, monkeypatch) -> None:
+    calls: list[tuple[Path, bytes]] = []
+
+    def fake_atomic_write(path: Path, data: bytes) -> bool:
+        calls.append((path, data))
+        return True
+
+    monkeypatch.setattr(docs, "_atomic_write_if_changed", fake_atomic_write, raising=False)
+
+    text_path = tmp_path / "out.txt"
+    binary_path = tmp_path / "out.bin"
+    assert docs._write_if_changed(text_path, "héllo") is True
+    assert docs._write_bytes_if_changed(binary_path, b"\x00\x01") is True
+
+    assert calls == [(text_path, "héllo".encode()), (binary_path, b"\x00\x01")]

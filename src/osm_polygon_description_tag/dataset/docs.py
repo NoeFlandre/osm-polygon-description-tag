@@ -74,28 +74,8 @@ def _h3_map_input_sha256(stats: Mapping[str, Any]) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def _write_if_changed(path: Path, text: str) -> bool:
-    """Atomically write text only when bytes differ."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.is_file() and path.read_text(encoding="utf-8") == text:
-        return False
-    temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        temp.write_text(text, encoding="utf-8")
-        with temp.open("rb") as handle:
-            os.fsync(handle.fileno())
-        os.replace(temp, path)
-        return True
-    finally:
-        if temp.exists():
-            temp.unlink()
-
-
-_base_write_if_changed = _write_if_changed
-
-
-def _write_bytes_if_changed(path: Path, data: bytes) -> bool:
-    """Atomically write binary data only when bytes differ."""
+def _atomic_write_if_changed(path: Path, data: bytes) -> bool:
+    """Atomically write bytes only when the destination bytes differ."""
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.is_file() and path.read_bytes() == data:
         return False
@@ -109,6 +89,16 @@ def _write_bytes_if_changed(path: Path, data: bytes) -> bool:
     finally:
         if temp.exists():
             temp.unlink()
+
+
+def _write_if_changed(path: Path, text: str) -> bool:
+    """Atomically write UTF-8 text only when the destination bytes differ."""
+    return _atomic_write_if_changed(path, text.encode("utf-8"))
+
+
+def _write_bytes_if_changed(path: Path, data: bytes) -> bool:
+    """Atomically write binary data only when bytes differ."""
+    return _atomic_write_if_changed(path, data)
 
 
 def _fmt_int(value: int) -> str:
