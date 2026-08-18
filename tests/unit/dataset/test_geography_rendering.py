@@ -15,6 +15,9 @@ These tests pin the rendering behaviour:
 
 from __future__ import annotations
 
+import ast
+import inspect
+import textwrap
 import time
 from pathlib import Path
 
@@ -218,6 +221,13 @@ def test_render_density_map_handles_empty_dataset(tmp_path: Path) -> None:
     assert "0 polygons" in result.caption or "zero" in result.caption.lower()
     # Default no-data caption is used.
     assert result.caption == _NO_DATA_CAPTION or "0" in result.caption
+
+
+def test_render_density_map_has_no_inert_empty_input_branch() -> None:
+    """The empty-input path is handled by the normal rendering flow."""
+    tree = ast.parse(textwrap.dedent(inspect.getsource(render_density_map)))
+
+    assert not any(isinstance(node, ast.Pass) for node in ast.walk(tree))
 
 
 def test_render_density_map_is_byte_stable(tmp_path: Path) -> None:

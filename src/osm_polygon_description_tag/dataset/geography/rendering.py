@@ -165,10 +165,6 @@ def render_density_map(
     empty sequence intentionally renders ocean only. Identical inputs and
     the same bundled reference produce byte-identical PNGs.
     """
-    if not cells and not output_path.exists():
-        # Render the no-data image even when no file exists yet.
-        pass
-
     sorted_cells: Sequence[tuple[str, int]] = tuple(sorted(cells.items()))
     total_rows = sum(int(value) for value in cells.values())
     occupied_cells = len(sorted_cells)
