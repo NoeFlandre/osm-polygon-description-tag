@@ -1,4 +1,5 @@
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,18 @@ from osm_polygon_description_tag.publication import (
     PublicationError,
     create_upload_plan,
     execute_upload,
+    planning,
+)
+from osm_polygon_description_tag.publication.planning import (
+    _read_manifest_for_publication,
+    _require_core_assets,
+    _require_matching_parquet,
+    _require_supported_manifest_version,
+    _validate_asset_entry,
+    _validate_assets_directory,
+    _validate_assets_for_publication,
+    _validate_manifest,
+    _validate_publication_parquet,
 )
 from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
@@ -129,6 +142,235 @@ def test_create_upload_plan_rejects_missing_card_or_stats(tmp_path: Path) -> Non
 
     with pytest.raises(PublicationError, match="missing|R|README"):
         create_upload_plan(data_root)
+
+
+def _write_assets(assets_dir: Path, *names: str) -> None:
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (assets_dir / name).write_bytes(b"asset")
+
+
+def test_publication_validation_helpers_preserve_their_contracts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_root = tmp_path / "generated"
+    _make_dataset(data_root)
+    hero = data_root / "assets" / "dataset-card-hero.png"
+    hero.write_bytes(b"hero")
+    manifest_path = data_root / "manifests" / "a-latest.manifest.json"
+    parquet_path = data_root / "data" / "a-latest.parquet"
+    manifest = _read_manifest_for_publication(manifest_path)
+
+    _require_supported_manifest_version(manifest)
+    _require_matching_parquet(manifest, manifest_path, parquet_path)
+    _validate_publication_parquet(parquet_path)
+    asset = _validate_asset_entry(data_root / "assets" / "dataset-card-hero.png")
+    assets = _validate_assets_directory(data_root / "assets")
+    _require_core_assets(assets)
+
+    published_assets = _validate_assets_for_publication(data_root)
+
+    assert asset.relative_path == "assets/dataset-card-hero.png"
+    assert [item.relative_path for item in published_assets] == [
+        "assets/description_polygon_density.png",
+        "assets/area_distribution.png",
+        "assets/dataset-card-hero.png",
+    ]
+
+    captured_paths: list[Path] = []
+    monkeypatch.setattr(
+        planning,
+        "_validate_assets_directory",
+        lambda path: captured_paths.append(path) or assets,
+    )
+    _validate_assets_for_publication(data_root)
+    assert captured_paths == [data_root / "assets"]
+
+    monkeypatch.setattr(
+        planning,
+        "read_manifest",
+        lambda _path: (_ for _ in ()).throw(planning.ManifestError("bad manifest")),
+    )
+    with pytest.raises(PublicationError, match="invalid manifest"):
+        _read_manifest_for_publication(manifest_path)
+
+    monkeypatch.setattr(planning, "read_manifest", lambda _path: manifest)
+    mismatched = replace(manifest, output=replace(manifest.output, sha256="0" * 64))
+    with pytest.raises(PublicationError, match="output identity"):
+        _require_matching_parquet(mismatched, manifest_path, parquet_path)
+
+    monkeypatch.setattr(planning, "read_manifest", lambda _path: mismatched)
+    with pytest.raises(PublicationError) as error:
+        _validate_manifest(manifest_path, parquet_path)
+    assert str(error.value) == f"manifest output identity does not match parquet: {manifest_path}"
+
+
+def test_publication_asset_requirements_report_exact_missing_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_root = tmp_path / "generated"
+    assets_dir = data_root / "assets"
+    _write_assets(
+        assets_dir,
+        "description_polygon_density.png",
+        "area_distribution.png",
+        "dataset-card-hero.png",
+    )
+    h3 = _validate_asset_entry(assets_dir / "description_polygon_density.png")
+    histogram = _validate_asset_entry(assets_dir / "area_distribution.png")
+    hero = _validate_asset_entry(assets_dir / "dataset-card-hero.png")
+
+    monkeypatch.setattr(planning, "_validate_assets_directory", lambda _path: [h3])
+    with pytest.raises(PublicationError) as error:
+        _validate_assets_for_publication(data_root)
+    assert str(error.value) == (
+        "assets directory must contain the area distribution histogram at "
+        "assets/area_distribution.png"
+    )
+
+    monkeypatch.setattr(planning, "_validate_assets_directory", lambda _path: [h3, histogram])
+    with pytest.raises(PublicationError) as error:
+        _validate_assets_for_publication(data_root)
+    assert str(error.value) == (
+        "assets directory must contain the dataset card hero at assets/dataset-card-hero.png"
+    )
+
+    with pytest.raises(PublicationError) as error:
+        _require_core_assets([h3])
+    assert str(error.value) == (
+        "assets directory must contain the area distribution histogram at "
+        "assets/area_distribution.png"
+    )
+
+    assert hero.relative_path == "assets/dataset-card-hero.png"
+
+
+@pytest.mark.parametrize(
+    ("name", "message"),
+    [
+        (".hidden", "hidden file under assets/ not allowed"),
+        ("leftover.tmp", "temporary file under assets/ not allowed"),
+        ("unrelated.png", "unrelated file under assets/ not allowed"),
+    ],
+)
+def test_assets_validation_reports_each_rejected_filename(
+    tmp_path: Path, name: str, message: str
+) -> None:
+    assets_dir = tmp_path / "assets"
+    _write_assets(assets_dir, name)
+
+    with pytest.raises(PublicationError, match=message):
+        _validate_assets_directory(assets_dir)
+
+
+def test_assets_validation_requires_a_real_directory_and_both_required_maps(tmp_path: Path) -> None:
+    missing = tmp_path / "missing-assets"
+    with pytest.raises(PublicationError, match=f"assets directory missing: {missing}"):
+        _validate_assets_directory(missing)
+
+    assets_dir = tmp_path / "assets"
+    _write_assets(assets_dir, "area_distribution.png", "dataset-card-hero.png")
+    with pytest.raises(PublicationError) as error:
+        _validate_assets_directory(assets_dir)
+    assert str(error.value) == (
+        "assets directory must contain the H3 density map at assets/description_polygon_density.png"
+    )
+
+    (assets_dir / "description_polygon_density.png").write_bytes(b"map")
+    (assets_dir / "area_distribution.png").unlink()
+    with pytest.raises(PublicationError) as error:
+        _validate_assets_directory(assets_dir)
+    assert str(error.value) == (
+        "assets directory must contain the area distribution histogram at "
+        "assets/area_distribution.png"
+    )
+
+
+def test_assets_validation_returns_items_in_filename_order(tmp_path: Path) -> None:
+    assets_dir = tmp_path / "assets"
+    _write_assets(
+        assets_dir,
+        "description_polygon_density.png",
+        "dataset-card-hero.png",
+        "area_distribution.png",
+    )
+
+    items = _validate_assets_directory(assets_dir)
+
+    assert [item.relative_path for item in items] == [
+        "assets/area_distribution.png",
+        "assets/dataset-card-hero.png",
+        "assets/description_polygon_density.png",
+    ]
+
+
+def test_assets_validation_rejects_symlink_and_non_regular_entries(tmp_path: Path) -> None:
+    assets_dir = tmp_path / "assets"
+    _write_assets(assets_dir, "description_polygon_density.png")
+    target = tmp_path / "target.png"
+    target.write_bytes(b"target")
+    try:
+        (assets_dir / "area_distribution.png").symlink_to(target)
+    except OSError:
+        pytest.skip("filesystem does not support symlinks")
+
+    with pytest.raises(PublicationError, match="symlink not allowed under assets/"):
+        _validate_assets_directory(assets_dir)
+
+    (assets_dir / "area_distribution.png").unlink()
+    (assets_dir / "area_distribution.png").mkdir()
+    with pytest.raises(PublicationError, match="not a regular file under assets/"):
+        _validate_assets_directory(assets_dir)
+
+
+def test_assets_validation_rejects_symlinked_directory(tmp_path: Path) -> None:
+    real_assets = tmp_path / "real-assets"
+    _write_assets(
+        real_assets,
+        "area_distribution.png",
+        "dataset-card-hero.png",
+        "description_polygon_density.png",
+    )
+    assets_dir = tmp_path / "assets"
+    try:
+        assets_dir.symlink_to(real_assets, target_is_directory=True)
+    except OSError:
+        pytest.skip("filesystem does not support symlinks")
+
+    with pytest.raises(PublicationError, match="assets directory must be a real directory"):
+        _validate_assets_directory(assets_dir)
+
+
+def test_manifest_validation_reports_each_publication_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_root = tmp_path / "generated"
+    _make_dataset(data_root)
+    manifest_path = data_root / "manifests" / "a-latest.manifest.json"
+    parquet_path = data_root / "data" / "a-latest.parquet"
+    manifest = planning.read_manifest(manifest_path)
+
+    monkeypatch.setattr(
+        planning,
+        "read_manifest",
+        lambda _path: replace(manifest, manifest_schema_version=999),
+    )
+    with pytest.raises(PublicationError, match="manifest uses unsupported schema version: 999"):
+        _validate_manifest(manifest_path, parquet_path)
+
+    monkeypatch.setattr(planning, "read_manifest", lambda _path: manifest)
+    with pytest.raises(PublicationError, match="parquet missing for manifest"):
+        _validate_manifest(manifest_path, tmp_path / "missing.parquet")
+
+    monkeypatch.setattr(
+        planning,
+        "validate_geoparquet",
+        lambda _path: (_ for _ in ()).throw(planning.StorageError("invalid rows")),
+    )
+    with pytest.raises(
+        PublicationError, match="parquet fails validation for publication: invalid rows"
+    ):
+        _validate_manifest(manifest_path, parquet_path)
 
 
 def test_execute_upload_refuses_wrong_confirmation(tmp_path: Path) -> None:

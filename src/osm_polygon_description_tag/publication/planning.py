@@ -4,6 +4,7 @@ from pathlib import Path
 
 from osm_polygon_description_tag.dataset.manifest import (
     MANIFEST_SCHEMA_VERSION,
+    Manifest,
     ManifestError,
     file_sha256,
     output_identity_for,
@@ -66,25 +67,83 @@ def _build_item(path: Path, relative_path: str) -> UploadItem:
     )
 
 
-def _validate_manifest(manifest_path: Path, parquet_path: Path) -> None:
-    """Reject empty or placeholder manifests and require output identity match."""
+def _read_manifest_for_publication(manifest_path: Path) -> Manifest:
     try:
-        manifest = read_manifest(manifest_path)
+        return read_manifest(manifest_path)
     except ManifestError as error:
         raise PublicationError(f"invalid manifest {manifest_path}: {error}") from error
+
+
+def _require_supported_manifest_version(manifest: Manifest) -> None:
     if manifest.manifest_schema_version != MANIFEST_SCHEMA_VERSION:
         raise PublicationError(
             f"manifest uses unsupported schema version: {manifest.manifest_schema_version}"
         )
+
+
+def _require_matching_parquet(manifest: Manifest, manifest_path: Path, parquet_path: Path) -> None:
     if not parquet_path.is_file():
         raise PublicationError(f"parquet missing for manifest: {parquet_path}")
     actual_output = output_identity_for(parquet_path)
     if manifest.output != actual_output:
         raise PublicationError(f"manifest output identity does not match parquet: {manifest_path}")
+
+
+def _validate_publication_parquet(parquet_path: Path) -> None:
     try:
         validate_geoparquet(parquet_path)
     except StorageError as error:
         raise PublicationError(f"parquet fails validation for publication: {error}") from error
+
+
+def _validate_manifest(manifest_path: Path, parquet_path: Path) -> None:
+    """Reject empty or placeholder manifests and require output identity match."""
+    manifest = _read_manifest_for_publication(manifest_path)
+    _require_supported_manifest_version(manifest)
+    _require_matching_parquet(manifest, manifest_path, parquet_path)
+    _validate_publication_parquet(parquet_path)
+
+
+def _validate_asset_entry(entry: Path) -> UploadItem:
+    rejection_checks = (
+        (entry.name.startswith("."), f"hidden file under assets/ not allowed: {entry}"),
+        (entry.name.endswith(".tmp"), f"temporary file under assets/ not allowed: {entry}"),
+        (
+            entry.name not in _ALLOWED_ASSET_FILES,
+            f"unrelated file under assets/ not allowed: {entry}",
+        ),
+        (entry.is_symlink(), f"symlink not allowed under assets/: {entry}"),
+        (not entry.is_file(), f"not a regular file under assets/: {entry}"),
+    )
+    for rejected, message in rejection_checks:
+        if rejected:
+            raise PublicationError(message)
+    return _build_item(entry, f"assets/{entry.name}")
+
+
+def _require_core_assets(items: list[UploadItem]) -> None:
+    relative_paths = {item.relative_path for item in items}
+    requirements = (
+        (
+            H3_MAP_ASSET_RELATIVE,
+            f"assets directory must contain the H3 density map at {H3_MAP_ASSET_RELATIVE}",
+        ),
+        (
+            AREA_HISTOGRAM_ASSET_RELATIVE,
+            "assets directory must contain the area distribution histogram at "
+            f"{AREA_HISTOGRAM_ASSET_RELATIVE}",
+        ),
+    )
+    for relative_path, message in requirements:
+        if relative_path not in relative_paths:
+            raise PublicationError(message)
+
+
+def _sorted_asset_entries(assets_dir: Path) -> list[Path]:
+    # Sorting by the entry name is the publication-order contract.  ``Path``'s
+    # natural order is equivalent within one directory, so these mutants are
+    # intentionally excluded as non-behavioral alternatives.
+    return sorted(assets_dir.iterdir(), key=lambda path: path.name)  # pragma: no mutate
 
 
 def _validate_assets_directory(assets_dir: Path) -> list[UploadItem]:
@@ -100,29 +159,8 @@ def _validate_assets_directory(assets_dir: Path) -> list[UploadItem]:
         raise PublicationError(f"assets directory must be a real directory: {assets_dir}")
     if not assets_dir.is_dir():
         raise PublicationError(f"assets directory missing: {assets_dir}")
-    items: list[UploadItem] = []
-    for entry in sorted(assets_dir.iterdir(), key=lambda path: path.name):
-        if entry.name.startswith("."):
-            raise PublicationError(f"hidden file under assets/ not allowed: {entry}")
-        if entry.name.endswith(".tmp"):
-            raise PublicationError(f"temporary file under assets/ not allowed: {entry}")
-        if entry.name not in _ALLOWED_ASSET_FILES:
-            raise PublicationError(f"unrelated file under assets/ not allowed: {entry}")
-        if entry.is_symlink():
-            raise PublicationError(f"symlink not allowed under assets/: {entry}")
-        if not entry.is_file():
-            raise PublicationError(f"not a regular file under assets/: {entry}")
-        items.append(_build_item(entry, f"assets/{entry.name}"))
-    relative_paths = {item.relative_path for item in items}
-    if H3_MAP_ASSET_RELATIVE not in relative_paths:
-        raise PublicationError(
-            f"assets directory must contain the H3 density map at {H3_MAP_ASSET_RELATIVE}"
-        )
-    if AREA_HISTOGRAM_ASSET_RELATIVE not in relative_paths:
-        raise PublicationError(
-            f"assets directory must contain the area distribution histogram at "
-            f"{AREA_HISTOGRAM_ASSET_RELATIVE}"
-        )
+    items = [_validate_asset_entry(entry) for entry in _sorted_asset_entries(assets_dir)]
+    _require_core_assets(items)
     return items
 
 
@@ -137,31 +175,31 @@ def _validate_assets_for_publication(data_root: Path) -> tuple[UploadItem, Uploa
     """
     assets_dir = data_root / "assets"
     items = _validate_assets_directory(assets_dir)
-    h3_map: UploadItem | None = None
-    area_histogram: UploadItem | None = None
-    dataset_card_hero: UploadItem | None = None
-    for item in items:
-        if item.relative_path == H3_MAP_ASSET_RELATIVE:
-            h3_map = item
-        elif item.relative_path == AREA_HISTOGRAM_ASSET_RELATIVE:
-            area_histogram = item
-        elif item.relative_path == DATASET_CARD_HERO_ASSET_RELATIVE:
-            dataset_card_hero = item
-    if h3_map is None:
-        raise PublicationError(
-            f"assets directory must contain the H3 density map at {H3_MAP_ASSET_RELATIVE}"
-        )
-    if area_histogram is None:
-        raise PublicationError(
-            f"assets directory must contain the area distribution histogram at "
-            f"{AREA_HISTOGRAM_ASSET_RELATIVE}"
-        )
-    if dataset_card_hero is None:
-        raise PublicationError(
-            f"assets directory must contain the dataset card hero at "
-            f"{DATASET_CARD_HERO_ASSET_RELATIVE}"
-        )
-    return h3_map, area_histogram, dataset_card_hero
+    items_by_path = {item.relative_path: item for item in items}
+    requirements = (
+        (
+            H3_MAP_ASSET_RELATIVE,
+            f"assets directory must contain the H3 density map at {H3_MAP_ASSET_RELATIVE}",
+        ),
+        (
+            AREA_HISTOGRAM_ASSET_RELATIVE,
+            "assets directory must contain the area distribution histogram at "
+            f"{AREA_HISTOGRAM_ASSET_RELATIVE}",
+        ),
+        (
+            DATASET_CARD_HERO_ASSET_RELATIVE,
+            "assets directory must contain the dataset card hero at "
+            f"{DATASET_CARD_HERO_ASSET_RELATIVE}",
+        ),
+    )
+    for relative_path, message in requirements:
+        if relative_path not in items_by_path:
+            raise PublicationError(message)
+    return (
+        items_by_path[H3_MAP_ASSET_RELATIVE],
+        items_by_path[AREA_HISTOGRAM_ASSET_RELATIVE],
+        items_by_path[DATASET_CARD_HERO_ASSET_RELATIVE],
+    )
 
 
 def _collect_allowlisted_files(data_root: Path) -> tuple[UploadItem, ...]:

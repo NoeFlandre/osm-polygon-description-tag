@@ -100,3 +100,43 @@ jobs:
 
       - name: Verify the bundled osmium binary
         run: docker run --rm --entrypoint osmium osm-polygon-description-tag:ci --version
+
+  mutation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: quality
+    env:
+      HF_HUB_OFFLINE: "1"
+      HF_DATASETS_OFFLINE: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.16"
+          enable-cache: true
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Sync locked environment
+        run: uv sync --frozen
+
+      - name: Run CRAP budget gate
+        run: just risk
+
+      - name: Run focused mutation gate
+        run: just mutation
+
+      - name: Upload mutation and CRAP reports
+        if: always()
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: mutation-score
+          path: |
+            reports/crap.json
+            reports/crap.md
+            reports/mutation-summary.json
+          if-no-files-found: error
