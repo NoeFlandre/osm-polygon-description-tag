@@ -32,7 +32,8 @@ risk:
     uv run python scripts/quality_metrics.py check \
         --report reports/crap.json \
         --max-crap-score 6 \
-        --pattern "src/osm_polygon_description_tag/publication/planning.py::*"
+        --pattern "src/osm_polygon_description_tag/publication/planning.py::*" \
+        --pattern "src/osm_polygon_description_tag/dataset/stats.py::*"
 
 # Run the required publication-planning mutation gate; mutmut resumes from its ignored cache.
 mutation:

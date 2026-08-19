@@ -5,12 +5,95 @@ import pytest
 from shapely.geometry import Polygon
 
 from osm_polygon_description_tag.dataset.reporting import collect_stats, generate_dataset_docs
+from osm_polygon_description_tag.dataset.stats import (
+    _collect_feature_summary,
+    _collect_manifest_summary,
+    _create_feature_table,
+    _find_validated_artifacts,
+    _ingest_features,
+    _new_connection,
+    _validate_artifact,
+)
 from tests.conftest import make_record_dict
 from tests.helpers.dataset import write_finalized_dataset, write_reporting_fixture
 
 
+def _repository_file(relative_path: str) -> Path:
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / relative_path
+        if candidate.is_file():
+            return candidate
+    raise AssertionError(f"could not find repository file: {relative_path}")
+
+
+_TEMPLATE_PATH = _repository_file("docs/dataset-card-template.md")
+
+
 def _frozen_clock() -> str:
     return "2026-07-27T00:00:00+00:00"
+
+
+def test_reporting_phases_validate_and_summarize_artifacts_in_filename_order(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    source_root.mkdir()
+    write_reporting_fixture(data_root, source_root)
+
+    artifacts = _find_validated_artifacts(data_root)
+    assert [artifact.parquet.name for artifact in artifacts] == [
+        "region-a.parquet",
+        "region-b.parquet",
+    ]
+
+    summary = _collect_manifest_summary(artifacts)
+
+    assert summary.emitted_features == 7
+    assert summary.rejections == {"no_nonempty_description": 4}
+    assert [record["parquet"] for record in summary.files] == [
+        "region-a.parquet",
+        "region-b.parquet",
+    ]
+
+
+def test_artifact_validation_returns_the_matching_manifest(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    source_root.mkdir()
+    write_reporting_fixture(data_root, source_root)
+
+    artifact = _validate_artifact(
+        data_root / "data" / "region-a.parquet",
+        data_root / "manifests",
+    )
+
+    assert artifact.parquet.name == "region-a.parquet"
+    assert artifact.manifest.source.name == "region-a.osm.pbf"
+
+
+def test_reporting_feature_phase_matches_public_stats(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    source_root.mkdir()
+    write_reporting_fixture(data_root, source_root)
+    artifacts = _find_validated_artifacts(data_root)
+
+    connection = _new_connection(data_root)
+    try:
+        _create_feature_table(connection)
+        _ingest_features(connection, artifacts)
+        summary = _collect_feature_summary(connection)
+    finally:
+        connection.close()
+
+    assert summary.rows == 3
+    assert summary.unique_osm_objects == 3
+    assert summary.osm_types == {"relation": 1, "way": 2}
+    assert summary.geometry_types == {"MultiPolygon": 1, "Polygon": 2}
+    assert summary.description_suffixes == {"en": 2, "pt-BR": 1}
+    assert summary.base_description_rows == 0
+    assert summary.localized_description_rows == 3
 
 
 def test_collect_stats_aggregates_from_validated_artifacts(tmp_path: Path) -> None:
@@ -122,12 +205,12 @@ def test_generate_dataset_docs_installs_hero_image(tmp_path: Path) -> None:
     source_root = tmp_path / "raw"
     source_root.mkdir()
     write_reporting_fixture(data_root, source_root)
-    template_path = Path("docs/dataset-card-template.md")
+    template_path = _TEMPLATE_PATH
 
     generate_dataset_docs(data_root, template_path, clock=_frozen_clock)
 
     hero = data_root / "assets" / "dataset-card-hero.png"
-    assert hero.read_bytes() == (Path("assets/dataset-card-hero.png").read_bytes())
+    assert hero.read_bytes() == _repository_file("assets/dataset-card-hero.png").read_bytes()
     first_mtime = hero.stat().st_mtime_ns
 
     readme = (data_root / "README.md").read_text(encoding="utf-8")
@@ -136,7 +219,7 @@ def test_generate_dataset_docs_installs_hero_image(tmp_path: Path) -> None:
     # Re-running with identical inputs leaves the hero byte-identical and
     # preserves its on-disk mtime.
     generate_dataset_docs(data_root, template_path, clock=_frozen_clock)
-    assert hero.read_bytes() == (Path("assets/dataset-card-hero.png").read_bytes())
+    assert hero.read_bytes() == _repository_file("assets/dataset-card-hero.png").read_bytes()
     assert hero.stat().st_mtime_ns == first_mtime
 
 
@@ -145,7 +228,7 @@ def test_generate_dataset_docs_writes_stats_and_card(tmp_path: Path) -> None:
     source_root = tmp_path / "raw"
     source_root.mkdir()
     write_reporting_fixture(data_root, source_root)
-    template_path = Path("docs/dataset-card-template.md")
+    template_path = _TEMPLATE_PATH
 
     generate_dataset_docs(data_root, template_path, clock=_frozen_clock)
 

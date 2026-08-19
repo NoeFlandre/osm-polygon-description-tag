@@ -186,6 +186,7 @@ def test_quality_recipes_and_required_mutation_gate_are_publicly_wired() -> None
     assert "uv run mutmut run" in justfile
     assert "--max-crap-score 6" in justfile
     assert 'publication/planning.py::*"' in justfile
+    assert 'dataset/stats.py::*"' in justfile
     assert "planning.x*__mutmut_*" in justfile
     assert "mutation:" in workflow
     assert "run: just risk" in workflow

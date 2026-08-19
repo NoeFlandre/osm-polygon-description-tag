@@ -124,7 +124,7 @@ jobs:
       - name: Sync locked environment
         run: uv sync --frozen
 
-      - name: Run publication-planning CRAP budget gate
+      - name: Run publication-planning and dataset-statistics CRAP budget gate
         run: just risk
 
       - name: Run publication-planning mutation gate
