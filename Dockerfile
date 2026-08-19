@@ -1,12 +1,16 @@
 # syntax=docker/dockerfile:1.7
 #
-# The default uv image is version-pinned to a known uv/Python/Debian
-# combination. Dependency versions are resolved by uv.lock. Operators may
-# override UV_IMAGE with a verified registry digest for immutable provenance.
+# The uv binary is version-pinned. Python and Debian come from the official
+# 3.12 Bookworm slim base. Dependency versions are resolved by uv.lock.
+# Operators may override UV_IMAGE with a verified registry digest.
 
-ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.16-python3.12-bookworm-slim
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.16
 
-FROM ${UV_IMAGE} AS base
+FROM ${UV_IMAGE} AS uv
+
+FROM python:3.12-slim-bookworm AS base
+
+COPY --from=uv /uv /uvx /usr/local/bin/
 
 ENV UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \

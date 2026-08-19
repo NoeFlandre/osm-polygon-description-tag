@@ -19,7 +19,10 @@ def _read(name: str) -> str:
 def test_runtime_image_is_locked_safe_and_has_required_osm_tools() -> None:
     dockerfile = _read("Dockerfile")
 
-    assert "ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.16-python3.12-bookworm-slim" in dockerfile
+    assert "ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.16" in dockerfile
+    assert "FROM ${UV_IMAGE} AS uv" in dockerfile
+    assert "FROM python:3.12-slim-bookworm AS base" in dockerfile
+    assert "COPY --from=uv /uv /uvx /usr/local/bin/" in dockerfile
     assert "apt-get install -y --no-install-recommends osmium-tool" in dockerfile
     assert "uv sync --frozen --no-dev --no-editable" in dockerfile
     assert "USER app" in dockerfile

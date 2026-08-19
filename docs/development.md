@@ -31,13 +31,13 @@ or contacts Hugging Face.
 
 ## Docker reproducibility
 
-The checked-in `Dockerfile` uses the version-pinned
-`ghcr.io/astral-sh/uv:0.11.16-python3.12-bookworm-slim` base, installs the
+The checked-in `Dockerfile` copies the version-pinned uv binary from
+`ghcr.io/astral-sh/uv:0.11.16` into Python 3.12 Bookworm slim, installs the
 runtime graph from `uv.lock`, and includes Debian's `osmium-tool` binary. The
 runtime image contains only the non-editable installed package, runs as an
 unprivileged `app` user, and defaults to `--help` so it cannot start the
-pipeline accidentally. For immutable image provenance, pass a verified base
-digest with `--build-arg UV_IMAGE=...@sha256:...`.
+pipeline accidentally. For immutable uv provenance, pass a verified digest
+with `--build-arg UV_IMAGE=...@sha256:...`.
 
 Build and run the safe container checks:
 
