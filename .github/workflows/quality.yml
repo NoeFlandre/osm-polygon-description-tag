@@ -124,10 +124,10 @@ jobs:
       - name: Sync locked environment
         run: uv sync --frozen
 
-      - name: Run CRAP budget gate
+      - name: Run publication-planning CRAP budget gate
         run: just risk
 
-      - name: Run focused mutation gate
+      - name: Run publication-planning mutation gate
         run: just mutation
 
       - name: Upload mutation and CRAP reports

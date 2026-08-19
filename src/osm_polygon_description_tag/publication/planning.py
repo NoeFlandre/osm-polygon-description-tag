@@ -48,6 +48,7 @@ DATASET_CARD_HERO_ASSET_RELATIVE = f"assets/{DATASET_CARD_HERO_FILENAME}"
 _ALLOWED_ASSET_FILES = frozenset(
     {H3_MAP_FILENAME, AREA_HISTOGRAM_FILENAME, DATASET_CARD_HERO_FILENAME}
 )
+_EMPTY_IDENTITY = ""
 
 
 def file_sha256_bytes(data: bytes) -> str:
@@ -202,51 +203,62 @@ def _validate_assets_for_publication(data_root: Path) -> tuple[UploadItem, Uploa
     )
 
 
-def _collect_allowlisted_files(data_root: Path) -> tuple[UploadItem, ...]:
+def _validate_data_root(data_root: Path) -> None:
     if not data_root.is_dir() or data_root.is_symlink():
         raise PublicationError(f"data root is not a regular directory: {data_root}")
+
+
+def _validate_uploader_cache(entry: Path) -> None:
+    if entry.is_symlink():
+        raise PublicationError(f"uploader cache must be a real directory, not a symlink: {entry}")
+    if not entry.is_dir():
+        raise PublicationError(f"uploader cache must be a directory: {entry}")
+    child = entry / "huggingface"
+    if not child.is_dir() or child.is_symlink():
+        raise PublicationError(f"expected {child} to be a real huggingface cache directory")
+
+
+def _validate_local_work(entry: Path) -> None:
+    if entry.is_symlink() or not entry.is_dir():
+        raise PublicationError(f"local work path must be a real directory: {entry}")
+
+
+def _validate_ds_store(entry: Path) -> None:
+    if entry.is_symlink() or not entry.is_file():
+        raise PublicationError(f".DS_Store must be a regular file: {entry}")
+
+
+def _validate_top_level_entry(entry: Path) -> None:
+    if entry.name in ALLOWED_TOP_LEVEL:
+        return
+    if entry.name == ".cache":
+        _validate_uploader_cache(entry)
+        return
+    if entry.name == _LOCAL_WORK_RELATIVE:
+        _validate_local_work(entry)
+        return
+    if entry.name == ".DS_Store":
+        _validate_ds_store(entry)
+        return
+    raise PublicationError(f"unknown top-level entry: {entry}")
+
+
+def _validate_top_level_entries(data_root: Path) -> None:
     for entry in data_root.iterdir():
-        if entry.name in ALLOWED_TOP_LEVEL:
-            continue
-        if entry.name == ".cache":
-            # The exact uploader-owned layout ``.cache/huggingface`` is
-            # permitted locally; it's checked below. Any other hidden
-            # top-level entry is rejected.
-            if entry.is_symlink():
-                raise PublicationError(
-                    f"uploader cache must be a real directory, not a symlink: {entry}"
-                )
-            if not entry.is_dir():
-                raise PublicationError(f"uploader cache must be a directory: {entry}")
-            child = entry / "huggingface"
-            if not child.is_dir() or child.is_symlink():
-                raise PublicationError(f"expected {child} to be a real huggingface cache directory")
-            continue
-        if entry.name == _LOCAL_WORK_RELATIVE:
-            if entry.is_symlink() or not entry.is_dir():
-                raise PublicationError(f"local work path must be a real directory: {entry}")
-            continue
-        if entry.name == ".DS_Store":
-            if entry.is_symlink() or not entry.is_file():
-                raise PublicationError(f".DS_Store must be a regular file: {entry}")
-            continue
-        raise PublicationError(f"unknown top-level entry: {entry}")
+        _validate_top_level_entry(entry)
 
+
+def _collect_required_metadata_items(data_root: Path) -> list[UploadItem]:
     items: list[UploadItem] = []
+    for filename in ("README.md", "stats.json"):
+        path = data_root / filename
+        if not path.is_file():
+            raise PublicationError(f"missing required file: {path}")
+        items.append(_build_item(path, filename))
+    return items
 
-    readme = data_root / "README.md"
-    stats = data_root / "stats.json"
-    if not readme.is_file():
-        raise PublicationError(f"missing required file: {readme}")
-    if not stats.is_file():
-        raise PublicationError(f"missing required file: {stats}")
-    items.append(_build_item(readme, "README.md"))
-    items.append(_build_item(stats, "stats.json"))
 
-    # ``assets/`` is required: every dataset-wide plan must include the
-    # deterministic H3 density map. A missing directory, a regular file
-    # of the same name, a symlink, or a directory that does not contain
-    # the canonical map file is rejected.
+def _require_assets_directory_for_plan(data_root: Path) -> Path:
     assets_dir = data_root / "assets"
     if not assets_dir.exists():
         raise PublicationError(
@@ -256,31 +268,58 @@ def _collect_allowlisted_files(data_root: Path) -> tuple[UploadItem, ...]:
         raise PublicationError(
             f"assets directory must be a real directory, not a symlink or file: {assets_dir}"
         )
-    items.extend(_validate_assets_directory(assets_dir))
+    return assets_dir
 
+
+def _validate_data_entry(path: Path) -> UploadItem:
+    if path.name.startswith(".") or path.suffix == ".tmp":
+        raise PublicationError(f"temporary or hidden file present: {path}")
+    if path.suffix != ".parquet":
+        raise PublicationError(f"unexpected file in data/: {path}")
+    return _build_item(path, f"data/{path.name}")
+
+
+def _collect_data_items(data_root: Path) -> list[UploadItem]:
     data_dir = data_root / "data"
-    if data_dir.is_dir():
-        for path in sorted(data_dir.iterdir(), key=lambda entry: entry.name):
-            if path.name.startswith(".") or path.suffix == ".tmp":
-                raise PublicationError(f"temporary or hidden file present: {path}")
-            if path.suffix != ".parquet":
-                raise PublicationError(f"unexpected file in data/: {path}")
-            items.append(_build_item(path, f"data/{path.name}"))
-            manifest_name = path.name.removesuffix(".parquet") + ".manifest.json"
-            manifest_path = data_root / "manifests" / manifest_name
-            _validate_manifest(manifest_path, path)
+    if not data_dir.is_dir():
+        return []
+    items: list[UploadItem] = []
+    for path in sorted(data_dir.iterdir(), key=lambda entry: entry.name):  # pragma: no mutate
+        items.append(_validate_data_entry(path))
+        manifest_name = path.name.removesuffix(".parquet") + ".manifest.json"
+        manifest_path = data_root / "manifests" / manifest_name
+        _validate_manifest(manifest_path, path)
+    return items
 
+
+def _validate_manifest_entry(path: Path) -> UploadItem:
+    if path.name.startswith(".") or path.name.endswith(".tmp"):
+        raise PublicationError(f"temporary or hidden file present: {path}")
+    if not path.name.endswith(".manifest.json"):
+        raise PublicationError(f"unexpected file in manifests/: {path}")
+    return _build_item(path, f"manifests/{path.name}")
+
+
+def _sorted_manifest_entries(manifests_dir: Path) -> list[Path]:
+    return sorted(manifests_dir.iterdir(), key=lambda entry: entry.name)  # pragma: no mutate
+
+
+def _collect_manifest_items(data_root: Path) -> list[UploadItem]:
     manifests_dir = data_root / "manifests"
-    if manifests_dir.is_dir():
-        for path in sorted(manifests_dir.iterdir(), key=lambda entry: entry.name):
-            if path.name.startswith(".") or path.name.endswith(".tmp"):
-                raise PublicationError(f"temporary or hidden file present: {path}")
-            if not path.name.endswith(".manifest.json"):
-                raise PublicationError(f"unexpected file in manifests/: {path}")
-            items.append(_build_item(path, f"manifests/{path.name}"))
+    if not manifests_dir.is_dir():
+        return []
+    return [_validate_manifest_entry(path) for path in _sorted_manifest_entries(manifests_dir)]
 
-    items.sort(key=lambda item: item.relative_path)
-    return tuple(items)
+
+def _collect_allowlisted_files(data_root: Path) -> tuple[UploadItem, ...]:
+    _validate_data_root(data_root)
+    _validate_top_level_entries(data_root)
+    items = _collect_required_metadata_items(data_root)
+    assets_dir = _require_assets_directory_for_plan(data_root)
+    items.extend(_validate_assets_directory(assets_dir))
+    items.extend(_collect_data_items(data_root))
+    items.extend(_collect_manifest_items(data_root))
+    return tuple(sorted(items, key=lambda item: item.relative_path))
 
 
 def create_upload_plan(data_root: Path) -> UploadPlan:
@@ -290,15 +329,19 @@ def create_upload_plan(data_root: Path) -> UploadPlan:
     payload. The caller must compare its confirmation to this exact value
     before ``execute_upload`` will run.
     """
-    resolved_root = data_root.resolve(strict=False)
+    resolved_root = data_root.resolve(strict=False)  # pragma: no mutate
     items = _collect_allowlisted_files(resolved_root)
+    # ``identity_sha256`` is omitted from ``UploadPlan.to_payload`` by design;
+    # changing this provisional-only field is observationally equivalent.
+    # pragma: no mutate start
     provisional = UploadPlan(
         repo_id=REPO_ID,
         data_root=str(resolved_root),
         files=items,
-        identity_sha256="",
+        identity_sha256=_EMPTY_IDENTITY,
     )
-    identity = file_sha256_bytes(provisional.to_json().encode("utf-8"))
+    # pragma: no mutate end
+    identity = file_sha256_bytes(provisional.to_json().encode("utf-8"))  # pragma: no mutate
     return UploadPlan(
         repo_id=REPO_ID,
         data_root=str(resolved_root),
@@ -357,14 +400,18 @@ def _build_per_pbf_upload_plan(data_root: Path, source_name: str) -> UploadPlan:
         area_histogram_item,
         dataset_card_hero_item,
     )
-    resolved_root = data_root.resolve(strict=False)
+    resolved_root = data_root.resolve(strict=False)  # pragma: no mutate
+    # ``identity_sha256`` is omitted from ``UploadPlan.to_payload`` by design;
+    # changing this provisional-only field is observationally equivalent.
+    # pragma: no mutate start
     provisional = UploadPlan(
         repo_id=REPO_ID,
         data_root=str(resolved_root),
         files=items,
-        identity_sha256="",
+        identity_sha256=_EMPTY_IDENTITY,
     )
-    identity = file_sha256_bytes(provisional.to_json().encode("utf-8"))
+    # pragma: no mutate end
+    identity = file_sha256_bytes(provisional.to_json().encode("utf-8"))  # pragma: no mutate
     return UploadPlan(
         repo_id=REPO_ID,
         data_root=str(resolved_root),
@@ -395,14 +442,18 @@ def _build_metadata_only_upload_plan(data_root: Path) -> UploadPlan:
         area_histogram_item,
         dataset_card_hero_item,
     )
-    resolved_root = data_root.resolve(strict=False)
+    resolved_root = data_root.resolve(strict=False)  # pragma: no mutate
+    # ``identity_sha256`` is omitted from ``UploadPlan.to_payload`` by design;
+    # changing this provisional-only field is observationally equivalent.
+    # pragma: no mutate start
     provisional = UploadPlan(
         repo_id=REPO_ID,
         data_root=str(resolved_root),
         files=items,
-        identity_sha256="",
+        identity_sha256=_EMPTY_IDENTITY,
     )
-    identity = file_sha256_bytes(provisional.to_json().encode("utf-8"))
+    # pragma: no mutate end
+    identity = file_sha256_bytes(provisional.to_json().encode("utf-8"))  # pragma: no mutate
     return UploadPlan(
         repo_id=REPO_ID,
         data_root=str(resolved_root),

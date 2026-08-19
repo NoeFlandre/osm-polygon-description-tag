@@ -32,26 +32,16 @@ risk:
     uv run python scripts/quality_metrics.py check \
         --report reports/crap.json \
         --max-crap-score 6 \
-        --pattern "src/osm_polygon_description_tag/publication/planning.py::_validate_*" \
-        --pattern "src/osm_polygon_description_tag/publication/planning.py::_require_*" \
-        --pattern "src/osm_polygon_description_tag/publication/planning.py::_read_manifest_for_publication"
+        --pattern "src/osm_polygon_description_tag/publication/planning.py::*"
 
-# Run the required focused mutation gate; mutmut resumes from its ignored cache.
+# Run the required publication-planning mutation gate; mutmut resumes from its ignored cache.
 mutation:
     mkdir -p reports
     uv run mutmut run --max-children=8 \
-        "osm_polygon_description_tag.publication.planning.x__validate_*__mutmut_*" \
-        "osm_polygon_description_tag.publication.planning.x__require_core_assets__mutmut_*" \
-        "osm_polygon_description_tag.publication.planning.x__require_matching_parquet__mutmut_*" \
-        "osm_polygon_description_tag.publication.planning.x__require_supported_manifest_version__mutmut_*" \
-        "osm_polygon_description_tag.publication.planning.x__read_manifest_for_publication__mutmut_*"
+        "osm_polygon_description_tag.publication.planning.x*__mutmut_*"
     uv run python scripts/check_mutation_score.py \
         --mutants-root mutants \
-        --pattern "osm_polygon_description_tag.publication.planning.x__validate_*__mutmut_*" \
-        --pattern "osm_polygon_description_tag.publication.planning.x__require_core_assets__mutmut_*" \
-        --pattern "osm_polygon_description_tag.publication.planning.x__require_matching_parquet__mutmut_*" \
-        --pattern "osm_polygon_description_tag.publication.planning.x__require_supported_manifest_version__mutmut_*" \
-        --pattern "osm_polygon_description_tag.publication.planning.x__read_manifest_for_publication__mutmut_*" \
+        --pattern "osm_polygon_description_tag.publication.planning.x*__mutmut_*" \
         --output reports/mutation-summary.json \
         --minimum-score 90
 

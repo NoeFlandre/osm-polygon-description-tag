@@ -19,15 +19,29 @@ from osm_polygon_description_tag.publication import (
     planning,
 )
 from osm_polygon_description_tag.publication.planning import (
+    _build_item,
+    _build_metadata_only_upload_plan,
+    _build_per_pbf_upload_plan,
+    _collect_data_items,
+    _collect_manifest_items,
     _read_manifest_for_publication,
+    _require_assets_directory_for_plan,
     _require_core_assets,
+    _require_h3_map,
     _require_matching_parquet,
     _require_supported_manifest_version,
     _validate_asset_entry,
     _validate_assets_directory,
     _validate_assets_for_publication,
+    _validate_data_entry,
+    _validate_data_root,
+    _validate_local_work,
     _validate_manifest,
+    _validate_manifest_entry,
     _validate_publication_parquet,
+    _validate_top_level_entries,
+    _validate_uploader_cache,
+    file_sha256_bytes,
 )
 from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
@@ -142,6 +156,293 @@ def test_create_upload_plan_rejects_missing_card_or_stats(tmp_path: Path) -> Non
 
     with pytest.raises(PublicationError, match="missing|R|README"):
         create_upload_plan(data_root)
+
+
+def test_collection_helpers_preserve_allowlist_boundaries(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    _make_dataset(data_root)
+    (data_root / ".DS_Store").write_bytes(b"Finder metadata")
+    (data_root / ".cache" / "huggingface").mkdir(parents=True)
+
+    _validate_top_level_entries(data_root)
+
+    assert [item.relative_path for item in _collect_data_items(data_root)] == [
+        "data/a-latest.parquet"
+    ]
+    assert [item.relative_path for item in _collect_manifest_items(data_root)] == [
+        "manifests/a-latest.manifest.json"
+    ]
+
+
+def test_build_item_preserves_non_regular_file_error(tmp_path: Path) -> None:
+    directory = tmp_path / "not-a-file"
+    directory.mkdir()
+
+    with pytest.raises(PublicationError, match="not a regular file"):
+        _build_item(directory, "data/not-a-file")
+
+
+def test_validate_data_root_rejects_a_file(tmp_path: Path) -> None:
+    root = tmp_path / "data-root"
+    root.write_bytes(b"not a directory")
+
+    with pytest.raises(PublicationError, match="data root is not a regular directory"):
+        _validate_data_root(root)
+
+
+def test_validate_data_root_rejects_a_directory_symlink(tmp_path: Path) -> None:
+    real_root = tmp_path / "real-root"
+    real_root.mkdir()
+    link = tmp_path / "data-root"
+    try:
+        link.symlink_to(real_root)
+    except OSError:
+        pytest.skip("filesystem does not support symlinks")
+
+    with pytest.raises(PublicationError, match="data root is not a regular directory"):
+        _validate_data_root(link)
+
+
+def test_validate_uploader_cache_accepts_only_real_huggingface_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original_is_dir = Path.is_dir
+
+    def case_sensitive_is_dir(path: Path) -> bool:
+        if path.name == "HUGGINGFACE":
+            return False
+        return original_is_dir(path)
+
+    monkeypatch.setattr(Path, "is_dir", case_sensitive_is_dir)
+    cache = tmp_path / ".cache"
+    cache.mkdir()
+    (cache / "huggingface").mkdir()
+    _validate_uploader_cache(cache)
+
+    (cache / "huggingface").rmdir()
+    with pytest.raises(PublicationError, match="real huggingface cache directory"):
+        _validate_uploader_cache(cache)
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    try:
+        (cache / "huggingface").symlink_to(outside)
+    except OSError:
+        pytest.skip("filesystem does not support symlinks")
+    with pytest.raises(PublicationError, match="real huggingface cache directory"):
+        _validate_uploader_cache(cache)
+
+
+def test_validate_uploader_cache_rejects_bad_cache_entry(tmp_path: Path) -> None:
+    cache_file = tmp_path / ".cache"
+    cache_file.write_bytes(b"not a directory")
+    with pytest.raises(PublicationError, match="uploader cache must be a directory"):
+        _validate_uploader_cache(cache_file)
+
+    real_cache = tmp_path / "real-cache"
+    real_cache.mkdir()
+    cache_link = tmp_path / "linked-cache"
+    try:
+        cache_link.symlink_to(real_cache)
+    except OSError:
+        pytest.skip("filesystem does not support symlinks")
+    with pytest.raises(PublicationError, match="uploader cache must be a real directory"):
+        _validate_uploader_cache(cache_link)
+
+
+def test_validate_local_work_requires_a_real_directory(tmp_path: Path) -> None:
+    work = tmp_path / ".work"
+    work.mkdir()
+    _validate_local_work(work)
+
+    work_file = tmp_path / "work-file"
+    work_file.write_bytes(b"not a directory")
+    with pytest.raises(PublicationError, match="local work path must be a real directory"):
+        _validate_local_work(work_file)
+
+    real_work = tmp_path / "real-work"
+    real_work.mkdir()
+    work_link = tmp_path / "work-link"
+    try:
+        work_link.symlink_to(real_work)
+    except OSError:
+        pytest.skip("filesystem does not support symlinks")
+    with pytest.raises(PublicationError, match="local work path must be a real directory"):
+        _validate_local_work(work_link)
+
+
+def test_require_assets_directory_preserves_missing_file_and_symlink_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_root = tmp_path / "generated"
+    data_root.mkdir()
+    assets = data_root / "assets"
+    assets.mkdir()
+    original_exists = Path.exists
+
+    def case_sensitive_exists(path: Path) -> bool:
+        if path.name == "ASSETS":
+            return False
+        return original_exists(path)
+
+    monkeypatch.setattr(Path, "exists", case_sensitive_exists)
+    assert _require_assets_directory_for_plan(data_root) == assets
+    assets.rmdir()
+    with pytest.raises(PublicationError, match="assets directory missing for plan"):
+        _require_assets_directory_for_plan(data_root)
+
+    assets_file = data_root / "assets"
+    assets_file.write_bytes(b"not a directory")
+    with pytest.raises(PublicationError, match="real directory, not a symlink or file"):
+        _require_assets_directory_for_plan(data_root)
+
+    assets_file.unlink()
+    real_assets = tmp_path / "real-assets"
+    real_assets.mkdir()
+    try:
+        assets_file.symlink_to(real_assets)
+    except OSError:
+        pytest.skip("filesystem does not support symlinks")
+    with pytest.raises(PublicationError, match="real directory, not a symlink or file"):
+        _require_assets_directory_for_plan(data_root)
+
+
+def test_validate_data_entry_rejects_hidden_temporary_and_unexpected_files(
+    tmp_path: Path,
+) -> None:
+    hidden = tmp_path / ".hidden.parquet"
+    hidden.write_bytes(b"hidden")
+    with pytest.raises(PublicationError, match="temporary or hidden file"):
+        _validate_data_entry(hidden)
+
+    temporary = tmp_path / "leftover.tmp"
+    temporary.write_bytes(b"temporary")
+    with pytest.raises(PublicationError, match="temporary or hidden file"):
+        _validate_data_entry(temporary)
+
+    unexpected = tmp_path / "notes.txt"
+    unexpected.write_bytes(b"unexpected")
+    with pytest.raises(PublicationError, match="unexpected file in data/"):
+        _validate_data_entry(unexpected)
+
+
+def test_collect_data_items_rejects_case_drift_in_data_and_manifest_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_root = tmp_path / "generated"
+    _make_dataset(data_root)
+    original_is_dir = Path.is_dir
+    original_is_file = Path.is_file
+    original_read_text = Path.read_text
+
+    def case_sensitive_is_dir(path: Path) -> bool:
+        if path.name in {"DATA", "MANIFESTS"}:
+            return False
+        return original_is_dir(path)
+
+    def case_sensitive_is_file(path: Path) -> bool:
+        if path.parent.name == "MANIFESTS":
+            return False
+        return original_is_file(path)
+
+    def case_sensitive_read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path.parent.name == "MANIFESTS" or path.name.endswith(".MANIFEST.JSON"):
+            raise FileNotFoundError(path)
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_dir", case_sensitive_is_dir)
+    monkeypatch.setattr(Path, "is_file", case_sensitive_is_file)
+    monkeypatch.setattr(Path, "read_text", case_sensitive_read_text)
+
+    assert [item.relative_path for item in _collect_data_items(data_root)] == [
+        "data/a-latest.parquet"
+    ]
+
+
+def test_validate_manifest_entry_preserves_rejection_contract(tmp_path: Path) -> None:
+    hidden = tmp_path / ".hidden.manifest.json"
+    hidden.write_bytes(b"hidden")
+    with pytest.raises(PublicationError, match="temporary or hidden file"):
+        _validate_manifest_entry(hidden)
+
+    temporary = tmp_path / "leftover.tmp"
+    temporary.write_bytes(b"temporary")
+    with pytest.raises(PublicationError, match="temporary or hidden file"):
+        _validate_manifest_entry(temporary)
+
+    unexpected = tmp_path / "manifest.json"
+    unexpected.write_bytes(b"unexpected")
+    with pytest.raises(PublicationError, match="unexpected file in manifests/"):
+        _validate_manifest_entry(unexpected)
+
+
+def test_collect_manifest_items_does_not_scan_case_variant_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_root = tmp_path / "generated"
+    _make_dataset(data_root)
+    original_is_dir = Path.is_dir
+
+    def case_sensitive_is_dir(path: Path) -> bool:
+        if path.name == "MANIFESTS":
+            return False
+        return original_is_dir(path)
+
+    monkeypatch.setattr(Path, "is_dir", case_sensitive_is_dir)
+
+    assert [item.relative_path for item in _collect_manifest_items(data_root)] == [
+        "manifests/a-latest.manifest.json"
+    ]
+
+
+def test_h3_compatibility_helper_requires_the_canonical_map(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    assets = data_root / "assets"
+    assets.mkdir(parents=True)
+    map_path = assets / "description_polygon_density.png"
+    map_path.write_bytes(b"map")
+
+    item = _require_h3_map(data_root)
+    assert item.relative_path == "assets/description_polygon_density.png"
+
+    map_path.unlink()
+    with pytest.raises(PublicationError, match="required file missing for H3 map"):
+        _require_h3_map(data_root)
+
+
+def test_per_pbf_plan_preserves_identity_and_validation_contract(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    _make_dataset(data_root)
+    (data_root / "assets" / "dataset-card-hero.png").write_bytes(b"hero")
+
+    plan = _build_per_pbf_upload_plan(data_root, "a-latest.osm.pbf")
+    provisional = replace(plan, identity_sha256="")
+    assert plan.repo_id == "NoeFlandre/osm-polygon-description-tag"
+    assert plan.data_root == str(data_root.resolve(strict=False))
+    assert plan.identity_sha256 == file_sha256_bytes(provisional.to_json().encode("utf-8"))
+
+    with pytest.raises(PublicationError, match="invalid source name"):
+        _build_per_pbf_upload_plan(data_root, "a-latest.pbf")
+
+    (data_root / "data" / "a-latest.parquet").unlink()
+    with pytest.raises(PublicationError, match="required file missing for per-PBF plan"):
+        _build_per_pbf_upload_plan(data_root, "a-latest.osm.pbf")
+
+
+def test_metadata_plan_preserves_identity_and_missing_file_contract(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    _make_dataset(data_root)
+    (data_root / "assets" / "dataset-card-hero.png").write_bytes(b"hero")
+
+    plan = _build_metadata_only_upload_plan(data_root)
+    provisional = replace(plan, identity_sha256="")
+    assert plan.repo_id == "NoeFlandre/osm-polygon-description-tag"
+    assert plan.data_root == str(data_root.resolve(strict=False))
+    assert plan.identity_sha256 == file_sha256_bytes(provisional.to_json().encode("utf-8"))
+
+    (data_root / "README.md").unlink()
+    with pytest.raises(PublicationError, match="required file missing for metadata plan"):
+        _build_metadata_only_upload_plan(data_root)
 
 
 def _write_assets(assets_dir: Path, *names: str) -> None:
