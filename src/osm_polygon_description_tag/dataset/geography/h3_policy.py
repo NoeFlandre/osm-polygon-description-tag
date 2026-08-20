@@ -14,7 +14,7 @@ The defaults are:
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Final
 
 import h3
@@ -37,21 +37,30 @@ def validate_coordinate(lat: float | int | None, lon: float | int | None) -> Non
     """
     if lat is None or lon is None:
         raise H3PolicyError("Latitude and longitude must not be null.")
+    lat_value, lon_value = _coerce_coordinates(lat, lon)
+    _validate_finite_coordinates(lat_value, lon_value)
+    _validate_coordinate_ranges(lat_value, lon_value)
+
+
+def _coerce_coordinates(lat: float | int, lon: float | int) -> tuple[float, float]:
     try:
-        lat_value = float(lat)
-        lon_value = float(lon)
+        return float(lat), float(lon)
     except (TypeError, ValueError) as error:
         raise H3PolicyError(
             f"Latitude and longitude must be numeric; got lat={lat!r}, lon={lon!r}."
         ) from error
-    if not (math.isfinite(lat_value) and math.isfinite(lon_value)):
-        raise H3PolicyError(
-            f"Latitude and longitude must be finite; got lat={lat_value!r}, lon={lon_value!r}."
-        )
-    if not (-90.0 <= lat_value <= 90.0):
-        raise H3PolicyError(f"Latitude {lat_value} is outside the [-90, 90] range.")
-    if not (-180.0 <= lon_value <= 180.0):
-        raise H3PolicyError(f"Longitude {lon_value} is outside the [-180, 180] range.")
+
+
+def _validate_finite_coordinates(lat: float, lon: float) -> None:
+    if not (math.isfinite(lat) and math.isfinite(lon)):
+        raise H3PolicyError(f"Latitude and longitude must be finite; got lat={lat!r}, lon={lon!r}.")
+
+
+def _validate_coordinate_ranges(lat: float, lon: float) -> None:
+    if not (-90.0 <= lat <= 90.0):
+        raise H3PolicyError(f"Latitude {lat} is outside the [-90, 90] range.")
+    if not (-180.0 <= lon <= 180.0):
+        raise H3PolicyError(f"Longitude {lon} is outside the [-180, 180] range.")
 
 
 def _normalize_resolution(resolution: int | None) -> int:
@@ -111,9 +120,32 @@ def split_antimeridian(points: Sequence[tuple[float, float]]) -> list[list[tuple
     """
     if len(points) < 3:
         return [list(points)]
-    if all(abs(points[index][0] - points[index - 1][0]) <= 180.0 for index in range(len(points))):
+    if not _crosses_antimeridian(points):
         return [list(points)]
 
+    unwrapped = _unwrap_points(points)
+    min_slab, max_slab = _slab_range(unwrapped)
+    return _rings_for_slabs(unwrapped, min_slab, max_slab)
+
+
+def _rings_for_slabs(
+    points: Sequence[tuple[float, float]], min_slab: int, max_slab: int
+) -> list[list[tuple[float, float]]]:
+    rings: list[list[tuple[float, float]]] = []
+    for slab in range(min_slab, max_slab + 1):
+        clipped = _clip_slab(points, slab)
+        if len(clipped) >= 3:
+            rings.append([(lon - 360.0 * slab, lat) for lon, lat in clipped])
+    return rings
+
+
+def _crosses_antimeridian(points: Sequence[tuple[float, float]]) -> bool:
+    return not all(
+        abs(points[index][0] - points[index - 1][0]) <= 180.0 for index in range(len(points))
+    )
+
+
+def _unwrap_points(points: Sequence[tuple[float, float]]) -> list[tuple[float, float]]:
     unwrapped = [points[0]]
     for lon, lat in points[1:]:
         previous_lon = unwrapped[-1][0]
@@ -122,21 +154,25 @@ def split_antimeridian(points: Sequence[tuple[float, float]]) -> list[list[tuple
         while lon - previous_lon < -180.0:
             lon += 360.0
         unwrapped.append((lon, lat))
+    return unwrapped
 
-    min_slab = math.floor((min(lon for lon, _ in unwrapped) + 180.0) / 360.0)
-    max_slab = math.floor((max(lon for lon, _ in unwrapped) + 180.0) / 360.0)
-    rings: list[list[tuple[float, float]]] = []
-    for slab in range(min_slab, max_slab + 1):
-        left = -180.0 + 360.0 * slab
-        right = 180.0 + 360.0 * slab
-        clipped = _clip_longitude(
-            _clip_longitude(unwrapped, left, keep_greater=True),
-            right,
-            keep_greater=False,
-        )
-        if len(clipped) >= 3:
-            rings.append([(lon - 360.0 * slab, lat) for lon, lat in clipped])
-    return rings
+
+def _slab_range(points: Sequence[tuple[float, float]]) -> tuple[int, int]:
+    longitudes = [lon for lon, _ in points]
+    return (
+        math.floor((min(longitudes) + 180.0) / 360.0),
+        math.floor((max(longitudes) + 180.0) / 360.0),
+    )
+
+
+def _clip_slab(points: Sequence[tuple[float, float]], slab: int) -> list[tuple[float, float]]:
+    left = -180.0 + 360.0 * slab
+    right = 180.0 + 360.0 * slab
+    return _clip_longitude(
+        _clip_longitude(points, left, keep_greater=True),
+        right,
+        keep_greater=False,
+    )
 
 
 def _clip_longitude(
@@ -164,15 +200,36 @@ def _clip_longitude(
     previous_inside = inside(previous)
     for current in points:
         current_inside = inside(current)
-        if current_inside:
-            if not previous_inside:
-                output.append(intersection(previous, current))
-            output.append(current)
-        elif previous_inside:
-            output.append(intersection(previous, current))
+        output.extend(
+            _clip_transition(
+                previous,
+                current,
+                boundary,
+                previous_inside,
+                current_inside,
+                intersection,
+            )
+        )
         previous = current
         previous_inside = current_inside
     return output
+
+
+def _clip_transition(
+    previous: tuple[float, float],
+    current: tuple[float, float],
+    boundary: float,
+    previous_inside: bool,
+    current_inside: bool,
+    intersection: Callable[[tuple[float, float], tuple[float, float]], tuple[float, float]],
+) -> list[tuple[float, float]]:
+    if current_inside:
+        if previous_inside:
+            return [current]
+        return [intersection(previous, current), current]
+    if previous_inside:
+        return [intersection(previous, current)]
+    return []
 
 
 def cell_rings(cell: str) -> list[list[tuple[float, float]]]:
@@ -189,12 +246,17 @@ def cell_rings(cell: str) -> list[list[tuple[float, float]]]:
         return []
     if not boundary:
         return []
-    raw_points: list[tuple[float, float]] = []
+    raw_points = _boundary_points(boundary)
+    return [ring for ring in split_antimeridian(raw_points) if len(ring) >= 3]
+
+
+def _boundary_points(boundary: Sequence[Sequence[float]]) -> list[tuple[float, float]]:
+    points: list[tuple[float, float]] = []
     for pair in boundary:
         if len(pair) >= 2:
             # H3 v4: (lat, lon); flip to (lon, lat) for matplotlib.
-            raw_points.append((float(pair[1]), float(pair[0])))
-    return [ring for ring in split_antimeridian(raw_points) if len(ring) >= 3]
+            points.append((float(pair[1]), float(pair[0])))
+    return points
 
 
 __all__ = [

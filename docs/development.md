@@ -33,17 +33,12 @@ or contacts Hugging Face.
 
 `just risk` writes ignored reports under `reports/`. It combines pytest coverage
 with Radon cyclomatic complexity and calculates the deterministic CRAP score
-(`complexity² × (1 − coverage)³ + complexity`) so the highest-risk functions
-are easy to prioritize. The complete `publication/planning.py` and
-`dataset/stats.py` modules have a strict CRAP budget: every function in those
-deep planning and statistics modules must remain below 6. `just mutation` runs
-the focused publication-planning mutation corpus and requires a 90%
-killed-mutant score with no unresolved mutants; statistics changes are guarded
-by the full regression suite and the strict CRAP budget.
+(`complexity² × (1 − coverage)³ + complexity`) for every source function. The
+repository-wide budget is strict: every function must remain below 6.
+`just mutation` runs the complete source tree against the complete regression
+suite and requires 100% killed mutants with no unresolved statuses.
 Mutmut's `mutants/` cache is ignored and may be reused locally; CI runs both
-gates as required jobs. The complete report still includes broader orchestration
-functions as diagnostic follow-up targets; they are not silently counted as
-meeting these focused module budgets.
+repository-wide gates as required jobs.
 
 ## Docker reproducibility
 

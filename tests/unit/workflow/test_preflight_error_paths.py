@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,6 +15,7 @@ from osm_polygon_description_tag.publication import (
 from osm_polygon_description_tag.workflow.orchestrator import (
     PUBLICATION_STATE_FILENAME,
     OrchestratorError,
+    _call_remote_reconcile,
     _execute_publication,
 )
 from osm_polygon_description_tag.workflow.preflight import PreflightError, default_preflight
@@ -25,6 +27,24 @@ def _setup_paths(tmp_path: Path) -> Paths:
     src.mkdir()
     data.mkdir()
     return Paths(source_root=src, data_root=data)
+
+
+def test_remote_reconcile_helper_passes_allowlist_and_wraps_failures() -> None:
+    plan = SimpleNamespace(files=[SimpleNamespace(relative_path="data/a.parquet")])
+    seen: list[tuple[str, set[str]]] = []
+
+    def reconcile(repo_id: str, managed: set[str]) -> str:
+        seen.append((repo_id, managed))
+        return "revision"
+
+    assert _call_remote_reconcile(reconcile, plan) == "revision"
+    assert seen == [(REPO_ID, {"data/a.parquet"})]
+
+    def fail(_repo_id: str, _managed: set[str]) -> str:
+        raise RuntimeError("hub unavailable")
+
+    with pytest.raises(OrchestratorError, match="remote artifact reconciliation failed"):
+        _call_remote_reconcile(fail, plan)
 
 
 def test_default_preflight_rejects_unreadable_source(tmp_path: Path) -> None:

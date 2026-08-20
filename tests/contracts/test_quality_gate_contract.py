@@ -177,6 +177,45 @@ def test_mutation_gate_can_filter_function_patterns_from_mutmut_metadata(tmp_pat
     assert payload["passed"] is False
 
 
+def test_mutation_gate_checks_all_metadata_when_no_pattern_is_given(tmp_path: Path) -> None:
+    metadata_path = tmp_path / "mutants" / "src" / "example.py.meta"
+    metadata_path.parent.mkdir(parents=True)
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "exit_code_by_key": {
+                    "pkg.example.x_sample__mutmut_1": 1,
+                    "pkg.example.x_other__mutmut_1": 1,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "mutation.json"
+
+    result = subprocess.run(  # noqa: S603 - executable and arguments are repository-controlled
+        [
+            sys.executable,
+            "scripts/check_mutation_score.py",
+            "--mutants-root",
+            str(tmp_path / "mutants"),
+            "--output",
+            str(output_path),
+            "--minimum-score",
+            "100",
+        ],
+        cwd=PROJECT_ROOT,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["total"] == 2
+    assert payload["killed"] == 2
+    assert payload["patterns"] == []
+    assert payload["passed"] is True
+
+
 def test_quality_recipes_and_required_mutation_gate_are_publicly_wired() -> None:
     justfile = (PROJECT_ROOT / "justfile").read_text(encoding="utf-8")
     workflow = (PROJECT_ROOT / ".github" / "workflows" / "quality.yml").read_text(encoding="utf-8")
@@ -185,9 +224,9 @@ def test_quality_recipes_and_required_mutation_gate_are_publicly_wired() -> None
     assert "mutation:" in justfile
     assert "uv run mutmut run" in justfile
     assert "--max-crap-score 6" in justfile
-    assert 'publication/planning.py::*"' in justfile
-    assert 'dataset/stats.py::*"' in justfile
-    assert "planning.x*__mutmut_*" in justfile
+    assert "--pattern" not in justfile
+    assert "planning.x*__mutmut_*" not in justfile
+    assert "all source modules" in justfile
     assert "mutation:" in workflow
     assert "run: just risk" in workflow
     assert "run: just mutation" in workflow

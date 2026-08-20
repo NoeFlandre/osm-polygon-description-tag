@@ -239,56 +239,78 @@ def _write_area_histogram_png(
     return dict(values)
 
 
-def generate_dataset_docs(
+def _cached_h3_occupied_cells(
+    map_path: Path,
+    previous_stats: Mapping[str, Any],
+    input_sha256: str,
+) -> int | None:
+    occupied = previous_stats.get("h3_occupied_cells")
+    if not map_path.is_file() or previous_stats.get("h3_map_input_sha256") != input_sha256:
+        return None
+    if not _is_nonnegative_int(occupied):
+        return None
+    return occupied
+
+
+def _is_nonnegative_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _ensure_h3_map(
     data_root: Path,
-    template_path: Path,
-    *,
-    clock: Callable[[], str] = utc_now_iso,
-) -> dict[str, Any]:
-    """Write deterministic stats, README, and derived media artifacts."""
-    stats = collect_stats(data_root, clock=clock)
-    map_input_sha256 = _h3_map_input_sha256(stats)
-    total_rows = int(stats["rows"])
+    total_rows: int,
+    stats: Mapping[str, Any],
+    previous_stats: Mapping[str, Any],
+) -> tuple[str, int]:
+    input_sha256 = _h3_map_input_sha256(stats)
     map_path = data_root / H3_MAP_ASSET_RELATIVE_PATH
-    previous_stats = _read_json_object(data_root / "stats.json")
-    previous_identity = previous_stats.get("h3_map_input_sha256")
-    previous_occupied = previous_stats.get("h3_occupied_cells")
-    can_reuse_map = (
-        map_path.is_file()
-        and previous_identity == map_input_sha256
-        and isinstance(previous_occupied, int)
-        and not isinstance(previous_occupied, bool)
-        and previous_occupied >= 0
-    )
-    if can_reuse_map:
-        occupied_cells = previous_occupied
-    else:
+    occupied_cells = _cached_h3_occupied_cells(map_path, previous_stats, input_sha256)
+    if occupied_cells is None:
         h3_counts = aggregate_h3_density(data_root)
         occupied_cells = len(h3_counts)
         _write_h3_map_png(data_root, total_rows, occupied_cells, counts=h3_counts)
-    stats["h3_map_input_sha256"] = map_input_sha256
-    stats["h3_occupied_cells"] = occupied_cells
+    return input_sha256, occupied_cells
 
+
+def _histogram_cache_is_valid(
+    histogram_path: Path,
+    previous_stats: Mapping[str, Any],
+    input_sha256: str,
+) -> bool:
+    total_rows = previous_stats.get("area_histogram_total_rows")
+    if not histogram_path.is_file():
+        return False
+    if previous_stats.get("area_histogram_input_sha256") != input_sha256:
+        return False
+    if previous_stats.get("area_histogram_render_version") != AREA_HISTOGRAM_RENDER_VERSION:
+        return False
+    return _is_nonnegative_int(total_rows)
+
+
+def _ensure_area_histogram(
+    data_root: Path,
+    stats: Mapping[str, Any],
+    previous_stats: Mapping[str, Any],
+) -> tuple[str, int]:
+    input_sha256 = _area_histogram_input_sha256(stats)
     histogram_path = data_root / _AREA_HISTOGRAM_ASSET_RELATIVE_PATH
-    histogram_input_sha256 = _area_histogram_input_sha256(stats)
-    can_reuse_histogram = (
-        histogram_path.is_file()
-        and previous_stats.get("area_histogram_input_sha256") == histogram_input_sha256
-        and previous_stats.get("area_histogram_render_version") == AREA_HISTOGRAM_RENDER_VERSION
-        and isinstance(previous_stats.get("area_histogram_total_rows"), int)
-        and not isinstance(previous_stats.get("area_histogram_total_rows"), bool)
-        and previous_stats["area_histogram_total_rows"] >= 0
-    )
-    if not can_reuse_histogram:
+    if not _histogram_cache_is_valid(histogram_path, previous_stats, input_sha256):
         _write_area_histogram_png(data_root)
-    stats["area_histogram_input_sha256"] = histogram_input_sha256
-    stats["area_histogram_render_version"] = AREA_HISTOGRAM_RENDER_VERSION
-    stats["area_histogram_total_rows"] = total_rows
+    return input_sha256, int(stats["rows"])
 
+
+def _write_dataset_hero(data_root: Path) -> None:
     _write_bytes_if_changed(
         data_root / _DATASET_CARD_HERO_ASSET_RELATIVE_PATH,
         dataset_card_hero().read_bytes(),
     )
+
+
+def _write_dataset_docs(
+    data_root: Path,
+    template_path: Path,
+    stats: dict[str, Any],
+) -> None:
     stats_json = json.dumps(stats, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     stats_sha256 = hashlib.sha256(stats_json.encode("utf-8")).hexdigest()
     template = template_path.read_text(encoding="utf-8")
@@ -301,10 +323,34 @@ def generate_dataset_docs(
     if H3_MAP_START_MARKER in readme and H3_MAP_END_MARKER in readme:
         readme = install_map_block(
             readme,
-            _render_h3_map_block(data_root, total_rows, occupied_cells),
+            _render_h3_map_block(data_root, int(stats["rows"]), int(stats["h3_occupied_cells"])),
         )
     _write_if_changed(data_root / "stats.json", stats_json)
     _write_if_changed(data_root / "README.md", readme)
+
+
+def generate_dataset_docs(
+    data_root: Path,
+    template_path: Path,
+    *,
+    clock: Callable[[], str] = utc_now_iso,
+) -> dict[str, Any]:
+    """Write deterministic stats, README, and derived media artifacts."""
+    stats = collect_stats(data_root, clock=clock)
+    total_rows = int(stats["rows"])
+    previous_stats = _read_json_object(data_root / "stats.json")
+    map_input_sha256, occupied_cells = _ensure_h3_map(data_root, total_rows, stats, previous_stats)
+    stats["h3_map_input_sha256"] = map_input_sha256
+    stats["h3_occupied_cells"] = occupied_cells
+
+    histogram_input_sha256, histogram_total_rows = _ensure_area_histogram(
+        data_root, stats, previous_stats
+    )
+    stats["area_histogram_input_sha256"] = histogram_input_sha256
+    stats["area_histogram_render_version"] = AREA_HISTOGRAM_RENDER_VERSION
+    stats["area_histogram_total_rows"] = histogram_total_rows
+    _write_dataset_hero(data_root)
+    _write_dataset_docs(data_root, template_path, stats)
     return stats
 
 

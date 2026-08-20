@@ -39,10 +39,18 @@ def load_land_basemap(path: Path | None = None) -> list[Any]:
     candidate = path or _bundled_basemap_path()
     if not candidate.is_file() or candidate.stat().st_size == 0:
         return []
+    payload = _read_basemap_payload(candidate)
+    return _features_from_payload(payload)
+
+
+def _read_basemap_payload(path: Path) -> object:
     try:
-        payload = json.loads(candidate.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return []
+        return None
+
+
+def _features_from_payload(payload: object) -> list[Any]:
     if not isinstance(payload, dict):
         return []
     features = payload.get("features")
@@ -71,19 +79,34 @@ def _draw_ring(ax: Any, ring: Sequence[Sequence[float]]) -> None:
 def draw_landmasses(ax: Any, features: Sequence[Any]) -> None:
     """Draw the outer rings of Natural Earth Polygon/MultiPolygon features."""
     for feature in features:
-        if not isinstance(feature, dict):
-            continue
-        geometry = feature.get("geometry")
-        if not isinstance(geometry, dict):
-            continue
-        geometry_type = geometry.get("type")
-        coordinates = geometry.get("coordinates")
-        if geometry_type == "Polygon" and isinstance(coordinates, list) and coordinates:
-            _draw_ring(ax, coordinates[0])
-        elif geometry_type == "MultiPolygon" and isinstance(coordinates, list):
-            for polygon in coordinates:
-                if isinstance(polygon, list) and polygon:
-                    _draw_ring(ax, polygon[0])
+        _draw_feature(ax, feature)
+
+
+def _draw_feature(ax: Any, feature: Any) -> None:
+    if not isinstance(feature, dict):
+        return
+    geometry = feature.get("geometry")
+    if not isinstance(geometry, dict):
+        return
+    geometry_type = geometry.get("type")
+    coordinates = geometry.get("coordinates")
+    if geometry_type == "Polygon":
+        _draw_polygon(ax, coordinates)
+    elif geometry_type == "MultiPolygon":
+        _draw_multipolygon(ax, coordinates)
+
+
+def _draw_polygon(ax: Any, coordinates: Any) -> None:
+    if isinstance(coordinates, list) and coordinates:
+        _draw_ring(ax, coordinates[0])
+
+
+def _draw_multipolygon(ax: Any, coordinates: Any) -> None:
+    if not isinstance(coordinates, list):
+        return
+    for polygon in coordinates:
+        if isinstance(polygon, list) and polygon:
+            _draw_ring(ax, polygon[0])
 
 
 __all__ = [

@@ -38,15 +38,7 @@ def descriptions_from_tags(
     key (excluding the empty suffix) with a non-empty value to its suffix.
     Suffixes are preserved verbatim and are never validated as language codes.
     """
-    base = tags.get("description")
-    if base is not None and not base.strip():
-        base = None
-    localized = {
-        key.removeprefix("description:"): value
-        for key, value in sorted(tags.items())
-        if key.startswith("description:") and key != "description:" and value.strip()
-    }
-    return base, localized
+    return _tag_values(tags, "description")
 
 
 def names_from_tags(tags: dict[str, str]) -> tuple[str | None, dict[str, str]]:
@@ -57,15 +49,24 @@ def names_from_tags(tags: dict[str, str]) -> tuple[str | None, dict[str, str]]:
     (excluding the empty suffix) with a non-empty value to its suffix.
     Suffixes are preserved verbatim and are never validated as language codes.
     """
-    base = tags.get("name")
-    if base is not None and not base.strip():
-        base = None
-    localized = {
-        key.removeprefix("name:"): value
+    return _tag_values(tags, "name")
+
+
+def _tag_values(tags: dict[str, str], prefix: str) -> tuple[str | None, dict[str, str]]:
+    return _clean_base_value(tags.get(prefix)), _localized_values(tags, prefix)
+
+
+def _clean_base_value(value: str | None) -> str | None:
+    return value if value is None or value.strip() else None
+
+
+def _localized_values(tags: dict[str, str], prefix: str) -> dict[str, str]:
+    marker = f"{prefix}:"
+    return {
+        key.removeprefix(marker): value
         for key, value in sorted(tags.items())
-        if key.startswith("name:") and key != "name:" and value.strip()
+        if key.startswith(marker) and key != marker and value.strip()
     }
-    return base, localized
 
 
 def geodesic_area_m2(geometry: BaseGeometry) -> float:
@@ -88,39 +89,43 @@ def _optional_timestamp(value: str | None) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
-def transform_record(record: ExportRecord, source_pbf: str) -> dict[str, object]:
-    """Transform one :class:`ExportRecord` into a typed schema record.
-
-    Raises :class:`RejectedFeature` with a stable reason code for any feature
-    that does not satisfy the inclusion contract.
-    """
+def _validate_record_identity(record: ExportRecord) -> None:
     if record.osm_type not in _OSM_TYPES:
         raise RejectedFeature("unsupported_osm_type")
     if record.osm_id <= 0:
         raise RejectedFeature("invalid_osm_id")
 
-    base, localized = descriptions_from_tags(record.tags)
-    if base is None and not localized:
-        raise RejectedFeature("no_nonempty_description")
 
-    name, localized_names = names_from_tags(record.tags)
-
+def _decode_polygon(record: ExportRecord) -> BaseGeometry:
     try:
         geometry = from_wkb(bytes.fromhex(record.geometry_ewkb_hex))
     except (ValueError, ShapelyError) as error:
         raise RejectedFeature("invalid_geometry") from error
-
     if geometry.geom_type not in {"Polygon", "MultiPolygon"}:
         raise RejectedFeature("non_polygon_geometry")
     if geometry.is_empty or not geometry.is_valid:
         raise RejectedFeature("invalid_geometry")
+    return geometry
 
-    oriented = orient(geometry)
-    area = geodesic_area_m2(oriented)
+
+def _validate_positive_area(geometry: BaseGeometry) -> float:
+    area = geodesic_area_m2(geometry)
     if not area > 0:
         raise RejectedFeature("nonpositive_area")
+    return area
 
-    min_x, min_y, max_x, max_y = oriented.bounds
+
+def _record_payload(
+    record: ExportRecord,
+    source_pbf: str,
+    geometry: BaseGeometry,
+    area: float,
+    base: str | None,
+    localized: dict[str, str],
+    name: str | None,
+    localized_names: dict[str, str],
+) -> dict[str, object]:
+    min_x, min_y, max_x, max_y = geometry.bounds
     osm_type = record.osm_type
     osm_id = record.osm_id
     return {
@@ -136,14 +141,41 @@ def transform_record(record: ExportRecord, source_pbf: str) -> dict[str, object]
         "description": base,
         "localized_descriptions": localized,
         "tags": record.tags,
-        "geometry_type": oriented.geom_type,
+        "geometry_type": geometry.geom_type,
         "area_m2": area,
         "bbox_min_x": min_x,
         "bbox_min_y": min_y,
         "bbox_max_x": max_x,
         "bbox_max_y": max_y,
-        "geometry": to_wkb(oriented, output_dimension=2),
+        "geometry": to_wkb(geometry, output_dimension=2),
     }
+
+
+def transform_record(record: ExportRecord, source_pbf: str) -> dict[str, object]:
+    """Transform one :class:`ExportRecord` into a typed schema record.
+
+    Raises :class:`RejectedFeature` with a stable reason code for any feature
+    that does not satisfy the inclusion contract.
+    """
+    _validate_record_identity(record)
+    base, localized = descriptions_from_tags(record.tags)
+    if base is None and not localized:
+        raise RejectedFeature("no_nonempty_description")
+
+    name, localized_names = names_from_tags(record.tags)
+    geometry = _decode_polygon(record)
+    oriented = orient(geometry)
+    area = _validate_positive_area(oriented)
+    return _record_payload(
+        record,
+        source_pbf,
+        oriented,
+        area,
+        base,
+        localized,
+        name,
+        localized_names,
+    )
 
 
 __all__ = [

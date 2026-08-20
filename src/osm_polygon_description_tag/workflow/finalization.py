@@ -143,34 +143,7 @@ def refresh_dataset_docs(
 def verify_final_completeness(paths: Paths, sources: Iterable[Source]) -> None:
     """Every discovered source must have a complete, resumable local artifact."""
     discovered = {source.name: source for source in sources}
-    completed: set[str] = set()
-    extra_artifacts: list[str] = []
-    missing_artifacts: list[str] = []
-    for parquet in sorted((paths.data_root / "data").glob("*.parquet")):
-        stem = parquet.name.removesuffix(".parquet")
-        source_name = f"{stem}.osm.pbf"
-        if source_name not in discovered:
-            extra_artifacts.append(stem)
-            continue
-        manifest_path = paths.data_root / "manifests" / f"{stem}.manifest.json"
-        if not manifest_path.is_file():
-            missing_artifacts.append(f"{stem}.manifest.json")
-            continue
-        try:
-            validate_geoparquet(parquet)
-            manifest = read_manifest(manifest_path)
-        except (StorageError, Exception):
-            missing_artifacts.append(f"{stem} (invalid manifest or parquet)")
-            continue
-        source = discovered[source_name]
-        if is_resumable(
-            manifest,
-            source_identity_for(source.path),
-            output_identity_for(parquet),
-        ):
-            completed.add(source_name)
-        else:
-            missing_artifacts.append(f"{stem} (not resumable)")
+    completed, extra_artifacts, missing_artifacts = _completeness_sets(paths, discovered)
     missing = set(discovered) - completed
     if missing or extra_artifacts or missing_artifacts:
         raise OrchestratorError(
@@ -178,6 +151,49 @@ def verify_final_completeness(paths: Paths, sources: Iterable[Source]) -> None:
             f"missing={sorted(missing)} extra={sorted(extra_artifacts)} "
             f"incomplete={sorted(missing_artifacts)}"
         )
+
+
+def _completeness_sets(
+    paths: Paths,
+    discovered: dict[str, Source],
+) -> tuple[set[str], list[str], list[str]]:
+    completed: set[str] = set()
+    extra_artifacts: list[str] = []
+    missing_artifacts: list[str] = []
+    for parquet in sorted((paths.data_root / "data").glob("*.parquet")):
+        completed_name, extra_name, missing_name = _inspect_artifact(paths, parquet, discovered)
+        _append_if_present(completed, completed_name)
+        _append_if_present(extra_artifacts, extra_name)
+        _append_if_present(missing_artifacts, missing_name)
+    return completed, extra_artifacts, missing_artifacts
+
+
+def _append_if_present(collection: set[str] | list[str], value: str | None) -> None:
+    if value is not None:
+        collection.add(value) if isinstance(collection, set) else collection.append(value)
+
+
+def _inspect_artifact(
+    paths: Paths,
+    parquet: Path,
+    discovered: dict[str, Source],
+) -> tuple[str | None, str | None, str | None]:
+    stem = parquet.name.removesuffix(".parquet")
+    source_name = f"{stem}.osm.pbf"
+    if source_name not in discovered:
+        return None, stem, None
+    manifest_path = paths.data_root / "manifests" / f"{stem}.manifest.json"
+    if not manifest_path.is_file():
+        return None, None, f"{stem}.manifest.json"
+    try:
+        validate_geoparquet(parquet)
+        manifest = read_manifest(manifest_path)
+    except (StorageError, Exception):
+        return None, None, f"{stem} (invalid manifest or parquet)"
+    source = discovered[source_name]
+    if is_resumable(manifest, source_identity_for(source.path), output_identity_for(parquet)):
+        return source_name, None, None
+    return None, None, f"{stem} (not resumable)"
 
 
 def upload_final_metadata(
@@ -197,45 +213,102 @@ def upload_final_metadata(
     metadata_plan = _build_metadata_only_upload_plan(paths.data_root)
     plan_validator(paths.data_root)
 
-    if _metadata_state_matches(paths.data_root, metadata_plan):
-        state_payload = _read_publication_state(paths.data_root)
-        metadata_state = _cast_dict(state_payload.get("metadata", {}))
-        revision = metadata_state.get("verified_revision")
-        if logger is not None:
-            logger.event(
-                "metadata_skip",
-                level="INFO",
-                verified_revision=str(revision) if revision else "",
-            )
-        return str(revision) if revision else None
+    skipped = _metadata_skip_revision(paths.data_root, metadata_plan, logger)
+    if skipped is not None:
+        return skipped
+    _log_metadata_start(logger)
+    _upload_metadata(metadata_plan, paths, upload_runner, upload_timeout, logger)
+    verified = _verify_metadata(metadata_plan, verifier, logger)
+    _persist_metadata_state(paths.data_root, metadata_plan, verified, clock)
+    _log_metadata_state(logger, verified)
+    return verified
 
+
+def _metadata_skip_revision(
+    data_root: Path, metadata_plan: UploadPlan, logger: RunLogger | None
+) -> str | None:
+    if not _metadata_state_matches(data_root, metadata_plan):
+        return None
+    state_payload = _read_publication_state(data_root)
+    metadata_state = _cast_dict(state_payload.get("metadata", {}))
+    revision = metadata_state.get("verified_revision")
+    if logger is not None:
+        logger.event(
+            "metadata_skip", level="INFO", verified_revision=str(revision) if revision else ""
+        )
+    return str(revision) if revision else None
+
+
+def _log_metadata_start(logger: RunLogger | None) -> None:
     if logger is not None:
         logger.event("metadata_upload_start", level="INFO")
+
+
+def _upload_metadata(
+    metadata_plan: UploadPlan,
+    paths: Paths,
+    upload_runner: Callable[[list[str]], str] | None,
+    upload_timeout: float | None,
+    logger: RunLogger | None,
+) -> None:
     try:
-        if upload_runner is None:
-            execute_upload(
-                metadata_plan,
-                confirmation=metadata_plan.identity_sha256,
-                timeout=upload_timeout,
-                retry_observer=(
-                    None
-                    if logger is None
-                    else lambda **fields: logger.event("upload_retry", stage="metadata", **fields)
-                ),
-            )
-        else:
-            revision = upload_runner(metadata_only_command(paths.data_root))
-            if not revision:
-                raise PublicationError("upload runner returned empty revision")
+        _run_metadata_upload(
+            metadata_plan,
+            paths,
+            upload_runner,
+            upload_timeout,
+            logger,
+        )
     except KeyboardInterrupt:
         raise
     except (PublicationError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         raise OrchestratorError(f"final metadata upload failed: {error}") from error
+    if logger is not None:
+        logger.event("metadata_upload_complete", level="INFO")
+
+
+def _run_metadata_upload(
+    metadata_plan: UploadPlan,
+    paths: Paths,
+    upload_runner: Callable[[list[str]], str] | None,
+    upload_timeout: float | None,
+    logger: RunLogger | None,
+) -> None:
+    if upload_runner is None:
+        execute_upload(
+            metadata_plan,
+            confirmation=metadata_plan.identity_sha256,
+            timeout=upload_timeout,
+            retry_observer=_metadata_retry_observer(logger),
+        )
+        return
+    revision = upload_runner(metadata_only_command(paths.data_root))
+    if not revision:
+        raise PublicationError("upload runner returned empty revision")
+
+
+def _metadata_retry_observer(logger: RunLogger | None) -> Callable[..., None] | None:
+    if logger is None:
+        return None
+    return lambda **fields: logger.event("upload_retry", stage="metadata", **fields)
+
+
+def _verify_metadata(
+    metadata_plan: UploadPlan,
+    verifier: HubVerifier | None,
+    logger: RunLogger | None,
+) -> str:
     if verifier is None:
         raise OrchestratorError("no Hub verifier supplied; cannot record final revision")
     if logger is not None:
-        logger.event("metadata_upload_complete", level="INFO")
         logger.event("metadata_verification_start", level="INFO")
+    verified = _call_metadata_verifier(verifier, metadata_plan)
+    if logger is not None:
+        logger.event("metadata_verification_complete", level="INFO", verified_revision=verified)
+    return verified
+
+
+def _call_metadata_verifier(verifier: HubVerifier, metadata_plan: UploadPlan) -> str:
     try:
         verified = verifier(REPO_ID, metadata_plan.files)
     except KeyboardInterrupt:
@@ -244,39 +317,43 @@ def upload_final_metadata(
         raise OrchestratorError(f"final Hub verifier failed: {error}") from error
     if not verified:
         raise OrchestratorError("Hub verifier returned no revision for final metadata")
-    if logger is not None:
-        logger.event(
-            "metadata_verification_complete",
-            level="INFO",
-            verified_revision=verified,
-        )
+    return verified
 
-    map_path = paths.data_root / H3_MAP_ASSET_RELATIVE
-    histogram_path = paths.data_root / AREA_HISTOGRAM_ASSET_RELATIVE
-    hero_path = paths.data_root / DATASET_CARD_HERO_ASSET_RELATIVE
+
+def _persist_metadata_state(
+    data_root: Path,
+    metadata_plan: UploadPlan,
+    verified: str,
+    clock: Callable[[], str],
+) -> None:
+    paths = {
+        "readme": data_root / "README.md",
+        "stats": data_root / "stats.json",
+        "h3_map": data_root / H3_MAP_ASSET_RELATIVE,
+        "histogram": data_root / AREA_HISTOGRAM_ASSET_RELATIVE,
+        "hero": data_root / DATASET_CARD_HERO_ASSET_RELATIVE,
+    }
     _write_metadata_state(
-        paths.data_root,
+        data_root,
         identity_sha256=metadata_plan.identity_sha256,
-        readme_sha256=file_sha256(paths.data_root / "README.md"),
-        stats_sha256=file_sha256(paths.data_root / "stats.json"),
-        readme_size_bytes=(paths.data_root / "README.md").stat().st_size,
-        stats_size_bytes=(paths.data_root / "stats.json").stat().st_size,
-        h3_map_sha256=file_sha256(map_path),
-        h3_map_size_bytes=map_path.stat().st_size,
-        area_histogram_sha256=file_sha256(histogram_path),
-        area_histogram_size_bytes=histogram_path.stat().st_size,
-        dataset_card_hero_sha256=file_sha256(hero_path),
-        dataset_card_hero_size_bytes=hero_path.stat().st_size,
+        readme_sha256=file_sha256(paths["readme"]),
+        stats_sha256=file_sha256(paths["stats"]),
+        readme_size_bytes=paths["readme"].stat().st_size,
+        stats_size_bytes=paths["stats"].stat().st_size,
+        h3_map_sha256=file_sha256(paths["h3_map"]),
+        h3_map_size_bytes=paths["h3_map"].stat().st_size,
+        area_histogram_sha256=file_sha256(paths["histogram"]),
+        area_histogram_size_bytes=paths["histogram"].stat().st_size,
+        dataset_card_hero_sha256=file_sha256(paths["hero"]),
+        dataset_card_hero_size_bytes=paths["hero"].stat().st_size,
         verified_revision=verified,
         completed_at=clock(),
     )
+
+
+def _log_metadata_state(logger: RunLogger | None, verified: str) -> None:
     if logger is not None:
-        logger.event(
-            "metadata_state_written",
-            level="INFO",
-            verified_revision=verified,
-        )
-    return verified
+        logger.event("metadata_state_written", level="INFO", verified_revision=verified)
 
 
 __all__ = ["refresh_dataset_docs", "upload_final_metadata", "verify_final_completeness"]

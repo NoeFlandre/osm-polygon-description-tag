@@ -26,6 +26,7 @@ import duckdb
 import pyarrow.parquet as pq
 
 from osm_polygon_description_tag.dataset.manifest import (
+    Manifest,
     file_sha256,
     output_identity_for,
     read_manifest,
@@ -64,19 +65,35 @@ class DeduplicationResult:
     files_changed: int
 
 
+@dataclass(frozen=True)
+class _DeduplicationContext:
+    data_root: Path
+    state_path: Path
+    state: Mapping[str, Any] | None
+    parquets: tuple[Path, ...]
+    manifests: dict[str, Manifest]
+    inputs: dict[str, str]
+    input_rows: int
+
+
 def _version(value: object) -> int:
     return int(value) if isinstance(value, int | float) else -1
 
 
-def _timestamp_rank(value: object) -> float:
+def _parse_timestamp(value: object) -> datetime | None:
     if isinstance(value, datetime):
-        parsed = value
-    elif isinstance(value, str) and value.strip():
-        try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            return 0.0
-    else:
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _timestamp_rank(value: object) -> float:
+    parsed = _parse_timestamp(value)
+    if parsed is None:
         return 0.0
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
@@ -162,6 +179,43 @@ def _complete_state_matches(state: Mapping[str, Any], current: Mapping[str, str]
     )
 
 
+def _promote_artifact(
+    stage_dir: Path,
+    data_root: Path,
+    relative: str,
+    expected_sha: str,
+) -> bool:
+    staged = stage_dir / relative
+    target = data_root / relative
+    if staged.is_file() and not staged.is_symlink():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(staged, target)
+        return True
+    if target.is_file() and file_sha256(target) == expected_sha:
+        return False
+    raise DeduplicationError(f"missing staged artifact: {staged}")
+
+
+def _promote_entry(
+    stage_dir: Path,
+    data_root: Path,
+    entry: Mapping[str, Any],
+    *,
+    promotion_hook: Callable[[int], None] | None,
+    promoted: int,
+) -> int:
+    artifacts = (
+        (str(entry["parquet"]), str(entry["parquet_sha256"])),
+        (str(entry["manifest"]), str(entry["manifest_sha256"])),
+    )
+    for relative, expected_sha in artifacts:
+        if _promote_artifact(stage_dir, data_root, relative, expected_sha):
+            promoted += 1
+            if promotion_hook is not None:
+                promotion_hook(promoted)
+    return promoted
+
+
 def _promote_staged(
     data_root: Path,
     state: Mapping[str, Any],
@@ -173,21 +227,13 @@ def _promote_staged(
         raise DeduplicationError(f"staged deduplication directory is missing: {stage_dir}")
     promoted = 0
     for entry in cast(list[dict[str, Any]], state["files"]):
-        for relative, expected_sha in (
-            (entry["parquet"], entry["parquet_sha256"]),
-            (entry["manifest"], entry["manifest_sha256"]),
-        ):
-            staged = stage_dir / relative
-            target = data_root / relative
-            if not staged.is_file() or staged.is_symlink():
-                if target.is_file() and file_sha256(target) == expected_sha:
-                    continue
-                raise DeduplicationError(f"missing staged artifact: {staged}")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(staged, target)
-            promoted += 1
-            if promotion_hook is not None:
-                promotion_hook(promoted)
+        promoted = _promote_entry(
+            stage_dir,
+            data_root,
+            entry,
+            promotion_hook=promotion_hook,
+            promoted=promoted,
+        )
     shutil.rmtree(stage_dir)
 
 
@@ -255,6 +301,199 @@ def _rows_for_source(
         yield from batch.to_pylist()
 
 
+def _skipped_result(
+    input_rows: int = 0,
+    output_rows: int = 0,
+    duplicate_rows: int = 0,
+) -> DeduplicationResult:
+    return DeduplicationResult("skipped", input_rows, output_rows, duplicate_rows, 0)
+
+
+def _validated_parquets(data_root: Path) -> tuple[Path, ...]:
+    data_dir = data_root / "data"
+    if not data_dir.is_dir() or not tuple(data_dir.glob("*.parquet")):
+        return ()
+    validated = validate_finalized_artifacts(data_root)
+    parquets = tuple(cast(Sequence[Path], validated["parquets"]))
+    for parquet in parquets:
+        validate_geoparquet(parquet)
+    return parquets
+
+
+def _complete_result(
+    state: Mapping[str, Any] | None,
+    inputs: Mapping[str, str],
+    parquets: Sequence[Path],
+) -> DeduplicationResult | None:
+    if state is None or not _complete_state_matches(state, inputs):
+        return None
+    output_rows = _current_output_rows(parquets)
+    return _skipped_result(
+        int(state.get("input_rows", output_rows)),
+        output_rows,
+        int(state.get("duplicate_rows", 0)),
+    )
+
+
+def _read_manifests(data_root: Path, parquets: Sequence[Path]) -> dict[str, Manifest]:
+    return {
+        parquet.name: read_manifest(data_root / "manifests" / f"{parquet.stem}.manifest.json")
+        for parquet in parquets
+    }
+
+
+def _prepare_context(
+    data_root: Path,
+    state_path: Path,
+    state: Mapping[str, Any] | None,
+) -> tuple[_DeduplicationContext | None, DeduplicationResult | None]:
+    parquets = _validated_parquets(data_root)
+    if not parquets:
+        return None, _skipped_result()
+    inputs = _input_hashes(parquets)
+    result = _complete_result(state, inputs, parquets)
+    if result is not None:
+        return None, result
+    manifests = _read_manifests(data_root, parquets)
+    return (
+        _DeduplicationContext(
+            data_root=data_root,
+            state_path=state_path,
+            state=state,
+            parquets=parquets,
+            manifests=manifests,
+            inputs=inputs,
+            input_rows=_current_output_rows(parquets),
+        ),
+        None,
+    )
+
+
+def _assert_known_sources(
+    connection: duckdb.DuckDBPyConnection,
+    manifests: Mapping[str, Manifest],
+) -> None:
+    source_names = {
+        str(value[0])
+        for value in connection.execute("SELECT DISTINCT source_pbf FROM deduplicated").fetchall()
+    }
+    manifest_source_names = {manifest.source.name for manifest in manifests.values()}
+    unknown_sources = source_names - manifest_source_names
+    if unknown_sources:
+        raise DeduplicationError(f"rows reference unknown source PBFs: {sorted(unknown_sources)}")
+
+
+def _stage_source(
+    connection: duckdb.DuckDBPyConnection,
+    parquet: Path,
+    manifest: Manifest,
+    stage_root: Path,
+) -> tuple[int, dict[str, Any] | None]:
+    old_rows = int(pq.ParquetFile(parquet).metadata.num_rows)
+    count_row = connection.execute(
+        "SELECT COUNT(*) FROM deduplicated WHERE source_pbf = ?",
+        [manifest.source.name],
+    ).fetchone()
+    new_rows = int(count_row[0] if count_row else 0)
+    dropped = old_rows - new_rows
+    if dropped <= 0:
+        return new_rows, None
+    staged_parquet = stage_root / "data" / parquet.name
+    staged_manifest = stage_root / "manifests" / f"{parquet.stem}.manifest.json"
+    write_geoparquet(
+        _rows_for_source(connection, manifest.source.name),
+        staged_parquet,
+        batch_size=_BATCH_SIZE,
+    )
+    rejection_counts = dict(manifest.counts.rejections)
+    rejection_counts[DUPLICATE_REJECTION_REASON] = (
+        rejection_counts.get(DUPLICATE_REJECTION_REASON, 0) + dropped
+    )
+    rewritten = replace(
+        manifest,
+        output=output_identity_for(staged_parquet),
+        counts=replace(
+            manifest.counts,
+            included_rows=new_rows,
+            rejections=dict(sorted(rejection_counts.items())),
+        ),
+    )
+    write_manifest(rewritten, staged_manifest)
+    return new_rows, {
+        "parquet": f"data/{parquet.name}",
+        "manifest": f"manifests/{staged_manifest.name}",
+        "parquet_sha256": file_sha256(staged_parquet),
+        "manifest_sha256": file_sha256(staged_manifest),
+        "duplicate_rows": dropped,
+    }
+
+
+def _stage_changes(
+    context: _DeduplicationContext,
+    stage_root: Path,
+) -> tuple[list[dict[str, Any]], int]:
+    changed: list[dict[str, Any]] = []
+    output_rows = 0
+    connection = duckdb.connect()
+    try:
+        _canonical_relation(connection, context.parquets)
+        _assert_known_sources(connection, context.manifests)
+        for parquet in context.parquets:
+            new_rows, record = _stage_source(
+                connection,
+                parquet,
+                context.manifests[parquet.name],
+                stage_root,
+            )
+            output_rows += new_rows
+            if record is not None:
+                changed.append(record)
+    finally:
+        connection.close()
+    return changed, output_rows
+
+
+def _state_payload(
+    context: _DeduplicationContext,
+    changed: list[dict[str, Any]],
+    output_rows: int,
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "policy_version": DEDUPLICATION_POLICY_VERSION,
+        "policy_sha256": DEDUPLICATION_POLICY_SHA256,
+        "status": "staged" if changed else "complete",
+        "inputs": dict(sorted(context.inputs.items())),
+        "outputs": dict(sorted(context.inputs.items())) if not changed else {},
+        "input_rows": context.input_rows,
+        "output_rows": output_rows,
+        "duplicate_rows": context.input_rows - output_rows,
+        "files": changed,
+    }
+
+
+def _finish_deduplication(
+    context: _DeduplicationContext,
+    stage_dir: Path,
+    state: dict[str, object],
+    changed: list[dict[str, Any]],
+    output_rows: int,
+    promotion_hook: Callable[[int], None] | None,
+) -> DeduplicationResult:
+    if changed:
+        state["stage_dir"] = stage_dir.as_posix()
+        _write_state(context.state_path, state)
+        return _resume_staged(
+            context.data_root,
+            context.state_path,
+            state,
+            promotion_hook=promotion_hook,
+        )
+    state["outputs"] = dict(sorted(context.inputs.items()))
+    _write_state(context.state_path, state)
+    return _skipped_result(context.input_rows, output_rows)
+
+
 def deduplicate_dataset(
     data_root: Path,
     *,
@@ -265,120 +504,24 @@ def deduplicate_dataset(
     state = _read_state(state_path)
     if state is not None and state.get("status") == "staged":
         return _resume_staged(data_root, state_path, state, promotion_hook=promotion_hook)
-    data_dir = data_root / "data"
-    if not data_dir.is_dir() or not tuple(data_dir.glob("*.parquet")):
-        return DeduplicationResult("skipped", 0, 0, 0, 0)
-    validated = validate_finalized_artifacts(data_root)
-    parquets = tuple(cast(Sequence[Path], validated["parquets"]))
-    if not parquets:
-        return DeduplicationResult("skipped", 0, 0, 0, 0)
-    for parquet in parquets:
-        validate_geoparquet(parquet)
-    inputs = _input_hashes(parquets)
-    if state is not None and _complete_state_matches(state, inputs):
-        output_rows = _current_output_rows(parquets)
-        return DeduplicationResult(
-            "skipped",
-            int(state.get("input_rows", output_rows)),
-            output_rows,
-            int(state.get("duplicate_rows", 0)),
-            0,
-        )
-
-    manifests = {
-        parquet.name: read_manifest(data_root / "manifests" / f"{parquet.stem}.manifest.json")
-        for parquet in parquets
-    }
-    input_rows = _current_output_rows(parquets)
+    context, result = _prepare_context(data_root, state_path, state)
+    if result is not None:
+        return result
+    if context is None:
+        raise DeduplicationError("deduplication context was not created")
     stage_token = uuid.uuid4().hex
     stage_dir = Path(".work") / "dedup" / stage_token
     stage_root = data_root / stage_dir
-    changed: list[dict[str, Any]] = []
-    output_rows = 0
-    connection = duckdb.connect()
-    try:
-        _canonical_relation(connection, parquets)
-        source_names = {
-            str(value[0])
-            for value in connection.execute(
-                "SELECT DISTINCT source_pbf FROM deduplicated"
-            ).fetchall()
-        }
-        manifest_source_names = {manifest.source.name for manifest in manifests.values()}
-        unknown_sources = source_names - manifest_source_names
-        if unknown_sources:
-            raise DeduplicationError(
-                f"rows reference unknown source PBFs: {sorted(unknown_sources)}"
-            )
-        for parquet in parquets:
-            manifest = manifests[parquet.name]
-            old_rows = int(pq.ParquetFile(parquet).metadata.num_rows)
-            count_row = connection.execute(
-                "SELECT COUNT(*) FROM deduplicated WHERE source_pbf = ?",
-                [manifest.source.name],
-            ).fetchone()
-            new_rows = int(count_row[0] if count_row else 0)
-            output_rows += new_rows
-            dropped = old_rows - new_rows
-            if dropped <= 0:
-                continue
-            staged_parquet = stage_root / "data" / parquet.name
-            staged_manifest = stage_root / "manifests" / f"{parquet.stem}.manifest.json"
-            write_geoparquet(
-                _rows_for_source(connection, manifest.source.name),
-                staged_parquet,
-                batch_size=_BATCH_SIZE,
-            )
-            rejection_counts = dict(manifest.counts.rejections)
-            rejection_counts[DUPLICATE_REJECTION_REASON] = (
-                rejection_counts.get(DUPLICATE_REJECTION_REASON, 0) + dropped
-            )
-            rewritten = replace(
-                manifest,
-                output=output_identity_for(staged_parquet),
-                counts=replace(
-                    manifest.counts,
-                    included_rows=new_rows,
-                    rejections=dict(sorted(rejection_counts.items())),
-                ),
-            )
-            write_manifest(rewritten, staged_manifest)
-            changed.append(
-                {
-                    "parquet": f"data/{parquet.name}",
-                    "manifest": f"manifests/{staged_manifest.name}",
-                    "parquet_sha256": file_sha256(staged_parquet),
-                    "manifest_sha256": file_sha256(staged_manifest),
-                    "duplicate_rows": dropped,
-                }
-            )
-    finally:
-        connection.close()
-
-    state_payload: dict[str, object] = {
-        "schema_version": 1,
-        "policy_version": DEDUPLICATION_POLICY_VERSION,
-        "policy_sha256": DEDUPLICATION_POLICY_SHA256,
-        "status": "staged" if changed else "complete",
-        "inputs": dict(sorted(inputs.items())),
-        "outputs": dict(sorted(inputs.items())) if not changed else {},
-        "input_rows": input_rows,
-        "output_rows": output_rows,
-        "duplicate_rows": input_rows - output_rows,
-        "files": changed,
-    }
-    if changed:
-        state_payload["stage_dir"] = stage_dir.as_posix()
-        _write_state(state_path, state_payload)
-        return _resume_staged(
-            data_root,
-            state_path,
-            state_payload,
-            promotion_hook=promotion_hook,
-        )
-    state_payload["outputs"] = dict(sorted(inputs.items()))
-    _write_state(state_path, state_payload)
-    return DeduplicationResult("skipped", input_rows, output_rows, 0, 0)
+    changed, output_rows = _stage_changes(context, stage_root)
+    state_payload = _state_payload(context, changed, output_rows)
+    return _finish_deduplication(
+        context,
+        stage_dir,
+        state_payload,
+        changed,
+        output_rows,
+        promotion_hook,
+    )
 
 
 __all__ = [

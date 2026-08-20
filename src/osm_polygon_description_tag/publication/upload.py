@@ -21,14 +21,18 @@ from osm_polygon_description_tag.publication.models import (
 
 def _verify_identity(plan: UploadPlan) -> None:
     for item in plan.files:
-        path = Path(plan.data_root) / item.relative_path
-        if path.is_symlink() or not path.is_file():
-            raise PublicationError(f"artifact missing for upload: {path}")
-        stat = path.stat()
-        if stat.st_size != item.size_bytes:
-            raise PublicationError(f"size drift for {path}")
-        if file_sha256(path) != item.sha256:
-            raise PublicationError(f"checksum drift for {path}")
+        _verify_item_identity(plan, item.relative_path, item.size_bytes, item.sha256)
+
+
+def _verify_item_identity(plan: UploadPlan, relative_path: str, size: int, checksum: str) -> None:
+    path = Path(plan.data_root) / relative_path
+    if path.is_symlink() or not path.is_file():
+        raise PublicationError(f"artifact missing for upload: {path}")
+    stat = path.stat()
+    if stat.st_size != size:
+        raise PublicationError(f"size drift for {path}")
+    if file_sha256(path) != checksum:
+        raise PublicationError(f"checksum drift for {path}")
 
 
 def _build_command(plan: UploadPlan) -> list[str]:
@@ -55,18 +59,27 @@ def _classify_failure(
     error: object,
 ) -> tuple[bool, int | None, str]:
     """Return (retryable, exit_code, kind) for a subprocess error."""
-    completed = getattr(error, "completed", None)
-    if completed is None and isinstance(error, subprocess.CalledProcessError):
-        completed = error
+    completed = _completed_process(error)
     if completed is None:
         return False, None, "exception"
     returncode = getattr(completed, "returncode", None)
     if isinstance(returncode, int) and returncode in RETRYABLE_EXIT_CODES:
         return True, returncode, "exit_code"
-    output = (getattr(completed, "stderr", b"") or b"").decode("utf-8", errors="replace").lower()
-    if "timeout" in output:
+    if _contains_timeout(completed):
         return True, returncode, "timeout"
     return False, returncode, "exit_code"
+
+
+def _completed_process(error: object) -> object | None:
+    completed = getattr(error, "completed", None)
+    if completed is None and isinstance(error, subprocess.CalledProcessError):
+        return error
+    return completed
+
+
+def _contains_timeout(completed: object) -> bool:
+    output = (getattr(completed, "stderr", b"") or b"").decode("utf-8", errors="replace").lower()
+    return "timeout" in output
 
 
 class _RetryRunner(Protocol):
@@ -109,15 +122,7 @@ def _run_with_retry(
     delay = backoff_seconds
 
     def _invoke() -> None:
-        if _runner is None:
-            subprocess.run(  # noqa: S603 - controlled argument array, no shell
-                command,
-                check=True,
-                shell=False,
-                timeout=timeout,
-            )
-            return
-        _runner(command, timeout)
+        _invoke_runner(command, timeout, _runner)
 
     while True:
         try:
@@ -125,35 +130,84 @@ def _run_with_retry(
             return
         except KeyboardInterrupt:
             raise
-        except subprocess.CalledProcessError as error:
-            retryable, exit_code, kind = _classify_failure(error)
-            if not retryable or attempt >= max_retries:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            retryable, exit_code, kind = _failure_details(error)
+            decision = _called_error_retry(
+                retryable,
+                attempt,
+                max_retries,
+                delay,
+                backoff_cap_seconds,
+            )
+            if decision is None:
                 raise
-            attempt += 1
-            bounded_delay = min(delay, backoff_cap_seconds)
-            if retry_observer is not None:
-                retry_observer(
-                    attempt=attempt,
-                    kind=kind,
-                    exit_code=exit_code,
-                    delay_seconds=bounded_delay,
-                )
-            time.sleep(bounded_delay)
-            delay *= backoff_factor
-        except subprocess.TimeoutExpired:
-            if attempt >= max_retries:
-                raise
-            attempt += 1
-            bounded_delay = min(delay, backoff_cap_seconds)
-            if retry_observer is not None:
-                retry_observer(
-                    attempt=attempt,
-                    kind="timeout",
-                    exit_code=None,
-                    delay_seconds=bounded_delay,
-                )
-            time.sleep(bounded_delay)
-            delay *= backoff_factor
+            attempt, delay = _sleep_before_retry(
+                attempt,
+                delay,
+                backoff_factor,
+                decision,
+                kind,
+                exit_code,
+                retry_observer,
+            )
+
+
+def _failure_details(
+    error: subprocess.CalledProcessError | subprocess.TimeoutExpired,
+) -> tuple[bool, int | None, str]:
+    if isinstance(error, subprocess.TimeoutExpired):
+        return True, None, "timeout"
+    return _classify_failure(error)
+
+
+def _invoke_runner(
+    command: list[str],
+    timeout: float | None,
+    runner: Callable[[list[str], float | None], None] | None,
+) -> None:
+    if runner is None:
+        subprocess.run(  # noqa: S603 - controlled argument array, no shell
+            command,
+            check=True,
+            shell=False,
+            timeout=timeout,
+        )
+        return
+    runner(command, timeout)
+
+
+def _called_error_retry(
+    retryable: bool,
+    attempt: int,
+    max_retries: int,
+    delay: float,
+    cap: float,
+) -> tuple[float, float] | None:
+    if not retryable or attempt >= max_retries:
+        return None
+    return (min(delay, cap), delay)
+
+
+def _sleep_before_retry(
+    attempt: int,
+    delay: float,
+    factor: float,
+    decision: tuple[float, float],
+    kind: str,
+    exit_code: int | None,
+    retry_observer: Callable[..., None] | None,
+) -> tuple[int, float]:
+    attempt += 1
+    bounded_delay, current_delay = decision
+    if retry_observer is not None:
+        retry_observer(
+            attempt=attempt,
+            kind=kind,
+            exit_code=exit_code,
+            delay_seconds=bounded_delay,
+        )
+    time.sleep(bounded_delay)
+    return attempt, current_delay * factor
 
 
 _default_runner_with_retry: _RetryRunner = _run_with_retry
@@ -177,23 +231,33 @@ def execute_upload(
     The ``--include`` list is derived strictly from the plan's items (no
     wildcards), so previously uploaded artifacts are not re-sent.
     """
+    _require_confirmation(plan, confirmation)
+    _verify_identity(plan)
+    command = _build_command(plan)
+    if runner is None:
+        _run_default_upload(command, timeout, retry_observer)
+    else:
+        _run_injected_upload(runner, command)
+
+
+def _require_confirmation(plan: UploadPlan, confirmation: str | None) -> None:
     if confirmation is None:
         raise PublicationError("confirmation required (must match freshly computed plan identity)")
     if confirmation != plan.identity_sha256:
         raise PublicationError("confirmation does not match plan identity (refusing to upload)")
-    _verify_identity(plan)
-    command = _build_command(plan)
-    if runner is None:
-        try:
-            _default_runner_with_retry(
-                command,
-                timeout=timeout,
-                retry_observer=retry_observer,
-            )
-        except TypeError as error:
-            # Compatibility for injected legacy runners used by embedders.
-            if "unexpected keyword argument 'retry_observer'" not in str(error):
-                raise
-            _default_runner_with_retry(command, timeout=timeout)
-    else:
-        runner(command)
+
+
+def _run_default_upload(
+    command: list[str], timeout: float | None, retry_observer: Callable[..., None] | None
+) -> None:
+    try:
+        _default_runner_with_retry(command, timeout=timeout, retry_observer=retry_observer)
+    except TypeError as error:
+        # Compatibility for injected legacy runners used by embedders.
+        if "unexpected keyword argument 'retry_observer'" not in str(error):
+            raise
+        _default_runner_with_retry(command, timeout=timeout)
+
+
+def _run_injected_upload(runner: Runner, command: list[str]) -> None:
+    runner(command)

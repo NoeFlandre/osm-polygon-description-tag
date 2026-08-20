@@ -10,6 +10,8 @@ from shapely.geometry import Polygon
 from osm_polygon_description_tag.dataset.schema import SCHEMA
 from osm_polygon_description_tag.dataset.storage import (
     StorageError,
+    _validate_area,
+    _validate_geometry,
     validate_geoparquet,
     write_geoparquet,
 )
@@ -239,6 +241,18 @@ def test_validate_detects_undecodable_wkb(tmp_path: Path) -> None:
 
     with pytest.raises(StorageError, match="undecodable"):
         validate_geoparquet(target)
+
+
+def test_row_geometry_and_area_helpers_accept_valid_values() -> None:
+    _validate_geometry(_POLYGON_WKB, "Polygon")
+    _validate_area(1.0)
+
+
+def test_row_geometry_and_area_helpers_reject_invalid_values() -> None:
+    with pytest.raises(StorageError, match="geometry_type/WKB"):
+        _validate_geometry(_POLYGON_WKB, "MultiPolygon")
+    with pytest.raises(StorageError, match="non-positive"):
+        _validate_area(0.0)
 
 
 def test_validate_detects_mixed_source_pbf(tmp_path: Path) -> None:

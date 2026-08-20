@@ -77,10 +77,26 @@ def _geometry_centroid(wkb: bytes | None) -> tuple[float, float] | None:
     """
     if wkb is None:
         return None
+    geometry = _decode_geometry(wkb)
+    _validate_geometry(geometry)
+    point = geometry.centroid
+    _validate_centroid(point)
+    lon = float(point.x)
+    lat = float(point.y)
+    if not (math.isfinite(lon) and math.isfinite(lat)):
+        raise H3AggregationError(f"non-finite centroid: lon={lon!r}, lat={lat!r}")
+    return lon, lat
+
+
+def _decode_geometry(wkb: bytes) -> BaseGeometry:
     try:
         geometry = from_wkb(wkb)
     except (ValueError, ShapelyError) as error:
         raise H3AggregationError(f"malformed WKB: {error}") from error
+    return geometry
+
+
+def _validate_geometry(geometry: BaseGeometry) -> None:
     if not isinstance(geometry, BaseGeometry):
         raise H3AggregationError(f"unsupported geometry type: {type(geometry).__name__}")
     if geometry.is_empty or not geometry.is_valid:
@@ -89,14 +105,11 @@ def _geometry_centroid(wkb: bytes | None) -> tuple[float, float] | None:
         raise H3AggregationError(
             f"unsupported geometry type for H3 density map: {geometry.geom_type!r}"
         )
-    point = geometry.centroid
+
+
+def _validate_centroid(point: BaseGeometry) -> None:
     if point.is_empty or not point.is_valid:
         raise H3AggregationError("could not derive a finite centroid")
-    lon = float(point.x)
-    lat = float(point.y)
-    if not (math.isfinite(lon) and math.isfinite(lat)):
-        raise H3AggregationError(f"non-finite centroid: lon={lon!r}, lat={lat!r}")
-    return lon, lat
 
 
 def iter_centroids(

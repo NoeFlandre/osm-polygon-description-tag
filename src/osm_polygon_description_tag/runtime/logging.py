@@ -126,6 +126,61 @@ def _utcnow_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _ensure_log_directory(subdir: Path) -> None:
+    if subdir.exists() or subdir.is_symlink():
+        if subdir.is_symlink() or not subdir.is_dir():
+            raise ValueError(f"logs path is not a regular directory: {subdir}")
+        return
+    subdir.mkdir(parents=True, exist_ok=False)
+
+
+def _validate_active_log(active: Path) -> None:
+    if active.is_symlink() or (active.exists() and not active.is_file()):
+        raise ValueError(f"active log must be a regular file: {active}")
+
+
+def _rotation_needed(path: Path, max_bytes: int) -> bool:
+    return path.stat().st_size >= max_bytes
+
+
+def _backup_chain(subdir: Path, backups: int) -> list[Path]:
+    return [subdir / f"run-and-publish.{n}.jsonl" for n in range(1, backups + 1)]
+
+
+def _validate_rotation_paths(active: Path, backup_chain: Iterable[Path]) -> None:
+    for backup in backup_chain:
+        if backup.is_symlink():
+            raise ValueError(f"backup path is a symlink: {backup}")
+    _validate_active_log(active)
+
+
+def _shift_backups(backup_chain: list[Path]) -> None:
+    for index in range(len(backup_chain) - 1, 0, -1):
+        src = backup_chain[index - 1]
+        dst = backup_chain[index]
+        if src.exists() and src.is_file():
+            os.replace(src, dst)
+
+
+def _create_active_log(subdir: Path, active_name: str) -> Path:
+    new_active = subdir / active_name
+    fd = os.open(str(new_active), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    os.close(fd)
+    _fsync_directory(subdir)
+    return new_active
+
+
+def _fsync_directory(directory: Path) -> None:
+    try:
+        dir_fd = os.open(str(directory), os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except OSError:
+        pass
+
+
 class RunLogger:
     """Typed event sink with bounded atomic rotation.
 
@@ -247,14 +302,9 @@ class RunLogger:
         if self._handle is not None:
             return
         subdir = self._data_root / self.SUBDIR_NAME
-        if subdir.exists() or subdir.is_symlink():
-            if subdir.is_symlink() or not subdir.is_dir():
-                raise ValueError(f"logs path is not a regular directory: {subdir}")
-        else:
-            subdir.mkdir(parents=True, exist_ok=False)
+        _ensure_log_directory(subdir)
         active = subdir / self.ACTIVE_NAME
-        if active.is_symlink() or (active.exists() and not active.is_file()):
-            raise ValueError(f"active log must be a regular file: {active}")
+        _validate_active_log(active)
         self._path = active
         self._handle = open(active, "ab", buffering=0)  # noqa: SIM115
 
@@ -285,52 +335,31 @@ class RunLogger:
         with self._lock:
             if self._handle is None or self._path is None:
                 return
-            if self._path.is_symlink() or not self._path.is_file():
-                raise ValueError(f"active log must be a regular file: {self._path}")
-            if self._path.stat().st_size >= self._max_bytes:
+            _validate_active_log(self._path)
+            if _rotation_needed(self._path, self._max_bytes):
                 self._rotate_locked()
 
-    def _rotate_locked(self) -> None:
+    def _close_active_for_rotation(self) -> None:
         assert self._handle is not None
-        assert self._path is not None
         self._handle.flush()
         with contextlib.suppress(OSError):
             os.fsync(self._handle.fileno())
         self._handle.close()
         self._handle = None
+
+    def _rotate_locked(self) -> None:
+        assert self._handle is not None
+        assert self._path is not None
+        self._close_active_for_rotation()
         subdir = self._path.parent
-        backup_chain = [subdir / f"run-and-publish.{n}.jsonl" for n in range(1, self._backups + 1)]
+        backup_chain = _backup_chain(subdir, self._backups)
         staging = subdir / f".run-and-publish.rotate.{uuid.uuid4().hex}.jsonl"
-        # Reject any unsafe state up front.
-        for backup in backup_chain:
-            if backup.is_symlink():
-                raise ValueError(f"backup path is a symlink: {backup}")
-        if self._path.is_symlink() or not self._path.is_file():
-            raise ValueError(f"active log must be a regular file: {self._path}")
-        # Stage a hard link to the current active file, never copy contents.
+        _validate_rotation_paths(self._path, backup_chain)
         os.link(self._path, staging)
-        # Remove the active file so the chain replaces can swap in.
         self._path.unlink()
-        # Shift backwards: replace (n) -> (n+1) freeing slot 1.
-        for index in range(self._backups - 1, 0, -1):
-            src = backup_chain[index - 1]
-            dst = backup_chain[index]
-            if not src.exists() or not src.is_file():
-                continue
-            os.replace(src, dst)
+        _shift_backups(backup_chain)
         os.replace(staging, backup_chain[0])
-        # Recreate a fresh empty active file owned by this run.
-        new_active = subdir / self.ACTIVE_NAME
-        fd = os.open(str(new_active), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        os.close(fd)
-        try:
-            dir_fd = os.open(str(subdir), os.O_RDONLY)
-            try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
-        except OSError:
-            pass
+        new_active = _create_active_log(subdir, self.ACTIVE_NAME)
         self._handle = open(new_active, "ab", buffering=0)  # noqa: SIM115
         self._path = new_active
 

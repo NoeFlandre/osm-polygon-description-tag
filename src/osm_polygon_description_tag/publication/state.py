@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 from typing import cast
 
+from osm_polygon_description_tag.dataset.manifest import file_sha256
 from osm_polygon_description_tag.publication.models import UploadPlan
 from osm_polygon_description_tag.publication.planning import (
     AREA_HISTOGRAM_ASSET_RELATIVE,
@@ -95,42 +96,38 @@ def _metadata_state_matches(data_root: Path, metadata_plan: UploadPlan) -> bool:
         return False
     if metadata.get("identity_sha256") != metadata_plan.identity_sha256:
         return False
-    readme_path = data_root / "README.md"
-    stats_path = data_root / "stats.json"
-    map_path = data_root / H3_MAP_ASSET_RELATIVE_PATH
-    histogram_path = data_root / AREA_HISTOGRAM_ASSET_RELATIVE_PATH
-    hero_path = data_root / DATASET_CARD_HERO_ASSET_RELATIVE_PATH
-    if (
-        not readme_path.is_file()
-        or not stats_path.is_file()
-        or not map_path.is_file()
-        or not histogram_path.is_file()
-        or not hero_path.is_file()
-    ):
+    paths = _metadata_paths(data_root)
+    if not _metadata_files_exist(paths):
         return False
-    from osm_polygon_description_tag.dataset.manifest import file_sha256
+    return _metadata_identity_matches(cast(dict[str, object], metadata), paths)
 
-    expected_readme_sha = file_sha256(readme_path)
-    expected_stats_sha = file_sha256(stats_path)
-    expected_map_sha = file_sha256(map_path)
-    expected_histogram_sha = file_sha256(histogram_path)
-    expected_hero_sha = file_sha256(hero_path)
-    if metadata.get("readme_sha256") != expected_readme_sha:
-        return False
-    if metadata.get("stats_sha256") != expected_stats_sha:
-        return False
-    if metadata.get(_H3_MAP_SHA256_FIELD) != expected_map_sha:
-        return False
-    if metadata.get(_AREA_HISTOGRAM_SHA256_FIELD) != expected_histogram_sha:
-        return False
-    if metadata.get(_DATASET_CARD_HERO_SHA256_FIELD) != expected_hero_sha:
-        return False
-    return (
-        metadata.get("readme_size_bytes") == readme_path.stat().st_size
-        and metadata.get("stats_size_bytes") == stats_path.stat().st_size
-        and metadata.get(_H3_MAP_SIZE_FIELD) == map_path.stat().st_size
-        and metadata.get(_AREA_HISTOGRAM_SIZE_FIELD) == histogram_path.stat().st_size
-        and metadata.get(_DATASET_CARD_HERO_SIZE_FIELD) == hero_path.stat().st_size
+
+def _metadata_paths(data_root: Path) -> dict[str, Path]:
+    return {
+        "readme": data_root / "README.md",
+        "stats": data_root / "stats.json",
+        "h3_map": data_root / H3_MAP_ASSET_RELATIVE_PATH,
+        "area_histogram": data_root / AREA_HISTOGRAM_ASSET_RELATIVE_PATH,
+        "hero": data_root / DATASET_CARD_HERO_ASSET_RELATIVE_PATH,
+    }
+
+
+def _metadata_files_exist(paths: dict[str, Path]) -> bool:
+    return all(path.is_file() and not path.is_symlink() for path in paths.values())
+
+
+def _metadata_identity_matches(metadata: dict[str, object], paths: dict[str, Path]) -> bool:
+    fields = {
+        "readme": ("readme_sha256", "readme_size_bytes"),
+        "stats": ("stats_sha256", "stats_size_bytes"),
+        "h3_map": (_H3_MAP_SHA256_FIELD, _H3_MAP_SIZE_FIELD),
+        "area_histogram": (_AREA_HISTOGRAM_SHA256_FIELD, _AREA_HISTOGRAM_SIZE_FIELD),
+        "hero": (_DATASET_CARD_HERO_SHA256_FIELD, _DATASET_CARD_HERO_SIZE_FIELD),
+    }
+    return all(
+        metadata.get(sha_field) == file_sha256(paths[name])
+        and metadata.get(size_field) == paths[name].stat().st_size
+        for name, (sha_field, size_field) in fields.items()
     )
 
 
@@ -151,11 +148,7 @@ def _write_metadata_state(
     verified_revision: str,
     completed_at: str,
 ) -> dict[str, object]:
-    state = read_publication_state(data_root)
-    if state.get("schema_version") != 1:
-        raise PublicationStateError(
-            f"unsupported publication state schema: {state.get('schema_version')!r}"
-        )
+    state = _current_state(data_root)
     payload: dict[str, object] = {
         "identity_sha256": identity_sha256,
         "readme_sha256": readme_sha256,
@@ -165,22 +158,38 @@ def _write_metadata_state(
         "verified_revision": verified_revision,
         "completed_at": completed_at,
     }
-    if h3_map_sha256 is not None:
-        payload[_H3_MAP_SHA256_FIELD] = h3_map_sha256
-    if h3_map_size_bytes is not None:
-        payload[_H3_MAP_SIZE_FIELD] = h3_map_size_bytes
-    if area_histogram_sha256 is not None:
-        payload[_AREA_HISTOGRAM_SHA256_FIELD] = area_histogram_sha256
-    if area_histogram_size_bytes is not None:
-        payload[_AREA_HISTOGRAM_SIZE_FIELD] = area_histogram_size_bytes
-    if dataset_card_hero_sha256 is not None:
-        payload[_DATASET_CARD_HERO_SHA256_FIELD] = dataset_card_hero_sha256
-    if dataset_card_hero_size_bytes is not None:
-        payload[_DATASET_CARD_HERO_SIZE_FIELD] = dataset_card_hero_size_bytes
+    _add_optional_metadata_fields(
+        payload,
+        (
+            (_H3_MAP_SHA256_FIELD, h3_map_sha256),
+            (_H3_MAP_SIZE_FIELD, h3_map_size_bytes),
+            (_AREA_HISTOGRAM_SHA256_FIELD, area_histogram_sha256),
+            (_AREA_HISTOGRAM_SIZE_FIELD, area_histogram_size_bytes),
+            (_DATASET_CARD_HERO_SHA256_FIELD, dataset_card_hero_sha256),
+            (_DATASET_CARD_HERO_SIZE_FIELD, dataset_card_hero_size_bytes),
+        ),
+    )
     state["metadata"] = payload
     state["last_updated_at"] = completed_at
     _atomic_write_json(data_root / PUBLICATION_STATE_FILENAME, state)
     return state
+
+
+def _current_state(data_root: Path) -> dict[str, object]:
+    state = read_publication_state(data_root)
+    if state.get("schema_version") != 1:
+        raise PublicationStateError(
+            f"unsupported publication state schema: {state.get('schema_version')!r}"
+        )
+    return state
+
+
+def _add_optional_metadata_fields(
+    payload: dict[str, object], fields: tuple[tuple[str, object | None], ...]
+) -> None:
+    for key, value in fields:
+        if value is not None:
+            payload[key] = value
 
 
 def cast_dict(value: object) -> dict[str, object]:

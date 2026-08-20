@@ -76,6 +76,10 @@ def project_code_revision() -> str | None:
     import shutil
 
     git_executable = shutil.which("git") or "git"
+    return _read_git_revision(root, git_executable)
+
+
+def _read_git_revision(root: Path, git_executable: str) -> str | None:
     try:
         completed = subprocess.run(  # noqa: S603 - controlled args, no shell
             [git_executable, "-C", str(root), "rev-parse", "HEAD"],
@@ -86,7 +90,11 @@ def project_code_revision() -> str | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    if completed.returncode != 0:
+    return _revision_from_process(completed.returncode, completed.stdout)
+
+
+def _revision_from_process(returncode: int, stdout: str) -> str | None:
+    if returncode != 0:
         return None
-    revision = completed.stdout.strip()
+    revision = stdout.strip()
     return revision or None

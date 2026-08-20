@@ -39,6 +39,7 @@ from osm_polygon_description_tag.dataset.geography.area_histogram import (
 )
 from osm_polygon_description_tag.dataset.geography.area_rendering import (
     _atomic_save_png,
+    _format_count_tick,
     atomic_save_png_for_testing,
 )
 from osm_polygon_description_tag.dataset.manifest import (
@@ -142,6 +143,13 @@ def test_bucket_index_handles_above_highest_edge() -> None:
 def test_top_edge_uses_inclusive_last_bucket_label() -> None:
     """The final bucket label describes values at the inclusive top edge."""
     assert AREA_BUCKET_LABELS[-1] == ">=100B m²"
+
+
+def test_format_count_tick_uses_human_scale_units() -> None:
+    assert _format_count_tick(12.0) == "12"
+    assert _format_count_tick(1_200.0) == "1.2k"
+    assert _format_count_tick(2_000.0) == "2k"
+    assert _format_count_tick(1_500_000.0) == "1.5M"
 
 
 def test_bucket_index_handles_negative_values() -> None:

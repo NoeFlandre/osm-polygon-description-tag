@@ -67,28 +67,18 @@ def _integer(value: object) -> int:
 
 def build_retrospective_points(stats: Mapping[str, Any]) -> list[dict[str, object]]:
     """Build deterministic cumulative per-file metrics from ``stats.json``."""
-    files = stats.get("files", [])
-    if not isinstance(files, Sequence) or isinstance(files, str | bytes | bytearray):
-        return []
-    ordered = sorted(
-        (entry for entry in files if isinstance(entry, Mapping)),
-        key=lambda entry: str(entry.get("parquet", "")),
-    )
+    ordered = _ordered_file_entries(stats)
     cumulative_rows = 0
     cumulative_output_bytes = 0
     points: list[dict[str, object]] = []
     for step, entry in enumerate(ordered, start=1):
-        source_rows = _integer(entry.get("rows"))
-        source_output_bytes = _integer(entry.get("output_bytes"))
-        cumulative_rows += source_rows
-        cumulative_output_bytes += source_output_bytes
-        points.append(
-            {
-                "step": step,
-                "cumulative_rows": cumulative_rows,
-                "cumulative_output_bytes": cumulative_output_bytes,
-            }
+        cumulative_rows, cumulative_output_bytes, point = _retrospective_point(
+            step,
+            entry,
+            cumulative_rows,
+            cumulative_output_bytes,
         )
+        points.append(point)
     return points
 
 
@@ -103,6 +93,35 @@ def _rejections(entry: Mapping[str, Any]) -> dict[str, int]:
     return {str(key): _integer(value) for key, value in sorted(raw.items())}
 
 
+def _ordered_file_entries(stats: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    files = stats.get("files", [])
+    if not isinstance(files, Sequence) or isinstance(files, str | bytes | bytearray):
+        return []
+    return sorted(
+        (entry for entry in files if isinstance(entry, Mapping)),
+        key=lambda entry: str(entry.get("parquet", "")),
+    )
+
+
+def _retrospective_point(
+    step: int,
+    entry: Mapping[str, Any],
+    cumulative_rows: int,
+    cumulative_output_bytes: int,
+) -> tuple[int, int, dict[str, object]]:
+    cumulative_rows += _integer(entry.get("rows"))
+    cumulative_output_bytes += _integer(entry.get("output_bytes"))
+    return (
+        cumulative_rows,
+        cumulative_output_bytes,
+        {
+            "step": step,
+            "cumulative_rows": cumulative_rows,
+            "cumulative_output_bytes": cumulative_output_bytes,
+        },
+    )
+
+
 def build_per_pbf_rows(stats: Mapping[str, Any]) -> list[dict[str, object]]:
     """Build the factual per-PBF table used by the static dashboard.
 
@@ -110,48 +129,70 @@ def build_per_pbf_rows(stats: Mapping[str, Any]) -> list[dict[str, object]]:
     non-empty-description filter. Technical acceptance is the fraction of
     candidates that survived all subsequent geometry/schema checks.
     """
-    files = stats.get("files", [])
-    if not isinstance(files, Sequence) or isinstance(files, str | bytes | bytearray):
-        return []
-    rows: list[dict[str, object]] = []
-    for entry in sorted(
-        (item for item in files if isinstance(item, Mapping)),
-        key=lambda item: str(item.get("parquet", "")),
-    ):
-        included = _integer(entry.get("rows"))
-        emitted = _integer(entry.get("emitted_features"))
-        rejection_counts = _rejections(entry)
-        no_description = rejection_counts.get("no_nonempty_description", 0)
-        candidates = max(emitted - no_description, 0)
-        technical_rejections = sum(
-            count
-            for reason, count in rejection_counts.items()
-            if reason != "no_nonempty_description"
-        )
-        source_bytes = _integer(entry.get("source_bytes"))
-        output_bytes = _integer(entry.get("output_bytes"))
-        rows.append(
-            {
-                "source": str(entry.get("source_pbf", entry.get("parquet", ""))),
-                "rows": included,
-                "input_pbf_gib": source_bytes / (1024**3),
-                "output_parquet_mib": output_bytes / (1024**2),
-                "description_candidate_rate": candidates / emitted if emitted else 0.0,
-                "technical_acceptance_rate": included / candidates if candidates else 0.0,
-                "output_bytes_per_row": output_bytes / included if included else 0.0,
-                "rejections_by_reason": json.dumps(
-                    rejection_counts, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-                ),
-                "_technical_rejections": technical_rejections,
-                "_rows_per_input_gib": included / (source_bytes / (1024**3))
-                if source_bytes
-                else 0.0,
-                "_technical_rejection_rate": (
-                    technical_rejections / candidates if candidates else 0.0
-                ),
-            }
-        )
-    return rows
+    return [_per_pbf_row(entry) for entry in _ordered_file_entries(stats)]
+
+
+def _per_pbf_row(entry: Mapping[str, Any]) -> dict[str, object]:
+    included = _integer(entry.get("rows"))
+    emitted = _integer(entry.get("emitted_features"))
+    rejection_counts = _rejections(entry)
+    candidates = _description_candidates(emitted, rejection_counts)
+    technical_rejections = _technical_rejections(rejection_counts)
+    source_bytes = _integer(entry.get("source_bytes"))
+    output_bytes = _integer(entry.get("output_bytes"))
+    rates = _pbf_rates(
+        included,
+        emitted,
+        candidates,
+        source_bytes,
+        output_bytes,
+        technical_rejections,
+    )
+    return {
+        "source": str(entry.get("source_pbf", entry.get("parquet", ""))),
+        "rows": included,
+        "input_pbf_gib": source_bytes / (1024**3),
+        "output_parquet_mib": output_bytes / (1024**2),
+        "description_candidate_rate": rates[0],
+        "technical_acceptance_rate": rates[1],
+        "output_bytes_per_row": rates[2],
+        "rejections_by_reason": json.dumps(
+            rejection_counts, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ),
+        "_technical_rejections": technical_rejections,
+        "_rows_per_input_gib": rates[3],
+        "_technical_rejection_rate": rates[4],
+    }
+
+
+def _pbf_rates(
+    included: int,
+    emitted: int,
+    candidates: int,
+    source_bytes: int,
+    output_bytes: int,
+    technical_rejections: int,
+) -> tuple[float, float, float, float, float]:
+    input_gib = source_bytes / (1024**3)
+    return (
+        _ratio(candidates, emitted),
+        _ratio(included, candidates),
+        _ratio(output_bytes, included),
+        _ratio(included, input_gib),
+        _ratio(technical_rejections, candidates),
+    )
+
+
+def _ratio(numerator: int | float, denominator: int | float) -> float:
+    return numerator / denominator if denominator else 0.0
+
+
+def _description_candidates(emitted: int, rejections: Mapping[str, int]) -> int:
+    return max(emitted - rejections.get("no_nonempty_description", 0), 0)
+
+
+def _technical_rejections(rejections: Mapping[str, int]) -> int:
+    return sum(count for reason, count in rejections.items() if reason != "no_nonempty_description")
 
 
 def build_dataset_summary(stats: Mapping[str, Any]) -> list[dict[str, object]]:
@@ -231,18 +272,38 @@ def build_snapshot_payload(
     """Build Trackio tables, media, and ranked plots for one dataset snapshot."""
     per_pbf_rows = build_per_pbf_rows(stats)
     payload: dict[str, object] = {}
+    _add_snapshot_tables(payload, backend, per_pbf_rows, stats)
+    _add_step_definition(payload, backend)
+    _add_snapshot_media(payload, backend, data_root)
+    _add_snapshot_plots(payload, backend, per_pbf_rows)
+    return payload
 
+
+def _add_snapshot_tables(
+    payload: dict[str, object],
+    backend: TrackioBackend,
+    per_pbf_rows: Sequence[Mapping[str, object]],
+    stats: Mapping[str, Any],
+) -> None:
     table_factory = getattr(backend, "Table", None)
     if callable(table_factory):
         payload["per_pbf_table"] = table_factory(data=_public_per_pbf_rows(per_pbf_rows))
         payload["dataset_summary"] = table_factory(data=build_dataset_summary(stats))
 
+
+def _add_step_definition(payload: dict[str, object], backend: TrackioBackend) -> None:
     markdown_factory = getattr(backend, "Markdown", None)
     if callable(markdown_factory):
         payload["step_definition"] = markdown_factory(
             "Step is the 1-based PBF index after sorting source filenames; it is not time."
         )
 
+
+def _add_snapshot_media(
+    payload: dict[str, object],
+    backend: TrackioBackend,
+    data_root: Path,
+) -> None:
     image_factory = getattr(backend, "Image", None)
     if callable(image_factory):
         media = (
@@ -258,38 +319,44 @@ def build_snapshot_payload(
             if path.is_file():
                 payload[key] = image_factory(path, caption=caption)
 
-    html_factory = getattr(backend, "Html", None)
-    if callable(html_factory) and per_pbf_rows:
-        plot_specs = (
-            (
-                "description_candidate_rate_by_region",
-                "Description candidate rate by region (top 30)",
-                "Candidate rate",
-            ),
-            (
-                "rows_per_input_gib_by_region",
-                "Described polygon rows per input GiB (top 30)",
-                "Rows per input GiB",
-            ),
-            (
-                "technical_rejection_rate_by_region",
-                "Technical rejection rate by region (top 30)",
-                "Technical rejection rate",
-            ),
-        )
-        key_to_value = {
-            plot_specs[0][0]: "description_candidate_rate",
-            plot_specs[1][0]: "_rows_per_input_gib",
-            plot_specs[2][0]: "_technical_rejection_rate",
-        }
-        for key, title, xlabel in plot_specs:
-            figure = _ranked_figure(per_pbf_rows, key_to_value[key], title, xlabel)
-            try:
-                payload[key] = html_factory(figure, caption=title)
-            finally:
-                figure.clf()
 
-    return payload
+def _add_snapshot_plots(
+    payload: dict[str, object],
+    backend: TrackioBackend,
+    per_pbf_rows: Sequence[Mapping[str, object]],
+) -> None:
+    html_factory = getattr(backend, "Html", None)
+    if not callable(html_factory) or not per_pbf_rows:
+        return
+    for key, title, xlabel, value_key in _plot_specs():
+        figure = _ranked_figure(per_pbf_rows, value_key, title, xlabel)
+        try:
+            payload[key] = html_factory(figure, caption=title)
+        finally:
+            figure.clf()
+
+
+def _plot_specs() -> tuple[tuple[str, str, str, str], ...]:
+    return (
+        (
+            "description_candidate_rate_by_region",
+            "Description candidate rate by region (top 30)",
+            "Candidate rate",
+            "description_candidate_rate",
+        ),
+        (
+            "rows_per_input_gib_by_region",
+            "Described polygon rows per input GiB (top 30)",
+            "Rows per input GiB",
+            "_rows_per_input_gib",
+        ),
+        (
+            "technical_rejection_rate_by_region",
+            "Technical rejection rate by region (top 30)",
+            "Technical rejection rate",
+            "_technical_rejection_rate",
+        ),
+    )
 
 
 def _load_backend() -> TrackioBackend | None:
@@ -297,6 +364,33 @@ def _load_backend() -> TrackioBackend | None:
         return cast(TrackioBackend, importlib.import_module("trackio"))
     except (ImportError, OSError):
         return None
+
+
+def _trackio_disabled_by_environment() -> bool:
+    return os.environ.get("OSM_POLYGON_DESCRIPTION_TAG_TRACKIO", "1").lower() in {
+        "0",
+        "false",
+        "off",
+        "no",
+    }
+
+
+def _initialize_backend(
+    backend: TrackioBackend,
+    project: str,
+    run_name: str | None,
+    config: Mapping[str, object],
+) -> None:
+    # The public dashboard is a static Space, which is free and serves a
+    # durable snapshot. Runs log locally during execution; ``finish``
+    # synchronizes that local database to the static Space.
+    kwargs: dict[str, object] = {
+        "project": project,
+        "config": dict(config),
+    }
+    if run_name is not None:
+        kwargs["name"] = run_name
+    backend.init(**kwargs)
 
 
 @dataclass
@@ -318,29 +412,18 @@ class TrackioRecorder:
         if self._started:
             return self.enabled
         self._started = True
-        if self.backend is None and os.environ.get(
-            "OSM_POLYGON_DESCRIPTION_TAG_TRACKIO", "1"
-        ).lower() in {"0", "false", "off", "no"}:
+        if self.backend is None and _trackio_disabled_by_environment():
             self.failure_reason = "trackio disabled by environment"
             return False
+        return self._start_backend(config)
+
+    def _start_backend(self, config: Mapping[str, object]) -> bool:
         try:
-            trackio_dir = self.data_root / "logs" / "trackio"
-            trackio_dir.mkdir(parents=True, exist_ok=True)
-            os.environ["TRACKIO_DIR"] = str(trackio_dir)
-            backend = self.backend or _load_backend()
+            backend = self._prepare_backend()
             if backend is None:
                 self.failure_reason = "trackio is not installed"
                 return False
-            # The public dashboard is a static Space, which is free and
-            # serves a durable snapshot. Runs log locally during execution;
-            # ``finish`` synchronizes that local database to the static Space.
-            kwargs: dict[str, object] = {
-                "project": self.project,
-                "config": dict(config),
-            }
-            if self.run_name is not None:
-                kwargs["name"] = self.run_name
-            backend.init(**kwargs)
+            _initialize_backend(backend, self.project, self.run_name, config)
         except Exception as error:  # Trackio must never take down the pipeline.
             self.failure_reason = f"trackio initialization failed: {error}"
             return False
@@ -348,6 +431,12 @@ class TrackioRecorder:
         self.enabled = True
         self.started_successfully = True
         return True
+
+    def _prepare_backend(self) -> TrackioBackend | None:
+        trackio_dir = self.data_root / "logs" / "trackio"
+        trackio_dir.mkdir(parents=True, exist_ok=True)
+        os.environ["TRACKIO_DIR"] = str(trackio_dir)
+        return self.backend or _load_backend()
 
     def log(self, metrics: Mapping[str, object]) -> None:
         """Queue numeric metrics, disabling the sink if Trackio rejects them."""

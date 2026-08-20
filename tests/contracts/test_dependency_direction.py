@@ -122,6 +122,12 @@ def _shim_violations(source: str, approved_targets: set[str]) -> list[str]:
     all_assignments = 0
     for node in statements:
         if isinstance(node, ast.ImportFrom):
+            # mutmut injects its trampoline import into the copied source
+            # while executing a mutant.  It is test instrumentation, not a
+            # project dependency, so keep the production-layer contract
+            # focused on imports authored by this repository.
+            if node.module is not None and node.module.startswith("mutmut."):
+                continue
             if node.module == "__future__" and [alias.name for alias in node.names] == [
                 "annotations"
             ]:

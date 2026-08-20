@@ -104,13 +104,21 @@ show_missing = true
 
 [tool.mutmut]
 source_paths = ["src"]
-only_mutate = [
-    "src/osm_polygon_description_tag/publication/planning.py",
-    "src/osm_polygon_description_tag/workflow/finalization.py",
+pytest_add_cli_args_test_selection = ["tests"]
+also_copy = [
+    ".github/",
+    ".dockerignore",
+    ".gitignore",
+    ".pre-commit-config.yaml",
+    "CITATION.cff",
+    "Dockerfile",
+    "README.md",
+    "config/",
+    "docs/",
+    "justfile",
+    "mkdocs.yml",
+    "scripts/",
 ]
-pytest_add_cli_args_test_selection = [
-    "tests/unit/publication",
-    "tests/unit/workflow/test_finalization.py",
-]
-timeout_multiplier = 10.0
+timeout_multiplier = 2.0
 timeout_constant = 1.0
+on_dependency_change = "warn"

@@ -36,6 +36,7 @@ from osm_polygon_description_tag.dataset.geography import (
 )
 from osm_polygon_description_tag.dataset.geography.parquet_inputs import (
     H3AggregationError,
+    _validate_geometry,
     iter_centroids,
 )
 from osm_polygon_description_tag.dataset.manifest import (
@@ -385,6 +386,12 @@ def test_aggregate_rejects_invalid_geometry(tmp_path: Path) -> None:
     )
     with pytest.raises(H3AggregationError, match="geometry"):
         aggregate_h3_density(data_root)
+
+
+def test_validate_geometry_rejects_non_geometry_and_accepts_polygon() -> None:
+    _validate_geometry(Polygon([(0, 0), (0, 1), (1, 1), (0, 0)]))
+    with pytest.raises(H3AggregationError, match="unsupported geometry type"):
+        _validate_geometry(Point(0, 0))
 
 
 def test_aggregate_rejects_null_geometry(tmp_path: Path) -> None:

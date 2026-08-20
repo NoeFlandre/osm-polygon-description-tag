@@ -173,38 +173,10 @@ def render_density_map(
     fig, ax = plt.subplots(figsize=_FIGSIZE, dpi=_DPI)
     fig.set_facecolor("white")
     _init_axes(ax)
-    if land_features is None:
-        land_features = load_land_basemap()
-    if land_features:
-        draw_landmasses(ax, land_features)
+    _draw_land_overlay(ax, land_features)
 
     cmap = plt.get_cmap(_COLORMAP_NAME)
-    if sorted_cells:
-        counts = _safe_counts(cells)
-        minimum = min(counts)
-        maximum = max(max(counts), minimum + 1)
-        # LogNorm requires vmin < vmax; the guard above guarantees this even
-        # for the one-cell case.
-        norm = mcolors.LogNorm(vmin=minimum, vmax=maximum)
-        for cell, count in sorted_cells:
-            _draw_cell(ax, cell, count=count, cmap=cmap, norm=norm)
-
-        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-        sm.set_array([])
-        colorbar = fig.colorbar(sm, ax=ax, fraction=_COLORBAR_FRACTION, pad=_COLORBAR_PAD)
-        colorbar.set_label(
-            "Polygons per H3 cell (log scale)",
-            fontsize=8,
-            color="#333333",
-        )
-        colorbar.ax.yaxis.set_major_formatter(mtick.FuncFormatter(_format_count_tick))
-        colorbar.ax.tick_params(labelsize=_TICK_LABELSIZE)
-    else:
-        # No cells: still add an empty colorbar to keep layout stable.
-        norm = mcolors.LogNorm(vmin=1, vmax=2)
-        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-        sm.set_array([])
-        fig.colorbar(sm, ax=ax, fraction=_COLORBAR_FRACTION, pad=_COLORBAR_PAD)
+    _draw_cells_and_colorbar(fig, ax, sorted_cells, cells, cmap)
 
     fig.suptitle(_TITLE, fontsize=_TITLE_FONTSIZE, color="#222222", y=0.98)
     fig.text(
@@ -225,6 +197,56 @@ def render_density_map(
         plt.close(fig)
 
     return RenderResult(output_path=output_path, caption=caption)
+
+
+def _draw_land_overlay(ax: Any, land_features: Sequence[Any] | None) -> None:
+    features = load_land_basemap() if land_features is None else land_features
+    if features:
+        draw_landmasses(ax, features)
+
+
+def _draw_cells_and_colorbar(
+    fig: Any,
+    ax: Any,
+    sorted_cells: Sequence[tuple[str, int]],
+    cells: Mapping[str, int],
+    cmap: mcolors.Colormap,
+) -> None:
+    if not sorted_cells:
+        _draw_empty_colorbar(fig, ax, cmap)
+        return
+    counts = _safe_counts(cells)
+    minimum = min(counts)
+    maximum = max(max(counts), minimum + 1)
+    # LogNorm requires vmin < vmax; the guard above guarantees this even
+    # for the one-cell case.
+    norm = mcolors.LogNorm(vmin=minimum, vmax=maximum)
+    for cell, count in sorted_cells:
+        _draw_cell(ax, cell, count=count, cmap=cmap, norm=norm)
+    _draw_density_colorbar(fig, ax, cmap, norm)
+
+
+def _draw_density_colorbar(
+    fig: Any, ax: Any, cmap: mcolors.Colormap, norm: mcolors.LogNorm
+) -> None:
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    colorbar = fig.colorbar(sm, ax=ax, fraction=_COLORBAR_FRACTION, pad=_COLORBAR_PAD)
+    colorbar.set_label(
+        "Polygons per H3 cell (log scale)",
+        fontsize=8,
+        color="#333333",
+    )
+    colorbar.ax.yaxis.set_major_formatter(mtick.FuncFormatter(_format_count_tick))
+    colorbar.ax.tick_params(labelsize=_TICK_LABELSIZE)
+
+
+def _draw_empty_colorbar(fig: Any, ax: Any, cmap: mcolors.Colormap) -> None:
+    # No cells: still add an empty colorbar to keep layout stable.
+    norm = mcolors.LogNorm(vmin=1, vmax=2)
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    fig.colorbar(sm, ax=ax, fraction=_COLORBAR_FRACTION, pad=_COLORBAR_PAD)
 
 
 def atomic_save_png_for_testing(

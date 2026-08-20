@@ -10,7 +10,8 @@ Arrow maps. Each list is sorted by key and preserves the complete original
 content while remaining viewable on the Hub.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import ItemsView, Mapping, Sequence
+from typing import cast
 
 import pyarrow as pa
 
@@ -28,6 +29,32 @@ KEY_VALUE_LIST = pa.list_(KEY_VALUE_STRUCT)
 KEY_VALUE_COLUMNS = ("localized_names", "localized_descriptions", "tags")
 
 
+def _key_value_item(item: object) -> tuple[object, object]:
+    if isinstance(item, Mapping):
+        return item.get("key"), item.get("value")
+    if isinstance(item, Sequence) and len(item) == 2:
+        return item[0], item[1]
+    raise TypeError(f"invalid key/value record: {item!r}")
+
+
+def _sequence_items(value: Sequence[object]) -> ItemsView[str, str]:
+    converted: dict[str, str] = {}
+    for item in value:
+        key, mapped = _key_value_item(item)
+        if key is None or mapped is None:
+            continue
+        converted[str(key)] = str(mapped)
+    return converted.items()
+
+
+def _mapping_items(value: Mapping[str, str] | Sequence[object] | object) -> ItemsView[str, str]:
+    if isinstance(value, Mapping):
+        return cast(ItemsView[str, str], value.items())
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes):
+        return _sequence_items(value)
+    raise TypeError(f"expected a string mapping, got {type(value).__name__}")
+
+
 def mapping_to_pairs(value: Mapping[str, str] | Sequence[object] | object) -> list[dict[str, str]]:
     """Encode a string mapping as deterministic key/value records.
 
@@ -36,23 +63,7 @@ def mapping_to_pairs(value: Mapping[str, str] | Sequence[object] | object) -> li
     """
     if value is None:
         return []
-    if isinstance(value, Mapping):
-        items = value.items()
-    elif isinstance(value, Sequence) and not isinstance(value, str | bytes):
-        converted: dict[str, str] = {}
-        for item in value:
-            if isinstance(item, Mapping):
-                key, mapped = item.get("key"), item.get("value")
-            elif isinstance(item, Sequence) and len(item) == 2:
-                key, mapped = item
-            else:
-                raise TypeError(f"invalid key/value record: {item!r}")
-            if key is None or mapped is None:
-                continue
-            converted[str(key)] = str(mapped)
-        items = converted.items()
-    else:
-        raise TypeError(f"expected a string mapping, got {type(value).__name__}")
+    items = _mapping_items(value)
     return [{"key": str(key), "value": str(item)} for key, item in sorted(items)]
 
 

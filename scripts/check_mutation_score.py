@@ -63,7 +63,7 @@ def build_metadata_report(
     for metadata_path in sorted(mutants_root.glob("src/**/*.py.meta")):
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         for mutant_name, exit_code in sorted(metadata.get("exit_code_by_key", {}).items()):
-            if not any(fnmatch.fnmatch(mutant_name, pattern) for pattern in patterns):
+            if patterns and not any(fnmatch.fnmatch(mutant_name, pattern) for pattern in patterns):
                 continue
             status = STATUS_BY_EXIT_CODE.get(exit_code, "suspicious")
             stats[status] = int(stats.get(status, 0)) + 1
@@ -91,8 +91,6 @@ def main() -> None:
             json.loads(args.stats_json.read_text(encoding="utf-8")), args.minimum_score
         )
     else:
-        if not args.pattern:
-            raise SystemExit("--pattern is required with --mutants-root")
         report = build_metadata_report(args.mutants_root, args.pattern, args.minimum_score)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(

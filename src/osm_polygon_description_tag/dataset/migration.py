@@ -44,28 +44,46 @@ def _is_current_schema(schema: pa.Schema) -> bool:
 def _migrate_parquet(path: Path) -> bool:
     reader = pq.ParquetFile(path)
     schema = reader.schema_arrow
-    if _is_current_schema(schema):
+    if not _requires_migration(schema, path):
         return False
-    if not _is_legacy_map_schema(schema):
-        raise MigrationError(f"unsupported schema for migration: {path}")
 
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     metadata = SCHEMA.with_metadata(schema.metadata or {})
     try:
-        with pq.ParquetWriter(temporary, metadata, compression="zstd") as writer:
-            for batch in reader.iter_batches(batch_size=4096):
-                rows = [_arrow_record(row) for row in batch.to_pylist()]
-                writer.write_table(pa.Table.from_pylist(rows, schema=metadata))
-        validate_geoparquet(temporary)
-        with open(temporary, "rb") as handle:
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        _rewrite_legacy_parquet(reader, temporary, metadata)
+        _promote_migrated_parquet(temporary, path)
         return True
     except (OSError, pa.ArrowException, StorageError) as error:
         raise MigrationError(f"cannot migrate {path}: {error}") from error
     finally:
         if temporary.exists():
             temporary.unlink()
+
+
+def _requires_migration(schema: pa.Schema, path: Path) -> bool:
+    if _is_current_schema(schema):
+        return False
+    if _is_legacy_map_schema(schema):
+        return True
+    raise MigrationError(f"unsupported schema for migration: {path}")
+
+
+def _rewrite_legacy_parquet(
+    reader: pq.ParquetFile,
+    temporary: Path,
+    metadata: pa.Schema,
+) -> None:
+    with pq.ParquetWriter(temporary, metadata, compression="zstd") as writer:
+        for batch in reader.iter_batches(batch_size=4096):
+            rows = [_arrow_record(row) for row in batch.to_pylist()]
+            writer.write_table(pa.Table.from_pylist(rows, schema=metadata))
+    validate_geoparquet(temporary)
+
+
+def _promote_migrated_parquet(temporary: Path, target: Path) -> None:
+    with open(temporary, "rb") as handle:
+        os.fsync(handle.fileno())
+    os.replace(temporary, target)
 
 
 def migrate_dataset_schema(data_root: Path) -> int:
@@ -77,26 +95,35 @@ def migrate_dataset_schema(data_root: Path) -> int:
     """
     data_dir = data_root / "data"
     manifests_dir = data_root / "manifests"
-    if not data_dir.is_dir() or not manifests_dir.is_dir():
-        raise MigrationError(f"missing data/ or manifests/ under {data_root}")
+    _require_migration_directories(data_dir, manifests_dir, data_root)
     migrated = 0
     for parquet in sorted(data_dir.glob("*.parquet"), key=lambda path: path.name):
         manifest_path = manifests_dir / f"{parquet.stem}.manifest.json"
-        changed = _migrate_parquet(parquet)
-        manifest = read_manifest(manifest_path)
-        if changed or manifest.schema_version != SCHEMA_VERSION:
-            write_manifest(
-                replace(
-                    manifest,
-                    schema_version=SCHEMA_VERSION,
-                    transform_algorithm_version=TRANSFORM_ALGORITHM_VERSION,
-                    output_algorithm_revision=current_output_algorithm_revision(),
-                    output=output_identity_for(parquet),
-                ),
-                manifest_path,
-            )
-            migrated += 1
+        migrated += _migrate_one_artifact(parquet, manifest_path)
     return migrated
+
+
+def _require_migration_directories(data_dir: Path, manifests_dir: Path, data_root: Path) -> None:
+    if not data_dir.is_dir() or not manifests_dir.is_dir():
+        raise MigrationError(f"missing data/ or manifests/ under {data_root}")
+
+
+def _migrate_one_artifact(parquet: Path, manifest_path: Path) -> int:
+    changed = _migrate_parquet(parquet)
+    manifest = read_manifest(manifest_path)
+    if changed or manifest.schema_version != SCHEMA_VERSION:
+        write_manifest(
+            replace(
+                manifest,
+                schema_version=SCHEMA_VERSION,
+                transform_algorithm_version=TRANSFORM_ALGORITHM_VERSION,
+                output_algorithm_revision=current_output_algorithm_revision(),
+                output=output_identity_for(parquet),
+            ),
+            manifest_path,
+        )
+        return 1
+    return 0
 
 
 __all__ = ["MigrationError", "migrate_dataset_schema"]

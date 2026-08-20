@@ -33,20 +33,28 @@ class TerminalPresenter:
             return
         name = event.get("event")
         if name == "build_start":
-            self.close()
-            self._progress = tqdm(
-                total=None,
-                desc=str(event.get("source", "")),
-                unit="features",
-                file=self._stderr,
-                disable=False,
-            )
-        elif name == "build_progress" and self._progress is not None:
-            value = event.get("emitted", 0)
-            emitted = value if isinstance(value, int) else 0
-            self._progress.update(max(0, emitted - self._progress.n))
+            self._start_progress(event)
+        elif name == "build_progress":
+            self._update_progress(event)
         elif name in {"build_complete", "interrupted"}:
             self.close()
+
+    def _start_progress(self, event: Mapping[str, object]) -> None:
+        self.close()
+        self._progress = tqdm(
+            total=None,
+            desc=str(event.get("source", "")),
+            unit="features",
+            file=self._stderr,
+            disable=False,
+        )
+
+    def _update_progress(self, event: Mapping[str, object]) -> None:
+        if self._progress is None:
+            return
+        value = event.get("emitted", 0)
+        emitted = value if isinstance(value, int) else 0
+        self._progress.update(max(0, emitted - self._progress.n))
 
     def error(self, message: str) -> None:
         """Render one domain error to stderr."""

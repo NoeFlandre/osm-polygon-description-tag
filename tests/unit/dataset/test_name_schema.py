@@ -16,10 +16,11 @@ Contract:
 from __future__ import annotations
 
 import pyarrow as pa
+import pytest
 from shapely import to_wkb
 from shapely.geometry import MultiPolygon, Polygon
 
-from osm_polygon_description_tag.dataset.schema import SCHEMA, SCHEMA_VERSION
+from osm_polygon_description_tag.dataset.schema import SCHEMA, SCHEMA_VERSION, _key_value_item
 from osm_polygon_description_tag.dataset.transform import (
     names_from_tags,
     transform_record,
@@ -203,6 +204,41 @@ def test_arrow_map_array_round_trip() -> None:
     table = pa.Table.from_batches([batch])
     localized = table.column("localized_names").to_pylist()
     assert localized == [[{"key": "pt-BR", "value": "X BR"}]]
+
+
+def test_mapping_to_pairs_accepts_mapping_and_pair_records_deterministically() -> None:
+    from osm_polygon_description_tag.dataset.schema import mapping_to_pairs
+
+    assert mapping_to_pairs({"z": 2, "a": 1}) == [
+        {"key": "a", "value": "1"},
+        {"key": "z", "value": "2"},
+    ]
+    assert mapping_to_pairs([{"key": "b", "value": "B"}, ("a", "A")]) == [
+        {"key": "a", "value": "A"},
+        {"key": "b", "value": "B"},
+    ]
+
+
+def test_key_value_item_extracts_supported_record_shapes() -> None:
+    assert _key_value_item({"key": "a", "value": "A"}) == ("a", "A")
+    assert _key_value_item(("a", "A")) == ("a", "A")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        [{"key": None, "value": "ignored"}, {"key": "kept", "value": None}],
+        [["key-only"]],
+    ],
+)
+def test_mapping_to_pairs_skips_missing_values_or_rejects_invalid_records(value: object) -> None:
+    from osm_polygon_description_tag.dataset.schema import mapping_to_pairs
+
+    if value == [["key-only"]]:
+        with pytest.raises(TypeError, match="invalid key/value record"):
+            mapping_to_pairs(value)
+    else:
+        assert mapping_to_pairs(value) == []
 
 
 def test_e2e_parquet_round_trip_preserves_name_columns(tmp_path) -> None:

@@ -120,67 +120,19 @@ def published_state_matches(
     return manifest.output == output_identity
 
 
-def process_one(
-    source: Source,
-    paths: Paths,
-    *,
-    clock: Callable[[], str],
-    exporter: Callable[..., Iterable[ExportRecord]] | None = None,
-    progress_interval: int = 100_000,
-    logger: RunLogger | None = None,
-    source_index: int = 0,
-    source_total: int = 0,
-    osmium_executable: str = "osmium",
-) -> SourceOutcome:
-    """Build or reuse one PBF and return its local state-machine outcome."""
-    complete, manifest = local_artifact_is_complete(paths, source)
-    state = read_publication_state(paths.data_root)
+def _published_entry(data_root: Path, source_name: str) -> dict[str, object]:
+    state = read_publication_state(data_root)
     published = cast_dict(state.get("published", {}))
-    existing = cast_dict(published.get(source.name, {}))
-    output_path = paths.data_root / "data" / source.output_name
+    return cast_dict(published.get(source_name, {}))
 
-    if (
-        complete
-        and manifest is not None
-        and published_state_matches(existing, manifest, source, output_path)
-    ):
-        if logger is not None:
-            logger.event(
-                "source_decision",
-                level="INFO",
-                source=source.name,
-                source_index=source_index,
-                source_total=source_total,
-                decision="already-published",
-            )
-        return SourceOutcome(
-            source_name=source.name,
-            status=STATUS_PUBLISHED,
-            included_rows=manifest.counts.included_rows,
-            output_bytes=output_path.stat().st_size,
-            remote_revision=None,
-            note="already published; nothing to do",
-        )
 
-    if complete and manifest is not None:
-        if logger is not None:
-            logger.event(
-                "source_decision",
-                level="INFO",
-                source=source.name,
-                source_index=source_index,
-                source_total=source_total,
-                decision="reuse-local",
-            )
-        return SourceOutcome(
-            source_name=source.name,
-            status=STATUS_REUSED,
-            included_rows=manifest.counts.included_rows,
-            output_bytes=output_path.stat().st_size,
-            remote_revision=None,
-            note="local artifact reused; upload required",
-        )
-
+def _log_decision(
+    logger: RunLogger | None,
+    source: Source,
+    source_index: int,
+    source_total: int,
+    decision: str,
+) -> None:
     if logger is not None:
         logger.event(
             "source_decision",
@@ -188,8 +140,61 @@ def process_one(
             source=source.name,
             source_index=source_index,
             source_total=source_total,
-            decision="build",
+            decision=decision,
         )
+
+
+def _manifest_outcome(
+    source: Source,
+    manifest: Manifest,
+    output_path: Path,
+    status: str,
+    note: str,
+) -> SourceOutcome:
+    return SourceOutcome(
+        source_name=source.name,
+        status=status,
+        included_rows=manifest.counts.included_rows,
+        output_bytes=output_path.stat().st_size,
+        remote_revision=None,
+        note=note,
+    )
+
+
+def _progress_logger(
+    logger: RunLogger,
+    source: Source,
+    source_index: int,
+    source_total: int,
+) -> Callable[[int, int], None]:
+    def on_progress(emitted: int, included: int) -> None:
+        logger.event(
+            "build_progress",
+            level="INFO",
+            source=source.name,
+            source_index=source_index,
+            source_total=source_total,
+            emitted=emitted,
+            included=included,
+        )
+
+    return on_progress
+
+
+def _build_source(
+    source: Source,
+    paths: Paths,
+    *,
+    clock: Callable[[], str],
+    exporter: Callable[..., Iterable[ExportRecord]] | None,
+    progress_interval: int,
+    logger: RunLogger | None,
+    source_index: int,
+    source_total: int,
+    osmium_executable: str,
+) -> SourceOutcome:
+    if logger is not None:
+        _log_decision(logger, source, source_index, source_total, "build")
         logger.event(
             "build_start",
             level="INFO",
@@ -197,19 +202,7 @@ def process_one(
             source_index=source_index,
             source_total=source_total,
         )
-
-        def on_progress(emitted: int, included: int) -> None:
-            logger.event(
-                "build_progress",
-                level="INFO",
-                source=source.name,
-                source_index=source_index,
-                source_total=source_total,
-                emitted=emitted,
-                included=included,
-            )
-
-        progress_callback = on_progress
+        progress_callback = _progress_logger(logger, source, source_index, source_total)
     else:
         progress_callback = None
     result = build_one(
@@ -238,6 +231,54 @@ def process_one(
         output_bytes=result.output_path.stat().st_size,
         remote_revision=None,
         note="freshly built; upload required",
+    )
+
+
+def process_one(
+    source: Source,
+    paths: Paths,
+    *,
+    clock: Callable[[], str],
+    exporter: Callable[..., Iterable[ExportRecord]] | None = None,
+    progress_interval: int = 100_000,
+    logger: RunLogger | None = None,
+    source_index: int = 0,
+    source_total: int = 0,
+    osmium_executable: str = "osmium",
+) -> SourceOutcome:
+    """Build or reuse one PBF and return its local state-machine outcome."""
+    complete, manifest = local_artifact_is_complete(paths, source)
+    existing = _published_entry(paths.data_root, source.name)
+    output_path = paths.data_root / "data" / source.output_name
+
+    if complete and manifest is not None:
+        if published_state_matches(existing, manifest, source, output_path):
+            _log_decision(logger, source, source_index, source_total, "already-published")
+            return _manifest_outcome(
+                source,
+                manifest,
+                output_path,
+                STATUS_PUBLISHED,
+                "already published; nothing to do",
+            )
+        _log_decision(logger, source, source_index, source_total, "reuse-local")
+        return _manifest_outcome(
+            source,
+            manifest,
+            output_path,
+            STATUS_REUSED,
+            "local artifact reused; upload required",
+        )
+    return _build_source(
+        source,
+        paths,
+        clock=clock,
+        exporter=exporter,
+        progress_interval=progress_interval,
+        logger=logger,
+        source_index=source_index,
+        source_total=source_total,
+        osmium_executable=osmium_executable,
     )
 
 

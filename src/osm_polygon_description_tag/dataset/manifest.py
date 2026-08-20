@@ -225,20 +225,24 @@ def is_resumable(
     because the algorithm version + area-policy checksum + output algorithm
     revision already capture every behavioral change.
     """
-    if manifest.manifest_schema_version != MANIFEST_SCHEMA_VERSION:
-        return False
-    if manifest.schema_version != SCHEMA_VERSION:
-        return False
-    if manifest.geoparquet_version != GEOPARQUET_VERSION:
-        return False
-    if manifest.transform_algorithm_version != TRANSFORM_ALGORITHM_VERSION:
-        return False
-    if manifest.area_policy_sha256 != current_area_policy_sha256():
+    if not _manifest_contract_matches(manifest):
         return False
     if manifest.source != source_identity or manifest.output != output_identity:
         return False
     output_revision = current_output_algorithm_revision()
     return manifest.output_algorithm_revision == output_revision
+
+
+def _manifest_contract_matches(manifest: Manifest) -> bool:
+    return all(
+        (
+            manifest.manifest_schema_version == MANIFEST_SCHEMA_VERSION,
+            manifest.schema_version == SCHEMA_VERSION,
+            manifest.geoparquet_version == GEOPARQUET_VERSION,
+            manifest.transform_algorithm_version == TRANSFORM_ALGORITHM_VERSION,
+            manifest.area_policy_sha256 == current_area_policy_sha256(),
+        )
+    )
 
 
 def current_output_algorithm_revision() -> str:

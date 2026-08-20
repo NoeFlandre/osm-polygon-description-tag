@@ -62,12 +62,6 @@ from osm_polygon_description_tag.publication.state import (
     PublicationStateError,
 )
 from osm_polygon_description_tag.publication.state import (
-    _metadata_state_matches as _state_metadata_state_matches,
-)
-from osm_polygon_description_tag.publication.state import (
-    _write_metadata_state as _state_write_metadata_state,
-)
-from osm_polygon_description_tag.publication.state import (
     _write_publication_state as _state_write_publication_state,
 )
 from osm_polygon_description_tag.publication.state import (
@@ -125,30 +119,9 @@ def read_publication_state(data_root: Path) -> dict[str, object]:
         raise _translate_state_error(error) from error
 
 
-def cast_dict(value: object) -> dict[str, object]:
-    try:
-        return _state_cast_dict(value)
-    except PublicationStateError as error:
-        raise _translate_state_error(error) from error
-
-
 def _write_publication_state(*args: Any, **kwargs: Any) -> dict[str, object]:
     try:
         return _state_write_publication_state(*args, **kwargs)
-    except PublicationStateError as error:
-        raise _translate_state_error(error) from error
-
-
-def _metadata_state_matches(*args: Any, **kwargs: Any) -> bool:
-    try:
-        return _state_metadata_state_matches(*args, **kwargs)
-    except PublicationStateError as error:
-        raise _translate_state_error(error) from error
-
-
-def _write_metadata_state(*args: Any, **kwargs: Any) -> dict[str, object]:
-    try:
-        return _state_write_metadata_state(*args, **kwargs)
     except PublicationStateError as error:
         raise _translate_state_error(error) from error
 
@@ -218,33 +191,93 @@ def _execute_publication(
     # Revalidate the dataset-wide upload plan immediately before upload to
     # catch in-place mutations between build and upload.
     create_upload_plan(paths.data_root)
+    _upload_source_plan(
+        plan,
+        paths,
+        source,
+        timeout=timeout,
+        upload_runner=upload_runner,
+        logger=logger,
+    )
+    return _verify_source_plan(plan, source, verifier=verifier, logger=logger)
+
+
+def _upload_source_plan(
+    plan: Any,
+    paths: Paths,
+    source: Source,
+    *,
+    timeout: float | None,
+    upload_runner: Callable[[list[str]], str] | None,
+    logger: RunLogger | None,
+) -> None:
     try:
         if upload_runner is None:
-            execute_upload(
-                plan,
-                confirmation=plan.identity_sha256,
-                timeout=timeout,
-                retry_observer=(
-                    None
-                    if logger is None
-                    else lambda **fields: logger.event("upload_retry", **fields)
-                ),
-            )
+            _run_default_source_upload(plan, timeout=timeout, logger=logger)
         else:
-            command = per_pbf_command(paths.data_root, source.name)
-            revision = upload_runner(command)
-            if not revision:
-                raise PublicationError("upload runner returned empty revision")
+            _run_injected_source_upload(paths, source, upload_runner)
     except KeyboardInterrupt:
         raise
     except (PublicationError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         raise OrchestratorError(f"upload failed for {source.name}: {error}") from error
 
+
+def _run_default_source_upload(
+    plan: Any,
+    *,
+    timeout: float | None,
+    logger: RunLogger | None,
+) -> None:
+    execute_upload(
+        plan,
+        confirmation=plan.identity_sha256,
+        timeout=timeout,
+        retry_observer=_source_retry_observer(logger),
+    )
+
+
+def _source_retry_observer(logger: RunLogger | None) -> Callable[..., None] | None:
+    if logger is None:
+        return None
+    return lambda **fields: logger.event("upload_retry", **fields)
+
+
+def _run_injected_source_upload(
+    paths: Paths,
+    source: Source,
+    upload_runner: Callable[[list[str]], str],
+) -> None:
+    revision = upload_runner(per_pbf_command(paths.data_root, source.name))
+    if not revision:
+        raise PublicationError("upload runner returned empty revision")
+
+
+def _verify_source_plan(
+    plan: Any,
+    source: Source,
+    *,
+    verifier: HubVerifier | None,
+    logger: RunLogger | None,
+) -> str:
     if verifier is None:
         raise OrchestratorError("no Hub verifier supplied; refusing to record an unknown revision")
+    _log_verification_start(logger, source)
+    verified = _call_source_verifier(plan, source, verifier)
+    _log_verification_complete(logger, source, verified)
+    return verified
+
+
+def _log_verification_start(logger: RunLogger | None, source: Source) -> None:
     if logger is not None:
         logger.event("upload_complete", level="INFO", source=source.name)
         logger.event("verification_start", level="INFO", source=source.name)
+
+
+def _call_source_verifier(
+    plan: Any,
+    source: Source,
+    verifier: HubVerifier,
+) -> str:
     try:
         verified = verifier(REPO_ID, plan.files)
     except KeyboardInterrupt:
@@ -255,6 +288,14 @@ def _execute_publication(
         raise OrchestratorError(
             f"Hub verifier returned no revision for {source.name}; refusing to record 'unknown'"
         )
+    return verified
+
+
+def _log_verification_complete(
+    logger: RunLogger | None,
+    source: Source,
+    verified: str,
+) -> None:
     if logger is not None:
         logger.event(
             "verification_complete",
@@ -262,7 +303,6 @@ def _execute_publication(
             source=source.name,
             verified_revision=verified,
         )
-    return verified
 
 
 def _publish_source_if_needed(
@@ -379,75 +419,11 @@ def run_and_publish(
     ``verifier`` (a callable returning a SHA on success) without exposing
     any of these via the public CLI.
     """
-    if clock is None:
-        clock = _default_clock
-    owns_logger = logger is None
-    if logger is None:
-        if paths is None:
-            if data_root is None:
-                raise OrchestratorError("logger requires paths or data_root")
-            data_root_path = data_root
-        else:
-            data_root_path = paths.data_root
-        logger = RunLogger(
-            data_root=data_root_path,
-            run_id=str(uuid.uuid4()),
-            clock=clock,
-            buffer_preflight=True,
-        )
+    clock = _resolve_clock(clock)
+    logger, owns_logger = _ensure_logger(logger, paths=paths, data_root=data_root, clock=clock)
     try:
-        if subprocess_runner is not None:
-            # Tests may redirect the production subprocess boundary; install it
-            # by monkeypatching the default runner used inside execute_upload.
-            import osm_polygon_description_tag.publication.upload as pub
-
-            original_runner = pub._default_runner_with_retry
-
-            def _bridge(
-                command: list[str],
-                *,
-                max_retries: int = 3,
-                backoff_seconds: float = 2.0,
-                backoff_factor: float = 2.0,
-                backoff_cap_seconds: float = 60.0,
-                timeout: float | None = None,
-                _runner: Callable[[list[str], float | None], None] | None = None,
-                retry_observer: Callable[..., None] | None = None,
-            ) -> None:
-                subprocess_runner(command)
-                _ = (
-                    max_retries,
-                    backoff_seconds,
-                    backoff_factor,
-                    backoff_cap_seconds,
-                    timeout,
-                    _runner,
-                    retry_observer,
-                )
-
-            pub._default_runner_with_retry = _bridge
-            try:
-                return _run_and_publish(
-                    source_root=source_root,
-                    data_root=data_root,
-                    confirm_repo=confirm_repo,
-                    preflight=preflight,
-                    upload_runner=upload_runner,
-                    clock=clock,
-                    paths=paths,
-                    exporter=exporter,
-                    verifier=verifier,
-                    verifier_factory=verifier_factory,
-                    upload_timeout=upload_timeout,
-                    progress_interval=progress_interval,
-                    logger=logger,
-                    tracker=tracker,
-                    osmium_executable=osmium_executable,
-                )
-            finally:
-                pub._default_runner_with_retry = original_runner
-
-        return _run_and_publish(
+        return _run_with_optional_subprocess_bridge(
+            subprocess_runner,
             source_root=source_root,
             data_root=data_root,
             confirm_repo=confirm_repo,
@@ -474,6 +450,79 @@ def run_and_publish(
             tracker.finish()
 
 
+def _resolve_clock(clock: Callable[[], str] | None) -> Callable[[], str]:
+    return _default_clock if clock is None else clock
+
+
+def _ensure_logger(
+    logger: RunLogger | None,
+    *,
+    paths: Paths | None,
+    data_root: Path | None,
+    clock: Callable[[], str],
+) -> tuple[RunLogger, bool]:
+    if logger is not None:
+        return logger, False
+    data_root_path = data_root if paths is None else paths.data_root
+    if data_root_path is None:
+        raise OrchestratorError("logger requires paths or data_root")
+    return (
+        RunLogger(
+            data_root=data_root_path,
+            run_id=str(uuid.uuid4()),
+            clock=clock,
+            buffer_preflight=True,
+        ),
+        True,
+    )
+
+
+def _run_with_optional_subprocess_bridge(
+    subprocess_runner: Callable[[list[str]], None] | None,
+    **kwargs: Any,
+) -> OrchestrationReport:
+    if subprocess_runner is None:
+        return _run_and_publish(**kwargs)
+    return _run_with_subprocess_bridge(subprocess_runner, **kwargs)
+
+
+def _run_with_subprocess_bridge(
+    subprocess_runner: Callable[[list[str]], None],
+    **kwargs: Any,
+) -> OrchestrationReport:
+    import osm_polygon_description_tag.publication.upload as pub
+
+    original_runner = pub._default_runner_with_retry
+
+    def _bridge(
+        command: list[str],
+        *,
+        max_retries: int = 3,
+        backoff_seconds: float = 2.0,
+        backoff_factor: float = 2.0,
+        backoff_cap_seconds: float = 60.0,
+        timeout: float | None = None,
+        _runner: Callable[[list[str], float | None], None] | None = None,
+        retry_observer: Callable[..., None] | None = None,
+    ) -> None:
+        subprocess_runner(command)
+        _ = (
+            max_retries,
+            backoff_seconds,
+            backoff_factor,
+            backoff_cap_seconds,
+            timeout,
+            _runner,
+            retry_observer,
+        )
+
+    pub._default_runner_with_retry = _bridge
+    try:
+        return _run_and_publish(**kwargs)
+    finally:
+        pub._default_runner_with_retry = original_runner
+
+
 def _run_and_publish(
     *,
     source_root: Path | None,
@@ -492,21 +541,101 @@ def _run_and_publish(
     tracker: TrackioRecorder | None,
     osmium_executable: str,
 ) -> OrchestrationReport:
-    if paths is None:
-        if source_root is None or data_root is None:
-            raise OrchestratorError("paths or (source_root, data_root) is required")
-        paths = Paths(source_root=source_root, data_root=data_root)
+    paths = _resolve_paths(paths, source_root, data_root)
+    preflight_report = _run_preflight(
+        paths,
+        preflight=preflight,
+        confirm_repo=confirm_repo,
+        osmium_executable=osmium_executable,
+        logger=logger,
+    )
+    sources, report = _discover_run(
+        paths,
+        preflight_report,
+        logger=logger,
+        tracker=tracker,
+    )
+    active_verifier = _resolve_verifier(
+        paths,
+        verifier=verifier,
+        verifier_factory=verifier_factory,
+        upload_runner=upload_runner,
+    )
+    outcomes_by_source = _build_sources(
+        sources,
+        paths,
+        clock=clock,
+        exporter=exporter,
+        progress_interval=progress_interval,
+        logger=logger,
+        osmium_executable=osmium_executable,
+    )
+    _finalize_local_dataset(paths, sources, clock=clock, logger=logger)
+    _publish_sources(
+        paths,
+        sources,
+        outcomes_by_source,
+        report,
+        verifier=active_verifier,
+        upload_timeout=upload_timeout,
+        upload_runner=upload_runner,
+        clock=clock,
+        logger=logger,
+        tracker=tracker,
+    )
+    _reconcile_remote(paths, active_verifier, logger)
+    report.final_remote_revision = _publish_final_metadata(
+        paths,
+        verifier=active_verifier,
+        upload_runner=upload_runner,
+        upload_timeout=upload_timeout,
+        clock=clock,
+        logger=logger,
+    )
+    logger.event(
+        "run_summary",
+        level="INFO",
+        result="completed",
+        source_count=len(sources),
+        per_pbf_uploads=sum(outcome.status != STATUS_PUBLISHED for outcome in report.outcomes),
+    )
+    if tracker is not None:
+        tracker.log_snapshot(paths.data_root)
+    logger.flush()
+    return report
 
+
+def _resolve_paths(
+    paths: Paths | None,
+    source_root: Path | None,
+    data_root: Path | None,
+) -> Paths:
+    if paths is not None:
+        return paths
+    if source_root is None or data_root is None:
+        raise OrchestratorError("paths or (source_root, data_root) is required")
+    return Paths(source_root=source_root, data_root=data_root)
+
+
+def _run_preflight(
+    paths: Paths,
+    *,
+    preflight: Preflight | None,
+    confirm_repo: str,
+    osmium_executable: str,
+    logger: RunLogger,
+) -> dict[str, object]:
     try:
-        if preflight is None:
-            preflight_report = default_preflight(
+        report = (
+            default_preflight(
                 paths,
                 confirm_repo=confirm_repo,
                 osmium_executable=osmium_executable,
                 hf_executable="hf",
             )
-        else:
-            preflight_report = preflight()
+            if preflight is None
+            else preflight()
+        )
     except Exception as error:
         logger.event("preflight_denied", level="ERROR", reason=str(error))
         logger.deny_preflight()
@@ -514,54 +643,78 @@ def _run_and_publish(
     logger.event(
         "preflight",
         level="INFO",
-        osmium_executable=preflight_report.get("osmium_executable", "osmium"),
-        osmium_version=preflight_report.get("osmium_version", ""),
-        hub_repo_sha=preflight_report.get("hub_repo_sha", ""),
-        source_count=preflight_report.get("source_count", 0),
+        osmium_executable=report.get("osmium_executable", "osmium"),
+        osmium_version=report.get("osmium_version", ""),
+        hub_repo_sha=report.get("hub_repo_sha", ""),
+        source_count=report.get("source_count", 0),
     )
     logger.approve_preflight()
+    return report
+
+
+def _discover_run(
+    paths: Paths,
+    preflight_report: dict[str, object],
+    *,
+    logger: RunLogger,
+    tracker: TrackioRecorder | None,
+) -> tuple[list[Source], OrchestrationReport]:
     removed_temps = cleanup_stale_owned_temps(paths.data_root)
     if removed_temps:
         logger.event("stale_temp_cleanup", level="INFO", rows=len(removed_temps))
-
-    sources = discover_sources(paths.source_root)
+    sources = list(discover_sources(paths.source_root))
     report = OrchestrationReport(source_count=len(sources), preflight=preflight_report)
-    total_sources = len(sources)
-    logger.event(
-        "sources_discovered",
-        level="INFO",
-        total=total_sources,
-    )
+    logger.event("sources_discovered", level="INFO", total=len(sources))
     if tracker is not None:
         tracker.start(
             config={
-                "source_count": total_sources,
+                "source_count": len(sources),
                 "step_definition": "PBF index sorted by filename; not time",
             }
         )
+    return sources, report
 
-    # Resolve the verifier exactly once so a single HfApi instance is used.
-    active_verifier: HubVerifier | None = verifier
-    if active_verifier is None and verifier_factory is not None:
-        active_verifier = verifier_factory()
-    elif active_verifier is None and verifier is None and upload_runner is None:
-        # Production path uses the default Hub verifier factory.
-        try:
-            active_verifier = default_hub_verifier_factory(
-                cache_dir=paths.data_root / ".cache" / "huggingface" / "hub"
-            )
-        except TypeError as error:
-            # Compatibility for injected legacy no-argument factories.
-            if "unexpected keyword argument" not in str(error):
-                raise
-            active_verifier = default_hub_verifier_factory()
 
-    per_pbf_upload_count = 0
-    cumulative_rows = 0
-    cumulative_output_bytes = 0
-    outcomes_by_source: dict[str, SourceOutcome] = {}
+def _resolve_verifier(
+    paths: Paths,
+    *,
+    verifier: HubVerifier | None,
+    verifier_factory: Callable[[], HubVerifier] | None,
+    upload_runner: Callable[[list[str]], str] | None,
+) -> HubVerifier | None:
+    if verifier is not None:
+        return verifier
+    if verifier_factory is not None:
+        return verifier_factory()
+    if upload_runner is not None:
+        return None
+    return _default_verifier(paths)
+
+
+def _default_verifier(paths: Paths) -> HubVerifier:
+    try:
+        return default_hub_verifier_factory(
+            cache_dir=paths.data_root / ".cache" / "huggingface" / "hub"
+        )
+    except TypeError as error:
+        if "unexpected keyword argument" not in str(error):
+            raise
+        return default_hub_verifier_factory()
+
+
+def _build_sources(
+    sources: list[Source],
+    paths: Paths,
+    *,
+    clock: Callable[[], str],
+    exporter: Callable[..., Iterable[ExportRecord]] | None,
+    progress_interval: int,
+    logger: RunLogger,
+    osmium_executable: str,
+) -> dict[str, SourceOutcome]:
+    outcomes: dict[str, SourceOutcome] = {}
     for index, source in enumerate(sources, start=1):
-        outcome = _process_one(
+        outcomes[source.name] = _process_one(
             source,
             paths,
             clock=clock,
@@ -569,13 +722,19 @@ def _run_and_publish(
             progress_interval=progress_interval,
             logger=logger,
             source_index=index,
-            source_total=total_sources,
+            source_total=len(sources),
             osmium_executable=osmium_executable,
         )
-        outcomes_by_source[source.name] = outcome
+    return outcomes
 
-    # Reject stray or incomplete artifacts before the global pass can inspect
-    # them.  The second check below validates the atomically promoted results.
+
+def _finalize_local_dataset(
+    paths: Paths,
+    sources: list[Source],
+    *,
+    clock: Callable[[], str],
+    logger: RunLogger,
+) -> None:
     _verify_final_completeness(paths, sources)
     dedup_result = deduplicate_dataset(paths.data_root)
     logger.event(
@@ -587,31 +746,38 @@ def _run_and_publish(
         files_changed=dedup_result.files_changed,
         status=dedup_result.status,
     )
-
     _verify_final_completeness(paths, sources)
-
-    # Refresh the canonical README, stats, and H3 map before constructing
-    # the dataset-wide reconciliation plan. This ordering is required for
-    # migration of a completed pre-H3 dataset: reconciliation must see the
-    # same complete allowlisted surface that metadata publication will see.
-    # The byte-stable writers preserve a true no-op when nothing changed.
     _refresh_dataset_docs_for_metadata(paths, clock=clock, logger=logger)
 
+
+def _publish_sources(
+    paths: Paths,
+    sources: list[Source],
+    outcomes_by_source: dict[str, SourceOutcome],
+    report: OrchestrationReport,
+    *,
+    verifier: HubVerifier | None,
+    upload_timeout: float | None,
+    upload_runner: Callable[[list[str]], str] | None,
+    clock: Callable[[], str],
+    logger: RunLogger,
+    tracker: TrackioRecorder | None,
+) -> None:
+    cumulative_rows = 0
+    cumulative_output_bytes = 0
     for index, source in enumerate(sources, start=1):
-        outcome = outcomes_by_source[source.name]
-        outcome, uploaded = _publish_source_if_needed(
+        outcome, _uploaded = _publish_source_if_needed(
             paths,
             source,
-            outcome,
-            verifier=active_verifier,
+            outcomes_by_source[source.name],
+            verifier=verifier,
             upload_timeout=upload_timeout,
             upload_runner=upload_runner,
             clock=clock,
             logger=logger,
             source_index=index,
-            source_total=total_sources,
+            source_total=len(sources),
         )
-        per_pbf_upload_count += int(uploaded)
         report.outcomes.append(outcome)
         cumulative_rows += outcome.included_rows
         cumulative_output_bytes += outcome.output_bytes
@@ -624,53 +790,51 @@ def _run_and_publish(
                 }
             )
 
-    # The production verifier owns a narrowly scoped reconciliation hook.
-    # It removes remote artifacts that no longer exist locally, but only
-    # below data/ and manifests/; unrelated repository files are preserved.
-    reconcile = getattr(active_verifier, "reconcile_managed_files", None)
-    if callable(reconcile):
-        full_plan = create_upload_plan(paths.data_root)
-        logger.event("remote_reconciliation_start", level="INFO")
-        try:
-            revision = reconcile(
-                REPO_ID,
-                {item.relative_path for item in full_plan.files},
-            )
-        except KeyboardInterrupt:
-            raise
-        except Exception as error:
-            raise OrchestratorError(f"remote artifact reconciliation failed: {error}") from error
-        logger.event(
-            "remote_reconciliation_complete",
-            level="INFO",
-            verified_revision=str(revision or ""),
-        )
 
-    # Final metadata is published independently. The metadata is uploaded
-    # whenever its current plan identity differs from the verified
-    # metadata state. This is independent of per-PBF upload count, so a
-    # failed intermediate metadata upload is retried on the next run.
-    final_metadata_revision = _upload_final_metadata(
+def _reconcile_remote(
+    paths: Paths,
+    verifier: HubVerifier | None,
+    logger: RunLogger,
+) -> None:
+    reconcile = getattr(verifier, "reconcile_managed_files", None)
+    if not callable(reconcile):
+        return
+    full_plan = create_upload_plan(paths.data_root)
+    logger.event("remote_reconciliation_start", level="INFO")
+    revision = _call_remote_reconcile(reconcile, full_plan)
+    logger.event(
+        "remote_reconciliation_complete",
+        level="INFO",
+        verified_revision=str(revision or ""),
+    )
+
+
+def _call_remote_reconcile(reconcile: Callable[..., object], plan: Any) -> object:
+    try:
+        return reconcile(REPO_ID, {item.relative_path for item in plan.files})
+    except KeyboardInterrupt:
+        raise
+    except Exception as error:
+        raise OrchestratorError(f"remote artifact reconciliation failed: {error}") from error
+
+
+def _publish_final_metadata(
+    paths: Paths,
+    *,
+    verifier: HubVerifier | None,
+    upload_runner: Callable[[list[str]], str] | None,
+    upload_timeout: float | None,
+    clock: Callable[[], str],
+    logger: RunLogger,
+) -> str | None:
+    return _upload_final_metadata(
         paths,
-        verifier=active_verifier,
+        verifier=verifier,
         upload_runner=upload_runner,
         upload_timeout=upload_timeout,
         clock=clock,
         logger=logger,
     )
-    if final_metadata_revision is not None:
-        report.final_remote_revision = final_metadata_revision
-    logger.event(
-        "run_summary",
-        level="INFO",
-        result="completed",
-        source_count=total_sources,
-        per_pbf_uploads=per_pbf_upload_count,
-    )
-    if tracker is not None:
-        tracker.log_snapshot(paths.data_root)
-    logger.flush()
-    return report
 
 
 def _refresh_dataset_docs_for_metadata(

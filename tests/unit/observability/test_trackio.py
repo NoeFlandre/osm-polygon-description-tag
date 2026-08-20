@@ -11,6 +11,7 @@ from osm_polygon_description_tag.observability.trackio import (
     build_dataset_summary,
     build_per_pbf_rows,
     build_retrospective_points,
+    build_snapshot_payload,
     dashboard_url,
     retrospective_run_name,
 )
@@ -251,3 +252,54 @@ def test_trackio_urls_and_run_names_are_stable() -> None:
         "?project=osm-polygon-description-tag&sidebar=hidden"
     )
     assert retrospective_run_name("2026-07-31") == "snapshot-2026-07-31"
+
+
+def test_snapshot_payload_includes_media_and_ranked_plots(tmp_path: Path) -> None:
+    class _MediaBackend(_FakeBackend):
+        def Image(self, path: Path, **kwargs: object) -> dict[str, object]:
+            return {"type": "image", "path": str(path), **kwargs}
+
+        def Html(self, figure: object, **kwargs: object) -> dict[str, object]:
+            return {"type": "html", "figure": figure, **kwargs}
+
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "description_polygon_density.png").write_bytes(b"h3")
+    (assets / "area_distribution.png").write_bytes(b"area")
+    stats = {
+        "rows": 8,
+        "files": [
+            {
+                "source_pbf": "alpha.osm.pbf",
+                "parquet": "alpha.parquet",
+                "rows": 8,
+                "source_bytes": 1024,
+                "output_bytes": 2048,
+                "emitted_features": 10,
+                "rejections": {"no_nonempty_description": 1, "invalid_geometry": 1},
+            }
+        ],
+    }
+
+    payload = build_snapshot_payload(_MediaBackend(), tmp_path, stats)
+
+    assert payload["h3_density_map"]["type"] == "image"
+    assert payload["area_distribution_histogram"]["type"] == "image"
+    assert payload["description_candidate_rate_by_region"]["type"] == "html"
+    assert payload["rows_per_input_gib_by_region"]["type"] == "html"
+    assert payload["technical_rejection_rate_by_region"]["type"] == "html"
+
+
+def test_trackio_stats_helpers_reject_non_sequence_files() -> None:
+    assert build_per_pbf_rows({"files": "not-a-list"}) == []
+    assert build_retrospective_points({"files": "not-a-list"}) == []
+
+
+def test_load_backend_returns_none_when_import_is_unavailable(monkeypatch) -> None:
+    import osm_polygon_description_tag.observability.trackio as trackio
+
+    def unavailable(_name: str) -> object:
+        raise ImportError("missing")
+
+    monkeypatch.setattr(trackio.importlib, "import_module", unavailable)
+    assert trackio._load_backend() is None

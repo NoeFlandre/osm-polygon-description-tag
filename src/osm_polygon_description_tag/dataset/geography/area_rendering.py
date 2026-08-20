@@ -116,83 +116,97 @@ def render_area_histogram(
     caption = _build_caption(counts)
     fig, ax = plt.subplots(figsize=_FIGSIZE, dpi=_DPI)
     try:
-        fig.set_facecolor(_BG_COLOR)
-        ax.set_facecolor(_PANEL_COLOR)
-
         positions = np.arange(len(labels))
-        # Some buckets may be empty (most prominently the smallest). Keep
-        # their bars truly zero-width; substituting one would imply a
-        # polygon that does not exist on the logarithmic axis.
-        occupied_positions = [
-            position for position, value in zip(positions, values, strict=True) if value > 0
-        ]
-        occupied_values = [value for value in values if value > 0]
-        ax.barh(
-            occupied_positions,
-            occupied_values,
-            color=_BAR_COLOR,
-            edgecolor=_BAR_EDGE,
-            linewidth=0.5,
-            zorder=2,
-        )
-
-        ax.set_yticks(positions)
-        ax.set_yticklabels(labels, fontsize=_TICK_FONTSIZE, color=_TEXT_COLOR)
-        ax.invert_yaxis()  # smallest area at the top, largest at the bottom
-
-        ax.set_xscale("log")
-        ax.set_xlabel(
-            "Polygons per bucket (log scale)", fontsize=_LABEL_FONTSIZE, color=_TEXT_COLOR
-        )
-        ax.tick_params(axis="x", colors=_MUTED_COLOR, labelsize=_TICK_FONTSIZE)
-        ax.tick_params(axis="y", colors=_TEXT_COLOR)
-
-        # Annotate each bar with its exact integer count so the chart is
-        # readable at a glance even when the y-axis is log-scaled.
-        for position, count in zip(positions, values, strict=True):
-            label_text = _format_count_tick(float(count))
-            width = max(float(count), 1.0)
-            ax.text(
-                width * 1.08,
-                position,
-                label_text,
-                va="center",
-                ha="left",
-                fontsize=_TICK_FONTSIZE,
-                color=_TEXT_COLOR,
-                zorder=4,
-            )
-
-        for spine in ("top", "right"):
-            ax.spines[spine].set_visible(False)
-        for spine in ("left", "bottom"):
-            ax.spines[spine].set_color(_MUTED_COLOR)
-
-        ax.grid(True, axis="x", color="#ffffff", linewidth=0.8, alpha=0.9, zorder=1)
-        ax.set_axisbelow(True)
-
-        ax.set_title(_TITLE, fontsize=_TITLE_FONTSIZE, color=_TEXT_COLOR, pad=12, loc="left")
-        fig.text(
-            0.5,
-            0.02,
-            caption,
-            ha="center",
-            va="bottom",
-            fontsize=_CAPTION_FONTSIZE,
-            color=_MUTED_COLOR,
-            wrap=True,
-        )
-
-        # Leave enough headroom on the right for the largest annotation.
-        max_value = max(values) if values else 1
-        ax.set_xlim(left=1.0, right=max(max_value * 4.0, 10.0))
-
+        _style_area_figure(fig, ax)
+        _draw_area_bars(ax, positions, values)
+        _style_area_axes(ax, labels, positions)
+        _annotate_area_bars(ax, positions, values)
+        _style_area_grid(ax)
+        _add_area_caption(fig, caption)
+        _set_area_limits(ax, values)
         fig.tight_layout(rect=(0, 0.05, 1, 0.97))
         _atomic_save_png(fig, output_path)
     finally:
         plt.close(fig)
 
     return AreaHistogramResult(output_path=output_path, caption=caption)
+
+
+def _style_area_figure(fig: Any, ax: Any) -> None:
+    fig.set_facecolor(_BG_COLOR)
+    ax.set_facecolor(_PANEL_COLOR)
+
+
+def _draw_area_bars(ax: Any, positions: Any, values: Sequence[int]) -> None:
+    # Keep empty buckets truly zero-width; substituting one would imply a
+    # polygon that does not exist on the logarithmic axis.
+    occupied_positions = [
+        position for position, value in zip(positions, values, strict=True) if value > 0
+    ]
+    occupied_values = [value for value in values if value > 0]
+    ax.barh(
+        occupied_positions,
+        occupied_values,
+        color=_BAR_COLOR,
+        edgecolor=_BAR_EDGE,
+        linewidth=0.5,
+        zorder=2,
+    )
+
+
+def _style_area_axes(ax: Any, labels: Sequence[str], positions: Any) -> None:
+    ax.set_yticks(positions)
+    ax.set_yticklabels(labels, fontsize=_TICK_FONTSIZE, color=_TEXT_COLOR)
+    ax.invert_yaxis()
+    ax.set_xscale("log")
+    ax.set_xlabel("Polygons per bucket (log scale)", fontsize=_LABEL_FONTSIZE, color=_TEXT_COLOR)
+    ax.tick_params(axis="x", colors=_MUTED_COLOR, labelsize=_TICK_FONTSIZE)
+    ax.tick_params(axis="y", colors=_TEXT_COLOR)
+
+
+def _annotate_area_bars(ax: Any, positions: Any, values: Sequence[int]) -> None:
+    for position, count in zip(positions, values, strict=True):
+        label_text = _format_count_tick(float(count))
+        width = max(float(count), 1.0)
+        ax.text(
+            width * 1.08,
+            position,
+            label_text,
+            va="center",
+            ha="left",
+            fontsize=_TICK_FONTSIZE,
+            color=_TEXT_COLOR,
+            zorder=4,
+        )
+
+
+def _style_area_grid(ax: Any) -> None:
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+    for spine in ("left", "bottom"):
+        ax.spines[spine].set_color(_MUTED_COLOR)
+    ax.grid(True, axis="x", color="#ffffff", linewidth=0.8, alpha=0.9, zorder=1)
+    ax.set_axisbelow(True)
+    ax.set_title(_TITLE, fontsize=_TITLE_FONTSIZE, color=_TEXT_COLOR, pad=12, loc="left")
+
+
+def _add_area_caption(fig: Any, caption: str) -> None:
+    fig.text(
+        0.5,
+        0.02,
+        caption,
+        ha="center",
+        va="bottom",
+        fontsize=_CAPTION_FONTSIZE,
+        color=_MUTED_COLOR,
+        wrap=True,
+    )
+
+
+def _set_area_limits(ax: Any, values: Sequence[int]) -> None:
+    # Leave enough headroom on the right for the largest annotation.
+    max_value = max(values) if values else 1
+    ax.set_xlim(left=1.0, right=max(max_value * 4.0, 10.0))
 
 
 def atomic_save_png_for_testing(fig: Any, output_path: Path) -> None:

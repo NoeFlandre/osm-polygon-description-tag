@@ -18,6 +18,7 @@ import os
 import sqlite3
 import uuid
 from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
@@ -26,6 +27,12 @@ import pyarrow.parquet as pq
 from shapely import from_wkb
 from shapely.errors import ShapelyError
 
+from osm_polygon_description_tag.dataset.manifest import (
+    MANIFEST_SCHEMA_VERSION,
+    ManifestError,
+    output_identity_for,
+    read_manifest,
+)
 from osm_polygon_description_tag.dataset.schema import (
     KEY_VALUE_COLUMNS,
     SCHEMA,
@@ -51,6 +58,13 @@ _VALIDATION_COLUMNS = [
 
 class StorageError(ValueError):
     """Raised for integrity or infrastructure failures during storage."""
+
+
+@dataclass(frozen=True)
+class _RecordStreamSummary:
+    row_count: int
+    geometry_types: frozenset[str]
+    bbox: tuple[float, float, float, float] | None
 
 
 def _arrow_record(record: Mapping[str, object]) -> dict[str, object]:
@@ -103,6 +117,58 @@ def _stream_rewrite_with_metadata(
             writer.write_batch(batch)
 
 
+def _record_bounds(record: Mapping[str, object]) -> tuple[float, float, float, float]:
+    return (
+        float(cast(float, record["bbox_min_x"])),
+        float(cast(float, record["bbox_min_y"])),
+        float(cast(float, record["bbox_max_x"])),
+        float(cast(float, record["bbox_max_y"])),
+    )
+
+
+def _merge_bounds(
+    current: tuple[float, float, float, float] | None,
+    update: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    if current is None:
+        return update
+    return (
+        min(current[0], update[0]),
+        min(current[1], update[1]),
+        max(current[2], update[2]),
+        max(current[3], update[3]),
+    )
+
+
+def _stream_records(
+    records: Iterable[dict[str, object]],
+    writer: pq.ParquetWriter,
+    batch_size: int,
+) -> _RecordStreamSummary:
+    batch: list[dict[str, object]] = []
+    geometry_types: set[str] = set()
+    bounds: tuple[float, float, float, float] | None = None
+    row_count = 0
+    for record in records:
+        batch.append(_arrow_record(record))
+        row_count += 1
+        geometry_types.add(str(record["geometry_type"]))
+        bounds = _merge_bounds(bounds, _record_bounds(record))
+        if len(batch) >= batch_size:
+            writer.write_batch(pa.RecordBatch.from_pylist(batch, schema=SCHEMA))
+            batch.clear()
+    if batch:
+        writer.write_batch(pa.RecordBatch.from_pylist(batch, schema=SCHEMA))
+    if row_count == 0:
+        writer.write_batch(pa.RecordBatch.from_pylist([], schema=SCHEMA))
+    return _RecordStreamSummary(row_count, frozenset(geometry_types), bounds)
+
+
+def _require_batch_size(batch_size: int) -> None:
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+
+
 def write_geoparquet(
     records: Iterable[dict[str, object]],
     target: Path,
@@ -113,15 +179,10 @@ def write_geoparquet(
     """Stream ``records`` into a validated GeoParquet file atomically promoted to ``target``."""
     if validator is None:
         validator = validate_geoparquet
-    if batch_size <= 0:
-        raise ValueError("batch_size must be positive")
+    _require_batch_size(batch_size)
     target.parent.mkdir(parents=True, exist_ok=True)
     temp_data = _owned_temp(target)
     temp_final = _owned_temp(target)
-    min_x = min_y = math.inf
-    max_x = max_y = -math.inf
-    geometry_types: set[str] = set()
-    row_count = 0
     try:
         with pq.ParquetWriter(
             temp_data,
@@ -129,26 +190,14 @@ def write_geoparquet(
             compression="zstd",
             use_dictionary=_DICTIONARY_COLUMNS,
         ) as writer:
-            batch: list[dict[str, object]] = []
-            for record in records:
-                batch.append(_arrow_record(record))
-                row_count += 1
-                geometry_types.add(str(record["geometry_type"]))
-                min_x = min(min_x, float(cast(float, record["bbox_min_x"])))
-                min_y = min(min_y, float(cast(float, record["bbox_min_y"])))
-                max_x = max(max_x, float(cast(float, record["bbox_max_x"])))
-                max_y = max(max_y, float(cast(float, record["bbox_max_y"])))
-                if len(batch) >= batch_size:
-                    writer.write_batch(pa.RecordBatch.from_pylist(batch, schema=SCHEMA))
-                    batch.clear()
-            if batch:
-                writer.write_batch(pa.RecordBatch.from_pylist(batch, schema=SCHEMA))
-            if row_count == 0:
-                writer.write_batch(pa.RecordBatch.from_pylist([], schema=SCHEMA))
+            summary = _stream_records(records, writer, batch_size)
 
-        bbox = [min_x, min_y, max_x, max_y] if row_count else []
+        bbox = list(summary.bbox) if summary.bbox is not None else []
         _stream_rewrite_with_metadata(
-            temp_data, temp_final, geometry_types=sorted(geometry_types), bbox=bbox
+            temp_data,
+            temp_final,
+            geometry_types=sorted(summary.geometry_types),
+            bbox=bbox,
         )
 
         validated_rows = validator(temp_final)
@@ -166,35 +215,52 @@ def _check_schema(file_schema: pa.Schema) -> None:
     if file_schema.names != SCHEMA.names:
         raise StorageError(f"schema field names mismatch: {file_schema.names}")
     for name in SCHEMA.names:
-        expected = SCHEMA.field(name)
-        actual = file_schema.field(name)
-        legacy_map = name in KEY_VALUE_COLUMNS and actual.type == pa.map_(pa.string(), pa.string())
-        if actual.type != expected.type and not legacy_map:
-            raise StorageError(f"field type mismatch for {name}: {actual.type} != {expected.type}")
-        if actual.nullable != expected.nullable:
-            raise StorageError(f"field nullability mismatch for {name}")
+        _check_field(file_schema.field(name), name)
+
+
+def _check_field(actual: pa.Field, name: str) -> None:
+    expected = SCHEMA.field(name)
+    legacy_map = name in KEY_VALUE_COLUMNS and actual.type == pa.map_(pa.string(), pa.string())
+    if actual.type != expected.type and not legacy_map:
+        raise StorageError(f"field type mismatch for {name}: {actual.type} != {expected.type}")
+    if actual.nullable != expected.nullable:
+        raise StorageError(f"field nullability mismatch for {name}")
 
 
 def _read_geo_metadata(schema: pa.Schema) -> dict[str, Any]:
-    metadata = schema.metadata or {}
-    raw = metadata.get(b"geo")
+    raw = (schema.metadata or {}).get(b"geo")
     if raw is None:
         raise StorageError("missing GeoParquet 'geo' metadata")
     try:
         geo = cast(dict[str, Any], json.loads(raw))
     except json.JSONDecodeError as error:
         raise StorageError(f"invalid GeoParquet 'geo' metadata: {error}") from error
+    _validate_geo_metadata_header(geo)
+    column = _geometry_metadata_column(geo)
+    _validate_geometry_metadata_column(column)
+    return geo
+
+
+def _validate_geo_metadata_header(geo: Mapping[str, Any]) -> None:
     if geo.get("version") != "1.1.0":
         raise StorageError(f"unsupported GeoParquet version: {geo.get('version')!r}")
     if geo.get("primary_column") != "geometry":
         raise StorageError("primary geometry column must be 'geometry'")
+
+
+def _geometry_metadata_column(geo: Mapping[str, Any]) -> dict[str, Any]:
     columns = geo.get("columns")
     if not isinstance(columns, dict) or "geometry" not in columns:
         raise StorageError("missing 'geometry' column metadata")
     column = columns["geometry"]
-    if not isinstance(column, dict) or column.get("encoding") != "WKB":
+    if not isinstance(column, dict):
+        raise StorageError("geometry metadata must be an object")
+    return cast(dict[str, Any], column)
+
+
+def _validate_geometry_metadata_column(column: Mapping[str, Any]) -> None:
+    if column.get("encoding") != "WKB":
         raise StorageError("geometry encoding must be WKB")
-    return geo
 
 
 class _UniquenessIndex:
@@ -247,6 +313,129 @@ class _UniquenessIndex:
         self.close()
 
 
+@dataclass
+class _ValidationState:
+    uniqueness: _UniquenessIndex
+    actual_types: set[str] = field(default_factory=set)
+    source_pbf: str | None = None
+    min_x: float = math.inf
+    min_y: float = math.inf
+    max_x: float = -math.inf
+    max_y: float = -math.inf
+    row_count: int = 0
+
+
+def _batch_columns(batch: pa.RecordBatch) -> dict[str, list[Any]]:
+    return {name: cast(list[Any], batch.column(name).to_pylist()) for name in _VALIDATION_COLUMNS}
+
+
+def _validate_source(state: _ValidationState, current: str) -> None:
+    if state.source_pbf is None:
+        state.source_pbf = current
+    elif state.source_pbf != current:
+        raise StorageError(f"mixed source_pbf within file: {state.source_pbf!r} and {current!r}")
+
+
+def _validate_geometry_type(state: _ValidationState, geometry_type: str) -> None:
+    if geometry_type not in _VALID_GEOMETRY_TYPES:
+        raise StorageError(f"unsupported geometry_type: {geometry_type!r}")
+    state.actual_types.add(geometry_type)
+
+
+def _validate_area(area: float | None) -> None:
+    if area is None or not math.isfinite(area) or area <= 0:
+        raise StorageError(f"non-positive or non-finite area_m2: {area}")
+
+
+def _validate_bbox(
+    state: _ValidationState,
+    values: tuple[float | None, float | None, float | None, float | None],
+) -> None:
+    for value, label in zip(
+        values,
+        ("bbox_min_x", "bbox_min_y", "bbox_max_x", "bbox_max_y"),
+        strict=True,
+    ):
+        _validate_coordinate(value, label)
+    min_x, min_y, max_x, max_y = cast(tuple[float, float, float, float], values)
+    if min_x > max_x or min_y > max_y:
+        raise StorageError("bbox min coordinate exceeds max")
+    state.min_x = min(state.min_x, min_x)
+    state.min_y = min(state.min_y, min_y)
+    state.max_x = max(state.max_x, max_x)
+    state.max_y = max(state.max_y, max_y)
+
+
+def _validate_coordinate(value: float | None, label: str) -> None:
+    if value is None or not math.isfinite(value):
+        raise StorageError(f"non-finite {label}: {value}")
+
+
+def _validate_geometry(geometry: bytes | None, geometry_type: str) -> None:
+    if geometry is None:
+        raise StorageError("null geometry")
+    decoded = _decode_geometry(geometry)
+    if decoded.geom_type != geometry_type or not decoded.is_valid or decoded.is_empty:
+        raise StorageError(f"geometry_type/WKB mismatch or invalid geometry: {decoded.geom_type}")
+
+
+def _decode_geometry(geometry: bytes):
+    try:
+        return from_wkb(geometry)
+    except ShapelyError as error:
+        raise StorageError(f"undecodable WKB geometry: {error}") from error
+
+
+def _validate_row(columns: Mapping[str, list[Any]], index: int, state: _ValidationState) -> None:
+    osm_type = cast(str, columns["osm_type"][index])
+    osm_id = cast(int, columns["osm_id"][index])
+    state.uniqueness.check_and_add(osm_type, osm_id)
+    _validate_source(state, cast(str, columns["source_pbf"][index]))
+    geometry_type = cast(str, columns["geometry_type"][index])
+    _validate_geometry_type(state, geometry_type)
+    _validate_area(cast(float | None, columns["area_m2"][index]))
+    _validate_bbox(
+        state,
+        (
+            cast(float | None, columns["bbox_min_x"][index]),
+            cast(float | None, columns["bbox_min_y"][index]),
+            cast(float | None, columns["bbox_max_x"][index]),
+            cast(float | None, columns["bbox_max_y"][index]),
+        ),
+    )
+    _validate_geometry(cast(bytes | None, columns["geometry"][index]), geometry_type)
+    state.row_count += 1
+
+
+def _validate_batch(batch: pa.RecordBatch, state: _ValidationState) -> None:
+    columns = _batch_columns(batch)
+    for index in range(batch.num_rows):
+        _validate_row(columns, index, state)
+
+
+def _validate_metadata_extent(
+    state: _ValidationState,
+    meta_types: set[str],
+    meta_bbox: object,
+) -> None:
+    if state.actual_types != meta_types:
+        raise StorageError(
+            "geometry_types mismatch: actual "
+            f"{sorted(state.actual_types)} != metadata {sorted(meta_types)}"
+        )
+    if state.row_count == 0 or meta_bbox is None:
+        return
+    _validate_metadata_bbox(state, meta_bbox)
+
+
+def _validate_metadata_bbox(state: _ValidationState, meta_bbox: object) -> None:
+    actual_bbox = [state.min_x, state.min_y, state.max_x, state.max_y]
+    expected_bbox = cast(list[float], meta_bbox)
+    for actual, expected in zip(actual_bbox, expected_bbox, strict=True):
+        if abs(actual - expected) > 1e-9:
+            raise StorageError(f"bbox mismatch: actual {actual_bbox} != metadata {expected_bbox}")
+
+
 def validate_geoparquet(path: Path) -> int:
     """Validate a finalized GeoParquet file in batches and return its row count."""
     if not path.is_file():
@@ -257,92 +446,17 @@ def validate_geoparquet(path: Path) -> int:
     column_meta = cast(dict[str, Any], cast(dict[str, Any], geo["columns"])["geometry"])
     meta_types = set(cast(list[str], column_meta.get("geometry_types", [])))
     meta_bbox = column_meta.get("bbox")
-
     data_root = path.parent.parent
-    uniqueness = _UniquenessIndex(work_root=data_root / ".work" / "validation")
-    actual_types: set[str] = set()
-    source_pbf: str | None = None
-    min_x = min_y = math.inf
-    max_x = max_y = -math.inf
-    row_count = 0
-
+    state = _ValidationState(
+        uniqueness=_UniquenessIndex(work_root=data_root / ".work" / "validation")
+    )
     try:
         for batch in pf.iter_batches(columns=_VALIDATION_COLUMNS):
-            osm_types = cast(list[str], batch.column("osm_type").to_pylist())
-            osm_ids = cast(list[int], batch.column("osm_id").to_pylist())
-            gtypes = cast(list[str], batch.column("geometry_type").to_pylist())
-            areas = cast(list[float], batch.column("area_m2").to_pylist())
-            bx_min = cast(list[float], batch.column("bbox_min_x").to_pylist())
-            by_min = cast(list[float], batch.column("bbox_min_y").to_pylist())
-            bx_max = cast(list[float], batch.column("bbox_max_x").to_pylist())
-            by_max = cast(list[float], batch.column("bbox_max_y").to_pylist())
-            geoms = cast(list[bytes], batch.column("geometry").to_pylist())
-            sources = cast(list[str], batch.column("source_pbf").to_pylist())
-
-            for index in range(batch.num_rows):
-                row_count += 1
-                uniqueness.check_and_add(osm_types[index], osm_ids[index])
-
-                current_source = sources[index]
-                if source_pbf is None:
-                    source_pbf = current_source
-                elif source_pbf != current_source:
-                    raise StorageError(
-                        f"mixed source_pbf within file: {source_pbf!r} and {current_source!r}"
-                    )
-
-                gtype = gtypes[index]
-                if gtype not in _VALID_GEOMETRY_TYPES:
-                    raise StorageError(f"unsupported geometry_type: {gtype!r}")
-                actual_types.add(gtype)
-
-                area = areas[index]
-                if area is None or not math.isfinite(area) or area <= 0:
-                    raise StorageError(f"non-positive or non-finite area_m2: {area}")
-
-                for value, label in (
-                    (bx_min[index], "bbox_min_x"),
-                    (by_min[index], "bbox_min_y"),
-                    (bx_max[index], "bbox_max_x"),
-                    (by_max[index], "bbox_max_y"),
-                ):
-                    if value is None or not math.isfinite(value):
-                        raise StorageError(f"non-finite {label}: {value}")
-                if bx_min[index] > bx_max[index] or by_min[index] > by_max[index]:
-                    raise StorageError("bbox min coordinate exceeds max")
-                min_x = min(min_x, bx_min[index])
-                min_y = min(min_y, by_min[index])
-                max_x = max(max_x, bx_max[index])
-                max_y = max(max_y, by_max[index])
-
-                geom = geoms[index]
-                if geom is None:
-                    raise StorageError("null geometry")
-                try:
-                    decoded = from_wkb(geom)
-                except ShapelyError as error:
-                    raise StorageError(f"undecodable WKB geometry: {error}") from error
-                if decoded.geom_type != gtype or not decoded.is_valid or decoded.is_empty:
-                    raise StorageError(
-                        f"geometry_type/WKB mismatch or invalid geometry: {decoded.geom_type}"
-                    )
+            _validate_batch(batch, state)
     finally:
-        uniqueness.close()
-
-    if actual_types != meta_types:
-        raise StorageError(
-            "geometry_types mismatch: actual "
-            f"{sorted(actual_types)} != metadata {sorted(meta_types)}"
-        )
-    if row_count > 0 and meta_bbox is not None:
-        actual_bbox = [min_x, min_y, max_x, max_y]
-        expected_bbox = cast(list[float], meta_bbox)
-        for actual, expected in zip(actual_bbox, expected_bbox, strict=True):
-            if abs(actual - expected) > 1e-9:
-                raise StorageError(
-                    f"bbox mismatch: actual {actual_bbox} != metadata {expected_bbox}"
-                )
-    return row_count
+        state.uniqueness.close()
+    _validate_metadata_extent(state, meta_types, meta_bbox)
+    return state.row_count
 
 
 def validate_finalized_artifacts(data_root):
@@ -354,51 +468,51 @@ def validate_finalized_artifacts(data_root):
     :func:`validate_geoparquet`; that stricter byte-level validation is
     performed separately, downstream, when the artifact is loaded.
     """
-    from osm_polygon_description_tag.dataset.manifest import (
-        MANIFEST_SCHEMA_VERSION,
-        ManifestError,
-        output_identity_for,
-        read_manifest,
-    )
-
     data_dir = data_root / "data"
     manifests_dir = data_root / "manifests"
+    _require_artifact_directories(data_dir, manifests_dir)
+
+    parquets = sorted(data_dir.glob("*.parquet"), key=lambda p: p.name)
+    manifest_paths = sorted(manifests_dir.glob("*.manifest.json"), key=lambda p: p.name)
+    _check_artifact_stems(parquets, manifest_paths)
+
+    validated_manifests = [_validate_manifest_pair(parquet, manifests_dir) for parquet in parquets]
+
+    return {
+        "parquets": tuple(parquets),
+        "manifests": tuple(validated_manifests),
+    }
+
+
+def _require_artifact_directories(data_dir: Path, manifests_dir: Path) -> None:
     if not data_dir.is_dir():
         raise StorageError(f"missing data directory: {data_dir}")
     if not manifests_dir.is_dir():
         raise StorageError(f"missing manifests directory: {manifests_dir}")
 
-    parquets = sorted(data_dir.glob("*.parquet"), key=lambda p: p.name)
-    manifest_paths = sorted(manifests_dir.glob("*.manifest.json"), key=lambda p: p.name)
+
+def _check_artifact_stems(parquets: list[Path], manifests: list[Path]) -> None:
     parquet_stems = {p.name.removesuffix(".parquet") for p in parquets}
-    manifest_stems = {p.name.removesuffix(".manifest.json") for p in manifest_paths}
+    manifest_stems = {p.name.removesuffix(".manifest.json") for p in manifests}
     mismatch = parquet_stems.symmetric_difference(manifest_stems)
     if mismatch:
         raise StorageError(f"artifact/manifest mismatch (missing or extra): {sorted(mismatch)}")
 
-    validated_parquets = []
-    validated_manifests = []
-    for parquet in parquets:
-        stem = parquet.name.removesuffix(".parquet")
-        manifest_path = manifests_dir / f"{stem}.manifest.json"
-        try:
-            manifest = read_manifest(manifest_path)
-        except ManifestError as error:
-            raise StorageError(f"invalid manifest {manifest_path}: {error}") from error
-        if manifest.manifest_schema_version != MANIFEST_SCHEMA_VERSION:
-            raise StorageError(
-                f"manifest uses unsupported schema version: {manifest.manifest_schema_version}"
-            )
-        actual_output = output_identity_for(parquet)
-        if manifest.output != actual_output:
-            raise StorageError(f"stale output identity for {parquet.name}")
-        validated_parquets.append(parquet)
-        validated_manifests.append(manifest_path)
 
-    return {
-        "parquets": tuple(validated_parquets),
-        "manifests": tuple(validated_manifests),
-    }
+def _validate_manifest_pair(parquet: Path, manifests_dir: Path) -> Path:
+    stem = parquet.name.removesuffix(".parquet")
+    manifest_path = manifests_dir / f"{stem}.manifest.json"
+    try:
+        manifest = read_manifest(manifest_path)
+    except ManifestError as error:
+        raise StorageError(f"invalid manifest {manifest_path}: {error}") from error
+    if manifest.manifest_schema_version != MANIFEST_SCHEMA_VERSION:
+        raise StorageError(
+            f"manifest uses unsupported schema version: {manifest.manifest_schema_version}"
+        )
+    if manifest.output != output_identity_for(parquet):
+        raise StorageError(f"stale output identity for {parquet.name}")
+    return manifest_path
 
 
 def _validate_finalized_artifacts_strict(data_root):

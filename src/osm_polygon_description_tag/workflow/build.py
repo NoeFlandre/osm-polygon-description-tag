@@ -100,15 +100,141 @@ def _transform_stream(
     interval = max(int(progress_interval), 1)
     for record in records:
         counts.emitted += 1
-        try:
-            yield transform_record(record, source_name)
-        except RejectedFeature as rejection:
-            counts.rejections[rejection.reason] = counts.rejections.get(rejection.reason, 0) + 1
-        else:
+        transformed = _transform_one(record, source_name, counts)
+        if transformed is not None:
             included += 1
+            yield transformed
         if progress_callback is not None and counts.emitted - last_emitted >= interval:
             last_emitted = counts.emitted
             progress_callback(counts.emitted, included)
+
+
+def _transform_one(
+    record: ExportRecord,
+    source_name: str,
+    counts: _Counts,
+) -> dict[str, object] | None:
+    try:
+        return transform_record(record, source_name)
+    except RejectedFeature as rejection:
+        counts.rejections[rejection.reason] = counts.rejections.get(rejection.reason, 0) + 1
+        return None
+
+
+def _artifact_paths(source: Source, paths: Paths) -> tuple[Path, Path]:
+    data_dir = paths.data_root / "data"
+    manifests_dir = paths.data_root / "manifests"
+    output_path = data_dir / source.output_name
+    manifest_path = manifests_dir / f"{source.output_name.removesuffix('.parquet')}.manifest.json"
+    for artifact in (output_path, manifest_path):
+        if artifact.resolve(strict=False).is_relative_to(paths.source_root.resolve(strict=False)):
+            raise PipelineError(f"artifact path inside immutable source: {artifact}")
+    data_dir.mkdir(parents=True, exist_ok=True)
+    manifests_dir.mkdir(parents=True, exist_ok=True)
+    return output_path, manifest_path
+
+
+def _reusable_build_result(
+    source: Source,
+    output_path: Path,
+    manifest_path: Path,
+) -> BuildResult | None:
+    manifest = _resumable_manifest(source, output_path, manifest_path)
+    if manifest is None or not _valid_output(output_path):
+        return None
+
+    return BuildResult(
+        source_name=source.name,
+        output_name=source.output_name,
+        status="skipped",
+        emitted_features=manifest.counts.emitted_features,
+        included_rows=manifest.counts.included_rows,
+        rejections=dict(manifest.counts.rejections),
+        output_path=output_path,
+        manifest_path=manifest_path,
+    )
+
+
+def _resumable_manifest(
+    source: Source,
+    output_path: Path,
+    manifest_path: Path,
+) -> Manifest | None:
+    if not output_path.is_file() or not manifest_path.is_file():
+        return None
+    try:
+        manifest = read_manifest(manifest_path)
+    except ManifestError:
+        return None
+    if not is_resumable(
+        manifest,
+        source_identity_for(source.path),
+        output_identity_for(output_path),
+    ):
+        return None
+    return manifest
+
+
+def _valid_output(output_path: Path) -> bool:
+    try:
+        validate_geoparquet(output_path)
+    except StorageError:
+        return False
+    return True
+
+
+def _build_fresh(
+    source: Source,
+    output_path: Path,
+    manifest_path: Path,
+    *,
+    exporter: Exporter,
+    writer: Writer,
+    executable: str,
+    export_config: Path,
+    clock: Clock,
+    batch_size: int,
+    progress_interval: int,
+    progress_callback: Callable[[int, int], None] | None,
+) -> BuildResult:
+    started_at = clock()
+    counts = _Counts()
+    transformed = _transform_stream(
+        exporter(source.path, export_config),
+        source.name,
+        counts,
+        progress_callback=progress_callback,
+        progress_interval=progress_interval,
+    )
+    included_rows = writer(transformed, output_path, batch_size=batch_size)
+    completed_at = clock()
+    manifest = Manifest(
+        manifest_schema_version=MANIFEST_SCHEMA_VERSION,
+        schema_version=SCHEMA_VERSION,
+        geoparquet_version=_GEOPARQUET_VERSION,
+        transform_algorithm_version=TRANSFORM_ALGORITHM_VERSION,
+        area_policy_sha256=current_area_policy_sha256(),
+        output_algorithm_revision=current_output_algorithm_revision(),
+        source=source_identity_for(source.path),
+        output=output_identity_for(output_path),
+        osmium_version=safe_osmium_version(executable),
+        dependency_versions=current_dependency_versions(),
+        code_revision=current_code_revision(),
+        started_at=started_at,
+        completed_at=completed_at,
+        counts=RunCounts(counts.emitted, included_rows, dict(counts.rejections)),
+    )
+    write_manifest(manifest, manifest_path)
+    return BuildResult(
+        source_name=source.name,
+        output_name=source.output_name,
+        status="built",
+        emitted_features=counts.emitted,
+        included_rows=included_rows,
+        rejections=dict(counts.rejections),
+        output_path=output_path,
+        manifest_path=manifest_path,
+    )
 
 
 def build_one(
@@ -129,92 +255,28 @@ def build_one(
     def default_exporter(src: Path, cfg: Path) -> Iterable[ExportRecord]:
         return stream_export(src, cfg, executable=executable)
 
-    if exporter is None:
-        exporter = default_exporter
-    if writer is None:
-        writer = write_geoparquet
-    if clock is None:
-        clock = utc_now_iso
+    exporter = default_exporter if exporter is None else exporter
+    writer = write_geoparquet if writer is None else writer
+    clock = utc_now_iso if clock is None else clock
 
     paths.validate()
     _verify_direct_child(source, paths.source_root)
-
-    data_dir = paths.data_root / "data"
-    manifests_dir = paths.data_root / "manifests"
-    output_path = data_dir / source.output_name
-    manifest_path = manifests_dir / f"{source.output_name.removesuffix('.parquet')}.manifest.json"
-    for artifact in (output_path, manifest_path):
-        if artifact.resolve(strict=False).is_relative_to(paths.source_root.resolve(strict=False)):
-            raise PipelineError(f"artifact path inside immutable source: {artifact}")
-
-    data_dir.mkdir(parents=True, exist_ok=True)
-    manifests_dir.mkdir(parents=True, exist_ok=True)
-
-    if output_path.is_file() and manifest_path.is_file():
-        try:
-            manifest = read_manifest(manifest_path)
-        except ManifestError:
-            manifest = None
-        if manifest is not None and is_resumable(
-            manifest,
-            source_identity_for(source.path),
-            output_identity_for(output_path),
-        ):
-            try:
-                validate_geoparquet(output_path)
-            except StorageError:
-                pass
-            else:
-                return BuildResult(
-                    source_name=source.name,
-                    output_name=source.output_name,
-                    status="skipped",
-                    emitted_features=manifest.counts.emitted_features,
-                    included_rows=manifest.counts.included_rows,
-                    rejections=dict(manifest.counts.rejections),
-                    output_path=output_path,
-                    manifest_path=manifest_path,
-                )
-
-    started_at = clock()
-    counts = _Counts()
-    transformed = _transform_stream(
-        exporter(source.path, export_config),
-        source.name,
-        counts,
-        progress_callback=progress_callback,
+    output_path, manifest_path = _artifact_paths(source, paths)
+    reused = _reusable_build_result(source, output_path, manifest_path)
+    if reused is not None:
+        return reused
+    return _build_fresh(
+        source,
+        output_path,
+        manifest_path,
+        exporter=exporter,
+        writer=writer,
+        executable=executable,
+        export_config=export_config,
+        clock=clock,
+        batch_size=batch_size,
         progress_interval=progress_interval,
-    )
-    included_rows = writer(transformed, output_path, batch_size=batch_size)
-    completed_at = clock()
-
-    manifest = Manifest(
-        manifest_schema_version=MANIFEST_SCHEMA_VERSION,
-        schema_version=SCHEMA_VERSION,
-        geoparquet_version=_GEOPARQUET_VERSION,
-        transform_algorithm_version=TRANSFORM_ALGORITHM_VERSION,
-        area_policy_sha256=current_area_policy_sha256(),
-        output_algorithm_revision=current_output_algorithm_revision(),
-        source=source_identity_for(source.path),
-        output=output_identity_for(output_path),
-        osmium_version=safe_osmium_version(executable),
-        dependency_versions=current_dependency_versions(),
-        code_revision=current_code_revision(),
-        started_at=started_at,
-        completed_at=completed_at,
-        counts=RunCounts(counts.emitted, included_rows, dict(counts.rejections)),
-    )
-    write_manifest(manifest, manifest_path)
-
-    return BuildResult(
-        source_name=source.name,
-        output_name=source.output_name,
-        status="built",
-        emitted_features=counts.emitted,
-        included_rows=included_rows,
-        rejections=dict(counts.rejections),
-        output_path=output_path,
-        manifest_path=manifest_path,
+        progress_callback=progress_callback,
     )
 
 

@@ -1,5 +1,6 @@
 """RED tests for deterministic cross-PBF OSM identity deduplication."""
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,8 @@ from shapely.geometry import Polygon
 
 from osm_polygon_description_tag.dataset.deduplication import (
     DUPLICATE_REJECTION_REASON,
+    _parse_timestamp,
+    _timestamp_rank,
     deduplicate_dataset,
     select_canonical_row,
 )
@@ -80,6 +83,29 @@ def test_select_canonical_row_prefers_latest_osm_version_then_filename() -> None
 
     assert select_canonical_row(rows)["source_pbf"] == "a.osm.pbf"
     assert select_canonical_row(rows)["version"] == 5
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (datetime(2026, 1, 1, tzinfo=UTC), 1767225600.0),
+        ("2026-01-01T01:00:00+01:00", 1767225600.0),
+        ("2026-01-01T00:00:00", 1767225600.0),
+        ("not-a-timestamp", 0.0),
+        ("", 0.0),
+        (None, 0.0),
+        (42, 0.0),
+    ],
+)
+def test_timestamp_rank_normalizes_supported_and_invalid_values(
+    value: object, expected: float
+) -> None:
+    assert _timestamp_rank(value) == expected
+
+
+def test_parse_timestamp_returns_utc_aware_values_or_none() -> None:
+    assert _parse_timestamp("2026-01-01T01:00:00+01:00") == datetime(2026, 1, 1, tzinfo=UTC)
+    assert _parse_timestamp("not-a-timestamp") is None
 
 
 def test_deduplicate_dataset_rewrites_overlapping_rows_and_is_idempotent(tmp_path: Path) -> None:

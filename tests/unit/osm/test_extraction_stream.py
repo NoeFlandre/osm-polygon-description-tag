@@ -70,7 +70,7 @@ def test_stream_export_wraps_missing_binary(tmp_path: Path) -> None:
 
 def test_stream_export_terminates_child_on_consumer_cancellation(tmp_path: Path) -> None:
     exe = _fake_osmium(tmp_path, stdout=REC, loop=True)
-    gen = stream_export(Path("x.osm.pbf"), Path("c.json"), executable=str(exe))
+    gen = stream_export(Path("x.osm.pbf"), Path("c.json"), executable=str(exe), kill_timeout=0.1)
     first = next(gen)
     assert first.osm_id == 1
     gen.close()  # consumer stops early; must not hang and must kill the child

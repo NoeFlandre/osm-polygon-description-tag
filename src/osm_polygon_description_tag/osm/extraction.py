@@ -198,41 +198,15 @@ def stream_export(
     binary or non-zero exit.
     """
     command = export_command(source, config, executable=executable)
-    try:
-        proc = subprocess.Popen(  # noqa: S603 - controlled argument array, no shell
-            command,
-            shell=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-    except FileNotFoundError as error:
-        raise OsmiumExportError(f"osmium executable not found: {executable}") from error
-
-    stdout = proc.stdout
-    stderr = proc.stderr
-    if stdout is None or stderr is None:
-        raise OsmiumExportError("could not attach osmium stdout/stderr pipes")
-    stderr_buffer = bytearray()
-    drain = Thread(
-        target=_drain_stderr,
-        args=(stderr, stderr_buffer, stderr_cap_bytes),
-        daemon=True,
-    )
-    drain.start()
-
-    return_code: int = -1
+    proc, stdout, drain, stderr_buffer = _start_export(command, stderr_cap_bytes)
+    return_code = -1
     try:
         yield from iter_records(stdout)
         stdout.close()
         return_code = proc.wait()
     except BaseException:
         # Downstream failure or generator close (cancellation): stop the child.
-        proc.terminate()
-        try:
-            proc.wait(timeout=kill_timeout)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
+        _stop_process(proc, kill_timeout)
         raise
     finally:
         if not stdout.closed:
@@ -244,6 +218,42 @@ def stream_export(
             f"osmium exited {return_code}: {_decode_stderr(bytes(stderr_buffer))}",
             stderr=bytes(stderr_buffer),
         )
+
+
+def _start_export(
+    command: tuple[str, ...],
+    stderr_cap_bytes: int,
+) -> tuple[subprocess.Popen[bytes], IO[bytes], Thread, bytearray]:
+    try:
+        proc = subprocess.Popen(  # noqa: S603 - controlled argument array, no shell
+            command,
+            shell=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except FileNotFoundError as error:
+        raise OsmiumExportError(f"osmium executable not found: {command[0]}") from error
+    stdout = proc.stdout
+    stderr = proc.stderr
+    if stdout is None or stderr is None:
+        raise OsmiumExportError("could not attach osmium stdout/stderr pipes")
+    stderr_buffer = bytearray()
+    drain = Thread(
+        target=_drain_stderr,
+        args=(stderr, stderr_buffer, stderr_cap_bytes),
+        daemon=True,
+    )
+    drain.start()
+    return proc, stdout, drain, stderr_buffer
+
+
+def _stop_process(proc: subprocess.Popen[bytes], kill_timeout: float) -> None:
+    proc.terminate()
+    try:
+        proc.wait(timeout=kill_timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
 
 
 def osmium_version(executable: str = "osmium", *, timeout: float = 10.0) -> str:

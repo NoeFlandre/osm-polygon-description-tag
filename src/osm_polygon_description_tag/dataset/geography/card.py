@@ -77,13 +77,22 @@ def write_map_block_marker_to_template(
     text = template_path.read_text(encoding="utf-8")
     start_count = text.count(H3_MAP_START_MARKER)
     end_count = text.count(H3_MAP_END_MARKER)
+    _validate_marker_counts(start_count, end_count)
+    if start_count == 1 and end_count == 1:
+        return
+    new_text = _template_with_map_markers(text, asset_relative_path)
+    _atomic_write_template(template_path, new_text)
+
+
+def _validate_marker_counts(start_count: int, end_count: int) -> None:
     if start_count > 1 or end_count > 1:
         raise ValueError(
             f"dataset card template must contain a unique H3 map marker block; "
             f"found {start_count} start markers and {end_count} end markers"
         )
-    if start_count == 1 and end_count == 1:
-        return
+
+
+def _template_with_map_markers(text: str, asset_relative_path: str) -> str:
     # Insert the marker block immediately before the stats marker block so the
     # map image appears near the top of the dataset card. The H3 marker block
     # ends with the same newline that introduces the stats marker, so the
@@ -94,7 +103,10 @@ def write_map_block_marker_to_template(
     block = (
         f"{H3_MAP_START_MARKER}\n![{H3_MAP_TITLE}]({asset_relative_path})\n{H3_MAP_END_MARKER}\n"
     )
-    new_text = text.replace(stats_start, block + stats_start, 1)
+    return text.replace(stats_start, block + stats_start, 1)
+
+
+def _atomic_write_template(template_path: Path, new_text: str) -> None:
     tmp = template_path.with_name(f".{template_path.name}.{uuid.uuid4().hex}.tmp")
     try:
         tmp.write_text(new_text, encoding="utf-8")

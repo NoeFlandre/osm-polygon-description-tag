@@ -31,20 +31,22 @@ risk:
         --markdown-output reports/crap.md
     uv run python scripts/quality_metrics.py check \
         --report reports/crap.json \
-        --max-crap-score 6 \
-        --pattern "src/osm_polygon_description_tag/publication/planning.py::*" \
-        --pattern "src/osm_polygon_description_tag/dataset/stats.py::*"
+        --max-crap-score 6
 
-# Run the required publication-planning mutation gate; mutmut resumes from its ignored cache.
+# Run the all-source mutation gate for all source modules; mutmut resumes from its ignored cache.
 mutation:
     mkdir -p reports
-    uv run mutmut run --max-children=8 \
-        "osm_polygon_description_tag.publication.planning.x*__mutmut_*"
+    if test -d "/Volumes/Seagate M3/projects/osm-polygon-description-tag"; then \
+        mkdir -p "/Volumes/Seagate M3/projects/osm-polygon-description-tag/.mutmut-tmp"; \
+        TMPDIR="/Volumes/Seagate M3/projects/osm-polygon-description-tag/.mutmut-tmp" \
+            uv run mutmut run --max-children=8; \
+    else \
+        uv run mutmut run --max-children=8; \
+    fi
     uv run python scripts/check_mutation_score.py \
         --mutants-root mutants \
-        --pattern "osm_polygon_description_tag.publication.planning.x*__mutmut_*" \
         --output reports/mutation-summary.json \
-        --minimum-score 90
+        --minimum-score 100
 
 build:
     uv build

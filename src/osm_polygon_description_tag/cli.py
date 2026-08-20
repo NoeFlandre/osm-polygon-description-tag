@@ -479,26 +479,9 @@ def _show_click_error(error: ClickException) -> None:
 
 
 def run(argv: Sequence[str] | None = None) -> int:
-    # Rich may cache a zero-width value before the entry point runs (notably in
-    # CI/pre-commit subprocesses). Keep captured help deterministic and readable.
-    rich_utils.MAX_WIDTH = 80
-    if not sys.stdout.isatty():
-        rich_utils.FORCE_TERMINAL = False
-    columns = os.environ.get("COLUMNS")
-    if columns is not None:
-        try:
-            invalid_columns = int(columns) < 80
-        except ValueError:
-            invalid_columns = True
-        if invalid_columns:
-            os.environ["COLUMNS"] = "80"
+    _configure_terminal()
     try:
-        app(
-            args=list(argv) if argv is not None else None,
-            prog_name="osm-polygon-description-tag",
-            standalone_mode=False,
-        )
-        return 0
+        return _invoke_app(argv)
     except Exit as error:
         return int(error.exit_code)
     except ClickException as error:
@@ -509,6 +492,36 @@ def run(argv: Sequence[str] | None = None) -> int:
     except _ERROR_TYPES as error:
         TerminalPresenter(stderr=sys.stderr).error(str(error))
         return 1
+
+
+def _configure_terminal() -> None:
+    # Rich may cache a zero-width value before the entry point runs (notably in
+    # CI/pre-commit subprocesses). Keep captured help deterministic and readable.
+    rich_utils.MAX_WIDTH = 80
+    if not sys.stdout.isatty():
+        rich_utils.FORCE_TERMINAL = False
+    _normalize_columns()
+
+
+def _normalize_columns() -> None:
+    columns = os.environ.get("COLUMNS")
+    if columns is None:
+        return
+    try:
+        invalid_columns = int(columns) < 80
+    except ValueError:
+        invalid_columns = True
+    if invalid_columns:
+        os.environ["COLUMNS"] = "80"
+
+
+def _invoke_app(argv: Sequence[str] | None) -> int:
+    app(
+        args=list(argv) if argv is not None else None,
+        prog_name="osm-polygon-description-tag",
+        standalone_mode=False,
+    )
+    return 0
 
 
 def main() -> None:
