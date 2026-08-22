@@ -15,7 +15,8 @@ class TerminalPresenter:
 
     def __init__(self, *, stderr: TextIO | None = None) -> None:
         self._stderr = stderr if stderr is not None else sys.stderr
-        self._interactive = bool(getattr(self._stderr, "isatty", lambda: False)())
+        isatty = getattr(self._stderr, "isatty", None)
+        self._interactive = bool(isatty()) if isatty is not None else False
         self._console = Console(
             file=self._stderr,
             force_terminal=self._interactive,
@@ -52,7 +53,7 @@ class TerminalPresenter:
     def _update_progress(self, event: Mapping[str, object]) -> None:
         if self._progress is None:
             return
-        value = event.get("emitted", 0)
+        value = event.get("emitted")
         emitted = value if isinstance(value, int) else 0
         self._progress.update(max(0, emitted - self._progress.n))
 

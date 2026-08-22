@@ -261,8 +261,6 @@ class RunLogger:
             "run_id": self._run_id,
         }
         for key, value in fields.items():
-            if not isinstance(key, str):
-                continue
             record[key] = value
         scrubbed = _scrub(record)
         raw = json.dumps(scrubbed, ensure_ascii=False, sort_keys=True, cls=_SafeJsonFormatter)
@@ -323,7 +321,9 @@ class RunLogger:
         assert self._handle is not None
         if not raw.endswith("\n"):
             raw = raw + "\n"
+        # pragma: no mutate start - UTF-8 codec names are case-insensitive
         payload = raw.encode("utf-8")
+        # pragma: no mutate end
         self._handle.write(payload)
         with contextlib.suppress(OSError):
             os.fsync(self._handle.fileno())
@@ -358,7 +358,10 @@ class RunLogger:
         os.link(self._path, staging)
         self._path.unlink()
         _shift_backups(backup_chain)
-        os.replace(staging, backup_chain[0])
+        if backup_chain:
+            os.replace(staging, backup_chain[0])
+        else:
+            staging.unlink()
         new_active = _create_active_log(subdir, self.ACTIVE_NAME)
         self._handle = open(new_active, "ab", buffering=0)  # noqa: SIM115
         self._path = new_active

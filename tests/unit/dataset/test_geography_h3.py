@@ -9,9 +9,11 @@ sorted cell ordering used by both the renderer and the dataset card.
 from __future__ import annotations
 
 import math
+from unittest.mock import call, patch
 
 import pytest
 
+import osm_polygon_description_tag.dataset.geography.h3_policy as h3_policy_module
 from osm_polygon_description_tag.dataset.geography import (
     DEFAULT_H3_RESOLUTION,
     H3PolicyError,
@@ -68,6 +70,12 @@ def test_validate_coordinate_rejects_non_numeric() -> None:
         validate_coordinate("not-a-number", "2.0")  # type: ignore[arg-type]
 
 
+def test_validate_coordinate_uses_exact_null_error_contract() -> None:
+    with pytest.raises(H3PolicyError) as error:
+        validate_coordinate(None, 0.0)
+    assert str(error.value) == "Latitude and longitude must not be null."
+
+
 # ---------------------------------------------------------------------------
 # Centroid -> H3 cell assignment
 # ---------------------------------------------------------------------------
@@ -117,6 +125,20 @@ def test_assign_h3_cell_rejects_out_of_range() -> None:
         assign_h3_cell(0.0, 181.0)
 
 
+def test_assign_h3_cell_preserves_h3_failure_context() -> None:
+    with (
+        patch.object(
+            h3_policy_module.h3,
+            "latlng_to_cell",
+            side_effect=ValueError("bad cell"),
+        ),
+        pytest.raises(H3PolicyError) as error,
+    ):
+        assign_h3_cell(1.0, 2.0, resolution=7)
+
+    assert str(error.value) == ("Could not assign H3 cell for (1.0, 2.0) at resolution 7: bad cell")
+
+
 @pytest.mark.parametrize("bad_resolution", [-1, 16, 100, "3", None])
 def test_assign_h3_cell_rejects_invalid_resolution(bad_resolution: object) -> None:
     with pytest.raises(H3PolicyError, match="resolution"):
@@ -151,6 +173,12 @@ def test_cell_rings_for_invalid_cell_returns_empty() -> None:
     assert cell_rings("000000000000000") == []
 
 
+def test_cell_rings_flips_boundary_coordinates_and_keeps_three_points() -> None:
+    boundary = [(10.0, 20.0), (30.0, 40.0), (50.0, 60.0)]
+    with patch.object(h3_policy_module.h3, "cell_to_boundary", return_value=boundary):
+        assert cell_rings("cell") == [[(20.0, 10.0), (40.0, 30.0), (60.0, 50.0)]]
+
+
 # ---------------------------------------------------------------------------
 # Antimeridian splitting
 # ---------------------------------------------------------------------------
@@ -179,6 +207,177 @@ def test_split_antimeridian_crossing_polygon_is_split() -> None:
         assert len(ring) >= 3
 
 
+def test_h3_antimeridian_internal_helpers_pin_boundary_and_unwrap_rules() -> None:
+    from osm_polygon_description_tag.dataset.geography.h3_policy import (
+        _clip_longitude,
+        _clip_slab,
+        _slab_range,
+        _unwrap_points,
+    )
+
+    # Boundary points belong to the retained side, while crossings get a
+    # deterministic interpolated point at the boundary.
+    points = [(-1.0, 0.0), (1.0, 2.0)]
+    assert _clip_longitude(points, 0.0, keep_greater=True)[0] == (0.0, 1.0)
+    assert _clip_longitude(points, 0.0, keep_greater=False)[0] == (0.0, 1.0)
+    assert _clip_longitude([(0.0, 3.0)], 0.0, keep_greater=True) == [(0.0, 3.0)]
+    assert _clip_longitude([(0.0, 3.0)], 0.0, keep_greater=False) == [(0.0, 3.0)]
+
+    unwrapped = _unwrap_points([(170.0, 0.0), (-170.0, 1.0), (170.0, 2.0)])
+    assert unwrapped == [(170.0, 0.0), (190.0, 1.0), (170.0, 2.0)]
+    assert _slab_range(unwrapped) == (0, 1)
+    clipped = _clip_slab(unwrapped, 0)
+    assert clipped
+    assert all(-180.0 <= lon <= 180.0 for lon, _lat in clipped)
+
+
+def test_antimeridian_helpers_pin_boundary_direction_and_slab_math() -> None:
+    from osm_polygon_description_tag.dataset.geography.h3_policy import (
+        _clip_longitude,
+        _clip_slab,
+        _crosses_antimeridian,
+        _slab_range,
+        _unwrap_points,
+    )
+
+    assert _crosses_antimeridian([(0.0, 0.0), (180.0, 0.0), (0.0, 1.0)]) is False
+    assert _crosses_antimeridian([(0.0, 0.0), (181.0, 0.0)]) is True
+    assert _crosses_antimeridian([(-180.0, 0.0), (0.0, 0.0), (-180.0, 0.0), (100.0, 0.0)]) is True
+
+    assert _unwrap_points([(0.0, 0.0), (180.0, 1.0)]) == [
+        (0.0, 0.0),
+        (180.0, 1.0),
+    ]
+    assert _unwrap_points([(0.0, 0.0), (-180.0, 1.0)]) == [
+        (0.0, 0.0),
+        (-180.0, 1.0),
+    ]
+    assert _unwrap_points([(-170.0, 0.0), (170.0, 1.0)]) == [
+        (-170.0, 0.0),
+        (-190.0, 1.0),
+    ]
+    assert _unwrap_points([(170.0, 0.0), (-170.0, 1.0)]) == [
+        (170.0, 0.0),
+        (190.0, 1.0),
+    ]
+    assert _unwrap_points([(0.0, 0.0), (721.0, 1.0)]) == [
+        (0.0, 0.0),
+        (1.0, 1.0),
+    ]
+    assert _unwrap_points([(0.0, 0.0), (-721.0, 1.0)]) == [
+        (0.0, 0.0),
+        (-1.0, 1.0),
+    ]
+    assert _unwrap_points([(0.0, 0.0), (541.0, 1.0)]) == [
+        (0.0, 0.0),
+        (-179.0, 1.0),
+    ]
+    assert _unwrap_points([(0.0, 0.0), (-541.0, 1.0)]) == [
+        (0.0, 0.0),
+        (179.0, 1.0),
+    ]
+    assert _unwrap_points([(0.0, 0.0), (181.0, 1.0), (-181.0, 2.0)]) == [
+        (0.0, 0.0),
+        (-179.0, 1.0),
+        (-181.0, 2.0),
+    ]
+
+    assert _slab_range([(-181.0, 0.0), (179.0, 0.0)]) == (-1, 0)
+    assert _slab_range([(-180.0, 0.0), (180.0, 0.0)]) == (0, 1)
+    assert _slab_range([(180.0, 0.0), (181.0, 0.0)]) == (1, 1)
+    assert _clip_slab([(170.0, 0.0), (190.0, 2.0), (170.0, 4.0)], 1) == [
+        (180.0, 1.0),
+        (190.0, 2.0),
+        (180.0, 3.0),
+    ]
+    assert _clip_slab([(530.0, 0.0), (550.0, 2.0), (530.0, 4.0)], 1) == [
+        (530.0, 0.0),
+        (540.0, 1.0),
+        (540.0, 3.0),
+        (530.0, 4.0),
+    ]
+    assert _clip_longitude([(-0.5, 0.0), (0.5, 2.0)], 0.0, keep_greater=True) == [
+        (0.0, 1.0),
+        (0.0, 1.0),
+        (0.5, 2.0),
+    ]
+
+
+def test_unwrap_points_handles_each_wrap_threshold_without_drift() -> None:
+    from osm_polygon_description_tag.dataset.geography.h3_policy import _unwrap_points
+
+    assert _unwrap_points([(0.0, 0.0), (181.0, 1.0)]) == [
+        (0.0, 0.0),
+        (-179.0, 1.0),
+    ]
+    assert _unwrap_points([(0.0, 0.0), (-181.0, 1.0)]) == [
+        (0.0, 0.0),
+        (179.0, 1.0),
+    ]
+    assert _unwrap_points([(-170.0, 0.0), (170.0, 1.0)]) == [
+        (-170.0, 0.0),
+        (-190.0, 1.0),
+    ]
+    assert _unwrap_points([(170.0, 0.0), (-170.0, 1.0)]) == [
+        (170.0, 0.0),
+        (190.0, 1.0),
+    ]
+
+
+def test_clip_longitude_propagates_inside_state_and_boundaries_exactly() -> None:
+    from osm_polygon_description_tag.dataset.geography.h3_policy import _clip_longitude
+
+    real_transition = h3_policy_module._clip_transition
+    with patch.object(
+        h3_policy_module,
+        "_clip_transition",
+        wraps=real_transition,
+    ) as transition:
+        result = _clip_longitude(
+            [(-1.0, 0.0), (1.0, 1.0), (-1.0, 2.0)],
+            0.0,
+            keep_greater=True,
+        )
+
+    assert result == [(0.0, 0.5), (1.0, 1.0), (0.0, 1.5)]
+    assert [call.args[2] for call in transition.call_args_list] == [0.0, 0.0, 0.0]
+    assert [call.args[3:5] for call in transition.call_args_list] == [
+        (False, False),
+        (False, True),
+        (True, False),
+    ]
+
+
+def test_split_antimeridian_preserves_short_inputs_and_exact_ring_thresholds() -> None:
+    from osm_polygon_description_tag.dataset.geography.h3_policy import (
+        _rings_for_slabs,
+    )
+
+    short = [(170.0, 0.0), (-170.0, 0.0), (170.0, 1.0)]
+    short_rings = split_antimeridian(short)
+    assert len(short_rings) == 2
+    assert all(len(ring) >= 3 for ring in short_rings)
+    assert split_antimeridian([(1.0, 2.0), (3.0, 4.0)]) == [[(1.0, 2.0), (3.0, 4.0)]]
+
+    clipped = {
+        1: [(360.0, 0.0), (361.0, 1.0), (362.0, 2.0)],
+        2: [(720.0, 3.0), (721.0, 4.0), (722.0, 5.0)],
+    }
+    with patch.object(
+        h3_policy_module, "_clip_slab", side_effect=lambda _points, slab: clipped[slab]
+    ) as clip_slab:
+        rings = _rings_for_slabs([(0.0, 0.0)], 1, 2)
+
+    assert rings == [
+        [(0.0, 0.0), (1.0, 1.0), (2.0, 2.0)],
+        [(0.0, 3.0), (1.0, 4.0), (2.0, 5.0)],
+    ]
+    assert clip_slab.call_args_list == [
+        call([(0.0, 0.0)], 1),
+        call([(0.0, 0.0)], 2),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # coordinate_to_h3 entry point
 # ---------------------------------------------------------------------------
@@ -192,6 +391,13 @@ def test_coordinate_to_h3_uses_default_resolution() -> None:
     assert coordinate_to_h3(48.8566, 2.3522) == coordinate_to_h3(
         48.8566, 2.3522, resolution=DEFAULT_H3_RESOLUTION
     )
+
+
+def test_coordinate_to_h3_forwards_explicit_resolution() -> None:
+    with patch.object(h3_policy_module, "assign_h3_cell", return_value="cell") as assign:
+        assert coordinate_to_h3(1.0, 2.0, resolution=7) == "cell"
+
+    assign.assert_called_once_with(1.0, 2.0, resolution=7)
 
 
 # ---------------------------------------------------------------------------

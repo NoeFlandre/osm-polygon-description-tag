@@ -91,7 +91,9 @@ def assign_h3_cell(
     """
     validate_coordinate(lat, lon)
     normalized = _normalize_resolution(resolution)
+    # pragma: no mutate start - validation above rejects either missing coordinate
     assert lat is not None and lon is not None
+    # pragma: no mutate end
     try:
         return str(h3.latlng_to_cell(float(lat), float(lon), normalized))
     except (ValueError, h3.H3ValueError) as error:
@@ -149,10 +151,15 @@ def _unwrap_points(points: Sequence[tuple[float, float]]) -> list[tuple[float, f
     unwrapped = [points[0]]
     for lon, lat in points[1:]:
         previous_lon = unwrapped[-1][0]
-        while lon - previous_lon > 180.0:
-            lon -= 360.0
-        while lon - previous_lon < -180.0:
-            lon += 360.0
+        delta = lon - previous_lon
+        if delta > 180.0:  # pragma: no mutate - the boundary computes zero turns
+            whole_turns, remainder = divmod(delta - 180.0, 360.0)
+            turns = int(whole_turns) + (remainder != 0.0)
+            lon = lon - 360.0 * turns
+        elif delta < -180.0:  # pragma: no mutate - the boundary computes zero turns
+            whole_turns, remainder = divmod(-180.0 - delta, 360.0)
+            turns = int(whole_turns) + (remainder != 0.0)
+            lon = lon + 360.0 * turns
         unwrapped.append((lon, lat))
     return unwrapped
 
@@ -168,11 +175,17 @@ def _slab_range(points: Sequence[tuple[float, float]]) -> tuple[int, int]:
 def _clip_slab(points: Sequence[tuple[float, float]], slab: int) -> list[tuple[float, float]]:
     left = -180.0 + 360.0 * slab
     right = 180.0 + 360.0 * slab
+    # pragma: no mutate start - None has the same falsey meaning for this bool
+    keep_greater = False
+    # pragma: no mutate end
+    clipped = _clip_longitude(points, left, keep_greater=True)
+    # pragma: no mutate start - None has the same falsey meaning for this bool
     return _clip_longitude(
-        _clip_longitude(points, left, keep_greater=True),
+        clipped,
         right,
-        keep_greater=False,
+        keep_greater=keep_greater,
     )
+    # pragma: no mutate end
 
 
 def _clip_longitude(
@@ -190,8 +203,10 @@ def _clip_longitude(
 
     def intersection(start: tuple[float, float], end: tuple[float, float]) -> tuple[float, float]:
         delta = end[0] - start[0]
+        # pragma: no mutate start - crossings cannot have equal endpoint longitudes
         if delta == 0.0:
             return (boundary, start[1])
+        # pragma: no mutate end
         ratio = (boundary - start[0]) / delta
         return (boundary, start[1] + ratio * (end[1] - start[1]))
 

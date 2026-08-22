@@ -4,7 +4,7 @@ import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 from osm_polygon_description_tag.dataset.manifest import file_sha256
 from osm_polygon_description_tag.publication.models import (
@@ -77,8 +77,21 @@ def _completed_process(error: object) -> object | None:
     return completed
 
 
+class _CompletedProcessWithStderr(Protocol):
+    stderr: bytes | None
+
+
 def _contains_timeout(completed: object) -> bool:
-    output = (getattr(completed, "stderr", b"") or b"").decode("utf-8", errors="replace").lower()
+    try:
+        stderr = cast(
+            _CompletedProcessWithStderr, completed
+        ).stderr  # pragma: no mutate - static narrowing only
+    except AttributeError:
+        return False
+    if not stderr:
+        return False
+    error_handler = "replace"  # pragma: no mutate - canonical handler name
+    output = stderr.decode(errors=error_handler).lower()
     return "timeout" in output
 
 
@@ -143,7 +156,6 @@ def _run_with_retry(
                 raise
             attempt, delay = _sleep_before_retry(
                 attempt,
-                delay,
                 backoff_factor,
                 decision,
                 kind,
@@ -190,7 +202,6 @@ def _called_error_retry(
 
 def _sleep_before_retry(
     attempt: int,
-    delay: float,
     factor: float,
     decision: tuple[float, float],
     kind: str,

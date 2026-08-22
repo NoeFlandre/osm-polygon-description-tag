@@ -84,8 +84,12 @@ def _init_axes(ax: Any) -> None:
     ax.set_facecolor(_OCEAN_COLOR)
     ax.set_xlim(-180.0, 180.0)
     ax.set_ylim(-90.0, 90.0)
+    # pragma: no mutate start - exclusive endpoints one step beyond yield the same fixed ticks
     ax.set_xticks(range(-180, 181, _GRID_LON_EVERY))
+    # pragma: no mutate end
+    # pragma: no mutate start - exclusive endpoints one step beyond yield the same fixed ticks
     ax.set_yticks(range(-90, 91, _GRID_LAT_EVERY))
+    # pragma: no mutate end
     ax.grid(True, color=_GRID_COLOR, linewidth=0.3, alpha=0.4)
     ax.tick_params(colors="#666666", labelsize=_TICK_LABELSIZE)
     ax.set_aspect("equal", adjustable="box")

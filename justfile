@@ -39,9 +39,9 @@ mutation:
     if test -d "/Volumes/Seagate M3/projects/osm-polygon-description-tag"; then \
         mkdir -p "/Volumes/Seagate M3/projects/osm-polygon-description-tag/.mutmut-tmp"; \
         TMPDIR="/Volumes/Seagate M3/projects/osm-polygon-description-tag/.mutmut-tmp" \
-            uv run mutmut run --max-children=8; \
+            uv run python -m scripts.run_mutation_gate --max-children 8; \
     else \
-        uv run mutmut run --max-children=8; \
+        uv run python -m scripts.run_mutation_gate --max-children 8; \
     fi
     uv run python scripts/check_mutation_score.py \
         --mutants-root mutants \

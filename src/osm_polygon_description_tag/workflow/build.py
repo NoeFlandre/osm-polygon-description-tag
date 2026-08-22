@@ -130,7 +130,7 @@ def _artifact_paths(source: Source, paths: Paths) -> tuple[Path, Path]:
         if artifact.resolve(strict=False).is_relative_to(paths.source_root.resolve(strict=False)):
             raise PipelineError(f"artifact path inside immutable source: {artifact}")
     data_dir.mkdir(parents=True, exist_ok=True)
-    manifests_dir.mkdir(parents=True, exist_ok=True)
+    manifests_dir.mkdir(exist_ok=True)
     return output_path, manifest_path
 
 

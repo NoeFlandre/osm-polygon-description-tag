@@ -28,7 +28,7 @@ COMMANDS = (
     "validate",
     "generate-card",
     "migrate-schema",
-    "trackio-report",
+    "trackio-snapshot",
     "publish-plan",
     "publish",
     "run-and-publish",
@@ -42,7 +42,7 @@ COMMAND_OPTIONS = {
     "validate": {*COMMON_OPTIONS, *HELP_OPTION},
     "generate-card": {*COMMON_OPTIONS, *HELP_OPTION},
     "migrate-schema": {*COMMON_OPTIONS, *HELP_OPTION},
-    "trackio-report": {
+    "trackio-snapshot": {
         *COMMON_OPTIONS,
         *HELP_OPTION,
         "--project",

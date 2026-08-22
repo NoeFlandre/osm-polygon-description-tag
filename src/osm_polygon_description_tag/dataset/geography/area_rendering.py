@@ -205,7 +205,9 @@ def _add_area_caption(fig: Any, caption: str) -> None:
 
 def _set_area_limits(ax: Any, values: Sequence[int]) -> None:
     # Leave enough headroom on the right for the largest annotation.
+    # pragma: no mutate start - empty fallback stays below the fixed lower bound of 10
     max_value = max(values) if values else 1
+    # pragma: no mutate end
     ax.set_xlim(left=1.0, right=max(max_value * 4.0, 10.0))
 
 

@@ -17,10 +17,13 @@ This file contains RED tests for each invariant. Implementation lives in
 from __future__ import annotations
 
 import json
+import stat
 from io import StringIO
 from pathlib import Path
 
 import pytest
+
+import osm_polygon_description_tag.runtime.logging as logging_module
 
 
 @pytest.fixture
@@ -516,6 +519,80 @@ def test_run_logger_close_is_idempotent_and_safe(tmp_path: Path, logger_factory)
     # After close, events are buffered again.
     logger.event("after_close", level="INFO")
     assert list(logger.drain())  # buffered because handle is closed
+
+
+def test_human_formatter_has_stable_header_and_insertion_order(tmp_path: Path) -> None:
+    from osm_polygon_description_tag.runtime.logging import RunLogger
+
+    logger = RunLogger(
+        data_root=tmp_path,
+        run_id="formatter",
+        buffer_preflight=True,
+        stderr=StringIO(),
+    )
+
+    assert logger._format_human(
+        {
+            "ts": "2026-01-01T00:00:00+00:00",
+            "level": "WARNING",
+            "event": "source_decision",
+            "run_id": "run-1",
+            "source": "a.osm.pbf",
+            "decision": "build",
+        }
+    ) == (
+        "2026-01-01T00:00:00+00:00 WARNING run=run-1 "
+        "source_decision source=a.osm.pbf decision=build"
+    )
+    assert logger._format_human({}) == " INFO run= event"
+
+
+def test_shift_backups_moves_full_chain_from_newest_to_oldest(tmp_path: Path) -> None:
+    chain = logging_module._backup_chain(tmp_path, 3)
+    for index, path in enumerate(chain, start=1):
+        path.write_text(f"backup-{index}", encoding="utf-8")
+
+    logging_module._shift_backups(chain)
+
+    assert not chain[0].exists()
+    assert chain[1].read_text(encoding="utf-8") == "backup-1"
+    assert chain[2].read_text(encoding="utf-8") == "backup-2"
+
+
+def test_create_active_log_is_exclusive_and_private(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    synced: list[Path] = []
+    monkeypatch.setattr(logging_module, "_fsync_directory", synced.append)
+
+    active = logging_module._create_active_log(tmp_path, "active.jsonl")
+
+    assert active == tmp_path / "active.jsonl"
+    assert stat.S_IMODE(active.stat().st_mode) == 0o600
+    assert synced == [tmp_path]
+    with pytest.raises(FileExistsError):
+        logging_module._create_active_log(tmp_path, "active.jsonl")
+
+
+def test_rotation_with_zero_backups_replaces_active_file_without_archive(
+    tmp_path: Path, logger_factory
+) -> None:
+    RunLogger, configure = logger_factory
+    data_root = tmp_path / "generated"
+    data_root.mkdir()
+    logger = RunLogger(
+        data_root=data_root,
+        run_id="rotation-zero",
+        clock=lambda: "2026-07-28T00:00:00+00:00",
+    )
+    configure(logger, max_bytes=1, backups=0)
+
+    logger.append_raw("old")
+
+    logs_dir = data_root / "logs"
+    assert (logs_dir / "run-and-publish.jsonl").read_bytes() == b""
+    assert not list(logs_dir.glob("run-and-publish.*.jsonl"))
+    logger.close()
 
 
 def test_project_root_uses_env_var_when_set(tmp_path, monkeypatch) -> None:

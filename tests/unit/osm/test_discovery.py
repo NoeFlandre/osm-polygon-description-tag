@@ -2,7 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from osm_polygon_description_tag.osm.discovery import Source, _output_name_for, discover_sources
+from osm_polygon_description_tag.osm.discovery import (
+    Source,
+    _output_name_for,
+    _source_for_path,
+    discover_sources,
+)
 
 
 def test_discovery_is_direct_sorted_and_pbf_only(tmp_path: Path) -> None:
@@ -35,8 +40,10 @@ def test_discovery_captures_source_identity(tmp_path: Path) -> None:
 
 
 def test_discovery_rejects_missing_directory(tmp_path: Path) -> None:
-    with pytest.raises(NotADirectoryError):
-        discover_sources(tmp_path / "missing")
+    missing = tmp_path / "missing"
+    with pytest.raises(NotADirectoryError) as error:
+        discover_sources(missing)
+    assert error.value.args == (missing,)
 
 
 def test_discovery_excludes_symlinks(tmp_path: Path) -> None:
@@ -69,3 +76,17 @@ def test_discovery_does_not_falsely_flag_distinct_files(tmp_path: Path) -> None:
     found = discover_sources(tmp_path)
 
     assert sorted(item.output_name for item in found) == ["x.osm.parquet", "x.parquet"]
+
+
+def test_source_for_path_rejects_and_records_output_name_collisions(tmp_path: Path) -> None:
+    path = tmp_path / "x.osm.pbf"
+    path.write_bytes(b"data")
+    output_names: set[str] = set()
+
+    first = _source_for_path(path, output_names)
+    assert first is not None
+    assert output_names == {"x.parquet"}
+
+    with pytest.raises(ValueError) as error:
+        _source_for_path(path, output_names)
+    assert str(error.value) == "output collision: x.parquet"

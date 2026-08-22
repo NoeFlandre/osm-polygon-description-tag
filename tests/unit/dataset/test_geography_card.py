@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 import pytest
 from shapely.geometry import Polygon
 
+import osm_polygon_description_tag.dataset.geography.card as card_module
 from osm_polygon_description_tag._resources import dataset_card_template
 from osm_polygon_description_tag.dataset.geography import (
     H3_MAP_ASSET_RELATIVE_PATH,
@@ -28,6 +30,9 @@ from osm_polygon_description_tag.dataset.geography import (
     render_map_block,
 )
 from osm_polygon_description_tag.dataset.geography.card import (
+    _atomic_write_template,
+    _template_with_map_markers,
+    _validate_marker_counts,
     write_map_block_marker_to_template,
 )
 from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
@@ -631,6 +636,68 @@ def test_write_map_block_marker_rejects_template_without_stats_marker(tmp_path: 
     template.write_text("# orphan\n\nno stats marker here\n", encoding="utf-8")
     with pytest.raises(ValueError, match="STATS:START"):
         write_map_block_marker_to_template(template)
+
+
+@pytest.mark.parametrize("start_count, end_count", [(2, 1), (1, 2), (2, 2)])
+def test_validate_marker_counts_rejects_each_duplicate_marker_side(
+    start_count: int, end_count: int
+) -> None:
+    with pytest.raises(ValueError) as error:
+        _validate_marker_counts(start_count, end_count)
+
+    assert str(error.value) == (
+        "dataset card template must contain a unique H3 map marker block; "
+        f"found {start_count} start markers and {end_count} end markers"
+    )
+
+
+def test_write_map_block_marker_requires_both_markers_before_noop() -> None:
+    template = Mock()
+    text = f"{H3_MAP_START_MARKER}\n"
+    template.read_text.return_value = text
+
+    with (
+        patch.object(card_module, "_template_with_map_markers", return_value="new") as build,
+        patch.object(card_module, "_atomic_write_template") as write,
+    ):
+        write_map_block_marker_to_template(template, asset_relative_path="asset.png")
+
+    template.read_text.assert_called_once_with(encoding="utf-8")
+    build.assert_called_once_with(text, "asset.png")
+    write.assert_called_once_with(template, "new")
+
+
+def test_template_with_map_markers_replaces_only_the_first_stats_marker() -> None:
+    stats_marker = "<!-- GENERATED:STATS:START -->\n"
+    text = f"before\n{stats_marker}first\n{stats_marker}second\n"
+
+    output = _template_with_map_markers(text, "assets/map.png")
+
+    assert output.count(H3_MAP_START_MARKER) == 1
+    assert output.count(stats_marker) == 2
+    assert output.endswith(f"{stats_marker}second\n")
+
+
+def test_atomic_write_template_uses_explicit_utf8_and_binary_fsync_open() -> None:
+    template = Mock()
+    temporary = Mock()
+    temporary.exists.return_value = False
+    template.with_name.return_value = temporary
+    handle = Mock()
+    handle.__enter__ = Mock(return_value=handle)
+    handle.__exit__ = Mock(return_value=None)
+
+    with (
+        patch("builtins.open", return_value=handle) as open_file,
+        patch.object(card_module.os, "fsync") as fsync,
+        patch.object(card_module.os, "replace") as replace,
+    ):
+        _atomic_write_template(template, "new text")
+
+    temporary.write_text.assert_called_once_with("new text", encoding="utf-8")
+    open_file.assert_called_once_with(temporary, "rb")
+    fsync.assert_called_once_with(handle.fileno())
+    replace.assert_called_once_with(temporary, template)
 
 
 # ---------------------------------------------------------------------------

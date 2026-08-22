@@ -20,7 +20,9 @@ def _output_name_for(source_name: str) -> str:
 def discover_sources(source_root: Path) -> tuple[Source, ...]:
     if not source_root.is_dir():
         raise NotADirectoryError(source_root)
-    paths = sorted(source_root.glob("*.osm.pbf"), key=lambda path: path.name)
+    paths = sorted(
+        source_root.glob("*.osm.pbf"), key=lambda path: path.name
+    )  # pragma: no mutate - all paths share one parent
     result: list[Source] = []
     output_names: set[str] = set()
     for path in paths:

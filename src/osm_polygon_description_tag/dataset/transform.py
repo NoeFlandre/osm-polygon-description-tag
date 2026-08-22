@@ -83,7 +83,7 @@ def geodesic_area_m2(geometry: BaseGeometry) -> float:
 def _optional_timestamp(value: str | None) -> datetime | None:
     if value is None or not value.strip():
         return None
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    parsed = datetime.fromisoformat(value)
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)

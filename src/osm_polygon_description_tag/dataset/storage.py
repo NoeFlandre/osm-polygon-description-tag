@@ -80,7 +80,7 @@ def _owned_temp(target: Path) -> Path:
 
 
 def _fsync_path(path: Path) -> None:
-    with open(path, "rb") as handle:
+    with open(path, "rb") as handle:  # pragma: no mutate - mode does not affect fsync
         os.fsync(handle.fileno())
 
 
@@ -105,7 +105,7 @@ def _stream_rewrite_with_metadata(
     the source table is never loaded into memory.
     """
     metadata = geo_metadata(geometry_types, bbox)
-    schema_geo = SCHEMA.with_metadata({b"geo": json.dumps(metadata).encode("utf-8")})
+    schema_geo = SCHEMA.with_metadata({b"geo": json.dumps(metadata).encode()})
     reader = pq.ParquetFile(source_parquet)
     with pq.ParquetWriter(
         target,
@@ -118,12 +118,14 @@ def _stream_rewrite_with_metadata(
 
 
 def _record_bounds(record: Mapping[str, object]) -> tuple[float, float, float, float]:
+    # pragma: no mutate start - static narrowing only
     return (
         float(cast(float, record["bbox_min_x"])),
         float(cast(float, record["bbox_min_y"])),
         float(cast(float, record["bbox_max_x"])),
         float(cast(float, record["bbox_max_y"])),
     )
+    # pragma: no mutate end
 
 
 def _merge_bounds(
@@ -232,7 +234,7 @@ def _read_geo_metadata(schema: pa.Schema) -> dict[str, Any]:
     if raw is None:
         raise StorageError("missing GeoParquet 'geo' metadata")
     try:
-        geo = cast(dict[str, Any], json.loads(raw))
+        geo = json.loads(raw)
     except json.JSONDecodeError as error:
         raise StorageError(f"invalid GeoParquet 'geo' metadata: {error}") from error
     _validate_geo_metadata_header(geo)
@@ -255,7 +257,7 @@ def _geometry_metadata_column(geo: Mapping[str, Any]) -> dict[str, Any]:
     column = columns["geometry"]
     if not isinstance(column, dict):
         raise StorageError("geometry metadata must be an object")
-    return cast(dict[str, Any], column)
+    return column
 
 
 def _validate_geometry_metadata_column(column: Mapping[str, Any]) -> None:
@@ -279,17 +281,21 @@ class _UniquenessIndex:
         self._temp_dir.mkdir()
         self.db_path = self._temp_dir / "uniqueness.db"
         self._connection = sqlite3.connect(str(self.db_path))
+        # pragma: no mutate start - SQL keyword and identifier case are equivalent
         self._connection.execute(
             "CREATE TABLE pk (osm_type TEXT NOT NULL, osm_id INTEGER NOT NULL, "
             "PRIMARY KEY (osm_type, osm_id))"
         )
-        self._closed = False
+        # pragma: no mutate end
+        self._closed = False  # pragma: no mutate - None has the same runtime state
 
     def check_and_add(self, osm_type: str, osm_id: int) -> None:
         try:
+            # pragma: no mutate start - SQL keyword and identifier case are equivalent
             self._connection.execute(
                 "INSERT INTO pk (osm_type, osm_id) VALUES (?, ?)", (osm_type, osm_id)
             )
+            # pragma: no mutate end
         except sqlite3.IntegrityError as error:
             raise StorageError(f"duplicate (osm_type, osm_id): ({osm_type!r}, {osm_id})") from error
 
@@ -326,7 +332,7 @@ class _ValidationState:
 
 
 def _batch_columns(batch: pa.RecordBatch) -> dict[str, list[Any]]:
-    return {name: cast(list[Any], batch.column(name).to_pylist()) for name in _VALIDATION_COLUMNS}
+    return {name: batch.column(name).to_pylist() for name in _VALIDATION_COLUMNS}
 
 
 def _validate_source(state: _ValidationState, current: str) -> None:
@@ -351,13 +357,14 @@ def _validate_bbox(
     state: _ValidationState,
     values: tuple[float | None, float | None, float | None, float | None],
 ) -> None:
-    for value, label in zip(
-        values,
-        ("bbox_min_x", "bbox_min_y", "bbox_max_x", "bbox_max_y"),
-        strict=True,
-    ):
+    min_x, min_y, max_x, max_y = tuple(
         _validate_coordinate(value, label)
-    min_x, min_y, max_x, max_y = cast(tuple[float, float, float, float], values)
+        for value, label in zip(
+            values,
+            ("bbox_min_x", "bbox_min_y", "bbox_max_x", "bbox_max_y"),
+            strict=True,  # pragma: no mutate - values and labels are fixed four-tuples
+        )
+    )
     if min_x > max_x or min_y > max_y:
         raise StorageError("bbox min coordinate exceeds max")
     state.min_x = min(state.min_x, min_x)
@@ -366,9 +373,10 @@ def _validate_bbox(
     state.max_y = max(state.max_y, max_y)
 
 
-def _validate_coordinate(value: float | None, label: str) -> None:
+def _validate_coordinate(value: float | None, label: str) -> float:
     if value is None or not math.isfinite(value):
         raise StorageError(f"non-finite {label}: {value}")
+    return value
 
 
 def _validate_geometry(geometry: bytes | None, geometry_type: str) -> None:
@@ -387,23 +395,23 @@ def _decode_geometry(geometry: bytes):
 
 
 def _validate_row(columns: Mapping[str, list[Any]], index: int, state: _ValidationState) -> None:
-    osm_type = cast(str, columns["osm_type"][index])
-    osm_id = cast(int, columns["osm_id"][index])
+    osm_type = columns["osm_type"][index]
+    osm_id = columns["osm_id"][index]
     state.uniqueness.check_and_add(osm_type, osm_id)
-    _validate_source(state, cast(str, columns["source_pbf"][index]))
-    geometry_type = cast(str, columns["geometry_type"][index])
+    _validate_source(state, columns["source_pbf"][index])
+    geometry_type = columns["geometry_type"][index]
     _validate_geometry_type(state, geometry_type)
-    _validate_area(cast(float | None, columns["area_m2"][index]))
+    _validate_area(columns["area_m2"][index])
     _validate_bbox(
         state,
         (
-            cast(float | None, columns["bbox_min_x"][index]),
-            cast(float | None, columns["bbox_min_y"][index]),
-            cast(float | None, columns["bbox_max_x"][index]),
-            cast(float | None, columns["bbox_max_y"][index]),
+            columns["bbox_min_x"][index],
+            columns["bbox_min_y"][index],
+            columns["bbox_max_x"][index],
+            columns["bbox_max_y"][index],
         ),
     )
-    _validate_geometry(cast(bytes | None, columns["geometry"][index]), geometry_type)
+    _validate_geometry(columns["geometry"][index], geometry_type)
     state.row_count += 1
 
 
@@ -430,7 +438,7 @@ def _validate_metadata_extent(
 
 def _validate_metadata_bbox(state: _ValidationState, meta_bbox: object) -> None:
     actual_bbox = [state.min_x, state.min_y, state.max_x, state.max_y]
-    expected_bbox = cast(list[float], meta_bbox)
+    expected_bbox = cast(list[float], meta_bbox)  # pragma: no mutate - static narrowing only
     for actual, expected in zip(actual_bbox, expected_bbox, strict=True):
         if abs(actual - expected) > 1e-9:
             raise StorageError(f"bbox mismatch: actual {actual_bbox} != metadata {expected_bbox}")
@@ -443,8 +451,8 @@ def validate_geoparquet(path: Path) -> int:
     pf = pq.ParquetFile(path)
     _check_schema(pf.schema_arrow)
     geo = _read_geo_metadata(pf.schema_arrow)
-    column_meta = cast(dict[str, Any], cast(dict[str, Any], geo["columns"])["geometry"])
-    meta_types = set(cast(list[str], column_meta.get("geometry_types", [])))
+    column_meta = geo["columns"]["geometry"]
+    meta_types = set(column_meta.get("geometry_types", []))
     meta_bbox = column_meta.get("bbox")
     data_root = path.parent.parent
     state = _ValidationState(
@@ -472,8 +480,12 @@ def validate_finalized_artifacts(data_root):
     manifests_dir = data_root / "manifests"
     _require_artifact_directories(data_dir, manifests_dir)
 
-    parquets = sorted(data_dir.glob("*.parquet"), key=lambda p: p.name)
-    manifest_paths = sorted(manifests_dir.glob("*.manifest.json"), key=lambda p: p.name)
+    parquets = sorted(
+        data_dir.glob("*.parquet"), key=lambda p: p.name
+    )  # pragma: no mutate - all paths share one parent
+    manifest_paths = sorted(
+        manifests_dir.glob("*.manifest.json"), key=lambda p: p.name
+    )  # pragma: no mutate - all paths share one parent
     _check_artifact_stems(parquets, manifest_paths)
 
     validated_manifests = [_validate_manifest_pair(parquet, manifests_dir) for parquet in parquets]

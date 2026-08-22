@@ -49,7 +49,7 @@ def _sequence_items(value: Sequence[object]) -> ItemsView[str, str]:
 
 def _mapping_items(value: Mapping[str, str] | Sequence[object] | object) -> ItemsView[str, str]:
     if isinstance(value, Mapping):
-        return cast(ItemsView[str, str], value.items())
+        return cast(ItemsView[str, str], value.items())  # pragma: no mutate - static narrowing only
     if isinstance(value, Sequence) and not isinstance(value, str | bytes):
         return _sequence_items(value)
     raise TypeError(f"expected a string mapping, got {type(value).__name__}")

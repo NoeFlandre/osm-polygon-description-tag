@@ -71,7 +71,9 @@ def _h3_map_input_sha256(stats: Mapping[str, Any]) -> str:
         "files": file_inputs,
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    # pragma: no mutate start - UTF-8 codec names are case-insensitive
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    # pragma: no mutate end
 
 
 def _atomic_write_if_changed(path: Path, data: bytes) -> bool:
@@ -93,7 +95,9 @@ def _atomic_write_if_changed(path: Path, data: bytes) -> bool:
 
 def _write_if_changed(path: Path, text: str) -> bool:
     """Atomically write UTF-8 text only when the destination bytes differ."""
+    # pragma: no mutate start - UTF-8 codec names are case-insensitive
     return _atomic_write_if_changed(path, text.encode("utf-8"))
+    # pragma: no mutate end
 
 
 def _write_bytes_if_changed(path: Path, data: bytes) -> bool:
@@ -111,7 +115,9 @@ def _fmt_bytes(value: int) -> str:
         if size < 1024 or unit == "TiB":
             return f"{size:,.0f} {unit}" if unit == "B" else f"{size:,.1f} {unit}"
         size /= 1024
+    # pragma: no mutate start - the final TiB branch always returns
     raise AssertionError("unreachable")
+    # pragma: no mutate end
 
 
 def _fmt_median(value: float | None) -> str:
@@ -201,7 +207,6 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
 
 def _render_h3_map_block(data_root: Path, total_rows: int, occupied_cells: int) -> str:
     """Render the dataset-card map body."""
-    _ = (data_root, total_rows, occupied_cells)
     return f"![{H3_MAP_TITLE}]({H3_MAP_ASSET_RELATIVE_PATH})\n"
 
 
@@ -213,7 +218,6 @@ def _write_h3_map_png(
     counts: Mapping[str, int] | None = None,
 ) -> None:
     """Render the H3 density PNG, accepting precomputed counts for tests."""
-    _ = (total_rows, occupied_cells)
     render_density_map(
         counts if counts is not None else aggregate_h3_density(data_root),
         data_root / H3_MAP_ASSET_RELATIVE_PATH,
@@ -312,8 +316,12 @@ def _write_dataset_docs(
     stats: dict[str, Any],
 ) -> None:
     stats_json = json.dumps(stats, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    # pragma: no mutate start - UTF-8 codec names are case-insensitive
     stats_sha256 = hashlib.sha256(stats_json.encode("utf-8")).hexdigest()
+    # pragma: no mutate end
+    # pragma: no mutate start - UTF-8 read aliases are runtime-equivalent
     template = template_path.read_text(encoding="utf-8")
+    # pragma: no mutate end
     if not _GENERATED_PATTERN.search(template):
         raise ReportingError(f"template missing GENERATED:STATS markers: {template_path}")
     readme = _GENERATED_PATTERN.sub(

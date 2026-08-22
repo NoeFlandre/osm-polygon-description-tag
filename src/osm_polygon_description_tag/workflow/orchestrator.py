@@ -506,6 +506,7 @@ def _run_with_subprocess_bridge(
         retry_observer: Callable[..., None] | None = None,
     ) -> None:
         subprocess_runner(command)
+        # pragma: no mutate start - compatibility-only retry parameters are intentionally ignored
         _ = (
             max_retries,
             backoff_seconds,
@@ -515,6 +516,7 @@ def _run_with_subprocess_bridge(
             _runner,
             retry_observer,
         )
+        # pragma: no mutate end
 
     pub._default_runner_with_retry = _bridge
     try:

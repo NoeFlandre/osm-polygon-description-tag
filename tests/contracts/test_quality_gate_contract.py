@@ -8,6 +8,8 @@ from pathlib import Path
 
 from packaging.requirements import Requirement
 
+from scripts.run_mutation_gate import complete_associations, trim_associations
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -216,13 +218,101 @@ def test_mutation_gate_checks_all_metadata_when_no_pattern_is_given(tmp_path: Pa
     assert payload["passed"] is True
 
 
+def test_mutation_gate_treats_mutmut_timeout_as_unresolved(tmp_path: Path) -> None:
+    metadata_path = tmp_path / "mutants" / "src" / "example.py.meta"
+    metadata_path.parent.mkdir(parents=True)
+    metadata_path.write_text(
+        json.dumps({"exit_code_by_key": {"pkg.example.x_sample__mutmut_1": -24}}),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "mutation.json"
+
+    result = subprocess.run(  # noqa: S603 - executable and arguments are repository-controlled
+        [
+            sys.executable,
+            "scripts/check_mutation_score.py",
+            "--mutants-root",
+            str(tmp_path / "mutants"),
+            "--output",
+            str(output_path),
+            "--minimum-score",
+            "100",
+        ],
+        cwd=PROJECT_ROOT,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["killed"] == 0
+    assert payload["unresolved"]["timeout"] == 1
+    assert payload["passed"] is False
+
+
+def test_mutation_fast_pass_keeps_shortest_tests_deterministically() -> None:
+    associations = {
+        "pkg.x_first": {"test/slow", "test/fast", "test/tie"},
+        "pkg.x_second": {"test/other"},
+    }
+    durations = {"test/slow": 3.0, "test/fast": 1.0, "test/tie": 1.0, "test/other": 2.0}
+
+    assert trim_associations(associations, durations, max_tests=2) == {
+        "pkg.x_first": ("test/fast", "test/tie"),
+        "pkg.x_second": ("test/other",),
+    }
+    assert associations["pkg.x_first"] == {"test/slow", "test/fast", "test/tie"}
+
+
+def test_mutation_fast_pass_prioritizes_function_module_tests() -> None:
+    associations = {
+        "pkg.trackio.x_build_snapshot": {
+            "tests/test_other.py::test_fast",
+            "tests/test_trackio.py::test_slow",
+        }
+    }
+    durations = {
+        "tests/test_other.py::test_fast": 0.1,
+        "tests/test_trackio.py::test_slow": 1.0,
+    }
+
+    assert trim_associations(associations, durations, max_tests=1)[
+        "pkg.trackio.x_build_snapshot"
+    ] == ("tests/test_trackio.py::test_slow",)
+
+
+def test_mutation_associations_fall_back_to_tests_from_the_same_module() -> None:
+    associations = {
+        "pkg.alpha.x_direct": {"tests/test_alpha.py::test_direct"},
+        "pkg.alpha.x_indirect": set(),
+        "pkg.beta.x_uncovered": set(),
+    }
+
+    assert complete_associations(
+        associations,
+        {
+            "tests/test_alpha.py::test_direct",
+            "tests/test_alpha.py::test_indirect",
+            "tests/test_beta.py::test_other",
+        },
+    ) == {
+        "pkg.alpha.x_direct": ("tests/test_alpha.py::test_direct",),
+        "pkg.alpha.x_indirect": (
+            "tests/test_alpha.py::test_direct",
+            "tests/test_alpha.py::test_indirect",
+        ),
+        "pkg.beta.x_uncovered": ("tests/test_beta.py::test_other",),
+    }
+
+
 def test_quality_recipes_and_required_mutation_gate_are_publicly_wired() -> None:
+    project = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     justfile = (PROJECT_ROOT / "justfile").read_text(encoding="utf-8")
     workflow = (PROJECT_ROOT / ".github" / "workflows" / "quality.yml").read_text(encoding="utf-8")
 
     assert "risk:" in justfile
     assert "mutation:" in justfile
-    assert "uv run mutmut run" in justfile
+    assert "run_mutation_gate" in justfile
+    assert "uv run python -m scripts.run_mutation_gate" in justfile
     assert "--max-crap-score 6" in justfile
     assert "--pattern" not in justfile
     assert "planning.x*__mutmut_*" not in justfile
@@ -233,3 +323,4 @@ def test_quality_recipes_and_required_mutation_gate_are_publicly_wired() -> None
     assert "mutation-score" in workflow
     assert "reports/crap.json" in workflow
     assert "actions/upload-artifact" in workflow
+    assert project["tool"]["mutmut"]["pytest_add_cli_args_test_selection"] == ["tests"]

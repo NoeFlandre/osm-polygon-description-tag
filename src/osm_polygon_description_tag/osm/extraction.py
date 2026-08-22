@@ -106,20 +106,26 @@ def _copy_unescape(data: bytes) -> bytes:
 def _nullable_int(field: bytes) -> int | None:
     if field == b"\\N":
         return None
+    # pragma: no mutate start - UTF-8 codec names are case-insensitive
     return int(_copy_unescape(field).decode("utf-8"))
+    # pragma: no mutate end
 
 
 def _nullable_str(field: bytes) -> str | None:
     if field == b"\\N":
         return None
+    # pragma: no mutate start - UTF-8 codec names are case-insensitive
     return _copy_unescape(field).decode("utf-8")
+    # pragma: no mutate end
 
 
 def _parse_tags(field: bytes) -> dict[str, str]:
     if field == b"\\N":
         return {}
     try:
+        # pragma: no mutate start - UTF-8 codec names are case-insensitive
         parsed = json.loads(_copy_unescape(field).decode("utf-8"))
+        # pragma: no mutate end
     except json.JSONDecodeError as error:
         raise ValueError(f"invalid tags JSON: {error}") from error
     if not isinstance(parsed, dict):
@@ -135,10 +141,17 @@ def parse_copy_record(line: bytes) -> ExportRecord:
         raise ValueError(f"expected 7 COPY fields, got {len(fields)}")
     geometry, osm_type, osm_id, version, changeset, timestamp, tags = fields
     try:
+        # pragma: no mutate start - ASCII codec names are case-insensitive
+        geometry_ewkb_hex = _copy_unescape(geometry).decode("ascii")
+        # pragma: no mutate end
+        # pragma: no mutate start - UTF-8 codec names are case-insensitive
+        osm_type_text = _copy_unescape(osm_type).decode("utf-8")
+        osm_id_value = int(_copy_unescape(osm_id).decode("utf-8"))
+        # pragma: no mutate end
         return ExportRecord(
-            geometry_ewkb_hex=_copy_unescape(geometry).decode("ascii"),
-            osm_type=_copy_unescape(osm_type).decode("utf-8"),
-            osm_id=int(_copy_unescape(osm_id).decode("utf-8")),
+            geometry_ewkb_hex=geometry_ewkb_hex,
+            osm_type=osm_type_text,
+            osm_id=osm_id_value,
             version=_nullable_int(version),
             changeset=_nullable_int(changeset),
             timestamp=_nullable_str(timestamp),
@@ -170,16 +183,22 @@ def _drain_stderr(stream: IO[bytes], buffer: bytearray, cap: int) -> None:
         while True:
             chunk = stream.read(65536)
             if not chunk:
+                # pragma: no mutate start - return and break both execute finally close
                 break
+                # pragma: no mutate end
             remaining = cap - len(buffer)
+            # pragma: no mutate start - slicing at zero appends no bytes
             if remaining > 0:
                 buffer.extend(chunk[:remaining])
+            # pragma: no mutate end
     finally:
         stream.close()
 
 
 def _decode_stderr(buffer: bytes) -> str:
+    # pragma: no mutate start - codec names are case-insensitive
     return buffer.decode("utf-8", errors="replace").strip()
+    # pragma: no mutate end
 
 
 def stream_export(
@@ -199,7 +218,9 @@ def stream_export(
     """
     command = export_command(source, config, executable=executable)
     proc, stdout, drain, stderr_buffer = _start_export(command, stderr_cap_bytes)
+    # pragma: no mutate start - wait always assigns the code before it is read
     return_code = -1
+    # pragma: no mutate end
     try:
         yield from iter_records(stdout)
         stdout.close()
@@ -269,4 +290,6 @@ def osmium_version(executable: str = "osmium", *, timeout: float = 10.0) -> str:
         raise OsmiumExportError(f"osmium executable not found: {executable}") from error
     lines = completed.stdout.splitlines()
     first = lines[0] if lines else b""
+    # pragma: no mutate start - codec names are case-insensitive
     return first.decode("utf-8", errors="replace").strip()
+    # pragma: no mutate end

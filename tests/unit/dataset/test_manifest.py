@@ -1,14 +1,22 @@
+import hashlib
 import json
+from dataclasses import replace
+from importlib.metadata import PackageNotFoundError
 from pathlib import Path
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+import osm_polygon_description_tag.dataset.manifest as manifest_module
 from osm_polygon_description_tag.dataset.manifest import (
     MANIFEST_SCHEMA_VERSION,
     Manifest,
+    ManifestError,
     OutputIdentity,
     RunCounts,
     SourceIdentity,
+    current_area_policy_sha256,
+    current_dependency_versions,
     current_output_algorithm_revision,
     file_sha256,
     is_resumable,
@@ -32,6 +40,71 @@ def test_sha256_reads_without_mutating(tmp_path: Path) -> None:
     after = path.stat()
     assert after.st_mtime_ns == before.st_mtime_ns
     assert after.st_size == before.st_size
+
+
+def test_fsync_dir_accepts_an_existing_directory(tmp_path: Path) -> None:
+    manifest_module._fsync_dir(tmp_path)
+
+
+def test_file_sha256_reads_in_bounded_chunks() -> None:
+    handle = MagicMock()
+    handle.__enter__.return_value = handle
+    handle.read.side_effect = [b"chunk", b""]
+
+    with patch("builtins.open", return_value=handle) as open_file:
+        assert file_sha256(Path("artifact")) == hashlib.sha256(b"chunk").hexdigest()
+
+    open_file.assert_called_once_with(Path("artifact"), "rb")
+    assert handle.read.call_args_list == [
+        call(manifest_module._SHA256_CHUNK),
+        call(manifest_module._SHA256_CHUNK),
+    ]
+
+
+def test_current_area_policy_sha256_uses_the_canonical_utf8_material(tmp_path: Path) -> None:
+    config = tmp_path / "osmium-export.json"
+    config.write_bytes(b'{"policy": "live"}\n')
+
+    expected = hashlib.sha256()
+    expected.update(config.read_bytes())
+    expected.update(b"\n")
+    for line in manifest_module._AREA_POLICY_SOURCE:
+        expected.update(line.encode("utf-8"))
+        expected.update(b"\n")
+
+    with patch.object(manifest_module, "osmium_export_config", return_value=config):
+        assert current_area_policy_sha256() == expected.hexdigest()
+
+
+def test_current_dependency_versions_collects_all_packages_and_skips_missing() -> None:
+    missing = {"pyproj"}
+
+    def fake_version(package: str) -> str:
+        if package in missing:
+            raise PackageNotFoundError(package)
+        return f"{package}-version"
+
+    with patch("importlib.metadata.version", side_effect=fake_version) as version:
+        observed = current_dependency_versions()
+
+    assert observed == {
+        "duckdb": "duckdb-version",
+        "pyarrow": "pyarrow-version",
+        "shapely": "shapely-version",
+        "pyyaml": "pyyaml-version",
+    }
+    assert version.call_args_list == [
+        call("duckdb"),
+        call("pyarrow"),
+        call("pyproj"),
+        call("shapely"),
+        call("pyyaml"),
+    ]
+
+
+def test_current_output_algorithm_revision_has_a_fixed_digest_prefix_length() -> None:
+    with patch.object(manifest_module, "current_area_policy_sha256", return_value="a" * 64):
+        assert current_output_algorithm_revision() == f"3:{'a' * 16}"
 
 
 def test_source_and_output_identity_capture_checksums(tmp_path: Path) -> None:
@@ -178,12 +251,46 @@ def test_write_and_read_manifest_roundtrip(tmp_path: Path) -> None:
     assert is_resumable(aligned, aligned.source, aligned.output)
 
 
+def test_write_manifest_creates_nested_parent_and_fsyncs_that_directory(tmp_path: Path) -> None:
+    path = tmp_path / "nested" / "deeper" / "region.manifest.json"
+
+    with patch.object(manifest_module, "_fsync_dir") as fsync_dir:
+        write_manifest(_manifest(), path)
+
+    assert path.is_file()
+    fsync_dir.assert_called_once_with(path.parent)
+
+
+def test_write_manifest_serializes_non_ascii_values_as_utf8(tmp_path: Path) -> None:
+    manifest = replace(_manifest(), dependency_versions={"é": "été"})
+    path = tmp_path / "region.manifest.json"
+
+    write_manifest(manifest, path)
+
+    assert path.read_bytes() == manifest.to_json().encode("utf-8")
+
+
 def test_read_manifest_rejects_corrupt_json(tmp_path: Path) -> None:
     path = tmp_path / "bad.manifest.json"
     path.write_text("{not json", encoding="utf-8")
 
     with pytest.raises(ValueError, match="manifest"):
         read_manifest(path)
+
+
+def test_read_manifest_requests_utf8_and_preserves_read_error_context(tmp_path: Path) -> None:
+    path = tmp_path / "region.manifest.json"
+    payload = _manifest().to_json()
+
+    with patch.object(Path, "read_text", autospec=True, return_value=payload) as read_text:
+        assert read_manifest(path) == _manifest()
+
+    read_text.assert_called_once_with(path, encoding="utf-8")
+
+    missing = tmp_path / "missing.manifest.json"
+    with pytest.raises(ManifestError) as error:
+        read_manifest(missing)
+    assert str(error.value).startswith(f"cannot read manifest {missing}:")
 
 
 def test_read_manifest_rejects_unsupported_version(tmp_path: Path) -> None:

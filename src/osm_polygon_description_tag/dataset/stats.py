@@ -85,7 +85,9 @@ def _safe_map(value: object) -> dict[str, int]:
     for key, count in items:
         if key is None:
             continue
+        # pragma: no mutate start - cast is static-only; int performs the runtime conversion
         cleaned[str(key)] = int(cast(int, count))
+        # pragma: no mutate end
     return cleaned
 
 
@@ -196,7 +198,9 @@ def _reporting_directories(data_root: Path) -> tuple[Path, Path]:
 
 
 def _matching_parquets(data_dir: Path, manifests_dir: Path) -> list[Path]:
+    # pragma: no mutate start - all glob results share data_dir, so Path order equals name order
     parquets = sorted(data_dir.glob("*.parquet"), key=lambda path: path.name)
+    # pragma: no mutate end
     parquet_stems = {path.name.removesuffix(".parquet") for path in parquets}
     manifest_stems = {
         path.name.removesuffix(".manifest.json") for path in manifests_dir.glob("*.manifest.json")

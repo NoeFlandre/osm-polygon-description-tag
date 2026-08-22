@@ -6,6 +6,8 @@ from shapely.geometry import LineString, MultiPolygon, Polygon
 
 from osm_polygon_description_tag.dataset.transform import (
     RejectedFeature,
+    _decode_polygon,
+    _optional_timestamp,
     descriptions_from_tags,
     geodesic_area_m2,
     transform_record,
@@ -37,6 +39,35 @@ def test_descriptions_whitespace_only_base_becomes_none() -> None:
     base, localized = descriptions_from_tags({"description": "   "})
     assert base is None
     assert localized == {}
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, None),
+        ("   ", None),
+        (
+            "2026-01-01T12:00:00+02:00",
+            datetime(2026, 1, 1, 10, 0, tzinfo=UTC),
+        ),
+        (
+            "2026-01-01T12:00:00",
+            datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
+        ),
+        (
+            "2026-01-01T12:00:00Z",
+            datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
+        ),
+    ],
+)
+def test_optional_timestamp_normalizes_missing_naive_and_offset_values(
+    value: str | None, expected: datetime | None
+) -> None:
+    result = _optional_timestamp(value)
+
+    assert result == expected
+    if result is not None:
+        assert result.tzinfo is UTC
 
 
 def _ewkb_hex(geom: object) -> str:
@@ -105,6 +136,14 @@ def test_transform_multipolygon_two_parts() -> None:
     assert result["description"] is None
 
 
+def test_transform_serializes_three_dimensional_geometry_as_two_dimensional_wkb() -> None:
+    polygon = Polygon([(0, 0, 10), (0, 1, 20), (1, 1, 30), (1, 0, 40), (0, 0, 10)])
+    result = transform_record(_record(polygon, {"description": "2D output"}), "x.osm.pbf")
+
+    decoded = from_wkb(result["geometry"])
+    assert not decoded.has_z
+
+
 def test_transform_preserves_unusual_description_suffix() -> None:
     polygon = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
     record = _record(polygon, {"description:pt-BR": "PT", "description:zh-Hant-TW": "ZH"})
@@ -146,6 +185,13 @@ def test_transform_preserves_unusual_description_suffix() -> None:
             "way",
             -1,
         ),
+        (
+            "invalid_osm_id",
+            Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+            {"description": "x"},
+            "way",
+            0,
+        ),
     ],
 )
 def test_transform_rejects_with_stable_reason(
@@ -169,6 +215,34 @@ def test_transform_rejects_nonpositive_area(monkeypatch: pytest.MonkeyPatch) -> 
     assert info.value.reason == "nonpositive_area"
 
 
+def test_transform_accepts_any_positive_geodesic_area(monkeypatch: pytest.MonkeyPatch) -> None:
+    polygon = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
+    monkeypatch.setattr(
+        "osm_polygon_description_tag.dataset.transform.geodesic_area_m2", lambda _geom: 0.5
+    )
+    record = _record(polygon, {"description": "small area"})
+
+    result = transform_record(record, "x.osm.pbf")
+
+    assert result["area_m2"] == 0.5
+
+
+@pytest.mark.parametrize(
+    "geom",
+    [
+        Polygon(),
+        Polygon([(0, 0), (1, 1), (1, 0), (0, 1), (0, 0)]),
+    ],
+)
+def test_transform_rejects_empty_and_invalid_polygons_as_invalid_geometry(geom: Polygon) -> None:
+    record = _record(geom, {"description": "invalid geometry"})
+
+    with pytest.raises(RejectedFeature) as info:
+        transform_record(record, "x.osm.pbf")
+
+    assert info.value.reason == "invalid_geometry"
+
+
 def test_transform_rejects_undecodable_wkb() -> None:
     record = ExportRecord(
         geometry_ewkb_hex="zzzznotwkb",
@@ -179,5 +253,25 @@ def test_transform_rejects_undecodable_wkb() -> None:
         timestamp="2026-01-01T00:00:00Z",
         tags={"description": "x"},
     )
-    with pytest.raises(RejectedFeature, match="invalid_geometry"):
+    with pytest.raises(RejectedFeature) as info:
         transform_record(record, "x.osm.pbf")
+
+    assert info.value.reason == "invalid_geometry"
+
+
+def test_decode_polygon_preserves_invalid_geometry_reason_and_cause() -> None:
+    record = ExportRecord(
+        geometry_ewkb_hex="zzzznotwkb",
+        osm_type="way",
+        osm_id=1,
+        version=1,
+        changeset=1,
+        timestamp="2026-01-01T00:00:00Z",
+        tags={"description": "x"},
+    )
+
+    with pytest.raises(RejectedFeature) as info:
+        _decode_polygon(record)
+
+    assert info.value.reason == "invalid_geometry"
+    assert isinstance(info.value.__cause__, ValueError)

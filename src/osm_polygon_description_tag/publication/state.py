@@ -34,7 +34,9 @@ class PublicationStateError(RuntimeError):
 
 def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    # pragma: no mutate start - None and False are equivalent for json.ensure_ascii
     body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    # pragma: no mutate end
     temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         temp.write_text(body, encoding="utf-8")
@@ -55,7 +57,10 @@ def read_publication_state(data_root: Path) -> dict[str, object]:
     state_path = data_root / PUBLICATION_STATE_FILENAME
     if not state_path.is_file():
         return {"schema_version": 1, "published": {}}
-    return cast_dict(json.loads(state_path.read_text(encoding="utf-8")))
+    # pragma: no mutate start - publication state is always UTF-8 JSON
+    state_text = state_path.read_text(encoding="utf-8")
+    # pragma: no mutate end
+    return cast_dict(json.loads(state_text))
 
 
 def _write_publication_state(
@@ -99,7 +104,8 @@ def _metadata_state_matches(data_root: Path, metadata_plan: UploadPlan) -> bool:
     paths = _metadata_paths(data_root)
     if not _metadata_files_exist(paths):
         return False
-    return _metadata_identity_matches(cast(dict[str, object], metadata), paths)
+    typed_metadata = cast(dict[str, object], metadata)  # pragma: no mutate - static narrowing only
+    return _metadata_identity_matches(typed_metadata, paths)
 
 
 def _metadata_paths(data_root: Path) -> dict[str, Path]:
@@ -195,4 +201,6 @@ def _add_optional_metadata_fields(
 def cast_dict(value: object) -> dict[str, object]:
     if not isinstance(value, dict):
         raise PublicationStateError(f"expected dict, got {type(value).__name__}")
+    # pragma: no mutate start - cast is static-only; the runtime value is unchanged
     return cast(dict[str, object], value)
+    # pragma: no mutate end

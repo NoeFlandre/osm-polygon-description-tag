@@ -24,6 +24,7 @@ from osm_polygon_description_tag.publication.planning import (
     _build_per_pbf_upload_plan,
     _collect_data_items,
     _collect_manifest_items,
+    _collect_required_metadata_items,
     _read_manifest_for_publication,
     _require_assets_directory_for_plan,
     _require_core_assets,
@@ -35,11 +36,13 @@ from osm_polygon_description_tag.publication.planning import (
     _validate_assets_for_publication,
     _validate_data_entry,
     _validate_data_root,
+    _validate_ds_store,
     _validate_local_work,
     _validate_manifest,
     _validate_manifest_entry,
     _validate_publication_parquet,
     _validate_top_level_entries,
+    _validate_top_level_entry,
     _validate_uploader_cache,
     file_sha256_bytes,
 )
@@ -180,6 +183,46 @@ def test_build_item_preserves_non_regular_file_error(tmp_path: Path) -> None:
 
     with pytest.raises(PublicationError, match="not a regular file"):
         _build_item(directory, "data/not-a-file")
+
+
+def test_build_item_reports_symlink_rejection_exactly(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("payload", encoding="utf-8")
+    link = tmp_path / "link.txt"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("filesystem does not support symlinks")
+
+    with pytest.raises(PublicationError) as error:
+        _build_item(link, "link.txt")
+    assert str(error.value) == f"symlink not allowed: {link}"
+
+
+def test_ds_store_validation_requires_a_regular_file_and_exact_error(tmp_path: Path) -> None:
+    directory = tmp_path / ".DS_Store-dir"
+    directory.mkdir()
+    with pytest.raises(PublicationError) as error:
+        _validate_ds_store(directory)
+    assert str(error.value) == f".DS_Store must be a regular file: {directory}"
+
+    regular = tmp_path / ".DS_Store"
+    regular.write_bytes(b"metadata")
+    _validate_ds_store(regular)
+
+
+def test_top_level_validation_rejects_unknown_entries_with_exact_error(tmp_path: Path) -> None:
+    unknown = tmp_path / "unexpected"
+
+    with pytest.raises(PublicationError) as error:
+        _validate_top_level_entry(unknown)
+    assert str(error.value) == f"unknown top-level entry: {unknown}"
+
+
+def test_required_metadata_validation_reports_the_missing_path_exactly(tmp_path: Path) -> None:
+    with pytest.raises(PublicationError) as error:
+        _collect_required_metadata_items(tmp_path)
+    assert str(error.value) == f"missing required file: {tmp_path / 'README.md'}"
 
 
 def test_validate_data_root_rejects_a_file(tmp_path: Path) -> None:

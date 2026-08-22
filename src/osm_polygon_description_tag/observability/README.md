@@ -5,12 +5,12 @@
 Publish factual dataset-processing metrics to Hugging Face Trackio without
 making Trackio a dependency of the extraction state machine.
 
-## Retrospective run
+## Dataset snapshot
 
 The completed Seagate dataset can be logged without reading raw PBF files:
 
 ```bash
-uv run osm-polygon-description-tag trackio-report \
+uv run osm-polygon-description-tag trackio-snapshot \
   --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag"
 ```
 

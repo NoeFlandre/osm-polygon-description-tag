@@ -121,4 +121,5 @@ also_copy = [
 ]
 timeout_multiplier = 2.0
 timeout_constant = 1.0
+dependency_tracking_depth = 2
 on_dependency_change = "warn"

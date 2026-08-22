@@ -11,9 +11,10 @@ to keep byte-for-byte PNG output reproducible across machines and runs.
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import pyarrow.parquet as pq
 
@@ -72,19 +73,7 @@ def _bucket_index(area_m2: float) -> int:
     clamped to the first bucket. Areas at or above the highest edge go
     to the last bucket.
     """
-    if area_m2 < AREA_BUCKET_EDGES[1]:
-        return 0
-    upper = len(AREA_BUCKET_EDGES) - 1
-    if area_m2 >= AREA_BUCKET_EDGES[upper]:
-        return upper
-    lo, hi = 1, upper - 1
-    while lo <= hi:
-        mid = (lo + hi) // 2
-        if area_m2 < AREA_BUCKET_EDGES[mid]:
-            hi = mid - 1
-        else:
-            lo = mid + 1
-    return lo - 1
+    return max(bisect_right(AREA_BUCKET_EDGES, area_m2) - 1, 0)
 
 
 def aggregate_area_histogram(
@@ -119,7 +108,9 @@ def aggregate_area_histogram(
                 if value is None:
                     continue
                 counts[_bucket_index(float(value))] += 1
+    # pragma: no mutate start - the fixed label and count sequences have equal length
     return dict(zip(AREA_BUCKET_LABELS, counts, strict=False))
+    # pragma: no mutate end
 
 
 def area_histogram_input_sha256(
@@ -142,8 +133,18 @@ def area_histogram_input_sha256(
             for name, sha in sorted(file_output_sha256s.items())
         ],
     }
-    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    json_options: dict[str, Any] = {
+        "sort_keys": True,
+        "separators": (",", ":"),
+    }
+    # pragma: no mutate start - None has the same falsey meaning as False here
+    json_options["ensure_ascii"] = False
+    # pragma: no mutate end
+    encoded = json.dumps(payload, **json_options)
+    # pragma: no mutate start - UTF-8 codec names are case-insensitive
+    digest = hashlib.sha256(encoded.encode("utf-8"))
+    # pragma: no mutate end
+    return digest.hexdigest()
 
 
 __all__ = [

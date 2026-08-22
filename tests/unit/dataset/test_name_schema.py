@@ -20,7 +20,13 @@ import pytest
 from shapely import to_wkb
 from shapely.geometry import MultiPolygon, Polygon
 
-from osm_polygon_description_tag.dataset.schema import SCHEMA, SCHEMA_VERSION, _key_value_item
+from osm_polygon_description_tag.dataset.schema import (
+    SCHEMA,
+    SCHEMA_VERSION,
+    _key_value_item,
+    _mapping_items,
+    _sequence_items,
+)
 from osm_polygon_description_tag.dataset.transform import (
     names_from_tags,
     transform_record,
@@ -222,6 +228,42 @@ def test_mapping_to_pairs_accepts_mapping_and_pair_records_deterministically() -
 def test_key_value_item_extracts_supported_record_shapes() -> None:
     assert _key_value_item({"key": "a", "value": "A"}) == ("a", "A")
     assert _key_value_item(("a", "A")) == ("a", "A")
+
+
+def test_key_value_item_rejects_non_sequence_with_exact_error() -> None:
+    with pytest.raises(TypeError, match=r"^invalid key/value record: 42$"):
+        _key_value_item(42)
+
+
+def test_key_value_item_rejects_wrong_length_with_exact_error() -> None:
+    with pytest.raises(TypeError, match=r"^invalid key/value record: \['only one'\]$"):
+        _key_value_item(["only one"])
+
+
+def test_sequence_items_skips_partial_records_and_keeps_following_values() -> None:
+    assert dict(
+        _sequence_items(
+            [
+                {"key": None, "value": "ignored"},
+                {"key": "missing-value", "value": None},
+                ("kept", 7),
+            ]
+        )
+    ) == {"kept": "7"}
+
+
+def test_sequence_items_converts_all_supported_key_and_value_types() -> None:
+    assert dict(_sequence_items([(3, 7), ("text", "value")])) == {
+        "3": "7",
+        "text": "value",
+    }
+
+
+def test_mapping_items_rejects_strings_and_other_objects_with_exact_error() -> None:
+    with pytest.raises(TypeError, match=r"^expected a string mapping, got str$"):
+        _mapping_items("abc")
+    with pytest.raises(TypeError, match=r"^expected a string mapping, got int$"):
+        _mapping_items(42)
 
 
 @pytest.mark.parametrize(

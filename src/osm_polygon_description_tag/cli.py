@@ -25,7 +25,7 @@ from osm_polygon_description_tag.dataset.reporting import ReportingError, genera
 from osm_polygon_description_tag.dataset.storage import StorageError, validate_geoparquet
 from osm_polygon_description_tag.observability.trackio import (
     TrackioRecorder,
-    publish_retrospective,
+    publish_snapshot,
 )
 from osm_polygon_description_tag.osm.discovery import discover_sources
 from osm_polygon_description_tag.osm.extraction import OsmiumExportError
@@ -187,7 +187,7 @@ def handle_validate(args: SimpleNamespace) -> int:
         raise ValueError(f"missing data directory: {data_dir}")
     rows_total = 0
     files = 0
-    for parquet in sorted(data_dir.glob("*.parquet"), key=lambda path: path.name):
+    for parquet in sorted(data_dir.glob("*.parquet")):
         rows_total += validate_geoparquet(parquet)
         files += 1
     _print_json({"files": files, "rows": rows_total})
@@ -268,9 +268,9 @@ def handle_run_and_publish(args: SimpleNamespace) -> int:
     return 0
 
 
-def handle_trackio_report(args: SimpleNamespace) -> int:
+def handle_trackio_snapshot(args: SimpleNamespace) -> int:
     paths = _resolve_paths(args)
-    report = publish_retrospective(
+    report = publish_snapshot(
         paths.data_root,
         project=args.project,
         space_id=args.space_id,
@@ -361,8 +361,8 @@ def migrate_schema_command(
     )
 
 
-@app.command("trackio-report", help="Log retrospective dataset metrics to Trackio")
-def trackio_report_command(
+@app.command("trackio-snapshot", help="Log a completed dataset snapshot to Trackio")
+def trackio_snapshot_command(
     project: Annotated[str, typer.Option("--project")] = "osm-polygon-description-tag",
     space_id: Annotated[str, typer.Option("--space-id")] = (
         "NoeFlandre/osm-polygon-description-tag-trackio"
@@ -373,7 +373,7 @@ def trackio_report_command(
     osmium: Osmium = "osmium",
 ) -> None:
     _invoke(
-        handle_trackio_report,
+        handle_trackio_snapshot,
         _namespace(
             source_root=source_root,
             data_root=data_root,
@@ -490,7 +490,10 @@ def run(argv: Sequence[str] | None = None) -> int:
     except (KeyboardInterrupt, _Interrupted):
         return 130
     except _ERROR_TYPES as error:
-        TerminalPresenter(stderr=sys.stderr).error(str(error))
+        # pragma: no mutate start - None uses the current stderr by default
+        presenter = TerminalPresenter(stderr=sys.stderr)
+        # pragma: no mutate end
+        presenter.error(str(error))
         return 1
 
 

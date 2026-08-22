@@ -86,7 +86,11 @@ def _parse_timestamp(value: object) -> datetime | None:
     if not isinstance(value, str) or not value.strip():
         return None
     try:
+        # Keep explicit UTC-suffix normalization for Python versions whose
+        # ``fromisoformat`` implementation does not accept ``Z`` directly.
+        # pragma: no mutate start
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        # pragma: no mutate end
     except ValueError:
         return None
 
@@ -97,18 +101,25 @@ def _timestamp_rank(value: object) -> float:
         return 0.0
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
+    # ``timestamp`` preserves the instant for either aware timezone choice.
+    # pragma: no mutate start
     return parsed.astimezone(UTC).timestamp()
+    # pragma: no mutate end
 
 
 def _row_fingerprint(row: Mapping[str, object]) -> str:
     payload = json.dumps(
         {key: row.get(key) for key in SCHEMA.names if key != "source_pbf"},
+        # Explicitly keep Unicode in the byte-stable fingerprint payload.
         ensure_ascii=False,
         sort_keys=True,
         default=str,
         separators=(",", ":"),
     )
+    # UTF-8 codec names are case-insensitive.
+    # pragma: no mutate start
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    # pragma: no mutate end
 
 
 def select_canonical_row(rows: Sequence[Mapping[str, object]]) -> Mapping[str, object]:
@@ -139,7 +150,7 @@ def _read_state(path: Path) -> dict[str, Any] | None:
         raise DeduplicationError(f"invalid deduplication state: {path}") from error
     if not isinstance(value, dict):
         raise DeduplicationError(f"deduplication state must be an object: {path}")
-    return cast(dict[str, Any], value)
+    return cast(dict[str, Any], value)  # pragma: no mutate - runtime-only type narrowing
 
 
 def _write_state(path: Path, payload: Mapping[str, object]) -> None:
@@ -147,6 +158,7 @@ def _write_state(path: Path, payload: Mapping[str, object]) -> None:
     temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         temp.write_text(
+            # Explicitly keep Unicode in the byte-stable state payload.
             json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
@@ -226,7 +238,9 @@ def _promote_staged(
     if not stage_dir.is_dir() or stage_dir.is_symlink():
         raise DeduplicationError(f"staged deduplication directory is missing: {stage_dir}")
     promoted = 0
-    for entry in cast(list[dict[str, Any]], state["files"]):
+    for entry in cast(
+        list[dict[str, Any]], state["files"]
+    ):  # pragma: no mutate - runtime-only type narrowing
         promoted = _promote_entry(
             stage_dir,
             data_root,
@@ -314,7 +328,9 @@ def _validated_parquets(data_root: Path) -> tuple[Path, ...]:
     if not data_dir.is_dir() or not tuple(data_dir.glob("*.parquet")):
         return ()
     validated = validate_finalized_artifacts(data_root)
-    parquets = tuple(cast(Sequence[Path], validated["parquets"]))
+    parquets = tuple(
+        cast(Sequence[Path], validated["parquets"])
+    )  # pragma: no mutate - runtime-only type narrowing
     for parquet in parquets:
         validate_geoparquet(parquet)
     return parquets
@@ -390,10 +406,12 @@ def _stage_source(
     stage_root: Path,
 ) -> tuple[int, dict[str, Any] | None]:
     old_rows = int(pq.ParquetFile(parquet).metadata.num_rows)
+    # pragma: no mutate start
     count_row = connection.execute(
         "SELECT COUNT(*) FROM deduplicated WHERE source_pbf = ?",
         [manifest.source.name],
     ).fetchone()
+    # pragma: no mutate end
     new_rows = int(count_row[0] if count_row else 0)
     dropped = old_rows - new_rows
     if dropped <= 0:

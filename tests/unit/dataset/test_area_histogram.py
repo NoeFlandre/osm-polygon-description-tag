@@ -11,6 +11,7 @@ import hashlib
 import json
 import time
 from pathlib import Path
+from unittest.mock import Mock, call, patch
 
 import matplotlib
 import pyarrow as pa
@@ -20,6 +21,8 @@ from shapely.geometry import Polygon
 
 matplotlib.use("Agg")
 
+import osm_polygon_description_tag.dataset.geography.area_histogram as area_histogram_module
+import osm_polygon_description_tag.dataset.geography.area_rendering as area_rendering_module
 from osm_polygon_description_tag.dataset.docs import (
     _area_histogram_input_sha256,
     generate_dataset_docs,
@@ -161,6 +164,26 @@ def test_bucket_index_handles_zero() -> None:
     assert _bucket_index(0.0) == 0
 
 
+@pytest.mark.parametrize(
+    ("area_m2", "expected_index"),
+    [
+        (1.5, 1),
+        (50.0, 2),
+        (500.0, 3),
+        (5_000.0, 4),
+        (50_000.0, 5),
+        (500_000.0, 6),
+        (5_000_000.0, 7),
+        (50_000_000.0, 8),
+        (500_000_000.0, 9),
+        (5_000_000_000.0, 10),
+        (50_000_000_000.0, 11),
+    ],
+)
+def test_bucket_index_finds_interior_values(area_m2: float, expected_index: int) -> None:
+    assert _bucket_index(area_m2) == expected_index
+
+
 # --- aggregation ---------------------------------------------------------
 
 
@@ -211,6 +234,57 @@ def test_aggregate_area_histogram_is_byte_stable(tmp_path: Path) -> None:
     assert first == second
     # Also stable as JSON, not just dict equality.
     assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
+
+
+@pytest.mark.parametrize("batch_size", [None, 17])
+def test_aggregate_area_histogram_reads_only_area_column_with_requested_batch_size(
+    tmp_path: Path, batch_size: int | None
+) -> None:
+    data_root = tmp_path / "generated"
+    parquet_path = data_root / "data" / "region.parquet"
+    batch = pa.record_batch([pa.array([1.0])], names=["area_m2"])
+    reader = Mock()
+    reader.iter_batches.return_value = [batch]
+    seen_directory: list[Path] = []
+
+    def sorted_inputs(directory: Path) -> list[Path]:
+        seen_directory.append(directory)
+        return [parquet_path]
+
+    with (
+        patch("osm_polygon_description_tag.dataset.storage.validate_finalized_artifacts_strict"),
+        patch.object(area_histogram_module, "sorted_parquets", side_effect=sorted_inputs),
+        patch.object(area_histogram_module.pq, "ParquetFile", return_value=reader),
+    ):
+        kwargs = {} if batch_size is None else {"batch_size": batch_size}
+        counts = aggregate_area_histogram(data_root, **kwargs)
+
+    assert seen_directory == [data_root / "data"]
+    expected_batch_size = 8192 if batch_size is None else batch_size
+    reader.iter_batches.assert_called_once_with(
+        columns=("area_m2",), batch_size=expected_batch_size
+    )
+    assert counts["1-10 m²"] == 1
+
+
+def test_aggregate_area_histogram_skips_null_values_in_a_streamed_batch(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "generated"
+    parquet_path = data_root / "data" / "region.parquet"
+    batch = pa.record_batch([pa.array([None, 1.0], type=pa.float64())], names=["area_m2"])
+    reader = Mock()
+    reader.iter_batches.return_value = [batch]
+
+    with (
+        patch("osm_polygon_description_tag.dataset.storage.validate_finalized_artifacts_strict"),
+        patch.object(area_histogram_module, "sorted_parquets", return_value=[parquet_path]),
+        patch.object(area_histogram_module.pq, "ParquetFile", return_value=reader),
+    ):
+        counts = aggregate_area_histogram(data_root)
+
+    assert sum(counts.values()) == 1
+    assert counts["1-10 m²"] == 1
 
 
 def test_aggregate_area_histogram_rejects_invalid_area_rows(tmp_path: Path) -> None:
@@ -282,7 +356,272 @@ def test_area_histogram_input_sha256_is_stable_under_key_reordering() -> None:
     assert a == b
 
 
+def test_area_histogram_input_sha256_uses_canonical_utf8_json() -> None:
+    mapping = {"é.parquet": "sha-é"}
+    payload = {
+        "cache_schema_version": 1,
+        "render_version": AREA_HISTOGRAM_RENDER_VERSION,
+        "files": [{"parquet": "é.parquet", "output_sha256": "sha-é"}],
+    }
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    assert area_histogram_input_sha256(mapping) == hashlib.sha256(canonical).hexdigest()
+
+
 # --- rendering -----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (999, "999"),
+        (1_000, "1k"),
+        (1_234, "1.2k"),
+        (1_000_000, "1.0M"),
+        (1_050_000, "1.1M"),
+        (2_500_000, "2.5M"),
+    ],
+)
+def test_area_format_count_tick_pins_threshold_and_rounding_contract(
+    value: float,
+    expected: str,
+) -> None:
+    assert area_rendering_module._format_count_tick(value) == expected
+
+
+def test_area_build_caption_and_bar_labels_are_exact_and_aligned() -> None:
+    counts = {
+        AREA_BUCKET_LABELS[0]: 2,
+        AREA_BUCKET_LABELS[-1]: 3,
+    }
+
+    assert area_rendering_module._build_caption(counts) == (
+        "Area distribution of description-tagged polygons. "
+        "5 polygons bucketed into 2 of 2 logarithmic area bins (m²)."
+    )
+    assert area_rendering_module._build_caption({}) == area_rendering_module._NO_DATA_CAPTION
+
+    labels, values = area_rendering_module._bar_labels(counts)
+    assert labels == list(AREA_BUCKET_LABELS)
+    assert values == [2, *([0] * (len(AREA_BUCKET_LABELS) - 2)), 3]
+
+
+def test_style_area_figure_sets_stable_background_colors() -> None:
+    fig = Mock()
+    axes = Mock()
+
+    area_rendering_module._style_area_figure(fig, axes)
+
+    fig.set_facecolor.assert_called_once_with(area_rendering_module._BG_COLOR)
+    axes.set_facecolor.assert_called_once_with(area_rendering_module._PANEL_COLOR)
+
+
+def test_draw_area_bars_filters_nonpositive_values_and_preserves_style() -> None:
+    axes = Mock()
+
+    area_rendering_module._draw_area_bars(axes, (0, 1, 2), [0, 3, -1])
+
+    axes.barh.assert_called_once_with(
+        [1],
+        [3],
+        color=area_rendering_module._BAR_COLOR,
+        edgecolor=area_rendering_module._BAR_EDGE,
+        linewidth=0.5,
+        zorder=2,
+    )
+
+
+def test_draw_area_bars_requires_aligned_positions_and_values() -> None:
+    with pytest.raises(ValueError):
+        area_rendering_module._draw_area_bars(Mock(), (0, 1), [2])
+
+
+def test_style_area_axes_applies_logarithmic_axis_contract() -> None:
+    axes = Mock()
+    labels = ["small", "large"]
+    positions = object()
+
+    area_rendering_module._style_area_axes(axes, labels, positions)
+
+    assert axes.method_calls == [
+        call.set_yticks(positions),
+        call.set_yticklabels(
+            labels,
+            fontsize=area_rendering_module._TICK_FONTSIZE,
+            color=area_rendering_module._TEXT_COLOR,
+        ),
+        call.invert_yaxis(),
+        call.set_xscale("log"),
+        call.set_xlabel(
+            "Polygons per bucket (log scale)",
+            fontsize=area_rendering_module._LABEL_FONTSIZE,
+            color=area_rendering_module._TEXT_COLOR,
+        ),
+        call.tick_params(
+            axis="x",
+            colors=area_rendering_module._MUTED_COLOR,
+            labelsize=area_rendering_module._TICK_FONTSIZE,
+        ),
+        call.tick_params(axis="y", colors=area_rendering_module._TEXT_COLOR),
+    ]
+
+
+def test_annotate_area_bars_places_stable_labels_and_clamps_zero_width() -> None:
+    axes = Mock()
+
+    area_rendering_module._annotate_area_bars(axes, (0, 1), [0, 1_250])
+
+    assert axes.text.call_args_list == [
+        call(
+            1.08,
+            0,
+            "0",
+            va="center",
+            ha="left",
+            fontsize=area_rendering_module._TICK_FONTSIZE,
+            color=area_rendering_module._TEXT_COLOR,
+            zorder=4,
+        ),
+        call(
+            1_250 * 1.08,
+            1,
+            "1.2k",
+            va="center",
+            ha="left",
+            fontsize=area_rendering_module._TICK_FONTSIZE,
+            color=area_rendering_module._TEXT_COLOR,
+            zorder=4,
+        ),
+    ]
+
+
+def test_annotate_area_bars_requires_aligned_positions_and_values() -> None:
+    with pytest.raises(ValueError):
+        area_rendering_module._annotate_area_bars(Mock(), (0, 1), [2])
+
+
+def test_style_area_grid_hides_frame_and_draws_stable_grid() -> None:
+    spines = {name: Mock() for name in ("top", "right", "left", "bottom")}
+    axes = Mock()
+    axes.spines = spines
+
+    area_rendering_module._style_area_grid(axes)
+
+    spines["top"].set_visible.assert_called_once_with(False)
+    spines["right"].set_visible.assert_called_once_with(False)
+    spines["left"].set_color.assert_called_once_with(area_rendering_module._MUTED_COLOR)
+    spines["bottom"].set_color.assert_called_once_with(area_rendering_module._MUTED_COLOR)
+    axes.grid.assert_called_once_with(
+        True,
+        axis="x",
+        color="#ffffff",
+        linewidth=0.8,
+        alpha=0.9,
+        zorder=1,
+    )
+    axes.set_axisbelow.assert_called_once_with(True)
+    axes.set_title.assert_called_once_with(
+        area_rendering_module._TITLE,
+        fontsize=area_rendering_module._TITLE_FONTSIZE,
+        color=area_rendering_module._TEXT_COLOR,
+        pad=12,
+        loc="left",
+    )
+
+
+def test_add_area_caption_uses_stable_layout_and_typography() -> None:
+    fig = Mock()
+
+    area_rendering_module._add_area_caption(fig, "caption")
+
+    fig.text.assert_called_once_with(
+        0.5,
+        0.02,
+        "caption",
+        ha="center",
+        va="bottom",
+        fontsize=area_rendering_module._CAPTION_FONTSIZE,
+        color=area_rendering_module._MUTED_COLOR,
+        wrap=True,
+    )
+
+
+def test_set_area_limits_reserves_annotation_headroom_for_empty_and_populated_data() -> None:
+    populated_axes = Mock()
+    area_rendering_module._set_area_limits(populated_axes, [2, 100])
+    populated_axes.set_xlim.assert_called_once_with(left=1.0, right=400.0)
+
+    empty_axes = Mock()
+    area_rendering_module._set_area_limits(empty_axes, [])
+    empty_axes.set_xlim.assert_called_once_with(left=1.0, right=10.0)
+
+
+def test_render_area_histogram_orchestrates_helpers_and_closes_figure(
+    tmp_path: Path,
+) -> None:
+    counts = {"b": 2, "a": 0}
+    labels = ["a", "b"]
+    values = [0, 2]
+    positions = object()
+    caption = "caption"
+    fig = Mock()
+    axes = Mock()
+    output_path = tmp_path / "hist.png"
+    calls: list[str] = []
+
+    def record(name: str):
+        def wrapper(*_args: object, **_kwargs: object) -> None:
+            calls.append(name)
+
+        return wrapper
+
+    with (
+        patch.object(
+            area_rendering_module, "_bar_labels", return_value=(labels, values)
+        ) as bar_labels,
+        patch.object(
+            area_rendering_module, "_build_caption", return_value=caption
+        ) as build_caption,
+        patch.object(
+            area_rendering_module.plt,
+            "subplots",
+            return_value=(fig, axes),
+        ) as subplots,
+        patch.object(area_rendering_module.np, "arange", return_value=positions) as arange,
+        patch.object(area_rendering_module, "_style_area_figure", side_effect=record("figure")),
+        patch.object(area_rendering_module, "_draw_area_bars", side_effect=record("bars")),
+        patch.object(area_rendering_module, "_style_area_axes", side_effect=record("axes")),
+        patch.object(area_rendering_module, "_annotate_area_bars", side_effect=record("labels")),
+        patch.object(area_rendering_module, "_style_area_grid", side_effect=record("grid")),
+        patch.object(
+            area_rendering_module, "_add_area_caption", side_effect=record("caption")
+        ) as add_caption,
+        patch.object(
+            area_rendering_module, "_set_area_limits", side_effect=record("limits")
+        ) as set_limits,
+        patch.object(area_rendering_module, "_atomic_save_png") as atomic_save,
+        patch.object(area_rendering_module.plt, "close") as close,
+    ):
+        result = area_rendering_module.render_area_histogram(counts, output_path)
+
+    bar_labels.assert_called_once_with(counts)
+    build_caption.assert_called_once_with(counts)
+    subplots.assert_called_once_with(
+        figsize=area_rendering_module._FIGSIZE,
+        dpi=area_rendering_module._DPI,
+    )
+    arange.assert_called_once_with(2)
+    assert calls == ["figure", "bars", "axes", "labels", "grid", "caption", "limits"]
+    add_caption.assert_called_once_with(fig, caption)
+    set_limits.assert_called_once_with(axes, values)
+    fig.tight_layout.assert_called_once_with(rect=(0, 0.05, 1, 0.97))
+    atomic_save.assert_called_once_with(fig, output_path)
+    close.assert_called_once_with(fig)
+    assert result == AreaHistogramResult(output_path=output_path, caption=caption)
 
 
 def test_render_area_histogram_writes_png(tmp_path: Path) -> None:

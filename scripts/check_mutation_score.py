@@ -22,7 +22,7 @@ STATUS_KEYS = (
 STATUS_BY_EXIT_CODE = {
     None: "not_checked",
     0: "survived",
-    -24: "killed",
+    -24: "timeout",
     1: "killed",
     2: "check_was_interrupted_by_user",
     3: "killed",

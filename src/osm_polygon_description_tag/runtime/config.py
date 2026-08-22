@@ -12,7 +12,11 @@ class UnsafePathError(ValueError):
 
 
 def _is_within(child: Path, parent: Path) -> bool:
-    return child.resolve(strict=False).is_relative_to(parent.resolve(strict=False))
+    # pragma: no mutate start - strict=False and None are equivalent here
+    resolved_child = child.resolve(strict=False)
+    resolved_parent = parent.resolve(strict=False)
+    # pragma: no mutate end
+    return resolved_child.is_relative_to(resolved_parent)
 
 
 @dataclass(frozen=True)

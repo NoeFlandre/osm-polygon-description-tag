@@ -3,7 +3,7 @@
 import os
 import shutil
 import subprocess
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
 from osm_polygon_description_tag.dataset.manifest import (
     TRANSFORM_ALGORITHM_VERSION,
@@ -109,7 +109,8 @@ def _validate_data_roots(paths: Paths) -> tuple[object, ...]:
 
 def _hub_identity() -> tuple[Any, Any]:
     try:
-        api = cast(Any, _huggingface_hub.HfApi)()
+        HfApiCls: Any = _huggingface_hub.HfApi
+        api = HfApiCls()
         identity = api.whoami()
         repo_info = api.repo_info(REPO_ID, repo_type="dataset")
     except Exception as error:

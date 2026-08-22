@@ -35,7 +35,7 @@ def atomic_save_png(fig: Any, output_path: Path) -> None:
         with open(tmp_path, "rb") as handle:
             os.fsync(handle.fileno())
         if output_path.exists() and output_path.read_bytes() == tmp_path.read_bytes():
-            tmp_path.unlink(missing_ok=True)
+            tmp_path.unlink()
             return
         os.replace(tmp_path, output_path)
         directory_fd = os.open(str(output_path.parent), os.O_RDONLY)

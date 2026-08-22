@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
 from osm_polygon_description_tag.publication.models import UploadItem
 
@@ -69,7 +69,7 @@ def default_hub_verifier_factory(*, cache_dir: Path | None = None) -> HubVerifie
     def verifier(repo_id: str, files: tuple[UploadItem, ...]) -> str:
         # Resolve the HfApi lazily at invocation time so monkeypatching
         # _huggingface_hub.HfApi is honored by tests.
-        HfApiCls = cast(Any, _huggingface_hub.HfApi)
+        HfApiCls: Any = _huggingface_hub.HfApi
         api = HfApiCls()
         try:
             identity = api.whoami()
@@ -83,7 +83,10 @@ def default_hub_verifier_factory(*, cache_dir: Path | None = None) -> HubVerifie
             raise HubVerificationError(
                 f"Hub repository {repo_id} is not accessible: {error}"
             ) from error
-        revision = str(getattr(info, "sha", "") or "")
+        # pragma: no mutate start - missing SHA defaults are normalized below
+        repo_sha = getattr(info, "sha", None)
+        # pragma: no mutate end
+        revision = str(repo_sha or "")
         if not revision:
             raise HubVerificationError(f"Hub repository {repo_id} returned an empty revision")
         for item in files:
@@ -144,7 +147,7 @@ def default_hub_verifier_factory(*, cache_dir: Path | None = None) -> HubVerifie
 
     def reconcile_managed_files(repo_id: str, expected_paths: set[str]) -> str | None:
         """Delete only stale files in the dataset's managed artifact namespaces."""
-        HfApiCls = cast(Any, _huggingface_hub.HfApi)
+        HfApiCls: Any = _huggingface_hub.HfApi
         api = HfApiCls()
         if not hasattr(api, "list_repo_files") or not hasattr(api, "delete_files"):
             return None
@@ -166,7 +169,10 @@ def default_hub_verifier_factory(*, cache_dir: Path | None = None) -> HubVerifie
         if revision:
             return str(revision)
         info = api.repo_info(repo_id, repo_type="dataset")
-        return str(getattr(info, "sha", "") or "") or None
+        # pragma: no mutate start - missing SHA defaults are normalized below
+        repo_sha = getattr(info, "sha", None)
+        # pragma: no mutate end
+        return str(repo_sha or "") or None
 
     class Verifier:
         def __call__(self, repo_id: str, files: tuple[UploadItem, ...]) -> str:

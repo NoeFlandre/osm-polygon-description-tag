@@ -17,10 +17,14 @@ from pathlib import Path
 import pytest
 from shapely.geometry import Polygon
 
+import osm_polygon_description_tag.dataset.docs as docs_module
 from osm_polygon_description_tag._resources import dataset_card_template
 from osm_polygon_description_tag.cli import run as cli_run
 from osm_polygon_description_tag.config import Paths
 from osm_polygon_description_tag.dataset.docs import (
+    _fmt_bytes,
+    _fmt_median,
+    _h3_map_input_sha256,
     _render_stats_block,
     collect_stats,
     generate_dataset_docs,
@@ -172,6 +176,173 @@ def test_card_renders_only_ten_suffixes_in_deterministic_order(tmp_path: Path) -
     positions = [rendered.index(f"| `s{index:02d}` |") for index in range(10)]
     assert positions == sorted(positions)
     assert "| `s10` |" not in rendered
+
+
+def test_stats_block_is_an_exact_contract_for_non_default_values() -> None:
+    stats = {
+        "stats_schema_version": 4,
+        "schema_version": 3,
+        "rows": 12_345,
+        "output_files": 6,
+        "output_bytes_total": 1_536,
+        "deduplicated_rows": 7,
+        "osm_types": {"way": 1_234, "relation": 56},
+        "geometry_types": {"Polygon": 1_200, "MultiPolygon": 90},
+        "base_description_values": 1_000,
+        "base_description_words_total": 4_500,
+        "base_description_words_median": None,
+        "localized_description_values": 789,
+        "localized_description_words_total": 3_456,
+        "localized_description_words_median": 12.5,
+        "description_suffixes": {"fr": 2, "en": 2, "de": 1},
+        "data_min_timestamp_utc": "2020-01-01T00:00:00Z",
+        "data_max_timestamp_utc": "2026-01-01T00:00:00Z",
+    }
+
+    rendered = _render_stats_block(stats, "abc")
+
+    assert rendered == "\n".join(
+        [
+            "<!-- stats_sha256: abc -->",
+            "<!-- stats_schema_version: 4 -->",
+            "<!-- schema_version: 3 -->",
+            "",
+            "## Dataset at a glance",
+            "",
+            "| Metric | Value |",
+            "| --- | --- |",
+            "| Polygons | 12,345 |",
+            "| Parquet files | 6 |",
+            "| Download size | 1.5 KiB |",
+            "| Duplicate rows removed | 7 |",
+            "| Closed ways | 1,234 |",
+            "| Relations | 56 |",
+            "| Polygon geometries | 1,200 |",
+            "| MultiPolygon geometries | 90 |",
+            "",
+            "## Description coverage",
+            "",
+            "| Description type | Values | Total words | Median words per description |",
+            "| --- | ---: | ---: | ---: |",
+            "| Base descriptions | 1,000 | 4,500 | — |",
+            "| Localized descriptions | 789 | 3,456 | 12.5 |",
+            "",
+            "### Most common localized suffixes",
+            "",
+            "These are exact OSM tag suffixes and are not validated language codes.",
+            "",
+            "| Suffix | Description values |",
+            "| --- | ---: |",
+            "| `en` | 2 |",
+            "| `fr` | 2 |",
+            "| `de` | 1 |",
+            "",
+            "### Area distribution",
+            "",
+            "![Area distribution of description-tagged polygons](assets/area_distribution.png)",
+            "",
+            "Area buckets span <1 m² to >=100B m² on a logarithmic scale; "
+            "each bar shows the number of polygons in that bucket (total 12,345).",
+            "",
+            "**OSM object timestamps (UTC):** 2020-01-01T00:00:00Z to 2026-01-01T00:00:00Z",
+            "",
+            "Detailed machine-readable statistics, exact suffix frequencies, rejection counts, "
+            "and per-file SHA-256 provenance are available in [`stats.json`](stats.json).",
+            "",
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (0, "0 B"),
+        (1_023, "1,023 B"),
+        (1_024, "1.0 KiB"),
+        (1_024**2, "1.0 MiB"),
+        (1_024**3, "1.0 GiB"),
+        (1_024**4, "1.0 TiB"),
+    ],
+)
+def test_format_bytes_uses_stable_binary_units(value: int, expected: str) -> None:
+    assert _fmt_bytes(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(None, "—"), (12.0, "12"), (12.5, "12.5")],
+)
+def test_format_median_distinguishes_missing_integer_and_fractional_values(
+    value: float | None, expected: str
+) -> None:
+    assert _fmt_median(value) == expected
+
+
+def test_h3_map_input_hash_is_canonical_and_includes_basemap(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    basemap = tmp_path / "basemap.geojson"
+    seen: list[Path] = []
+
+    def fake_file_sha256(path: Path) -> str:
+        seen.append(path)
+        return "basemap-sha"
+
+    monkeypatch.setattr(docs_module, "file_sha256", fake_file_sha256)
+    monkeypatch.setattr(docs_module, "bundled_basemap_path", lambda: basemap)
+    stats = {
+        "files": [
+            {"parquet": "z.parquet", "output_sha256": "z-sha"},
+            {"parquet": "a.parquet", "output_sha256": "a-sha"},
+            "ignored",
+        ]
+    }
+
+    actual = _h3_map_input_sha256(stats)
+    payload = {
+        "cache_schema_version": docs_module._H3_MAP_CACHE_SCHEMA_VERSION,
+        "render_version": docs_module._H3_MAP_RENDER_VERSION,
+        "h3_resolution": docs_module.DEFAULT_H3_RESOLUTION,
+        "basemap_sha256": "basemap-sha",
+        "files": [
+            {"parquet": "a.parquet", "output_sha256": "a-sha"},
+            {"parquet": "z.parquet", "output_sha256": "z-sha"},
+        ],
+    }
+    expected = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+    assert actual == expected
+    assert seen == [basemap]
+
+
+def test_stats_block_omits_timestamp_line_when_one_bound_is_missing() -> None:
+    stats = {
+        "stats_schema_version": 1,
+        "schema_version": 1,
+        "rows": 1,
+        "output_files": 1,
+        "output_bytes_total": 1,
+        "deduplicated_rows": 0,
+        "osm_types": {},
+        "geometry_types": {},
+        "base_description_values": 0,
+        "base_description_words_total": 0,
+        "base_description_words_median": None,
+        "localized_description_values": 0,
+        "localized_description_words_total": 0,
+        "localized_description_words_median": None,
+        "description_suffixes": {},
+        "data_min_timestamp_utc": "2020-01-01T00:00:00Z",
+        "data_max_timestamp_utc": "",
+    }
+
+    rendered = _render_stats_block(stats, "hash")
+
+    assert "**OSM object timestamps (UTC):**" not in rendered
 
 
 def test_identical_regeneration_does_not_invalidate_metadata_state(

@@ -156,7 +156,6 @@ def _manifest_outcome(
         status=status,
         included_rows=manifest.counts.included_rows,
         output_bytes=output_path.stat().st_size,
-        remote_revision=None,
         note=note,
     )
 
@@ -211,6 +210,7 @@ def _build_source(
         export_config=osmium_export_config(),
         executable=osmium_executable,
         exporter=exporter,
+        clock=clock,
         progress_interval=progress_interval,
         progress_callback=progress_callback,
     )
@@ -229,7 +229,6 @@ def _build_source(
         status=STATUS_BUILT,
         included_rows=result.included_rows,
         output_bytes=result.output_path.stat().st_size,
-        remote_revision=None,
         note="freshly built; upload required",
     )
 

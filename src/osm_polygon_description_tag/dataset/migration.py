@@ -31,7 +31,8 @@ class MigrationError(RuntimeError):
 
 def _is_legacy_map_schema(schema: pa.Schema) -> bool:
     return all(
-        schema.field(name).type == pa.map_(pa.string(), pa.string()) for name in KEY_VALUE_COLUMNS
+        name in schema.names and schema.field(name).type == pa.map_(pa.string(), pa.string())
+        for name in KEY_VALUE_COLUMNS
     )
 
 

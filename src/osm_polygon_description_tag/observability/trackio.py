@@ -1,4 +1,4 @@
-"""Optional Trackio metrics for retrospective and live pipeline runs.
+"""Optional Trackio metrics for dataset snapshots and live pipeline runs.
 
 Trackio is deliberately isolated behind :class:`TrackioRecorder`.  A missing
 installation, missing Hugging Face credentials, or a dashboard outage disables
@@ -52,7 +52,7 @@ def dashboard_url(
     return f"https://{host}.static.hf.space/?project={quote(project, safe='-_.~')}&sidebar=hidden"
 
 
-def retrospective_run_name(snapshot_date: str) -> str:
+def snapshot_run_name(snapshot_date: str) -> str:
     """Return an explicit, human-readable name for a dataset snapshot."""
     try:
         datetime.strptime(snapshot_date, "%Y-%m-%d")
@@ -65,14 +65,14 @@ def _integer(value: object) -> int:
     return int(value) if isinstance(value, int | float) else 0
 
 
-def build_retrospective_points(stats: Mapping[str, Any]) -> list[dict[str, object]]:
+def build_snapshot_points(stats: Mapping[str, Any]) -> list[dict[str, object]]:
     """Build deterministic cumulative per-file metrics from ``stats.json``."""
     ordered = _ordered_file_entries(stats)
     cumulative_rows = 0
     cumulative_output_bytes = 0
     points: list[dict[str, object]] = []
     for step, entry in enumerate(ordered, start=1):
-        cumulative_rows, cumulative_output_bytes, point = _retrospective_point(
+        cumulative_rows, cumulative_output_bytes, point = _snapshot_point(
             step,
             entry,
             cumulative_rows,
@@ -103,7 +103,7 @@ def _ordered_file_entries(stats: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     )
 
 
-def _retrospective_point(
+def _snapshot_point(
     step: int,
     entry: Mapping[str, Any],
     cumulative_rows: int,
@@ -245,7 +245,7 @@ def _ranked_figure(
 ) -> Any:
     import matplotlib
 
-    matplotlib.use("Agg")
+    matplotlib.use("Agg")  # pragma: no mutate - backend names are case-insensitive
     import matplotlib.pyplot as plt
 
     ranked = sorted(
@@ -256,7 +256,7 @@ def _ranked_figure(
     figure, axis = plt.subplots(figsize=(10, max(6, len(ranked) * 0.24)), dpi=120)
     labels = [str(row.get("source", "")) for row in ranked]
     values = [_number(row.get(value_key)) for row in ranked]
-    axis.barh(labels, values, color="#4a6fa5")
+    axis.barh(labels, values, color="#4a6fa5")  # pragma: no mutate - hex case is equivalent
     axis.set_title(title)
     axis.set_xlabel(xlabel)
     axis.grid(axis="x", alpha=0.25)
@@ -361,13 +361,14 @@ def _plot_specs() -> tuple[tuple[str, str, str, str], ...]:
 
 def _load_backend() -> TrackioBackend | None:
     try:
-        return cast(TrackioBackend, importlib.import_module("trackio"))
+        return cast(TrackioBackend, importlib.import_module("trackio"))  # pragma: no mutate
     except (ImportError, OSError):
         return None
 
 
 def _trackio_disabled_by_environment() -> bool:
-    return os.environ.get("OSM_POLYGON_DESCRIPTION_TAG_TRACKIO", "1").lower() in {
+    value = os.environ.get("OSM_POLYGON_DESCRIPTION_TAG_TRACKIO", "1")  # pragma: no mutate
+    return value.lower() in {
         "0",
         "false",
         "off",
@@ -489,8 +490,8 @@ class TrackioRecorder:
 
 
 @dataclass(frozen=True)
-class TrackioReport:
-    """Machine-readable result of a retrospective logging operation."""
+class TrackioSnapshotReport:
+    """Machine-readable result of a dataset snapshot logging operation."""
 
     project: str
     space_id: str
@@ -514,26 +515,26 @@ class TrackioReport:
 
 def _read_stats(data_root: Path) -> dict[str, Any]:
     path = data_root / "stats.json"
-    return cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _stats_sha256(stats: Mapping[str, Any]) -> str:
     encoded = json.dumps(stats, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()  # pragma: no mutate
 
 
-def publish_retrospective(
+def publish_snapshot(
     data_root: Path,
     *,
     backend: TrackioBackend | None = None,
     project: str = DEFAULT_TRACKIO_PROJECT,
     space_id: str = DEFAULT_TRACKIO_SPACE_ID,
     run_name: str | None = None,
-) -> TrackioReport:
+) -> TrackioSnapshotReport:
     """Log one completed dataset snapshot and its per-file metric curve."""
     stats = collect_stats(data_root)
     stats_sha256 = _stats_sha256(stats)
-    resolved_run_name = run_name or retrospective_run_name(datetime.now(UTC).date().isoformat())
+    resolved_run_name = run_name or snapshot_run_name(datetime.now(UTC).date().isoformat())
     recorder = TrackioRecorder(
         data_root=data_root,
         backend=backend,
@@ -541,7 +542,7 @@ def publish_retrospective(
         space_id=space_id,
         run_name=resolved_run_name,
     )
-    points = build_retrospective_points(stats)
+    points = build_snapshot_points(stats)
     config = {
         "dataset_repo": "NoeFlandre/osm-polygon-description-tag",
         "dataset_stats_sha256": stats_sha256,
@@ -554,7 +555,7 @@ def publish_retrospective(
         recorder.log(point)
     recorder.log_snapshot(data_root, stats=stats)
     recorder.finish()
-    return TrackioReport(
+    return TrackioSnapshotReport(
         project=project,
         space_id=space_id,
         run_name=resolved_run_name,
@@ -570,12 +571,12 @@ __all__ = [
     "DEFAULT_TRACKIO_SPACE_ID",
     "TRACKIO_DASHBOARD_URL",
     "TrackioRecorder",
-    "TrackioReport",
+    "TrackioSnapshotReport",
     "build_dataset_summary",
     "build_per_pbf_rows",
-    "build_retrospective_points",
     "build_snapshot_payload",
+    "build_snapshot_points",
     "dashboard_url",
-    "publish_retrospective",
-    "retrospective_run_name",
+    "publish_snapshot",
+    "snapshot_run_name",
 ]

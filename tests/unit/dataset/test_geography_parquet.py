@@ -17,13 +17,17 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import Mock, call, patch
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 from shapely import to_wkb
 from shapely.geometry import MultiPolygon, Point, Polygon
+
+import osm_polygon_description_tag.dataset.geography.aggregation as aggregation_module
 
 # Import the actual function that the package uses to ensure coverage
 # against the no-pq.read_table contract.
@@ -36,8 +40,12 @@ from osm_polygon_description_tag.dataset.geography import (
 )
 from osm_polygon_description_tag.dataset.geography.parquet_inputs import (
     H3AggregationError,
+    _decode_geometry,
+    _geometry_centroid,
+    _validate_centroid,
     _validate_geometry,
     iter_centroids,
+    require_directory,
 )
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
@@ -178,6 +186,25 @@ def test_aggregate_h3_density_uses_resolution_3(tmp_path: Path) -> None:
     assert DEFAULT_H3_RESOLUTION == 3
 
 
+def test_aggregate_h3_density_forwards_default_and_explicit_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[Path, int | None]] = []
+
+    def fake_collect(root: Path, *, h3_resolution: int | None) -> dict[str, int]:
+        calls.append((root, h3_resolution))
+        return {"cell": h3_resolution or -1}
+
+    monkeypatch.setattr(aggregation_module, "collect_h3_counts", fake_collect)
+
+    assert aggregation_module.aggregate_h3_density(tmp_path) == {"cell": DEFAULT_H3_RESOLUTION}
+    assert aggregation_module.aggregate_h3_density(tmp_path, h3_resolution=0) == {"cell": -1}
+    assert calls == [
+        (tmp_path, DEFAULT_H3_RESOLUTION),
+        (tmp_path, 0),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # collect_h3_counts entry point
 # ---------------------------------------------------------------------------
@@ -244,6 +271,37 @@ def test_collect_h3_counts_resolution_falsy_does_not_use_default(
     # typically maps to fewer cells.
     assert isinstance(counts_zero, dict)
     assert isinstance(counts_none, dict)
+
+
+def test_collect_h3_counts_forwards_exact_resolution_to_assignment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import osm_polygon_description_tag.dataset.storage as storage_module
+
+    observed: list[tuple[float, float, int]] = []
+    validated: list[Path] = []
+    parquet_path = tmp_path / "data" / "region.parquet"
+
+    monkeypatch.setattr(
+        parquet_inputs_module,
+        "iter_centroids",
+        lambda _root: iter(((parquet_path, 2.0, 1.0), (parquet_path, 4.0, 3.0))),
+    )
+    monkeypatch.setattr(
+        storage_module,
+        "validate_finalized_artifacts",
+        lambda root: validated.append(root),
+    )
+
+    def record_assignment(lat: float, lon: float, *, resolution: int) -> str:
+        observed.append((lat, lon, resolution))
+        return "cell"
+
+    monkeypatch.setattr(parquet_inputs_module, "assign_h3_cell", record_assignment)
+
+    assert collect_h3_counts(tmp_path, h3_resolution=7) == {"cell": 2}
+    assert validated == [tmp_path]
+    assert observed == [(1.0, 2.0, 7), (3.0, 4.0, 7)]
 
 
 # ---------------------------------------------------------------------------
@@ -390,8 +448,78 @@ def test_aggregate_rejects_invalid_geometry(tmp_path: Path) -> None:
 
 def test_validate_geometry_rejects_non_geometry_and_accepts_polygon() -> None:
     _validate_geometry(Polygon([(0, 0), (0, 1), (1, 1), (0, 0)]))
-    with pytest.raises(H3AggregationError, match="unsupported geometry type"):
+    _validate_geometry(MultiPolygon([Polygon([(0, 0), (0, 1), (1, 1), (0, 0)])]))
+    with pytest.raises(H3AggregationError) as error:
         _validate_geometry(Point(0, 0))
+    assert str(error.value) == "unsupported geometry type for H3 density map: 'Point'"
+
+    with pytest.raises(H3AggregationError) as non_geometry_error:
+        _validate_geometry(object())  # type: ignore[arg-type]
+    assert str(non_geometry_error.value) == "unsupported geometry type: object"
+
+
+def test_validate_geometry_distinguishes_empty_and_invalid_polygons() -> None:
+    with pytest.raises(H3AggregationError, match="^invalid or empty geometry$"):
+        _validate_geometry(Polygon())
+
+    invalid = Polygon([(0, 0), (1, 1), (1, 0), (0, 1), (0, 0)])
+    with pytest.raises(H3AggregationError, match="^invalid or empty geometry$"):
+        _validate_geometry(invalid)
+
+
+@pytest.mark.parametrize(
+    ("is_empty", "is_valid"),
+    ((True, True), (False, False)),
+)
+def test_validate_centroid_rejects_empty_or_invalid_points(is_empty: bool, is_valid: bool) -> None:
+    point = SimpleNamespace(is_empty=is_empty, is_valid=is_valid)
+    with pytest.raises(H3AggregationError, match="^could not derive a finite centroid$"):
+        _validate_centroid(point)  # type: ignore[arg-type]
+
+
+def test_decode_geometry_reports_malformed_wkb() -> None:
+    with pytest.raises(H3AggregationError, match="^malformed WKB:"):
+        _decode_geometry(b"not-a-valid-wkb")
+
+
+@pytest.mark.parametrize(
+    ("lon", "lat"),
+    ((float("nan"), 1.0), (1.0, float("inf"))),
+)
+def test_geometry_centroid_rejects_each_non_finite_coordinate(
+    lon: float, lat: float, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    geometry = SimpleNamespace(centroid=SimpleNamespace(x=lon, y=lat))
+    monkeypatch.setattr(parquet_inputs_module, "_decode_geometry", lambda _wkb: geometry)
+    monkeypatch.setattr(parquet_inputs_module, "_validate_geometry", lambda _geometry: None)
+    monkeypatch.setattr(parquet_inputs_module, "_validate_centroid", lambda _point: None)
+
+    with pytest.raises(H3AggregationError) as error:
+        _geometry_centroid(b"unused")
+    assert str(error.value).startswith("non-finite centroid:")
+
+
+def test_require_directory_rejects_missing_and_file_paths(tmp_path: Path) -> None:
+    missing = tmp_path / "missing"
+    with pytest.raises(H3AggregationError) as missing_error:
+        require_directory(missing, label="data")
+    assert str(missing_error.value) == (
+        f"Required data directory does not exist: {missing}. "
+        "Run a complete PBF processing pass first."
+    )
+
+    file_path = tmp_path / "not-a-directory"
+    file_path.write_bytes(b"x")
+    with pytest.raises(H3AggregationError) as file_error:
+        require_directory(file_path, label="data")
+    assert str(file_error.value) == (
+        f"Required data directory does not exist: {file_path}. "
+        "Run a complete PBF processing pass first."
+    )
+
+    directory = tmp_path / "data"
+    directory.mkdir()
+    assert require_directory(directory, label="data") is directory
 
 
 def test_aggregate_rejects_null_geometry(tmp_path: Path) -> None:
@@ -434,8 +562,9 @@ def test_aggregate_rejects_null_geometry(tmp_path: Path) -> None:
         ),
         data_root / "manifests" / "alpha.manifest.json",
     )
-    with pytest.raises(H3AggregationError):
+    with pytest.raises(H3AggregationError) as error:
         aggregate_h3_density(data_root)
+    assert str(error.value) == f"null geometry at {output} (osm_id=1)"
 
 
 # ---------------------------------------------------------------------------
@@ -485,6 +614,78 @@ def test_iter_centroids_uses_geometry_centroid_not_bbox_center(
     bbox_centre_lat = 2.0
     # We expect a point that differs from the bbox centre.
     assert not (math.isclose(lon, bbox_centre_lon) and math.isclose(lat, bbox_centre_lat))
+
+
+def test_iter_centroids_forwards_exact_streaming_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_root = tmp_path / "generated"
+    data_dir = data_root / "data"
+    parquet_path = data_dir / "region.parquet"
+    batch = Mock()
+    columns = {
+        "geometry": Mock(to_pylist=Mock(return_value=[b"wkb"])),
+        "osm_id": Mock(to_pylist=Mock(return_value=[42])),
+    }
+    batch.column.side_effect = columns.__getitem__
+    reader = Mock()
+    reader.iter_batches.return_value = [batch]
+
+    with (
+        patch.object(
+            parquet_inputs_module,
+            "require_directory",
+            return_value=data_dir,
+        ) as require,
+        patch.object(
+            parquet_inputs_module,
+            "sorted_parquets",
+            return_value=[parquet_path],
+        ) as sorted_paths,
+        patch.object(parquet_inputs_module.pq, "ParquetFile", return_value=reader) as parquet_file,
+        patch.object(
+            parquet_inputs_module,
+            "_geometry_centroid",
+            return_value=(2.5, 1.5),
+        ) as centroid,
+        patch.object(parquet_inputs_module, "validate_coordinate") as validate,
+    ):
+        rows = list(iter_centroids(data_root, batch_size=17))
+
+    assert rows == [(parquet_path, 2.5, 1.5)]
+    require.assert_called_once_with(data_root / "data", label="data")
+    sorted_paths.assert_called_once_with(data_dir)
+    parquet_file.assert_called_once_with(parquet_path)
+    reader.iter_batches.assert_called_once_with(columns=list(PARQUET_INPUT_COLUMNS), batch_size=17)
+    batch.column.assert_has_calls([call("geometry"), call("osm_id")])
+    centroid.assert_called_once_with(b"wkb")
+    validate.assert_called_once_with(1.5, 2.5)
+
+
+def test_iter_centroids_reports_null_geometry_with_source_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_root = tmp_path / "generated"
+    data_dir = data_root / "data"
+    parquet_path = data_dir / "region.parquet"
+    batch = Mock()
+    columns = {
+        "geometry": Mock(to_pylist=Mock(return_value=[None])),
+        "osm_id": Mock(to_pylist=Mock(return_value=[42])),
+    }
+    batch.column.side_effect = columns.__getitem__
+    reader = Mock()
+    reader.iter_batches.return_value = [batch]
+    monkeypatch.setattr(
+        parquet_inputs_module, "require_directory", lambda *_args, **_kwargs: data_dir
+    )
+    monkeypatch.setattr(parquet_inputs_module, "sorted_parquets", lambda _directory: [parquet_path])
+    monkeypatch.setattr(parquet_inputs_module.pq, "ParquetFile", lambda _path: reader)
+
+    with pytest.raises(H3AggregationError) as error:
+        list(iter_centroids(data_root))
+
+    assert str(error.value) == f"null geometry at {parquet_path} (osm_id=42)"
 
 
 # ---------------------------------------------------------------------------
