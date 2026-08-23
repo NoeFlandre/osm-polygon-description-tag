@@ -251,10 +251,8 @@ def test_ensure_area_histogram_reuses_or_rebuilds_and_returns_current_row_count(
     write_histogram.assert_called_once_with(tmp_path)
 
 
-def test_render_h3_map_block_is_a_stable_relative_markdown_reference(
-    tmp_path: Path,
-) -> None:
-    assert docs_module._render_h3_map_block(tmp_path, 3, 2) == (
+def test_render_h3_map_block_is_a_stable_relative_markdown_reference() -> None:
+    assert docs_module._render_h3_map_block() == (
         f"![{docs_module.H3_MAP_TITLE}]({docs_module.H3_MAP_ASSET_RELATIVE_PATH})\n"
     )
 
@@ -375,7 +373,7 @@ def test_write_dataset_docs_renders_stats_map_and_canonical_json(
 
     dumps.assert_called_once_with(stats, ensure_ascii=False, indent=2, sort_keys=True)
     render_stats.assert_called_once_with(stats, expected_hash)
-    render_map.assert_called_once_with(tmp_path, 4, 2)
+    render_map.assert_called_once_with()
     assert install_map.call_args.args[0].count(docs_module.H3_MAP_START_MARKER) == 1
     install_map.assert_called_once_with(install_map.call_args.args[0], "map body")
     assert write_if_changed.call_args_list == [

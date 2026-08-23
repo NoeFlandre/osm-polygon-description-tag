@@ -94,9 +94,7 @@ def test_generation_preserves_handwritten_sections(
     # generation, not on matplotlib or the assets/ directory.
     monkeypatch.setattr(
         "osm_polygon_description_tag.dataset.docs._render_h3_map_block",
-        lambda data_root,
-        total_rows,
-        occupied_cells: "![H3 map](assets/description_polygon_density.png)\n",
+        lambda: "![H3 map](assets/description_polygon_density.png)\n",
         raising=False,
     )
     monkeypatch.setattr(
@@ -138,9 +136,7 @@ def test_generated_block_contains_only_backed_numbers(
     # generation, not on matplotlib or the assets/ directory.
     monkeypatch.setattr(
         "osm_polygon_description_tag.dataset.docs._render_h3_map_block",
-        lambda data_root,
-        total_rows,
-        occupied_cells: "![H3 map](assets/description_polygon_density.png)\n",
+        lambda: "![H3 map](assets/description_polygon_density.png)\n",
         raising=False,
     )
     monkeypatch.setattr(

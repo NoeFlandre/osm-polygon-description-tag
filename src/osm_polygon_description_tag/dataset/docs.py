@@ -205,7 +205,7 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
     return "\n".join(lines)
 
 
-def _render_h3_map_block(data_root: Path, total_rows: int, occupied_cells: int) -> str:
+def _render_h3_map_block() -> str:
     """Render the dataset-card map body."""
     return f"![{H3_MAP_TITLE}]({H3_MAP_ASSET_RELATIVE_PATH})\n"
 
@@ -331,7 +331,7 @@ def _write_dataset_docs(
     if H3_MAP_START_MARKER in readme and H3_MAP_END_MARKER in readme:
         readme = install_map_block(
             readme,
-            _render_h3_map_block(data_root, int(stats["rows"]), int(stats["h3_occupied_cells"])),
+            _render_h3_map_block(),
         )
     _write_if_changed(data_root / "stats.json", stats_json)
     _write_if_changed(data_root / "README.md", readme)

@@ -56,7 +56,7 @@ def _populate_dataset(data_root: Path, source_root: Path) -> None:
     write_finalized_dataset(data_root, source_root, shards)
 
 
-def _stub_map_block(stats_sha256: str, total_rows: int, occupied_cells: int) -> str:
+def _stub_map_block() -> str:
     """Return a deterministic map body (no markers) for unit tests."""
     return f"![H3 density of description-tagged polygons]({H3_MAP_ASSET_RELATIVE_PATH})\n"
 
@@ -161,9 +161,7 @@ def test_generation_installs_map_block_with_correct_relative_path(
     # deterministic stub so the test does not require matplotlib.
     monkeypatch.setattr(
         "osm_polygon_description_tag.dataset.docs._render_h3_map_block",
-        lambda data_root, total_rows, occupied_cells: _stub_map_block(
-            "deadbeef", total_rows, occupied_cells
-        ),
+        lambda: _stub_map_block(),
         raising=False,
     )
     # Patch the dataset.reporting module to also use a stub for the PNG.
@@ -269,9 +267,7 @@ def test_generation_preserves_existing_stats_block(
 
     monkeypatch.setattr(
         "osm_polygon_description_tag.dataset.docs._render_h3_map_block",
-        lambda data_root, total_rows, occupied_cells: _stub_map_block(
-            "deadbeef", total_rows, occupied_cells
-        ),
+        lambda: _stub_map_block(),
         raising=False,
     )
     monkeypatch.setattr(
@@ -310,7 +306,7 @@ def test_byte_level_regression_only_map_block_changes(
     # First generation: install the map block with text A.
     monkeypatch.setattr(
         "osm_polygon_description_tag.dataset.docs._render_h3_map_block",
-        lambda data_root, total_rows, occupied_cells: "![alt version A](map.png)\n",
+        lambda: "![alt version A](map.png)\n",
         raising=False,
     )
     monkeypatch.setattr(
@@ -324,7 +320,7 @@ def test_byte_level_regression_only_map_block_changes(
     # Second generation: same surrounding prose, different map text.
     monkeypatch.setattr(
         "osm_polygon_description_tag.dataset.docs._render_h3_map_block",
-        lambda data_root, total_rows, occupied_cells: "![alt version B](map.png)\n",
+        lambda: "![alt version B](map.png)\n",
         raising=False,
     )
     generate_dataset_docs(data_root, template)
@@ -350,9 +346,7 @@ def test_idempotent_regeneration_does_not_duplicate_map_block(
 
     monkeypatch.setattr(
         "osm_polygon_description_tag.dataset.docs._render_h3_map_block",
-        lambda data_root, total_rows, occupied_cells: _stub_map_block(
-            "deadbeef", total_rows, occupied_cells
-        ),
+        lambda: _stub_map_block(),
         raising=False,
     )
     monkeypatch.setattr(
