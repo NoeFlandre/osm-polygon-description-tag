@@ -129,6 +129,31 @@ def test_default_verifier_checks_multiple_files_with_lfs_and_download_fallback(
     ]
 
 
+def test_download_fallback_uses_canonical_file_sha256(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    content = b"downloaded content"
+    item = _item("README.md", content)
+    hub = _StrictVerifierHub(
+        tmp_path,
+        {item.relative_path: _StrictEntry(include_size=False, include_lfs_sha=False)},
+        {item.relative_path: content},
+    )
+    _install_hub(monkeypatch, hub)
+    hashed_paths: list[Path] = []
+
+    def fake_file_sha256(path: Path) -> str:
+        hashed_paths.append(path)
+        return item.sha256
+
+    monkeypatch.setattr(verification, "file_sha256", fake_file_sha256, raising=False)
+    verifier = verification.default_hub_verifier_factory(cache_dir=tmp_path / "cache")
+
+    assert verifier(REPO_ID, (item,)) == "revision-1"
+    assert hashed_paths == [tmp_path / "downloaded" / item.relative_path]
+
+
 def test_default_verifier_rejects_empty_identity_with_exact_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

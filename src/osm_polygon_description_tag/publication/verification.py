@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Protocol
 
+from osm_polygon_description_tag.dataset.manifest import file_sha256
 from osm_polygon_description_tag.publication.models import UploadItem
 
 LFS_SHA_THRESHOLD_BYTES = 5 * 1024 * 1024
@@ -137,7 +138,7 @@ def default_hub_verifier_factory(*, cache_dir: Path | None = None) -> HubVerifie
                 raise HubVerificationError(
                     f"could not download {item.relative_path} from {repo_id}@{revision}: {error}"
                 ) from error
-            digest = _file_sha256_streaming(Path(local_path))
+            digest = file_sha256(Path(local_path))
             if digest.lower() != str(item.sha256).lower():
                 raise HubVerificationError(
                     f"remote SHA mismatch for {item.relative_path}: "
@@ -182,19 +183,6 @@ def default_hub_verifier_factory(*, cache_dir: Path | None = None) -> HubVerifie
             return reconcile_managed_files(repo_id, expected_paths)
 
     return Verifier()
-
-
-def _file_sha256_streaming(path: Path) -> str:
-    """Compute SHA-256 by streaming the file in bounded chunks.
-
-    Equivalent to ``file_sha256`` from the manifest module but explicitly
-    avoids loading the entire file into memory at once. The verifier must
-    use this helper so download-and-hash verification never OOMs the
-    process on large dataset files.
-    """
-    from osm_polygon_description_tag.dataset.manifest import file_sha256 as _file_sha256
-
-    return _file_sha256(path)
 
 
 def build_default_hub_verifier() -> HubVerifier:
