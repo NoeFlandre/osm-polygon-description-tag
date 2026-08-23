@@ -331,15 +331,8 @@ def _collect_allowlisted_files(data_root: Path) -> tuple[UploadItem, ...]:
     return tuple(sorted(items, key=lambda item: item.relative_path))
 
 
-def create_upload_plan(data_root: Path) -> UploadPlan:
-    """Build the allowlisted, identity-hashed upload plan for ``data_root``.
-
-    The plan's ``identity_sha256`` is the SHA-256 of the canonical JSON
-    payload. The caller must compare its confirmation to this exact value
-    before ``execute_upload`` will run.
-    """
+def _finalize_upload_plan(data_root: Path, items: tuple[UploadItem, ...]) -> UploadPlan:
     resolved_root = data_root.resolve(strict=False)  # pragma: no mutate
-    items = _collect_allowlisted_files(resolved_root)
     # ``identity_sha256`` is omitted from ``UploadPlan.to_payload`` by design;
     # changing this provisional-only field is observationally equivalent.
     # pragma: no mutate start
@@ -357,6 +350,18 @@ def create_upload_plan(data_root: Path) -> UploadPlan:
         files=items,
         identity_sha256=identity,
     )
+
+
+def create_upload_plan(data_root: Path) -> UploadPlan:
+    """Build the allowlisted, identity-hashed upload plan for ``data_root``.
+
+    The plan's ``identity_sha256`` is the SHA-256 of the canonical JSON
+    payload. The caller must compare its confirmation to this exact value
+    before ``execute_upload`` will run.
+    """
+    resolved_root = data_root.resolve(strict=False)  # pragma: no mutate
+    items = _collect_allowlisted_files(resolved_root)
+    return _finalize_upload_plan(resolved_root, items)
 
 
 def _require_h3_map(data_root: Path) -> UploadItem:  # pragma: no cover - kept for callers
@@ -408,24 +413,7 @@ def _build_per_pbf_upload_plan(data_root: Path, source_name: str) -> UploadPlan:
         area_histogram_item,
         dataset_card_hero_item,
     )
-    resolved_root = data_root.resolve(strict=False)  # pragma: no mutate
-    # ``identity_sha256`` is omitted from ``UploadPlan.to_payload`` by design;
-    # changing this provisional-only field is observationally equivalent.
-    # pragma: no mutate start
-    provisional = UploadPlan(
-        repo_id=REPO_ID,
-        data_root=str(resolved_root),
-        files=items,
-        identity_sha256=_EMPTY_IDENTITY,
-    )
-    # pragma: no mutate end
-    identity = file_sha256_bytes(provisional.to_json().encode("utf-8"))  # pragma: no mutate
-    return UploadPlan(
-        repo_id=REPO_ID,
-        data_root=str(resolved_root),
-        files=items,
-        identity_sha256=identity,
-    )
+    return _finalize_upload_plan(data_root, items)
 
 
 def _build_metadata_only_upload_plan(data_root: Path) -> UploadPlan:
@@ -447,24 +435,7 @@ def _build_metadata_only_upload_plan(data_root: Path) -> UploadPlan:
         area_histogram_item,
         dataset_card_hero_item,
     )
-    resolved_root = data_root.resolve(strict=False)  # pragma: no mutate
-    # ``identity_sha256`` is omitted from ``UploadPlan.to_payload`` by design;
-    # changing this provisional-only field is observationally equivalent.
-    # pragma: no mutate start
-    provisional = UploadPlan(
-        repo_id=REPO_ID,
-        data_root=str(resolved_root),
-        files=items,
-        identity_sha256=_EMPTY_IDENTITY,
-    )
-    # pragma: no mutate end
-    identity = file_sha256_bytes(provisional.to_json().encode("utf-8"))  # pragma: no mutate
-    return UploadPlan(
-        repo_id=REPO_ID,
-        data_root=str(resolved_root),
-        files=items,
-        identity_sha256=identity,
-    )
+    return _finalize_upload_plan(data_root, items)
 
 
 def per_pbf_command(data_root: Path, source_name: str) -> list[str]:

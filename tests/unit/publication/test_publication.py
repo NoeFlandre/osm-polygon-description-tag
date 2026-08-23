@@ -18,6 +18,7 @@ from osm_polygon_description_tag.publication import (
     execute_upload,
     planning,
 )
+from osm_polygon_description_tag.publication.models import UploadItem
 from osm_polygon_description_tag.publication.planning import (
     _build_item,
     _build_metadata_only_upload_plan,
@@ -121,6 +122,20 @@ def test_create_upload_plan_is_deterministic(tmp_path: Path) -> None:
 
     assert plan_a.identity_sha256 == plan_b.identity_sha256
     assert plan_a.to_json() == plan_b.to_json()
+
+
+def test_finalize_upload_plan_hashes_canonical_payload() -> None:
+    finalize = getattr(planning, "_finalize_upload_plan", None)
+    assert callable(finalize)
+
+    items = (UploadItem(relative_path="README.md", size_bytes=1, sha256="a" * 64),)
+    plan = finalize(Path("generated"), items)
+    provisional = replace(plan, identity_sha256="")
+
+    assert plan.repo_id == "NoeFlandre/osm-polygon-description-tag"
+    assert plan.data_root == str(Path("generated").resolve(strict=False))
+    assert plan.files == items
+    assert plan.identity_sha256 == file_sha256_bytes(provisional.to_json().encode("utf-8"))
 
 
 def test_create_upload_plan_rejects_unknown_top_level(tmp_path: Path) -> None:
