@@ -448,23 +448,26 @@ def validate_geoparquet(path: Path) -> int:
     """Validate a finalized GeoParquet file in batches and return its row count."""
     if not path.is_file():
         raise StorageError(f"missing parquet: {path}")
-    pf = pq.ParquetFile(path)
-    _check_schema(pf.schema_arrow)
-    geo = _read_geo_metadata(pf.schema_arrow)
-    column_meta = geo["columns"]["geometry"]
-    meta_types = set(column_meta.get("geometry_types", []))
-    meta_bbox = column_meta.get("bbox")
-    data_root = path.parent.parent
-    state = _ValidationState(
-        uniqueness=_UniquenessIndex(work_root=data_root / ".work" / "validation")
-    )
     try:
-        for batch in pf.iter_batches(columns=_VALIDATION_COLUMNS):
-            _validate_batch(batch, state)
-    finally:
-        state.uniqueness.close()
-    _validate_metadata_extent(state, meta_types, meta_bbox)
-    return state.row_count
+        pf = pq.ParquetFile(path)
+        _check_schema(pf.schema_arrow)
+        geo = _read_geo_metadata(pf.schema_arrow)
+        column_meta = geo["columns"]["geometry"]
+        meta_types = set(column_meta.get("geometry_types", []))
+        meta_bbox = column_meta.get("bbox")
+        data_root = path.parent.parent
+        state = _ValidationState(
+            uniqueness=_UniquenessIndex(work_root=data_root / ".work" / "validation")
+        )
+        try:
+            for batch in pf.iter_batches(columns=_VALIDATION_COLUMNS):
+                _validate_batch(batch, state)
+        finally:
+            state.uniqueness.close()
+        _validate_metadata_extent(state, meta_types, meta_bbox)
+        return state.row_count
+    except (OSError, pa.ArrowException) as error:
+        raise StorageError(f"cannot read GeoParquet {path}: {error}") from error
 
 
 def validate_finalized_artifacts(data_root):

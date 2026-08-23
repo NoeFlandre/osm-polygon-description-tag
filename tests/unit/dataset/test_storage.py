@@ -243,6 +243,31 @@ def test_validate_detects_undecodable_wkb(tmp_path: Path) -> None:
         validate_geoparquet(target)
 
 
+def test_validate_rejects_unreadable_parquet_as_storage_error(tmp_path: Path) -> None:
+    target = tmp_path / "not-parquet.parquet"
+    target.write_bytes(b"not a parquet file")
+
+    with pytest.raises(StorageError, match="cannot read GeoParquet"):
+        validate_geoparquet(target)
+
+
+def test_validate_translates_arrow_errors_during_batch_read(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    valid_records: list[dict[str, object]],
+) -> None:
+    target = tmp_path / "corrupt-page.parquet"
+    write_geoparquet(iter(valid_records), target, validator=lambda _path: len(valid_records))
+
+    def fail_batches(*_args: object, **_kwargs: object):
+        raise pa.ArrowInvalid("corrupt page")
+
+    monkeypatch.setattr(pq.ParquetFile, "iter_batches", fail_batches)
+
+    with pytest.raises(StorageError, match="cannot read GeoParquet"):
+        validate_geoparquet(target)
+
+
 def test_row_geometry_and_area_helpers_accept_valid_values() -> None:
     _validate_geometry(_POLYGON_WKB, "Polygon")
     _validate_area(1.0)

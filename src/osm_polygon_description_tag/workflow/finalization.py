@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from osm_polygon_description_tag.dataset.manifest import (
+    ManifestError,
     file_sha256,
     is_resumable,
     output_identity_for,
@@ -188,7 +189,7 @@ def _inspect_artifact(
     try:
         validate_geoparquet(parquet)
         manifest = read_manifest(manifest_path)
-    except (StorageError, Exception):
+    except (ManifestError, StorageError):
         return None, None, f"{stem} (invalid manifest or parquet)"
     source = discovered[source_name]
     if is_resumable(manifest, source_identity_for(source.path), output_identity_for(parquet)):

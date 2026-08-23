@@ -14,6 +14,7 @@ from pathlib import Path
 
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
+    ManifestError,
     is_resumable,
     output_identity_for,
     read_manifest,
@@ -91,7 +92,7 @@ def local_artifact_is_complete(paths: Paths, source: Source) -> tuple[bool, Mani
     try:
         validate_geoparquet(output_path)
         manifest = read_manifest(manifest_path)
-    except (StorageError, Exception):
+    except (ManifestError, StorageError):
         return False, None
     if not is_resumable(
         manifest,

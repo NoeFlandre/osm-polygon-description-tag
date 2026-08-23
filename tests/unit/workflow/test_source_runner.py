@@ -310,6 +310,22 @@ def test_local_artifact_is_complete_returns_false_for_validation_or_identity_fai
     assert local_artifact_is_complete(paths, source) == (False, None)
 
 
+def test_local_artifact_is_complete_propagates_unexpected_validation_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source, paths = _source_and_paths(tmp_path)
+    _write_artifact_pair(paths, source)
+
+    def fail_unexpectedly(_path: Path) -> None:
+        raise RuntimeError("unexpected validator failure")
+
+    monkeypatch.setattr(source_runner, "validate_geoparquet", fail_unexpectedly)
+
+    with pytest.raises(RuntimeError, match="unexpected validator failure"):
+        local_artifact_is_complete(paths, source)
+
+
 def test_local_artifact_is_complete_returns_manifest_for_resumable_pair(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

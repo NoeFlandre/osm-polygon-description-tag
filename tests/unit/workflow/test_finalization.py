@@ -668,6 +668,27 @@ def test_inspect_artifact_reports_invalid_and_non_resumable_artifacts(
     )
 
 
+def test_inspect_artifact_propagates_unexpected_validation_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    paths = _paths(tmp_path)
+    source = _source(tmp_path)
+    parquet = paths.data_root / "data" / "region.parquet"
+    parquet.parent.mkdir(parents=True)
+    parquet.write_bytes(b"parquet")
+    manifest_path = paths.data_root / "manifests" / "region.manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text("{}", encoding="utf-8")
+
+    def fail_unexpectedly(_path: Path) -> None:
+        raise RuntimeError("unexpected validator failure")
+
+    monkeypatch.setattr(finalization_module, "validate_geoparquet", fail_unexpectedly)
+
+    with pytest.raises(RuntimeError, match="unexpected validator failure"):
+        _inspect_artifact(paths, parquet, {source.name: source})
+
+
 def test_verify_final_completeness_reports_all_incomplete_categories(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
