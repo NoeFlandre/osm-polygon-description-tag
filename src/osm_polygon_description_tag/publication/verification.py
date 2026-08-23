@@ -8,8 +8,6 @@ from typing import Any, Protocol
 from osm_polygon_description_tag.dataset.manifest import file_sha256
 from osm_polygon_description_tag.publication.models import UploadItem
 
-LFS_SHA_THRESHOLD_BYTES = 5 * 1024 * 1024
-
 
 class HubVerifier(Protocol):
     """Verify that ``files`` actually exist in ``repo_id`` and return the repo SHA."""

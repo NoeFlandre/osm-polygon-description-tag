@@ -93,6 +93,10 @@ def _install_hub(monkeypatch: pytest.MonkeyPatch, hub: object) -> None:
     monkeypatch.setattr(verification._huggingface_hub, "HfApi", lambda: hub)
 
 
+def test_verification_module_has_no_unused_lfs_threshold_constant() -> None:
+    assert not hasattr(verification, "LFS_SHA_THRESHOLD_BYTES")
+
+
 def test_default_verifier_checks_multiple_files_with_lfs_and_download_fallback(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
