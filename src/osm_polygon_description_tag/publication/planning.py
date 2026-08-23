@@ -11,6 +11,14 @@ from osm_polygon_description_tag.dataset.manifest import (
     read_manifest,
 )
 from osm_polygon_description_tag.dataset.storage import StorageError, validate_geoparquet
+from osm_polygon_description_tag.publication.artifacts import (
+    AREA_HISTOGRAM_ARTIFACT,
+    DATASET_CARD_HERO_ARTIFACT,
+    DOCUMENT_ARTIFACTS,
+    H3_MAP_ARTIFACT,
+    METADATA_ARTIFACTS,
+    VISUAL_ARTIFACTS,
+)
 from osm_polygon_description_tag.publication.models import (
     REPO_ID,
     PublicationError,
@@ -39,14 +47,16 @@ _LOCAL_WORK_RELATIVE = ".work"
 # The exact uploader-owned asset filenames that may appear under
 # ``assets/``. The allowlist below rejects every other entry to keep
 # the publication surface explicit and bounded.
-H3_MAP_FILENAME = "description_polygon_density.png"
-H3_MAP_ASSET_RELATIVE = f"assets/{H3_MAP_FILENAME}"
-AREA_HISTOGRAM_FILENAME = "area_distribution.png"
-AREA_HISTOGRAM_ASSET_RELATIVE = f"assets/{AREA_HISTOGRAM_FILENAME}"
-DATASET_CARD_HERO_FILENAME = "dataset-card-hero.png"
-DATASET_CARD_HERO_ASSET_RELATIVE = f"assets/{DATASET_CARD_HERO_FILENAME}"
+H3_MAP_FILENAME = H3_MAP_ARTIFACT.filename
+H3_MAP_ASSET_RELATIVE = H3_MAP_ARTIFACT.relative_path
+AREA_HISTOGRAM_FILENAME = AREA_HISTOGRAM_ARTIFACT.filename
+AREA_HISTOGRAM_ASSET_RELATIVE = AREA_HISTOGRAM_ARTIFACT.relative_path
+DATASET_CARD_HERO_FILENAME = DATASET_CARD_HERO_ARTIFACT.filename
+DATASET_CARD_HERO_ASSET_RELATIVE = DATASET_CARD_HERO_ARTIFACT.relative_path
 _ALLOWED_ASSET_FILES = frozenset(
-    {H3_MAP_FILENAME, AREA_HISTOGRAM_FILENAME, DATASET_CARD_HERO_FILENAME}
+    artifact.filename
+    for artifact in METADATA_ARTIFACTS
+    if artifact.relative_path.startswith("assets/")
 )
 _EMPTY_IDENTITY = ""
 
@@ -126,17 +136,17 @@ def _require_core_assets(items: list[UploadItem]) -> None:
     relative_paths = {item.relative_path for item in items}
     requirements = (
         (
-            H3_MAP_ASSET_RELATIVE,
-            f"assets directory must contain the H3 density map at {H3_MAP_ASSET_RELATIVE}",
+            H3_MAP_ARTIFACT,
+            f"assets directory must contain the H3 density map at {H3_MAP_ARTIFACT.relative_path}",
         ),
         (
-            AREA_HISTOGRAM_ASSET_RELATIVE,
+            AREA_HISTOGRAM_ARTIFACT,
             "assets directory must contain the area distribution histogram at "
-            f"{AREA_HISTOGRAM_ASSET_RELATIVE}",
+            f"{AREA_HISTOGRAM_ARTIFACT.relative_path}",
         ),
     )
-    for relative_path, message in requirements:
-        if relative_path not in relative_paths:
+    for artifact, message in requirements:
+        if artifact.relative_path not in relative_paths:
             raise PublicationError(message)
 
 
@@ -165,7 +175,7 @@ def _validate_assets_directory(assets_dir: Path) -> list[UploadItem]:
     return items
 
 
-def _validate_assets_for_publication(data_root: Path) -> tuple[UploadItem, UploadItem, UploadItem]:
+def _validate_assets_for_publication(data_root: Path) -> tuple[UploadItem, ...]:
     """Validate the entire ``assets/`` directory and return the canonical items.
 
     Returns a ``(h3_map, area_histogram, dataset_card_hero)`` tuple. Both
@@ -179,28 +189,24 @@ def _validate_assets_for_publication(data_root: Path) -> tuple[UploadItem, Uploa
     items_by_path = {item.relative_path: item for item in items}
     requirements = (
         (
-            H3_MAP_ASSET_RELATIVE,
-            f"assets directory must contain the H3 density map at {H3_MAP_ASSET_RELATIVE}",
+            H3_MAP_ARTIFACT,
+            f"assets directory must contain the H3 density map at {H3_MAP_ARTIFACT.relative_path}",
         ),
         (
-            AREA_HISTOGRAM_ASSET_RELATIVE,
+            AREA_HISTOGRAM_ARTIFACT,
             "assets directory must contain the area distribution histogram at "
-            f"{AREA_HISTOGRAM_ASSET_RELATIVE}",
+            f"{AREA_HISTOGRAM_ARTIFACT.relative_path}",
         ),
         (
-            DATASET_CARD_HERO_ASSET_RELATIVE,
+            DATASET_CARD_HERO_ARTIFACT,
             "assets directory must contain the dataset card hero at "
-            f"{DATASET_CARD_HERO_ASSET_RELATIVE}",
+            f"{DATASET_CARD_HERO_ARTIFACT.relative_path}",
         ),
     )
-    for relative_path, message in requirements:
-        if relative_path not in items_by_path:
+    for artifact, message in requirements:
+        if artifact.relative_path not in items_by_path:
             raise PublicationError(message)
-    return (
-        items_by_path[H3_MAP_ASSET_RELATIVE],
-        items_by_path[AREA_HISTOGRAM_ASSET_RELATIVE],
-        items_by_path[DATASET_CARD_HERO_ASSET_RELATIVE],
-    )
+    return tuple(items_by_path[artifact.relative_path] for artifact in VISUAL_ARTIFACTS)
 
 
 def _validate_data_root(data_root: Path) -> None:
@@ -248,13 +254,16 @@ def _validate_top_level_entries(data_root: Path) -> None:
         _validate_top_level_entry(entry)
 
 
+def _required_document_paths(data_root: Path) -> tuple[Path, ...]:
+    return tuple(data_root / artifact.relative_path for artifact in DOCUMENT_ARTIFACTS)
+
+
 def _collect_required_metadata_items(data_root: Path) -> list[UploadItem]:
     items: list[UploadItem] = []
-    for filename in ("README.md", "stats.json"):
-        path = data_root / filename
+    for artifact, path in zip(DOCUMENT_ARTIFACTS, _required_document_paths(data_root), strict=True):
         if not path.is_file():
             raise PublicationError(f"missing required file: {path}")
-        items.append(_build_item(path, filename))
+        items.append(_build_item(path, artifact.relative_path))
     return items
 
 
@@ -385,8 +394,7 @@ def _build_per_pbf_upload_plan(data_root: Path, source_name: str) -> UploadPlan:
     required = (
         data_root / "data" / f"{stem}.parquet",
         data_root / "manifests" / f"{stem}.manifest.json",
-        data_root / "README.md",
-        data_root / "stats.json",
+        *_required_document_paths(data_root),
     )
     for path in required:
         if not path.is_file():
@@ -426,10 +434,7 @@ def _build_metadata_only_upload_plan(data_root: Path) -> UploadPlan:
     The plan includes ``README.md``, ``stats.json``, and every required
     visual asset under ``assets/``.
     """
-    required = (
-        data_root / "README.md",
-        data_root / "stats.json",
-    )
+    required = _required_document_paths(data_root)
     for path in required:
         if not path.is_file():
             raise PublicationError(f"required file missing for metadata plan: {path}")

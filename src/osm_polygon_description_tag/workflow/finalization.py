@@ -22,11 +22,14 @@ from osm_polygon_description_tag.dataset.manifest import (
 from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
 from osm_polygon_description_tag.dataset.storage import StorageError, validate_geoparquet
 from osm_polygon_description_tag.osm.discovery import Source
+from osm_polygon_description_tag.publication.artifacts import (
+    AREA_HISTOGRAM_ARTIFACT,
+    DATASET_CARD_HERO_ARTIFACT,
+    H3_MAP_ARTIFACT,
+    metadata_paths,
+)
 from osm_polygon_description_tag.publication.models import REPO_ID, PublicationError, UploadPlan
 from osm_polygon_description_tag.publication.planning import (
-    AREA_HISTOGRAM_ASSET_RELATIVE,
-    DATASET_CARD_HERO_ASSET_RELATIVE,
-    H3_MAP_ASSET_RELATIVE,
     _build_metadata_only_upload_plan,
     create_upload_plan,
     metadata_only_command,
@@ -52,6 +55,10 @@ from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.runtime.logging import RunLogger
 from osm_polygon_description_tag.runtime.resources import dataset_card_template
 from osm_polygon_description_tag.workflow.source_runner import OrchestratorError
+
+H3_MAP_ASSET_RELATIVE = H3_MAP_ARTIFACT.relative_path
+AREA_HISTOGRAM_ASSET_RELATIVE = AREA_HISTOGRAM_ARTIFACT.relative_path
+DATASET_CARD_HERO_ASSET_RELATIVE = DATASET_CARD_HERO_ARTIFACT.relative_path
 
 
 def _translate_state_error(error: PublicationStateError) -> OrchestratorError:
@@ -137,7 +144,7 @@ def refresh_dataset_docs(
         level="INFO",
         readme=paths.data_root / "README.md",
         stats=paths.data_root / "stats.json",
-        assets=paths.data_root / "assets" / "description_polygon_density.png",
+        assets=paths.data_root / H3_MAP_ARTIFACT.relative_path,
     )
 
 
@@ -327,13 +334,7 @@ def _persist_metadata_state(
     verified: str,
     clock: Callable[[], str],
 ) -> None:
-    paths = {
-        "readme": data_root / "README.md",
-        "stats": data_root / "stats.json",
-        "h3_map": data_root / H3_MAP_ASSET_RELATIVE,
-        "histogram": data_root / AREA_HISTOGRAM_ASSET_RELATIVE,
-        "hero": data_root / DATASET_CARD_HERO_ASSET_RELATIVE,
-    }
+    paths = metadata_paths(data_root)
     _write_metadata_state(
         data_root,
         identity_sha256=metadata_plan.identity_sha256,
@@ -343,8 +344,8 @@ def _persist_metadata_state(
         stats_size_bytes=paths["stats"].stat().st_size,
         h3_map_sha256=file_sha256(paths["h3_map"]),
         h3_map_size_bytes=paths["h3_map"].stat().st_size,
-        area_histogram_sha256=file_sha256(paths["histogram"]),
-        area_histogram_size_bytes=paths["histogram"].stat().st_size,
+        area_histogram_sha256=file_sha256(paths["area_histogram"]),
+        area_histogram_size_bytes=paths["area_histogram"].stat().st_size,
         dataset_card_hero_sha256=file_sha256(paths["hero"]),
         dataset_card_hero_size_bytes=paths["hero"].stat().st_size,
         verified_revision=verified,

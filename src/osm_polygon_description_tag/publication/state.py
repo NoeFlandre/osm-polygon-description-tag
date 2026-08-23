@@ -9,23 +9,25 @@ from pathlib import Path
 from typing import cast
 
 from osm_polygon_description_tag.dataset.manifest import file_sha256
-from osm_polygon_description_tag.publication.models import UploadPlan
-from osm_polygon_description_tag.publication.planning import (
-    AREA_HISTOGRAM_ASSET_RELATIVE,
-    DATASET_CARD_HERO_ASSET_RELATIVE,
-    H3_MAP_ASSET_RELATIVE,
+from osm_polygon_description_tag.publication.artifacts import (
+    AREA_HISTOGRAM_ARTIFACT,
+    DATASET_CARD_HERO_ARTIFACT,
+    H3_MAP_ARTIFACT,
+    METADATA_ARTIFACTS,
+    metadata_paths,
 )
+from osm_polygon_description_tag.publication.models import UploadPlan
 
 PUBLICATION_STATE_FILENAME = "publication-state.json"
-H3_MAP_ASSET_RELATIVE_PATH = H3_MAP_ASSET_RELATIVE
-AREA_HISTOGRAM_ASSET_RELATIVE_PATH = AREA_HISTOGRAM_ASSET_RELATIVE
-DATASET_CARD_HERO_ASSET_RELATIVE_PATH = DATASET_CARD_HERO_ASSET_RELATIVE
-_H3_MAP_SHA256_FIELD = "h3_map_sha256"
-_H3_MAP_SIZE_FIELD = "h3_map_size_bytes"
-_AREA_HISTOGRAM_SHA256_FIELD = "area_histogram_sha256"
-_AREA_HISTOGRAM_SIZE_FIELD = "area_histogram_size_bytes"
-_DATASET_CARD_HERO_SHA256_FIELD = "dataset_card_hero_sha256"
-_DATASET_CARD_HERO_SIZE_FIELD = "dataset_card_hero_size_bytes"
+H3_MAP_ASSET_RELATIVE_PATH = H3_MAP_ARTIFACT.relative_path
+AREA_HISTOGRAM_ASSET_RELATIVE_PATH = AREA_HISTOGRAM_ARTIFACT.relative_path
+DATASET_CARD_HERO_ASSET_RELATIVE_PATH = DATASET_CARD_HERO_ARTIFACT.relative_path
+_H3_MAP_SHA256_FIELD = H3_MAP_ARTIFACT.sha256_field
+_H3_MAP_SIZE_FIELD = H3_MAP_ARTIFACT.size_field
+_AREA_HISTOGRAM_SHA256_FIELD = AREA_HISTOGRAM_ARTIFACT.sha256_field
+_AREA_HISTOGRAM_SIZE_FIELD = AREA_HISTOGRAM_ARTIFACT.size_field
+_DATASET_CARD_HERO_SHA256_FIELD = DATASET_CARD_HERO_ARTIFACT.sha256_field
+_DATASET_CARD_HERO_SIZE_FIELD = DATASET_CARD_HERO_ARTIFACT.size_field
 
 
 class PublicationStateError(RuntimeError):
@@ -109,13 +111,7 @@ def _metadata_state_matches(data_root: Path, metadata_plan: UploadPlan) -> bool:
 
 
 def _metadata_paths(data_root: Path) -> dict[str, Path]:
-    return {
-        "readme": data_root / "README.md",
-        "stats": data_root / "stats.json",
-        "h3_map": data_root / H3_MAP_ASSET_RELATIVE_PATH,
-        "area_histogram": data_root / AREA_HISTOGRAM_ASSET_RELATIVE_PATH,
-        "hero": data_root / DATASET_CARD_HERO_ASSET_RELATIVE_PATH,
-    }
+    return metadata_paths(data_root)
 
 
 def _metadata_files_exist(paths: dict[str, Path]) -> bool:
@@ -123,17 +119,10 @@ def _metadata_files_exist(paths: dict[str, Path]) -> bool:
 
 
 def _metadata_identity_matches(metadata: dict[str, object], paths: dict[str, Path]) -> bool:
-    fields = {
-        "readme": ("readme_sha256", "readme_size_bytes"),
-        "stats": ("stats_sha256", "stats_size_bytes"),
-        "h3_map": (_H3_MAP_SHA256_FIELD, _H3_MAP_SIZE_FIELD),
-        "area_histogram": (_AREA_HISTOGRAM_SHA256_FIELD, _AREA_HISTOGRAM_SIZE_FIELD),
-        "hero": (_DATASET_CARD_HERO_SHA256_FIELD, _DATASET_CARD_HERO_SIZE_FIELD),
-    }
     return all(
-        metadata.get(sha_field) == file_sha256(paths[name])
-        and metadata.get(size_field) == paths[name].stat().st_size
-        for name, (sha_field, size_field) in fields.items()
+        metadata.get(artifact.sha256_field) == file_sha256(paths[artifact.key])
+        and metadata.get(artifact.size_field) == paths[artifact.key].stat().st_size
+        for artifact in METADATA_ARTIFACTS
     )
 
 
