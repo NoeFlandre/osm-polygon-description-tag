@@ -404,6 +404,19 @@ def test_published_entry_defaults_missing_state_sections_to_empty(
     assert source_runner._published_entry(Path("data"), "a.osm.pbf") == {"remote_revision": "r1"}
 
 
+def test_publication_state_call_translates_errors_and_preserves_cause() -> None:
+    call_state = getattr(source_runner, "_call_publication_state", None)
+    assert callable(call_state)
+    state_error = PublicationStateError("malformed state")
+
+    def fail() -> str:
+        raise state_error
+
+    with pytest.raises(source_runner.OrchestratorError, match="^malformed state$") as info:
+        call_state(fail)
+    assert info.value.__cause__ is state_error
+
+
 def test_state_wrappers_translate_publication_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -35,7 +35,7 @@ from osm_polygon_description_tag.publication.planning import (
     metadata_only_command,
 )
 from osm_polygon_description_tag.publication.state import (
-    PublicationStateError,
+    PublicationStateError as PublicationStateError,
 )
 from osm_polygon_description_tag.publication.state import (
     _metadata_state_matches as _state_metadata_state_matches,
@@ -54,36 +54,26 @@ from osm_polygon_description_tag.publication.verification import HubVerifier
 from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.runtime.logging import RunLogger
 from osm_polygon_description_tag.runtime.resources import dataset_card_template
-from osm_polygon_description_tag.workflow.source_runner import OrchestratorError
+from osm_polygon_description_tag.workflow.source_runner import (
+    OrchestratorError,
+    _call_publication_state,
+)
 
 H3_MAP_ASSET_RELATIVE = H3_MAP_ARTIFACT.relative_path
 AREA_HISTOGRAM_ASSET_RELATIVE = AREA_HISTOGRAM_ARTIFACT.relative_path
 DATASET_CARD_HERO_ASSET_RELATIVE = DATASET_CARD_HERO_ARTIFACT.relative_path
 
 
-def _translate_state_error(error: PublicationStateError) -> OrchestratorError:
-    return OrchestratorError(str(error))
-
-
 def _read_publication_state(data_root: Path) -> dict[str, object]:
-    try:
-        return _state_read_publication_state(data_root)
-    except PublicationStateError as error:
-        raise _translate_state_error(error) from error
+    return _call_publication_state(_state_read_publication_state, data_root)
 
 
 def _cast_dict(value: object) -> dict[str, object]:
-    try:
-        return _state_cast_dict(value)
-    except PublicationStateError as error:
-        raise _translate_state_error(error) from error
+    return _call_publication_state(_state_cast_dict, value)
 
 
 def _metadata_state_matches(data_root: Path, metadata_plan: UploadPlan) -> bool:
-    try:
-        return _state_metadata_state_matches(data_root, metadata_plan)
-    except PublicationStateError as error:
-        raise _translate_state_error(error) from error
+    return _call_publication_state(_state_metadata_state_matches, data_root, metadata_plan)
 
 
 def _write_metadata_state(
@@ -103,25 +93,23 @@ def _write_metadata_state(
     verified_revision: str,
     completed_at: str,
 ) -> dict[str, object]:
-    try:
-        return _state_write_metadata_state(
-            data_root,
-            identity_sha256=identity_sha256,
-            readme_sha256=readme_sha256,
-            stats_sha256=stats_sha256,
-            readme_size_bytes=readme_size_bytes,
-            stats_size_bytes=stats_size_bytes,
-            h3_map_sha256=h3_map_sha256,
-            h3_map_size_bytes=h3_map_size_bytes,
-            area_histogram_sha256=area_histogram_sha256,
-            area_histogram_size_bytes=area_histogram_size_bytes,
-            dataset_card_hero_sha256=dataset_card_hero_sha256,
-            dataset_card_hero_size_bytes=dataset_card_hero_size_bytes,
-            verified_revision=verified_revision,
-            completed_at=completed_at,
-        )
-    except PublicationStateError as error:
-        raise _translate_state_error(error) from error
+    return _call_publication_state(
+        _state_write_metadata_state,
+        data_root,
+        identity_sha256=identity_sha256,
+        readme_sha256=readme_sha256,
+        stats_sha256=stats_sha256,
+        readme_size_bytes=readme_size_bytes,
+        stats_size_bytes=stats_size_bytes,
+        h3_map_sha256=h3_map_sha256,
+        h3_map_size_bytes=h3_map_size_bytes,
+        area_histogram_sha256=area_histogram_sha256,
+        area_histogram_size_bytes=area_histogram_size_bytes,
+        dataset_card_hero_sha256=dataset_card_hero_sha256,
+        dataset_card_hero_size_bytes=dataset_card_hero_size_bytes,
+        verified_revision=verified_revision,
+        completed_at=completed_at,
+    )
 
 
 def refresh_dataset_docs(

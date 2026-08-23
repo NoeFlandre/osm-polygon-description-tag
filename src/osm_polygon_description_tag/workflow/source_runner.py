@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ParamSpec, TypeVar
 
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
@@ -48,23 +49,29 @@ class OrchestratorError(RuntimeError):
 
 OrchestratorError.__module__ = "osm_polygon_description_tag.orchestrator"
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
 
 def _translate_state_error(error: PublicationStateError) -> OrchestratorError:
     return OrchestratorError(str(error))
 
 
-def read_publication_state(data_root: Path) -> dict[str, object]:
+def _call_publication_state(
+    operation: Callable[_P, _R], /, *args: _P.args, **kwargs: _P.kwargs
+) -> _R:
     try:
-        return _state_read_publication_state(data_root)
+        return operation(*args, **kwargs)
     except PublicationStateError as error:
         raise _translate_state_error(error) from error
+
+
+def read_publication_state(data_root: Path) -> dict[str, object]:
+    return _call_publication_state(_state_read_publication_state, data_root)
 
 
 def cast_dict(value: object) -> dict[str, object]:
-    try:
-        return _state_cast_dict(value)
-    except PublicationStateError as error:
-        raise _translate_state_error(error) from error
+    return _call_publication_state(_state_cast_dict, value)
 
 
 @dataclass

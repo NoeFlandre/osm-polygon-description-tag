@@ -59,7 +59,9 @@ from osm_polygon_description_tag.publication.planning import (
 )
 from osm_polygon_description_tag.publication.state import (
     PUBLICATION_STATE_FILENAME,
-    PublicationStateError,
+)
+from osm_polygon_description_tag.publication.state import (
+    PublicationStateError as PublicationStateError,
 )
 from osm_polygon_description_tag.publication.state import (
     _write_publication_state as _state_write_publication_state,
@@ -92,6 +94,7 @@ from osm_polygon_description_tag.workflow.source_runner import (
     STATUS_REUSED,
     OrchestratorError,
     SourceOutcome,
+    _call_publication_state,
 )
 from osm_polygon_description_tag.workflow.source_runner import (
     local_artifact_is_complete as _local_artifact_is_complete,  # noqa: F401
@@ -108,22 +111,12 @@ INTERRUPT_EXIT_CODE = 130
 STATUS_FAILED = "failed"
 
 
-def _translate_state_error(error: PublicationStateError) -> OrchestratorError:
-    return OrchestratorError(str(error))
-
-
 def read_publication_state(data_root: Path) -> dict[str, object]:
-    try:
-        return _state_read_publication_state(data_root)
-    except PublicationStateError as error:
-        raise _translate_state_error(error) from error
+    return _call_publication_state(_state_read_publication_state, data_root)
 
 
 def _write_publication_state(*args: Any, **kwargs: Any) -> dict[str, object]:
-    try:
-        return _state_write_publication_state(*args, **kwargs)
-    except PublicationStateError as error:
-        raise _translate_state_error(error) from error
+    return _call_publication_state(_state_write_publication_state, *args, **kwargs)
 
 
 @dataclass
