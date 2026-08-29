@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from threading import Thread
 from typing import IO
 
+import orjson
+
 # ---------------------------------------------------------------------------
 # Public types
 # ---------------------------------------------------------------------------
@@ -110,6 +112,8 @@ def _copy_unescape(data: bytes) -> bytes:
 def _nullable_int(field: bytes) -> int | None:
     if field == b"\\N":
         return None
+    if b"\\" not in field and field.isascii():
+        return int(field)
     # pragma: no mutate start - UTF-8 codec names are case-insensitive
     return int(_copy_unescape(field).decode("utf-8"))
     # pragma: no mutate end
@@ -118,9 +122,18 @@ def _nullable_int(field: bytes) -> int | None:
 def _nullable_str(field: bytes) -> str | None:
     if field == b"\\N":
         return None
+    if b"\\" not in field:
+        return field.decode("utf-8")
     # pragma: no mutate start - UTF-8 codec names are case-insensitive
     return _copy_unescape(field).decode("utf-8")
     # pragma: no mutate end
+
+
+def _load_tags(payload: bytes) -> object:
+    try:
+        return orjson.loads(payload)
+    except orjson.JSONDecodeError:
+        return json.loads(payload)
 
 
 def _parse_tags(field: bytes) -> dict[str, str]:
@@ -128,7 +141,8 @@ def _parse_tags(field: bytes) -> dict[str, str]:
         return {}
     try:
         # pragma: no mutate start - UTF-8 codec names are case-insensitive
-        parsed = json.loads(_copy_unescape(field))
+        payload = field if b"\\" not in field else _copy_unescape(field)
+        parsed = _load_tags(payload)
         # pragma: no mutate end
     except json.JSONDecodeError as error:
         raise ValueError(f"invalid tags JSON: {error}") from error
@@ -146,11 +160,23 @@ def parse_copy_record(line: bytes) -> ExportRecord:
     geometry, osm_type, osm_id, version, changeset, timestamp, tags = fields
     try:
         # pragma: no mutate start - ASCII codec names are case-insensitive
-        geometry_ewkb_hex = _copy_unescape(geometry).decode("ascii")
+        geometry_ewkb_hex = (
+            geometry.decode("ascii")
+            if b"\\" not in geometry
+            else _copy_unescape(geometry).decode("ascii")
+        )
         # pragma: no mutate end
         # pragma: no mutate start - UTF-8 codec names are case-insensitive
-        osm_type_text = _copy_unescape(osm_type).decode("utf-8")
-        osm_id_value = int(_copy_unescape(osm_id).decode("utf-8"))
+        osm_type_text = (
+            osm_type.decode("utf-8")
+            if b"\\" not in osm_type
+            else _copy_unescape(osm_type).decode("utf-8")
+        )
+        osm_id_value = (
+            int(osm_id)
+            if b"\\" not in osm_id and osm_id.isascii()
+            else int(_copy_unescape(osm_id).decode("utf-8"))
+        )
         # pragma: no mutate end
         return ExportRecord(
             geometry_ewkb_hex=geometry_ewkb_hex,
@@ -168,7 +194,9 @@ def parse_copy_record(line: bytes) -> ExportRecord:
 def iter_records(stream: IO[bytes]) -> Iterator[ExportRecord]:
     """Yield parsed records from a bounded COPY byte stream."""
     for line_number, raw in enumerate(stream, start=1):
-        if not raw.strip():
+        if not raw:
+            continue
+        if raw[0] in (0x20, 0x09, 0x0D, 0x0A) and not raw.strip():
             continue
         try:
             yield parse_copy_record(raw)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from queue import Queue
 from threading import Thread
@@ -43,10 +44,59 @@ def test_parse_tags_passes_unescaped_bytes_to_json_loader(
         seen.append(value)
         return {"description": "value"}
 
-    monkeypatch.setattr(extraction.json, "loads", loads)
+    monkeypatch.setattr(
+        extraction,
+        "orjson",
+        SimpleNamespace(loads=loads),
+        raising=False,
+    )
 
     assert extraction._parse_tags(b'{"description":"value"}') == {"description": "value"}
     assert seen == [b'{"description":"value"}']
+
+
+def test_parse_tags_falls_back_to_stdlib(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[object] = []
+
+    def loads(value: object) -> object:
+        seen.append(value)
+        raise json.JSONDecodeError("forced fallback", "", 0)
+
+    monkeypatch.setattr(
+        extraction,
+        "orjson",
+        SimpleNamespace(loads=loads, JSONDecodeError=json.JSONDecodeError),
+        raising=False,
+    )
+
+    assert extraction._parse_tags(b'{"value": NaN}') == {"value": "nan"}
+    assert seen == [b'{"value": NaN}']
+
+
+def test_plain_copy_record_bypasses_unescape(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(_value: bytes) -> bytes:
+        raise AssertionError("plain fields should not call _copy_unescape")
+
+    monkeypatch.setattr(extraction, "_copy_unescape", fail)
+
+    record = extraction.parse_copy_record(
+        b'0103\tway\t42\t1\t1\t2026-01-01T00:00:00Z\t{"highway":"service"}\n'
+    )
+
+    assert record.osm_id == 42
+    assert record.tags == {"highway": "service"}
+
+
+def test_iter_records_does_not_strip_normal_records() -> None:
+    class NoStripBytes(bytes):
+        def strip(self, chars: bytes | None = None) -> bytes:
+            raise AssertionError("normal records should not call strip")
+
+    line = NoStripBytes(b"0103\tway\t42\t1\t1\t2026-01-01T00:00:00Z\t{}\n")
+
+    records = list(extraction.iter_records([line]))
+
+    assert [record.osm_id for record in records] == [42]
 
 
 @pytest.mark.parametrize(
