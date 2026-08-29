@@ -62,11 +62,12 @@ def _clean_base_value(value: str | None) -> str | None:
 
 def _localized_values(tags: dict[str, str], prefix: str) -> dict[str, str]:
     marker = f"{prefix}:"
-    return {
-        key.removeprefix(marker): value
-        for key, value in sorted(tags.items())
+    matches = [
+        (key.removeprefix(marker), value)
+        for key, value in tags.items()
         if key.startswith(marker) and key != marker and value.strip()
-    }
+    ]
+    return dict(sorted(matches))
 
 
 def geodesic_area_m2(geometry: BaseGeometry) -> float:

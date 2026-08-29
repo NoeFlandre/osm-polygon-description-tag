@@ -28,6 +28,27 @@ def _copy_unescape_with_deadline(wire: bytes) -> bytes:
     return results.get_nowait()
 
 
+def test_copy_unescape_returns_plain_bytes_without_copying() -> None:
+    wire = b"plain-wire-" * 20
+
+    assert extraction._copy_unescape(wire) is wire
+
+
+def test_parse_tags_passes_unescaped_bytes_to_json_loader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[object] = []
+
+    def loads(value: object) -> object:
+        seen.append(value)
+        return {"description": "value"}
+
+    monkeypatch.setattr(extraction.json, "loads", loads)
+
+    assert extraction._parse_tags(b'{"description":"value"}') == {"description": "value"}
+    assert seen == [b'{"description":"value"}']
+
+
 @pytest.mark.parametrize(
     ("wire", "decoded"),
     [

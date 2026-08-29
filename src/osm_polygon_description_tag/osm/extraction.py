@@ -19,6 +19,16 @@ from typing import IO
 #: Maximum bytes of child stderr retained for diagnostics.
 STDERR_CAP_BYTES = 1 << 20
 
+_COPY_ESCAPES = {
+    ord("t"): 0x09,
+    ord("n"): 0x0A,
+    ord("r"): 0x0D,
+    ord("b"): 0x08,
+    ord("f"): 0x0C,
+    ord("v"): 0x0B,
+    ord("\\"): 0x5C,
+}
+
 
 class OsmiumExportError(RuntimeError):
     """Raised when the ``osmium export`` subprocess fails or is interrupted."""
@@ -78,6 +88,8 @@ def export_command(
 
 def _copy_unescape(data: bytes) -> bytes:
     """Decode the PostgreSQL COPY text backslash escapes for one field."""
+    if b"\\" not in data:
+        return data
     out = bytearray()
     i = 0
     n = len(data)
@@ -85,15 +97,7 @@ def _copy_unescape(data: bytes) -> bytes:
         byte = data[i]
         if byte == 0x5C and i + 1 < n:  # backslash escape
             nxt = data[i + 1]
-            mapped = {
-                ord("t"): 0x09,
-                ord("n"): 0x0A,
-                ord("r"): 0x0D,
-                ord("b"): 0x08,
-                ord("f"): 0x0C,
-                ord("v"): 0x0B,
-                ord("\\"): 0x5C,
-            }.get(nxt)
+            mapped = _COPY_ESCAPES.get(nxt)
             if mapped is not None:
                 out.append(mapped)
                 i += 2
@@ -124,7 +128,7 @@ def _parse_tags(field: bytes) -> dict[str, str]:
         return {}
     try:
         # pragma: no mutate start - UTF-8 codec names are case-insensitive
-        parsed = json.loads(_copy_unescape(field).decode("utf-8"))
+        parsed = json.loads(_copy_unescape(field))
         # pragma: no mutate end
     except json.JSONDecodeError as error:
         raise ValueError(f"invalid tags JSON: {error}") from error

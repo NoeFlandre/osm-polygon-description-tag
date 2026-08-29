@@ -41,6 +41,33 @@ def test_descriptions_whitespace_only_base_becomes_none() -> None:
     assert localized == {}
 
 
+def test_localized_values_sorts_only_matching_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[tuple[str, str]]] = []
+    real_sorted = sorted
+
+    def record_sorted(values: object) -> list[tuple[str, str]]:
+        items = list(values)  # type: ignore[arg-type]
+        calls.append(items)
+        return real_sorted(items)
+
+    monkeypatch.setattr(
+        "osm_polygon_description_tag.dataset.transform.sorted",
+        record_sorted,
+        raising=False,
+    )
+    tags = {
+        "z": "unrelated",
+        "description:fr": "FR",
+        "a": "unrelated",
+        "description:en": "EN",
+    }
+
+    assert descriptions_from_tags(tags) == (None, {"en": "EN", "fr": "FR"})
+    assert calls == [[("fr", "FR"), ("en", "EN")]]
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
