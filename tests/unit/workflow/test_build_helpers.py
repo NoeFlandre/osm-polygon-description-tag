@@ -11,6 +11,7 @@ import osm_polygon_description_tag.workflow.build as build_module
 from osm_polygon_description_tag.config import Paths
 from osm_polygon_description_tag.dataset.transform import RejectedFeature
 from osm_polygon_description_tag.discovery import Source
+from osm_polygon_description_tag.extraction import ExportRecord
 
 
 def _source(tmp_path: Path) -> Source:
@@ -78,7 +79,15 @@ def test_verify_direct_child_reports_symlink_and_outside_paths(tmp_path: Path) -
 
 
 def test_transform_one_forwards_record_and_source_and_counts_rejections() -> None:
-    record = object()
+    record = ExportRecord(
+        geometry_ewkb_hex="0103",
+        osm_type="way",
+        osm_id=42,
+        version=1,
+        changeset=1,
+        timestamp=None,
+        tags={"description": "present"},
+    )
     counts = build_module._Counts()
     transformed = {"description": "value"}
 
@@ -95,6 +104,28 @@ def test_transform_one_forwards_record_and_source_and_counts_rejections() -> Non
         assert build_module._transform_one(record, "region.osm.pbf", counts) is None
         assert build_module._transform_one(record, "region.osm.pbf", counts) is None
     assert counts.rejections == {"no_description": 2}
+
+
+def test_transform_one_short_circuits_missing_description_before_transform() -> None:
+    record = ExportRecord(
+        geometry_ewkb_hex="0103",
+        osm_type="way",
+        osm_id=42,
+        version=1,
+        changeset=1,
+        timestamp=None,
+        tags={"name": "without a description"},
+    )
+    counts = build_module._Counts()
+
+    with patch.object(
+        build_module,
+        "transform_record",
+        side_effect=AssertionError("expected rejection should not transform"),
+    ):
+        assert build_module._transform_one(record, "region.osm.pbf", counts) is None
+
+    assert counts.rejections == {"no_nonempty_description": 1}
 
 
 def test_transform_stream_counts_rows_yields_transformed_values_and_reports_progress() -> None:

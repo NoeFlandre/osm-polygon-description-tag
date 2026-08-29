@@ -10,7 +10,7 @@ import subprocess
 from collections.abc import Iterator
 from dataclasses import dataclass
 from threading import Thread
-from typing import IO
+from typing import IO, cast
 
 import orjson
 
@@ -148,7 +148,30 @@ def _parse_tags(field: bytes) -> dict[str, str]:
         raise ValueError(f"invalid tags JSON: {error}") from error
     if not isinstance(parsed, dict):
         raise ValueError("tags JSON must be an object")
+    if all(type(key) is str and type(value) is str for key, value in parsed.items()):
+        return cast(dict[str, str], parsed)
     return {str(key): str(value) for key, value in parsed.items()}
+
+
+def _parse_unescaped_record(fields: list[bytes]) -> ExportRecord:
+    geometry, osm_type, osm_id, version, changeset, timestamp, tags = fields
+    return ExportRecord(
+        geometry.decode("ascii"),
+        osm_type.decode("utf-8"),
+        int(osm_id) if osm_id.isascii() else int(osm_id.decode("utf-8")),
+        None
+        if version == b"\\N"
+        else int(version)
+        if version.isascii()
+        else int(version.decode("utf-8")),
+        None
+        if changeset == b"\\N"
+        else int(changeset)
+        if changeset.isascii()
+        else int(changeset.decode("utf-8")),
+        None if timestamp == b"\\N" else timestamp.decode("utf-8"),
+        _parse_tags(tags),
+    )
 
 
 def parse_copy_record(line: bytes) -> ExportRecord:
@@ -159,6 +182,8 @@ def parse_copy_record(line: bytes) -> ExportRecord:
         raise ValueError(f"expected 7 COPY fields, got {len(fields)}")
     geometry, osm_type, osm_id, version, changeset, timestamp, tags = fields
     try:
+        if b"\\" not in stripped:
+            return _parse_unescaped_record(fields)
         # pragma: no mutate start - ASCII codec names are case-insensitive
         geometry_ewkb_hex = (
             geometry.decode("ascii")

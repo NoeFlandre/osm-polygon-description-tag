@@ -53,21 +53,40 @@ def names_from_tags(tags: dict[str, str]) -> tuple[str | None, dict[str, str]]:
 
 
 def _tag_values(tags: dict[str, str], prefix: str) -> tuple[str | None, dict[str, str]]:
-    return _clean_base_value(tags.get(prefix)), _localized_values(tags, prefix)
+    marker = f"{prefix}:"
+    base = _clean_base_value(tags.get(prefix))
+    matches = [
+        (key.removeprefix(marker), value)
+        for key, value in tags.items()
+        if key.startswith(marker) and key != marker and value.strip()
+    ]
+    return base, dict(sorted(matches)) if matches else {}
 
 
 def _clean_base_value(value: str | None) -> str | None:
     return value if value is None or value.strip() else None
 
 
-def _localized_values(tags: dict[str, str], prefix: str) -> dict[str, str]:
+def _has_nonempty_localized(tags: dict[str, str], prefix: str) -> bool:
     marker = f"{prefix}:"
-    matches = [
-        (key.removeprefix(marker), value)
-        for key, value in tags.items()
-        if key.startswith(marker) and key != marker and value.strip()
-    ]
-    return dict(sorted(matches))
+    for key, value in tags.items():
+        if key.startswith(marker) and key != marker and value.strip():
+            return True
+    return False
+
+
+def _early_rejection_reason(record: ExportRecord) -> str | None:
+    """Return a cheap pre-geometry rejection reason for the build hot path."""
+    if record.osm_type not in _OSM_TYPES:
+        return "unsupported_osm_type"
+    if record.osm_id <= 0:
+        return "invalid_osm_id"
+    base = record.tags.get("description")
+    if base is not None and base.strip():
+        return None
+    return (
+        None if _has_nonempty_localized(record.tags, "description") else "no_nonempty_description"
+    )
 
 
 def geodesic_area_m2(geometry: BaseGeometry) -> float:

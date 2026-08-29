@@ -7,6 +7,7 @@ from shapely.geometry import LineString, MultiPolygon, Polygon
 from osm_polygon_description_tag.dataset.transform import (
     RejectedFeature,
     _decode_polygon,
+    _early_rejection_reason,
     _optional_timestamp,
     descriptions_from_tags,
     geodesic_area_m2,
@@ -66,6 +67,39 @@ def test_localized_values_sorts_only_matching_pairs(
 
     assert descriptions_from_tags(tags) == (None, {"en": "EN", "fr": "FR"})
     assert calls == [[("fr", "FR"), ("en", "EN")]]
+
+
+def test_localized_values_skips_sorting_when_no_values_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(_values: object) -> list[object]:
+        raise AssertionError("empty localized values should not be sorted")
+
+    monkeypatch.setattr(
+        "osm_polygon_description_tag.dataset.transform.sorted",
+        fail,
+        raising=False,
+    )
+
+    assert descriptions_from_tags({"description": "Base", "name": "Place"}) == ("Base", {})
+
+
+def test_early_rejection_reason_checks_localized_values_without_materializing_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(_tags: dict[str, str]) -> tuple[str | None, dict[str, str]]:
+        raise AssertionError("early rejection should only need a boolean localized check")
+
+    monkeypatch.setattr(
+        "osm_polygon_description_tag.dataset.transform.descriptions_from_tags",
+        fail,
+    )
+
+    record = _record(Polygon(), {"name": "without a description"})
+
+    assert _early_rejection_reason(record) == "no_nonempty_description"
+    localized = _record(Polygon(), {"description:en": "English"})
+    assert _early_rejection_reason(localized) is None
 
 
 @pytest.mark.parametrize(

@@ -32,7 +32,11 @@ from osm_polygon_description_tag.dataset.storage import (
     validate_geoparquet,
     write_geoparquet,
 )
-from osm_polygon_description_tag.dataset.transform import RejectedFeature, transform_record
+from osm_polygon_description_tag.dataset.transform import (
+    RejectedFeature,
+    _early_rejection_reason,
+    transform_record,
+)
 from osm_polygon_description_tag.osm.discovery import Source
 from osm_polygon_description_tag.osm.extraction import (
     ExportRecord,
@@ -114,6 +118,10 @@ def _transform_one(
     source_name: str,
     counts: _Counts,
 ) -> dict[str, object] | None:
+    early_reason = _early_rejection_reason(record)
+    if early_reason is not None:
+        counts.rejections[early_reason] = counts.rejections.get(early_reason, 0) + 1
+        return None
     try:
         return transform_record(record, source_name)
     except RejectedFeature as rejection:

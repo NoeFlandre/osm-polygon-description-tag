@@ -73,6 +73,22 @@ def test_parse_tags_falls_back_to_stdlib(monkeypatch: pytest.MonkeyPatch) -> Non
     assert seen == [b'{"value": NaN}']
 
 
+def test_parse_tags_reuses_all_string_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
+    parsed = {"description": "value"}
+
+    monkeypatch.setattr(extraction.orjson, "loads", lambda _payload: parsed)
+
+    assert extraction._parse_tags(b'{"description":"value"}') is parsed
+
+
+def test_parse_tags_stringifies_non_string_values() -> None:
+    assert extraction._parse_tags(b'{"number": 7, "flag": true, "missing": null}') == {
+        "number": "7",
+        "flag": "True",
+        "missing": "None",
+    }
+
+
 def test_plain_copy_record_bypasses_unescape(monkeypatch: pytest.MonkeyPatch) -> None:
     def fail(_value: bytes) -> bytes:
         raise AssertionError("plain fields should not call _copy_unescape")
@@ -85,6 +101,20 @@ def test_plain_copy_record_bypasses_unescape(monkeypatch: pytest.MonkeyPatch) ->
 
     assert record.osm_id == 42
     assert record.tags == {"highway": "service"}
+
+
+def test_plain_copy_record_bypasses_nullable_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(_value: bytes) -> int | str | None:
+        raise AssertionError("plain records should use the whole-record fast path")
+
+    monkeypatch.setattr(extraction, "_nullable_int", fail)
+    monkeypatch.setattr(extraction, "_nullable_str", fail)
+
+    record = extraction.parse_copy_record(b"0103\tway\t42\t1\t1\t2026-01-01T00:00:00Z\t{}\n")
+
+    assert record.version == 1
+    assert record.changeset == 1
+    assert record.timestamp == "2026-01-01T00:00:00Z"
 
 
 def test_iter_records_does_not_strip_normal_records() -> None:
