@@ -9,7 +9,7 @@ wikidata-only visualisation.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any, Final
 
@@ -101,12 +101,18 @@ def _draw_polygon(ax: Any, coordinates: Any) -> None:
         _draw_ring(ax, coordinates[0])
 
 
-def _draw_multipolygon(ax: Any, coordinates: Any) -> None:
+def _outer_rings(coordinates: Any) -> Iterator[Any]:
+    """Yield the first ring from each valid MultiPolygon member."""
     if not isinstance(coordinates, list):
         return
     for polygon in coordinates:
         if isinstance(polygon, list) and polygon:
-            _draw_ring(ax, polygon[0])
+            yield polygon[0]
+
+
+def _draw_multipolygon(ax: Any, coordinates: Any) -> None:
+    for ring in _outer_rings(coordinates):
+        _draw_ring(ax, ring)
 
 
 __all__ = [

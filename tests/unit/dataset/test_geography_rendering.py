@@ -508,6 +508,18 @@ def test_draw_ring_passes_the_complete_land_patch_style() -> None:
     axes.add_patch.assert_called_once_with(patch_artist)
 
 
+def test_outer_rings_ignores_non_list_coordinates() -> None:
+    assert list(basemap_module._outer_rings(([],))) == []
+
+
+def test_outer_rings_skips_empty_and_non_list_polygons() -> None:
+    first_ring = [(0, 0), (1, 0), (0, 1)]
+    second_ring = [(2, 0), (3, 0), (2, 1)]
+    coordinates = [[], (first_ring,), [second_ring]]
+
+    assert list(basemap_module._outer_rings(coordinates)) == [second_ring]
+
+
 def test_polygon_helpers_ignore_truthy_non_list_coordinate_containers() -> None:
     axes = Mock()
     with patch.object(basemap_module, "_draw_ring") as draw_ring:
