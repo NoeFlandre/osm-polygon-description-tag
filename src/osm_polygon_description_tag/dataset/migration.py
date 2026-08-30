@@ -12,6 +12,7 @@ import pyarrow.parquet as pq
 
 from osm_polygon_description_tag.dataset.manifest import (
     TRANSFORM_ALGORITHM_VERSION,
+    _manifest_path_for,
     current_output_algorithm_revision,
     output_identity_for,
     read_manifest,
@@ -99,7 +100,7 @@ def migrate_dataset_schema(data_root: Path) -> int:
     _require_migration_directories(data_dir, manifests_dir, data_root)
     migrated = 0
     for parquet in sorted(data_dir.glob("*.parquet"), key=lambda path: path.name):
-        manifest_path = manifests_dir / f"{parquet.stem}.manifest.json"
+        manifest_path = _manifest_path_for(parquet.name, data_root)
         migrated += _migrate_one_artifact(parquet, manifest_path)
     return migrated
 

@@ -13,6 +13,7 @@ from pathlib import Path
 
 from osm_polygon_description_tag.dataset.manifest import (
     ManifestError,
+    _manifest_path_for,
     file_sha256,
     is_resumable,
     output_identity_for,
@@ -178,7 +179,7 @@ def _inspect_artifact(
     source_name = f"{stem}.osm.pbf"
     if source_name not in discovered:
         return None, stem, None
-    manifest_path = paths.data_root / "manifests" / f"{stem}.manifest.json"
+    manifest_path = _manifest_path_for(parquet.name, paths.data_root)
     if not manifest_path.is_file():
         return None, None, f"{stem}.manifest.json"
     try:

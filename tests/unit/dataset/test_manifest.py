@@ -46,6 +46,13 @@ def test_fsync_dir_accepts_an_existing_directory(tmp_path: Path) -> None:
     manifest_module._fsync_dir(tmp_path)
 
 
+def test_manifest_path_for_uses_parquet_name_without_extension() -> None:
+    assert manifest_module._manifest_path_for(
+        "region.latest.parquet",
+        Path("generated"),
+    ) == Path("generated/manifests/region.latest.manifest.json")
+
+
 def test_file_sha256_reads_in_bounded_chunks() -> None:
     handle = MagicMock()
     handle.__enter__.return_value = handle

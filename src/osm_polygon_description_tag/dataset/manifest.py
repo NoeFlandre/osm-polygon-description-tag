@@ -309,6 +309,12 @@ def current_code_revision() -> str | None:
     return project_code_revision()
 
 
+def _manifest_path_for(output_name: str, data_root: Path) -> Path:
+    """Return the manifest path paired with ``output_name`` under ``data_root``."""
+    stem = output_name.removesuffix(".parquet")
+    return data_root / "manifests" / f"{stem}.manifest.json"
+
+
 __all__ = [
     "MANIFEST_SCHEMA_VERSION",
     "TRANSFORM_ALGORITHM_VERSION",

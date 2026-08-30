@@ -30,6 +30,7 @@ from shapely.errors import ShapelyError
 from osm_polygon_description_tag.dataset.manifest import (
     MANIFEST_SCHEMA_VERSION,
     ManifestError,
+    _manifest_path_for,
     output_identity_for,
     read_manifest,
 )
@@ -515,8 +516,7 @@ def _check_artifact_stems(parquets: list[Path], manifests: list[Path]) -> None:
 
 
 def _validate_manifest_pair(parquet: Path, manifests_dir: Path) -> Path:
-    stem = parquet.name.removesuffix(".parquet")
-    manifest_path = manifests_dir / f"{stem}.manifest.json"
+    manifest_path = _manifest_path_for(parquet.name, manifests_dir.parent)
     try:
         manifest = read_manifest(manifest_path)
     except ManifestError as error:

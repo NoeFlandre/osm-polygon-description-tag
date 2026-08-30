@@ -6,6 +6,7 @@ from osm_polygon_description_tag.dataset.manifest import (
     MANIFEST_SCHEMA_VERSION,
     Manifest,
     ManifestError,
+    _manifest_path_for,
     file_sha256,
     output_identity_for,
     read_manifest,
@@ -295,9 +296,7 @@ def _collect_data_items(data_root: Path) -> list[UploadItem]:
     items: list[UploadItem] = []
     for path in sorted(data_dir.iterdir(), key=lambda entry: entry.name):  # pragma: no mutate
         items.append(_validate_data_entry(path))
-        manifest_name = path.name.removesuffix(".parquet") + ".manifest.json"
-        manifest_path = data_root / "manifests" / manifest_name
-        _validate_manifest(manifest_path, path)
+        _validate_manifest(_manifest_path_for(path.name, data_root), path)
     return items
 
 
@@ -396,9 +395,10 @@ def _build_per_pbf_upload_plan(data_root: Path, source_name: str) -> UploadPlan:
     if not source_name.endswith(".osm.pbf"):
         raise PublicationError(f"invalid source name: {source_name!r}")
     stem = source_name.removesuffix(".osm.pbf")
+    output_path = data_root / "data" / f"{stem}.parquet"
     required = (
-        data_root / "data" / f"{stem}.parquet",
-        data_root / "manifests" / f"{stem}.manifest.json",
+        output_path,
+        _manifest_path_for(output_path.name, data_root),
         *_required_document_paths(data_root),
     )
     for path in required:
