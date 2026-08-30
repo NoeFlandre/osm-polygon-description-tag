@@ -278,6 +278,27 @@ def test_migrate_parquet_wraps_storage_errors_with_the_artifact_path(
         migration._migrate_parquet(path)
 
 
+def test_migrate_parquet_removes_partial_temporary_file_after_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "legacy.parquet"
+    _write_legacy_parquet(path)
+    temporary_paths: list[Path] = []
+
+    def fail(_reader: pq.ParquetFile, temporary: Path, _metadata: pa.Schema) -> None:
+        temporary.write_bytes(b"partial parquet")
+        temporary_paths.append(temporary)
+        raise StorageError("invalid migrated output")
+
+    monkeypatch.setattr(migration, "_rewrite_legacy_parquet", fail)
+
+    with pytest.raises(MigrationError, match=re.escape(str(path))):
+        migration._migrate_parquet(path)
+
+    assert len(temporary_paths) == 1
+    assert not temporary_paths[0].exists()
+
+
 def test_rewrite_legacy_parquet_requests_zstd_and_bounded_batches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
