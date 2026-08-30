@@ -36,6 +36,7 @@ from osm_polygon_description_tag.publication.state import (
 from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.runtime.logging import RunLogger
 from osm_polygon_description_tag.runtime.resources import osmium_export_config
+from osm_polygon_description_tag.workflow.artifacts import source_artifact_paths
 from osm_polygon_description_tag.workflow.build import build_one
 
 STATUS_BUILT = "built-needs-upload"
@@ -88,12 +89,7 @@ class SourceOutcome:
 
 def local_artifact_is_complete(paths: Paths, source: Source) -> tuple[bool, Manifest | None]:
     """Return ``(True, manifest)`` only for a fully resumable local artifact."""
-    output_path = paths.data_root / "data" / source.output_name
-    manifest_path = (
-        paths.data_root
-        / "manifests"
-        / f"{source.output_name.removesuffix('.parquet')}.manifest.json"
-    )
+    output_path, manifest_path = source_artifact_paths(paths, source)
     if not output_path.is_file() or not manifest_path.is_file():
         return False, None
     try:
@@ -256,7 +252,7 @@ def process_one(
     """Build or reuse one PBF and return its local state-machine outcome."""
     complete, manifest = local_artifact_is_complete(paths, source)
     existing = _published_entry(paths.data_root, source.name)
-    output_path = paths.data_root / "data" / source.output_name
+    output_path, _manifest_path = source_artifact_paths(paths, source)
 
     if complete and manifest is not None:
         if published_state_matches(existing, manifest, source, output_path):

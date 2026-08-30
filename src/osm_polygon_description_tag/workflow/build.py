@@ -46,6 +46,7 @@ from osm_polygon_description_tag.osm.extraction import (
 )
 from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.runtime.time import utc_now_iso
+from osm_polygon_description_tag.workflow.artifacts import source_artifact_paths
 
 _GEOPARQUET_VERSION = "1.1.0"
 
@@ -130,15 +131,12 @@ def _transform_one(
 
 
 def _artifact_paths(source: Source, paths: Paths) -> tuple[Path, Path]:
-    data_dir = paths.data_root / "data"
-    manifests_dir = paths.data_root / "manifests"
-    output_path = data_dir / source.output_name
-    manifest_path = manifests_dir / f"{source.output_name.removesuffix('.parquet')}.manifest.json"
+    output_path, manifest_path = source_artifact_paths(paths, source)
     for artifact in (output_path, manifest_path):
         if artifact.resolve(strict=False).is_relative_to(paths.source_root.resolve(strict=False)):
             raise PipelineError(f"artifact path inside immutable source: {artifact}")
-    data_dir.mkdir(parents=True, exist_ok=True)
-    manifests_dir.mkdir(exist_ok=True)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.parent.mkdir(exist_ok=True)
     return output_path, manifest_path
 
 

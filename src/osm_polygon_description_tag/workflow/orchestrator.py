@@ -82,6 +82,7 @@ from osm_polygon_description_tag.runtime.cleanup import cleanup_stale_owned_temp
 from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.runtime.logging import RunLogger
 from osm_polygon_description_tag.workflow import finalization
+from osm_polygon_description_tag.workflow.artifacts import source_artifact_paths
 from osm_polygon_description_tag.workflow.build import build_one  # noqa: F401
 from osm_polygon_description_tag.workflow.preflight import (
     Preflight,
@@ -312,9 +313,8 @@ def _publish_source_if_needed(
     source_total: int,
 ) -> tuple[SourceOutcome, bool]:
     """Upload one final deduplicated source artifact when its state is stale."""
-    output_path = paths.data_root / "data" / source.output_name
-    manifest_name = f"{source.output_name.removesuffix('.parquet')}.manifest.json"
-    manifest = read_manifest(paths.data_root / "manifests" / manifest_name)
+    output_path, manifest_path = source_artifact_paths(paths, source)
+    manifest = read_manifest(manifest_path)
     outcome.included_rows = manifest.counts.included_rows
     outcome.output_bytes = output_path.stat().st_size
     state = _state_read_publication_state(paths.data_root)
