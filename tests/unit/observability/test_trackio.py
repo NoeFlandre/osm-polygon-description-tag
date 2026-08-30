@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
+from types import ModuleType
 from typing import ClassVar
 
 import pytest
@@ -605,6 +607,70 @@ def test_trackio_plot_specs_are_stable_and_ranked_figure_is_bounded() -> None:
         assert [tick.get_text() for tick in figure.axes[0].get_yticklabels()] == ["b", "a"]
     finally:
         figure.clf()
+
+
+def test_ranked_figure_size_has_a_stable_minimum_and_scale() -> None:
+    assert trackio._ranked_figure_size(0) == (10.0, 6.0)
+    assert trackio._ranked_figure_size(30) == pytest.approx((10.0, 7.2))
+
+
+def test_ranked_figure_forwards_deterministic_chart_data_to_the_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Figure:
+        def __init__(self) -> None:
+            self.tight_layout_calls = 0
+
+        def tight_layout(self) -> None:
+            self.tight_layout_calls += 1
+
+    class _Axis:
+        def __init__(self) -> None:
+            self.barh_args: tuple[object, ...] | None = None
+            self.barh_kwargs: dict[str, object] | None = None
+            self.title: str | None = None
+            self.xlabel: str | None = None
+            self.grid_kwargs: dict[str, object] | None = None
+
+        def barh(self, *args: object, **kwargs: object) -> None:
+            self.barh_args = args
+            self.barh_kwargs = kwargs
+
+        def set_title(self, title: str) -> None:
+            self.title = title
+
+        def set_xlabel(self, xlabel: str) -> None:
+            self.xlabel = xlabel
+
+        def grid(self, **kwargs: object) -> None:
+            self.grid_kwargs = kwargs
+
+    figure = _Figure()
+    axis = _Axis()
+    pyplot = ModuleType("matplotlib.pyplot")
+    pyplot.subplots = lambda **kwargs: (  # type: ignore[attr-defined]
+        figure,
+        axis,
+    )
+    matplotlib = ModuleType("matplotlib")
+    matplotlib.__path__ = []  # type: ignore[attr-defined]
+    matplotlib.use = lambda _backend: None  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "matplotlib", matplotlib)
+    monkeypatch.setitem(sys.modules, "matplotlib.pyplot", pyplot)
+
+    rows = [{"source": f"region-{index:02d}", "value": index} for index in range(31)]
+    result = trackio._ranked_figure(rows, "value", "title", "xlabel")
+
+    assert result is figure
+    assert axis.barh_args == (
+        [f"region-{index:02d}" for index in range(1, 31)],
+        list(range(1, 31)),
+    )
+    assert axis.barh_kwargs == {"color": "#4a6fa5"}
+    assert axis.title == "title"
+    assert axis.xlabel == "xlabel"
+    assert axis.grid_kwargs == {"axis": "x", "alpha": 0.25}
+    assert figure.tight_layout_calls == 1
 
 
 def test_ranked_figure_has_deterministic_sorting_size_style_and_top_limit() -> None:

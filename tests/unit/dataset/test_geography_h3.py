@@ -236,6 +236,7 @@ def test_antimeridian_helpers_pin_boundary_direction_and_slab_math() -> None:
         _clip_longitude,
         _clip_slab,
         _crosses_antimeridian,
+        _slab_index,
         _slab_range,
         _unwrap_points,
     )
@@ -285,6 +286,8 @@ def test_antimeridian_helpers_pin_boundary_direction_and_slab_math() -> None:
     assert _slab_range([(-181.0, 0.0), (179.0, 0.0)]) == (-1, 0)
     assert _slab_range([(-180.0, 0.0), (180.0, 0.0)]) == (0, 1)
     assert _slab_range([(180.0, 0.0), (181.0, 0.0)]) == (1, 1)
+    assert _slab_index(-181.0) == -1
+    assert _slab_index(180.0) == 1
     assert _clip_slab([(170.0, 0.0), (190.0, 2.0), (170.0, 4.0)], 1) == [
         (180.0, 1.0),
         (190.0, 2.0),

@@ -124,8 +124,9 @@ def test_transform_one_short_circuits_missing_description_before_transform() -> 
         side_effect=AssertionError("expected rejection should not transform"),
     ):
         assert build_module._transform_one(record, "region.osm.pbf", counts) is None
+        assert build_module._transform_one(record, "region.osm.pbf", counts) is None
 
-    assert counts.rejections == {"no_nonempty_description": 1}
+    assert counts.rejections == {"no_nonempty_description": 2}
 
 
 def test_transform_stream_counts_rows_yields_transformed_values_and_reports_progress() -> None:

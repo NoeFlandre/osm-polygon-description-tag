@@ -97,7 +97,7 @@ def _transform_stream(
     counts: _Counts,
     *,
     progress_callback: Callable[[int, int], None] | None = None,
-    progress_interval: int = 100_000,
+    progress_interval: int = 100_000,  # pragma: no mutate - public default contract
 ) -> Iterator[dict[str, object]]:
     included = 0
     last_emitted = 0

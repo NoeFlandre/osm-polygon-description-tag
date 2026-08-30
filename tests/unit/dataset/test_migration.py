@@ -201,12 +201,30 @@ def test_requires_migration_reports_the_unsupported_path() -> None:
         migration._requires_migration(unsupported, path)
 
 
+def test_schema_predicates_distinguish_current_and_legacy_schemas() -> None:
+    assert migration._is_current_schema(SCHEMA) is True
+    assert migration._is_current_schema(_legacy_schema()) is False
+    assert migration._is_legacy_map_schema(_legacy_schema()) is True
+    assert migration._is_legacy_map_schema(SCHEMA) is False
+
+
+def test_requires_migration_skips_the_current_schema() -> None:
+    assert migration._requires_migration(SCHEMA, Path("current.parquet")) is False
+
+
 def test_migrate_parquet_reports_path_when_schema_is_unsupported(tmp_path: Path) -> None:
     path = tmp_path / "unsupported.parquet"
     pq.write_table(pa.table({"unexpected": [1]}), path)
 
     with pytest.raises(MigrationError, match=re.escape(str(path))):
         migration._migrate_parquet(path)
+
+
+def test_migrate_parquet_skips_a_current_schema(tmp_path: Path) -> None:
+    path = tmp_path / "current.parquet"
+    pq.write_table(pa.Table.from_pylist([], schema=SCHEMA), path)
+
+    assert migration._migrate_parquet(path) is False
 
 
 def test_migrate_parquet_returns_true_after_promoting_a_migration(
@@ -218,6 +236,31 @@ def test_migrate_parquet_returns_true_after_promoting_a_migration(
     monkeypatch.setattr(migration, "_promote_migrated_parquet", lambda *_args: None)
 
     assert migration._migrate_parquet(path) is True
+
+
+def test_migrate_parquet_forwards_rewrite_inputs_and_schema_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "legacy.parquet"
+    schema = _legacy_schema().with_metadata({b"custom": b"metadata"})
+    pq.write_table(pa.Table.from_pylist([_legacy_row()], schema=schema), path)
+    rewrite_args: list[tuple[pq.ParquetFile, Path, pa.Schema]] = []
+    promote_args: list[tuple[Path, Path]] = []
+
+    def rewrite(reader: pq.ParquetFile, temporary: Path, metadata: pa.Schema) -> None:
+        rewrite_args.append((reader, temporary, metadata))
+
+    def promote(temporary: Path, target: Path) -> None:
+        promote_args.append((temporary, target))
+
+    monkeypatch.setattr(migration, "_rewrite_legacy_parquet", rewrite)
+    monkeypatch.setattr(migration, "_promote_migrated_parquet", promote)
+
+    assert migration._migrate_parquet(path) is True
+    assert len(rewrite_args) == 1
+    assert isinstance(rewrite_args[0][0], pq.ParquetFile)
+    assert rewrite_args[0][2].metadata == schema.metadata
+    assert promote_args == [(rewrite_args[0][1], path)]
 
 
 def test_migrate_parquet_wraps_storage_errors_with_the_artifact_path(
@@ -264,6 +307,58 @@ def test_rewrite_legacy_parquet_requests_zstd_and_bounded_batches(
     migration._rewrite_legacy_parquet(Reader(), tmp_path / "temporary.parquet", SCHEMA)
 
     assert observed == {"batch_size": 4096, "compression": "zstd"}
+
+
+def test_rewrite_legacy_parquet_converts_nonempty_batches_with_final_schema(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Batch:
+        def to_pylist(self) -> list[dict[str, object]]:
+            return [_legacy_row()]
+
+    class Reader:
+        def iter_batches(self, *, batch_size: int) -> tuple[Batch, ...]:
+            assert batch_size == 4096
+            return (Batch(),)
+
+    class Writer:
+        def __init__(self, path: Path, schema: pa.Schema, **kwargs: object) -> None:
+            self.path = path
+            self.schema = schema
+            self.compression = kwargs.get("compression")
+            self.tables: list[pa.Table] = []
+
+        def __enter__(self) -> "Writer":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def write_table(self, table: pa.Table) -> None:
+            self.tables.append(table)
+
+    writers: list[Writer] = []
+
+    def make_writer(path: Path, schema: pa.Schema, **kwargs: object) -> Writer:
+        writer = Writer(path, schema, **kwargs)
+        writers.append(writer)
+        return writer
+
+    monkeypatch.setattr(migration.pq, "ParquetWriter", make_writer)
+    validated: list[Path] = []
+    monkeypatch.setattr(migration, "validate_geoparquet", validated.append)
+
+    temporary = tmp_path / "temporary.parquet"
+    migration._rewrite_legacy_parquet(Reader(), temporary, SCHEMA)
+
+    assert len(writers) == 1
+    assert writers[0].path == temporary
+    assert writers[0].schema == SCHEMA
+    assert writers[0].compression == "zstd"
+    assert len(writers[0].tables) == 1
+    assert writers[0].tables[0].schema == SCHEMA
+    assert writers[0].tables[0].num_rows == 1
+    assert validated == [temporary]
 
 
 def test_promote_migrated_parquet_fsyncs_a_binary_handle_before_replace(

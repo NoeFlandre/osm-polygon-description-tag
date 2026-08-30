@@ -166,10 +166,12 @@ def _unwrap_points(points: Sequence[tuple[float, float]]) -> list[tuple[float, f
 
 def _slab_range(points: Sequence[tuple[float, float]]) -> tuple[int, int]:
     longitudes = [lon for lon, _ in points]
-    return (
-        math.floor((min(longitudes) + 180.0) / 360.0),
-        math.floor((max(longitudes) + 180.0) / 360.0),
-    )
+    return _slab_index(min(longitudes)), _slab_index(max(longitudes))
+
+
+def _slab_index(longitude: float) -> int:
+    """Return the integer longitude slab containing ``longitude``."""
+    return math.floor((longitude + 180.0) / 360.0)
 
 
 def _clip_slab(points: Sequence[tuple[float, float]], slab: int) -> list[tuple[float, float]]:

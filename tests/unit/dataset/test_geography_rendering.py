@@ -520,6 +520,28 @@ def test_polygon_helpers_ignore_truthy_non_list_coordinate_containers() -> None:
     draw_ring.assert_not_called()
 
 
+def test_polygon_helpers_forward_each_valid_outer_ring_to_the_axes() -> None:
+    axes = Mock()
+    polygon_ring = [(0, 0), (1, 0), (0, 1)]
+    multipolygon_rings = [
+        [(2, 0), (3, 0), (2, 1)],
+        [(4, 0), (5, 0), (4, 1)],
+    ]
+
+    with patch.object(basemap_module, "_draw_ring") as draw_ring:
+        basemap_module._draw_polygon(axes, [polygon_ring])
+        basemap_module._draw_multipolygon(
+            axes,
+            [[multipolygon_rings[0]], [], [multipolygon_rings[1]]],
+        )
+
+    assert draw_ring.call_args_list == [
+        call(axes, polygon_ring),
+        call(axes, multipolygon_rings[0]),
+        call(axes, multipolygon_rings[1]),
+    ]
+
+
 def test_draw_landmasses_supports_polygon_multipolygon_and_bad_features() -> None:
     """Only valid outer rings become beige land patches."""
 

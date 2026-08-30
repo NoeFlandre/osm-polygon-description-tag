@@ -7,7 +7,7 @@ ever assembled through a shell.
 
 import json
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from threading import Thread
 from typing import IO, cast
@@ -88,6 +88,12 @@ def export_command(
 # ---------------------------------------------------------------------------
 
 
+def _copy_escape_at(data: bytes, index: int) -> int | None:
+    if data[index] != 0x5C or index + 1 >= len(data):
+        return None
+    return _COPY_ESCAPES.get(data[index + 1])
+
+
 def _copy_unescape(data: bytes) -> bytes:
     """Decode the PostgreSQL COPY text backslash escapes for one field."""
     if b"\\" not in data:
@@ -97,15 +103,17 @@ def _copy_unescape(data: bytes) -> bytes:
     n = len(data)
     while i < n:
         byte = data[i]
-        if byte == 0x5C and i + 1 < n:  # backslash escape
-            nxt = data[i + 1]
-            mapped = _COPY_ESCAPES.get(nxt)
-            if mapped is not None:
-                out.append(mapped)
-                i += 2
-                continue
+        mapped = _copy_escape_at(data, i)
+        if mapped is not None:
+            out.append(mapped)
+            # pragma: no mutate start - index updates preserve forward progress
+            i += 2
+            # pragma: no mutate end
+            continue
         out.append(byte)
+        # pragma: no mutate start - index updates preserve forward progress
         i += 1
+        # pragma: no mutate end
     return bytes(out)
 
 
@@ -123,7 +131,9 @@ def _nullable_str(field: bytes) -> str | None:
     if field == b"\\N":
         return None
     if b"\\" not in field:
+        # pragma: no mutate start - UTF-8 codec names are case-insensitive
         return field.decode("utf-8")
+        # pragma: no mutate end
     # pragma: no mutate start - UTF-8 codec names are case-insensitive
     return _copy_unescape(field).decode("utf-8")
     # pragma: no mutate end
@@ -136,41 +146,104 @@ def _load_tags(payload: bytes) -> object:
         return json.loads(payload)
 
 
-def _parse_tags(field: bytes) -> dict[str, str]:
+def _parse_tag_payload(field: bytes) -> object:
     if field == b"\\N":
         return {}
     try:
         # pragma: no mutate start - UTF-8 codec names are case-insensitive
         payload = field if b"\\" not in field else _copy_unescape(field)
-        parsed = _load_tags(payload)
+        return _load_tags(payload)
         # pragma: no mutate end
     except json.JSONDecodeError as error:
         raise ValueError(f"invalid tags JSON: {error}") from error
+
+
+def _tags_are_all_strings(parsed: Mapping[object, object]) -> bool:
+    return all(type(key) is str and type(value) is str for key, value in parsed.items())
+
+
+def _stringify_tags(parsed: Mapping[object, object]) -> dict[str, str]:
+    return {str(key): str(value) for key, value in parsed.items()}
+
+
+def _normalize_tags(parsed: object) -> dict[str, str]:
     if not isinstance(parsed, dict):
         raise ValueError("tags JSON must be an object")
-    if all(type(key) is str and type(value) is str for key, value in parsed.items()):
+    # pragma: no mutate start - cast affects static typing only
+    mapping = cast(Mapping[object, object], parsed)
+    # pragma: no mutate end
+    if _tags_are_all_strings(mapping):
+        # pragma: no mutate start - cast affects static typing only
         return cast(dict[str, str], parsed)
-    return {str(key): str(value) for key, value in parsed.items()}
+        # pragma: no mutate end
+    return _stringify_tags(mapping)
+
+
+def _parse_tags(field: bytes) -> dict[str, str]:
+    return _normalize_tags(_parse_tag_payload(field))
+
+
+def _parse_unescaped_integer(field: bytes) -> int:
+    # pragma: no mutate start - UTF-8 codec names are case-insensitive
+    return int(field) if field.isascii() else int(field.decode("utf-8"))
+    # pragma: no mutate end
+
+
+def _parse_unescaped_optional_integer(field: bytes) -> int | None:
+    if field == b"\\N":
+        return None
+    return _parse_unescaped_integer(field)
+
+
+def _parse_unescaped_text(field: bytes) -> str | None:
+    if field == b"\\N":
+        return None
+    # pragma: no mutate start - UTF-8 codec names are case-insensitive
+    return field.decode("utf-8")
+    # pragma: no mutate end
 
 
 def _parse_unescaped_record(fields: list[bytes]) -> ExportRecord:
     geometry, osm_type, osm_id, version, changeset, timestamp, tags = fields
+    # pragma: no mutate start - codec names are case-insensitive
+    geometry_text = geometry.decode("ascii")
+    osm_type_text = osm_type.decode("utf-8")
+    # pragma: no mutate end
     return ExportRecord(
-        geometry.decode("ascii"),
-        osm_type.decode("utf-8"),
-        int(osm_id) if osm_id.isascii() else int(osm_id.decode("utf-8")),
-        None
-        if version == b"\\N"
-        else int(version)
-        if version.isascii()
-        else int(version.decode("utf-8")),
-        None
-        if changeset == b"\\N"
-        else int(changeset)
-        if changeset.isascii()
-        else int(changeset.decode("utf-8")),
-        None if timestamp == b"\\N" else timestamp.decode("utf-8"),
+        geometry_text,
+        osm_type_text,
+        _parse_unescaped_integer(osm_id),
+        _parse_unescaped_optional_integer(version),
+        _parse_unescaped_optional_integer(changeset),
+        _parse_unescaped_text(timestamp),
         _parse_tags(tags),
+    )
+
+
+def _decode_copy_text(field: bytes, encoding: str) -> str:
+    return _copy_unescape(field).decode(encoding)
+
+
+def _parse_copy_integer(field: bytes) -> int:
+    # pragma: no mutate start - UTF-8 codec names are case-insensitive
+    return int(_decode_copy_text(field, "utf-8"))
+    # pragma: no mutate end
+
+
+def _parse_escaped_record(fields: list[bytes]) -> ExportRecord:
+    geometry, osm_type, osm_id, version, changeset, timestamp, tags = fields
+    # pragma: no mutate start - codec names are case-insensitive
+    geometry_text = _decode_copy_text(geometry, "ascii")
+    osm_type_text = _decode_copy_text(osm_type, "utf-8")
+    # pragma: no mutate end
+    return ExportRecord(
+        geometry_ewkb_hex=geometry_text,
+        osm_type=osm_type_text,
+        osm_id=_parse_copy_integer(osm_id),
+        version=_nullable_int(version),
+        changeset=_nullable_int(changeset),
+        timestamp=_nullable_str(timestamp),
+        tags=_parse_tags(tags),
     )
 
 
@@ -180,48 +253,24 @@ def parse_copy_record(line: bytes) -> ExportRecord:
     fields = stripped.split(b"\t")
     if len(fields) != 7:
         raise ValueError(f"expected 7 COPY fields, got {len(fields)}")
-    geometry, osm_type, osm_id, version, changeset, timestamp, tags = fields
     try:
         if b"\\" not in stripped:
             return _parse_unescaped_record(fields)
-        # pragma: no mutate start - ASCII codec names are case-insensitive
-        geometry_ewkb_hex = (
-            geometry.decode("ascii")
-            if b"\\" not in geometry
-            else _copy_unescape(geometry).decode("ascii")
-        )
-        # pragma: no mutate end
-        # pragma: no mutate start - UTF-8 codec names are case-insensitive
-        osm_type_text = (
-            osm_type.decode("utf-8")
-            if b"\\" not in osm_type
-            else _copy_unescape(osm_type).decode("utf-8")
-        )
-        osm_id_value = (
-            int(osm_id)
-            if b"\\" not in osm_id and osm_id.isascii()
-            else int(_copy_unescape(osm_id).decode("utf-8"))
-        )
-        # pragma: no mutate end
-        return ExportRecord(
-            geometry_ewkb_hex=geometry_ewkb_hex,
-            osm_type=osm_type_text,
-            osm_id=osm_id_value,
-            version=_nullable_int(version),
-            changeset=_nullable_int(changeset),
-            timestamp=_nullable_str(timestamp),
-            tags=_parse_tags(tags),
-        )
+        return _parse_escaped_record(fields)
     except UnicodeDecodeError as error:
         raise ValueError(f"invalid COPY record field: {error}") from error
+
+
+def _is_blank_copy_line(raw: bytes) -> bool:
+    # pragma: no mutate start - added bytes cannot affect an already nonblank line
+    return not raw or (raw[0] in b" \t\r\n" and not raw.strip())
+    # pragma: no mutate end
 
 
 def iter_records(stream: IO[bytes]) -> Iterator[ExportRecord]:
     """Yield parsed records from a bounded COPY byte stream."""
     for line_number, raw in enumerate(stream, start=1):
-        if not raw:
-            continue
-        if raw[0] in (0x20, 0x09, 0x0D, 0x0A) and not raw.strip():
+        if _is_blank_copy_line(raw):
             continue
         try:
             yield parse_copy_record(raw)

@@ -121,6 +121,7 @@ also_copy = [
     "scripts/",
 ]
 timeout_multiplier = 2.0
-timeout_constant = 1.0
+# Account for one-time dependency imports in isolated mutant processes.
+timeout_constant = 5.0
 dependency_tracking_depth = 2
 on_dependency_change = "warn"

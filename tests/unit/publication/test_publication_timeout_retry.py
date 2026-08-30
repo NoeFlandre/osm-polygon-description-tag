@@ -69,7 +69,15 @@ def test_default_runner_retries_timeout_and_eventually_succeeds() -> None:
 def test_default_runner_propagates_timeout_after_max_retries() -> None:
     """Persistent ``TimeoutExpired`` escapes after the retry budget is exhausted."""
 
+    calls = 0
+
     def runner(command: list[str], timeout: float | None = None) -> None:
+        nonlocal calls
+        calls += 1
+        if calls > 3:
+            # Keep an incorrect retry-stop predicate from hanging the mutation
+            # process indefinitely after the expected timeout budget.
+            raise subprocess.CalledProcessError(1, command)
         raise subprocess.TimeoutExpired(cmd=command, timeout=timeout or 0.1)
 
     with pytest.raises(subprocess.TimeoutExpired):

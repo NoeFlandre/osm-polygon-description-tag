@@ -5,6 +5,7 @@ matching description tags, preserves every original OSM tag, converts geometry
 to WKB, computes bounding boxes and geodesic area, and yields one typed record.
 """
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -53,13 +54,8 @@ def names_from_tags(tags: dict[str, str]) -> tuple[str | None, dict[str, str]]:
 
 
 def _tag_values(tags: dict[str, str], prefix: str) -> tuple[str | None, dict[str, str]]:
-    marker = f"{prefix}:"
     base = _clean_base_value(tags.get(prefix))
-    matches = [
-        (key.removeprefix(marker), value)
-        for key, value in tags.items()
-        if key.startswith(marker) and key != marker and value.strip()
-    ]
+    matches = list(_localized_items(tags, prefix))
     return base, dict(sorted(matches)) if matches else {}
 
 
@@ -67,26 +63,40 @@ def _clean_base_value(value: str | None) -> str | None:
     return value if value is None or value.strip() else None
 
 
-def _has_nonempty_localized(tags: dict[str, str], prefix: str) -> bool:
+def _is_nonempty_localized(key: str, value: str, marker: str) -> bool:
+    return key.startswith(marker) and key != marker and bool(value.strip())
+
+
+def _localized_items(tags: dict[str, str], prefix: str) -> Iterator[tuple[str, str]]:
     marker = f"{prefix}:"
     for key, value in tags.items():
-        if key.startswith(marker) and key != marker and value.strip():
-            return True
-    return False
+        if _is_nonempty_localized(key, value, marker):
+            yield key.removeprefix(marker), value
 
 
-def _early_rejection_reason(record: ExportRecord) -> str | None:
-    """Return a cheap pre-geometry rejection reason for the build hot path."""
+def _has_nonempty_localized(tags: dict[str, str], prefix: str) -> bool:
+    return next(_localized_items(tags, prefix), None) is not None
+
+
+def _identity_rejection_reason(record: ExportRecord) -> str | None:
     if record.osm_type not in _OSM_TYPES:
         return "unsupported_osm_type"
     if record.osm_id <= 0:
         return "invalid_osm_id"
-    base = record.tags.get("description")
-    if base is not None and base.strip():
-        return None
-    return (
-        None if _has_nonempty_localized(record.tags, "description") else "no_nonempty_description"
-    )
+    return None
+
+
+def _has_nonempty_description(tags: dict[str, str]) -> bool:
+    base = tags.get("description")
+    return (base is not None and bool(base.strip())) or _has_nonempty_localized(tags, "description")
+
+
+def _early_rejection_reason(record: ExportRecord) -> str | None:
+    """Return a cheap pre-geometry rejection reason for the build hot path."""
+    identity_reason = _identity_rejection_reason(record)
+    if identity_reason is not None:
+        return identity_reason
+    return None if _has_nonempty_description(record.tags) else "no_nonempty_description"
 
 
 def geodesic_area_m2(geometry: BaseGeometry) -> float:
@@ -110,10 +120,9 @@ def _optional_timestamp(value: str | None) -> datetime | None:
 
 
 def _validate_record_identity(record: ExportRecord) -> None:
-    if record.osm_type not in _OSM_TYPES:
-        raise RejectedFeature("unsupported_osm_type")
-    if record.osm_id <= 0:
-        raise RejectedFeature("invalid_osm_id")
+    reason = _identity_rejection_reason(record)
+    if reason is not None:
+        raise RejectedFeature(reason)
 
 
 def _decode_polygon(record: ExportRecord) -> BaseGeometry:

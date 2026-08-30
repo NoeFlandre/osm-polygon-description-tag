@@ -68,7 +68,13 @@ def test_write_publication_state_writes_complete_source_record(
     tmp_path: Path,
 ) -> None:
     initial = {"schema_version": 1, "published": {"old.osm.pbf": {"remote_revision": "old"}}}
-    monkeypatch.setattr(state, "read_publication_state", lambda _root: initial)
+    read_roots: list[Path] = []
+
+    def read(root: Path) -> dict[str, object]:
+        read_roots.append(root)
+        return initial
+
+    monkeypatch.setattr(state, "read_publication_state", read)
     writes: list[tuple[Path, dict[str, object]]] = []
     monkeypatch.setattr(
         state, "_atomic_write_json", lambda path, payload: writes.append((path, payload))
@@ -102,6 +108,7 @@ def test_write_publication_state_writes_complete_source_record(
     }
     assert result == expected
     assert writes == [(tmp_path / state.PUBLICATION_STATE_FILENAME, expected)]
+    assert read_roots == [tmp_path]
 
 
 def test_write_publication_state_creates_missing_published_section(

@@ -410,6 +410,15 @@ def test_area_build_caption_and_bar_labels_are_exact_and_aligned() -> None:
     assert values == [2, *([0] * (len(AREA_BUCKET_LABELS) - 2)), 3]
 
 
+def test_area_caption_counts_zero_and_one_as_unoccupied_and_occupied_bins() -> None:
+    counts = {"empty": 0, "single": 1, "multiple": 2}
+
+    assert area_rendering_module._build_caption(counts) == (
+        "Area distribution of description-tagged polygons. "
+        "3 polygons bucketed into 2 of 3 logarithmic area bins (m²)."
+    )
+
+
 def test_style_area_figure_sets_stable_background_colors() -> None:
     fig = Mock()
     axes = Mock()

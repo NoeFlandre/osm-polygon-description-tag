@@ -328,9 +328,9 @@ def _validated_parquets(data_root: Path) -> tuple[Path, ...]:
     if not data_dir.is_dir() or not tuple(data_dir.glob("*.parquet")):
         return ()
     validated = validate_finalized_artifacts(data_root)
-    parquets = tuple(
-        cast(Sequence[Path], validated["parquets"])
-    )  # pragma: no mutate - runtime-only type narrowing
+    # pragma: no mutate start - runtime-only type narrowing
+    parquets = tuple(cast(Sequence[Path], validated["parquets"]))
+    # pragma: no mutate end
     for parquet in parquets:
         validate_geoparquet(parquet)
     return parquets

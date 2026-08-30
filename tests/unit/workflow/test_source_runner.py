@@ -432,6 +432,23 @@ def test_state_wrappers_translate_publication_errors(
         cast_dict(object())
 
 
+def test_read_publication_state_forwards_the_exact_data_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = Path("data")
+    expected = {"schema_version": 1}
+    seen: list[Path] = []
+
+    def read(actual_root: Path) -> dict[str, object]:
+        seen.append(actual_root)
+        return expected
+
+    monkeypatch.setattr(source_runner, "_state_read_publication_state", read)
+
+    assert read_publication_state(root) is expected
+    assert seen == [root]
+
+
 def test_process_one_forwards_all_build_options_and_defaults(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

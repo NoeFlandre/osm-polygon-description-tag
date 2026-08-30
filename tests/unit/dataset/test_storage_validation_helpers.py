@@ -318,6 +318,10 @@ def test_validate_geo_metadata_header_rejects_each_contract_field(
     assert str(error.value) == message
 
 
+def test_validate_geo_metadata_header_accepts_the_current_contract() -> None:
+    _validate_geo_metadata_header({"version": "1.1.0", "primary_column": "geometry"})
+
+
 def test_geometry_metadata_column_requires_a_mapping_and_geometry_entry() -> None:
     with pytest.raises(StorageError) as missing_from_list:
         _geometry_metadata_column({"columns": ["geometry"]})
@@ -330,6 +334,13 @@ def test_geometry_metadata_column_requires_a_mapping_and_geometry_entry() -> Non
     with pytest.raises(StorageError) as wrong_type:
         _geometry_metadata_column({"columns": {"geometry": []}})
     assert str(wrong_type.value) == "geometry metadata must be an object"
+
+
+def test_geometry_metadata_column_returns_the_geometry_mapping() -> None:
+    column = {"encoding": "WKB", "geometry_types": ["Polygon"]}
+    geo = {"columns": {"geometry": column}}
+
+    assert _geometry_metadata_column(geo) is column
 
 
 def test_read_geo_metadata_reports_the_exact_missing_metadata_error() -> None:

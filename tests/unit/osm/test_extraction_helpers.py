@@ -89,6 +89,105 @@ def test_parse_tags_stringifies_non_string_values() -> None:
     }
 
 
+def test_normalize_tags_reuses_an_all_string_mapping() -> None:
+    parsed = {"description": "value"}
+
+    assert extraction._normalize_tags(parsed) is parsed
+
+
+def test_normalize_tags_rejects_non_mapping_payloads() -> None:
+    with pytest.raises(ValueError, match=r"^tags JSON must be an object$"):
+        extraction._normalize_tags([])
+
+
+def test_normalize_tags_stringifies_non_string_mapping_entries() -> None:
+    assert extraction._normalize_tags({1: True}) == {"1": "True"}
+
+
+def test_tags_are_all_strings_requires_exact_string_types() -> None:
+    class StringSubclass(str):
+        pass
+
+    assert extraction._tags_are_all_strings({"key": "value"}) is True
+    assert extraction._tags_are_all_strings({"key": 1}) is False
+    assert extraction._tags_are_all_strings({StringSubclass("key"): "value"}) is False
+
+
+def test_stringify_tags_converts_mapping_entries() -> None:
+    assert extraction._stringify_tags({1: True, "none": None}) == {
+        "1": "True",
+        "none": "None",
+    }
+
+
+def test_parse_tag_payload_handles_copy_null_and_malformed_json() -> None:
+    assert extraction._parse_tag_payload(b"\\N") == {}
+
+    with pytest.raises(ValueError, match=r"^invalid tags JSON:"):
+        extraction._parse_tag_payload(b"{not json}")
+
+
+def test_unescaped_integer_parser_supports_ascii_and_unicode_digits() -> None:
+    assert extraction._parse_unescaped_integer(b"42") == 42
+    assert extraction._parse_unescaped_integer(bytes.fromhex("efbc94efbc92")) == 42
+
+
+def test_unescaped_optional_fields_preserve_copy_nulls() -> None:
+    assert extraction._parse_unescaped_optional_integer(b"\\N") is None
+    assert extraction._parse_unescaped_optional_integer(b"7") == 7
+    assert extraction._parse_unescaped_text(b"\\N") is None
+    assert extraction._parse_unescaped_text(b"text") == "text"
+
+
+def test_escaped_record_parser_decodes_copy_escaped_fields() -> None:
+    record = extraction._parse_escaped_record(
+        [
+            b"0103",
+            b"way\\tnorth",
+            b"7",
+            b"8",
+            b"9",
+            b"2026-01-01T00:00:00Z\\n",
+            b'{"description":"value"}',
+        ]
+    )
+
+    assert record.geometry_ewkb_hex == "0103"
+    assert record.osm_type == "way\tnorth"
+    assert record.osm_id == 7
+    assert record.version == 8
+    assert record.changeset == 9
+    assert record.timestamp == "2026-01-01T00:00:00Z\n"
+    assert record.tags == {"description": "value"}
+
+
+def test_copy_parser_routes_escaped_fields_to_escaped_record_parser() -> None:
+    record = extraction.parse_copy_record(
+        b'0103\tway\\tnorth\t7\t8\t9\t2026-01-01T00:00:00Z\\n\t{"description":"value"}\n'
+    )
+
+    assert record.osm_type == "way\tnorth"
+    assert record.version == 8
+    assert record.changeset == 9
+    assert record.timestamp == "2026-01-01T00:00:00Z\n"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (b"", True),
+        (b"\n", True),
+        (b" \t\r\n", True),
+        (b"\tdata", False),
+        (b"0103\tway\t42\t1\t1\t2026-01-01T00:00:00Z\t{}\n", False),
+    ],
+)
+def test_blank_copy_line_predicate_handles_empty_and_whitespace_lines(
+    raw: bytes, expected: bool
+) -> None:
+    assert extraction._is_blank_copy_line(raw) is expected
+
+
 def test_plain_copy_record_bypasses_unescape(monkeypatch: pytest.MonkeyPatch) -> None:
     def fail(_value: bytes) -> bytes:
         raise AssertionError("plain fields should not call _copy_unescape")
@@ -154,6 +253,21 @@ def test_copy_unescape_preserves_unknown_and_trailing_backslashes() -> None:
     assert _copy_unescape_with_deadline(b"trailing\\") == b"trailing\\"
 
 
+@pytest.mark.parametrize(
+    ("wire", "index", "expected"),
+    [
+        (b"\\t", 0, 0x09),
+        (b"x\\n", 1, 0x0A),
+        (b"\\q", 0, None),
+        (b"trailing\\", 8, None),
+    ],
+)
+def test_copy_escape_at_returns_only_supported_escape_bytes(
+    wire: bytes, index: int, expected: int | None
+) -> None:
+    assert extraction._copy_escape_at(wire, index) == expected
+
+
 def test_copy_parser_strips_only_trailing_line_endings() -> None:
     line = b"\n0103\tway\t42\t1\t1\t2026-01-01T00:00:00Z\t{}\r\n"
 
@@ -182,8 +296,10 @@ def test_copy_parser_reports_invalid_field_encoding_exactly() -> None:
 
 def test_nullable_helpers_decode_null_and_values() -> None:
     assert extraction._nullable_int(b"\\N") is None
+    assert extraction._nullable_int(b"42") == 42
     assert extraction._nullable_int(b"\\t42") == 42
     assert extraction._nullable_str(b"\\N") is None
+    assert extraction._nullable_str(b"hello") == "hello"
     assert extraction._nullable_str(b"hello\\nworld") == "hello\nworld"
 
 

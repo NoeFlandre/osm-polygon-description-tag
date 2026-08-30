@@ -4,6 +4,7 @@ import pytest
 from shapely import from_wkb, to_wkb
 from shapely.geometry import LineString, MultiPolygon, Polygon
 
+import osm_polygon_description_tag.dataset.transform as transform_module
 from osm_polygon_description_tag.dataset.transform import (
     RejectedFeature,
     _decode_polygon,
@@ -100,6 +101,46 @@ def test_early_rejection_reason_checks_localized_values_without_materializing_th
     assert _early_rejection_reason(record) == "no_nonempty_description"
     localized = _record(Polygon(), {"description:en": "English"})
     assert _early_rejection_reason(localized) is None
+
+
+def test_early_rejection_reason_reports_invalid_identity_before_tags() -> None:
+    record = _record(Polygon(), {}, osm_type="node")
+
+    assert _early_rejection_reason(record) == "unsupported_osm_type"
+
+
+def test_localized_items_filter_exact_nonempty_keys() -> None:
+    tags = {
+        "description": "base",
+        "description:": "empty suffix",
+        "description:en": "English",
+        "description:fr": "   ",
+        "description:pt-BR": "Português",
+        "description_extra": "not a match",
+    }
+
+    assert list(transform_module._localized_items(tags, "description")) == [
+        ("en", "English"),
+        ("pt-BR", "Português"),
+    ]
+
+
+def test_identity_rejection_reason_preserves_validation_order() -> None:
+    record = _record(Polygon(), {"description": "present"}, osm_type="node", osm_id=0)
+    assert transform_module._identity_rejection_reason(record) == "unsupported_osm_type"
+
+    invalid_id = _record(Polygon(), {"description": "present"}, osm_id=0)
+    assert transform_module._identity_rejection_reason(invalid_id) == "invalid_osm_id"
+
+    valid = _record(Polygon(), {"description": "present"})
+    assert transform_module._identity_rejection_reason(valid) is None
+
+
+def test_has_nonempty_description_checks_base_and_localized_values() -> None:
+    assert transform_module._has_nonempty_description({"description": "Base"}) is True
+    assert transform_module._has_nonempty_description({"description": "  "}) is False
+    assert transform_module._has_nonempty_description({"description:en": "English"}) is True
+    assert transform_module._has_nonempty_description({"name": "Place"}) is False
 
 
 @pytest.mark.parametrize(

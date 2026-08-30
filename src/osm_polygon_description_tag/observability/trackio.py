@@ -253,7 +253,7 @@ def _ranked_figure(
         key=lambda row: (-_number(row.get(value_key)), str(row.get("source", ""))),
     )[:30]
     ranked = list(reversed(ranked))
-    figure, axis = plt.subplots(figsize=(10, max(6, len(ranked) * 0.24)), dpi=120)
+    figure, axis = plt.subplots(figsize=_ranked_figure_size(len(ranked)), dpi=120)
     labels = [str(row.get("source", "")) for row in ranked]
     values = [_number(row.get(value_key)) for row in ranked]
     axis.barh(labels, values, color="#4a6fa5")  # pragma: no mutate - hex case is equivalent
@@ -262,6 +262,11 @@ def _ranked_figure(
     axis.grid(axis="x", alpha=0.25)
     figure.tight_layout()
     return figure
+
+
+def _ranked_figure_size(row_count: int) -> tuple[float, float]:
+    """Return the stable figure size for a ranked chart."""
+    return (10.0, max(6.0, row_count * 0.24))
 
 
 def build_snapshot_payload(

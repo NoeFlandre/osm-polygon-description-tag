@@ -808,14 +808,20 @@ def test_metadata_skip_revision_returns_revision_and_logs_when_state_matches(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     events: list[tuple[str, dict[str, object]]] = []
+    plan = _metadata_plan(tmp_path)
+    matches: list[tuple[Path, UploadPlan]] = []
 
     class Logger:
         def event(self, name: str, **fields: object) -> None:
             events.append((name, fields))
 
+    def state_matches(root: Path, actual_plan: UploadPlan) -> bool:
+        matches.append((root, actual_plan))
+        return True
+
     monkeypatch.setattr(
         "osm_polygon_description_tag.workflow.finalization._metadata_state_matches",
-        lambda _root, _plan: True,
+        state_matches,
     )
     seen_roots: list[Path] = []
 
@@ -828,9 +834,10 @@ def test_metadata_skip_revision_returns_revision_and_logs_when_state_matches(
         read_state,
     )
 
-    result = _metadata_skip_revision(tmp_path, _metadata_plan(tmp_path), Logger())
+    result = _metadata_skip_revision(tmp_path, plan, Logger())
 
     assert result == "revision"
+    assert matches == [(tmp_path, plan)]
     assert seen_roots == [tmp_path]
     assert events == [("metadata_skip", {"level": "INFO", "verified_revision": "revision"})]
 

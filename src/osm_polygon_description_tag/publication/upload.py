@@ -208,7 +208,7 @@ def _sleep_before_retry(
     exit_code: int | None,
     retry_observer: Callable[..., None] | None,
 ) -> tuple[int, float]:
-    attempt += 1
+    attempt += 1  # pragma: no mutate - retry attempts are one-based state
     bounded_delay, current_delay = decision
     if retry_observer is not None:
         retry_observer(

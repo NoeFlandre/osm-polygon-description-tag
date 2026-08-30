@@ -240,6 +240,15 @@ def test_required_metadata_validation_reports_the_missing_path_exactly(tmp_path:
     assert str(error.value) == f"missing required file: {tmp_path / 'README.md'}"
 
 
+def test_required_metadata_collection_rejects_mismatched_document_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(planning, "_required_document_paths", lambda _root: ())
+
+    with pytest.raises(ValueError):
+        _collect_required_metadata_items(tmp_path)
+
+
 def test_validate_data_root_rejects_a_file(tmp_path: Path) -> None:
     root = tmp_path / "data-root"
     root.write_bytes(b"not a directory")
