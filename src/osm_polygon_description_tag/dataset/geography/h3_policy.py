@@ -263,8 +263,7 @@ def cell_rings(cell: str) -> list[list[tuple[float, float]]]:
         return []
     if not boundary:
         return []
-    raw_points = _boundary_points(boundary)
-    return [ring for ring in split_antimeridian(raw_points) if len(ring) >= 3]
+    return _rings_from_boundary(boundary)
 
 
 def _boundary_points(boundary: Sequence[Sequence[float]]) -> list[tuple[float, float]]:
@@ -274,6 +273,14 @@ def _boundary_points(boundary: Sequence[Sequence[float]]) -> list[tuple[float, f
             # H3 v4: (lat, lon); flip to (lon, lat) for matplotlib.
             points.append((float(pair[1]), float(pair[0])))
     return points
+
+
+def _rings_from_boundary(
+    boundary: Sequence[Sequence[float]],
+) -> list[list[tuple[float, float]]]:
+    """Convert an H3 boundary into drawable, antimeridian-safe rings."""
+    raw_points = _boundary_points(boundary)
+    return [ring for ring in split_antimeridian(raw_points) if len(ring) >= 3]
 
 
 __all__ = [

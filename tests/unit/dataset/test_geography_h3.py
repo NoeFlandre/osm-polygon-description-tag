@@ -173,10 +173,27 @@ def test_cell_rings_for_invalid_cell_returns_empty() -> None:
     assert cell_rings("000000000000000") == []
 
 
+def test_cell_rings_returns_empty_for_empty_h3_boundary() -> None:
+    with patch.object(h3_policy_module.h3, "cell_to_boundary", return_value=[]):
+        assert cell_rings("cell") == []
+
+
 def test_cell_rings_flips_boundary_coordinates_and_keeps_three_points() -> None:
     boundary = [(10.0, 20.0), (30.0, 40.0), (50.0, 60.0)]
     with patch.object(h3_policy_module.h3, "cell_to_boundary", return_value=boundary):
         assert cell_rings("cell") == [[(20.0, 10.0), (40.0, 30.0), (60.0, 50.0)]]
+
+
+def test_rings_from_boundary_ignores_short_boundary_pairs() -> None:
+    boundary = [(10.0, 20.0), (30.0,), (50.0, 60.0), (70.0, 80.0)]
+
+    assert h3_policy_module._rings_from_boundary(boundary) == [
+        [(20.0, 10.0), (60.0, 50.0), (80.0, 70.0)]
+    ]
+
+
+def test_rings_from_boundary_discards_rings_with_fewer_than_three_points() -> None:
+    assert h3_policy_module._rings_from_boundary([(10.0, 20.0), (30.0, 40.0)]) == []
 
 
 # ---------------------------------------------------------------------------
