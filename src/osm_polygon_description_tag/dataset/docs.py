@@ -41,6 +41,7 @@ _AREA_HISTOGRAM_ASSET_RELATIVE_PATH = f"assets/{_AREA_HISTOGRAM_FILENAME}"
 _AREA_HISTOGRAM_TITLE = "Area distribution of description-tagged polygons"
 _DATASET_CARD_HERO_FILENAME = "dataset-card-hero.png"
 _DATASET_CARD_HERO_ASSET_RELATIVE_PATH = f"assets/{_DATASET_CARD_HERO_FILENAME}"
+_BYTE_UNITS = ("B", "KiB", "MiB", "GiB", "TiB")
 _GENERATED_PATTERN = re.compile(
     r"(<!-- GENERATED:STATS:START -->\n)(.*?)(<!-- GENERATED:STATS:END -->)", re.DOTALL
 )
@@ -109,15 +110,19 @@ def _fmt_int(value: int) -> str:
     return f"{value:,}"
 
 
-def _fmt_bytes(value: int) -> str:
+def _scale_bytes(value: int) -> tuple[float, int]:
     size = float(value)
-    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
-        if size < 1024 or unit == "TiB":
-            return f"{size:,.0f} {unit}" if unit == "B" else f"{size:,.1f} {unit}"
+    unit_index = 0
+    while size >= 1024 and unit_index < len(_BYTE_UNITS) - 1:
         size /= 1024
-    # pragma: no mutate start - the final TiB branch always returns
-    raise AssertionError("unreachable")
-    # pragma: no mutate end
+        unit_index += 1
+    return size, unit_index
+
+
+def _fmt_bytes(value: int) -> str:
+    size, unit_index = _scale_bytes(value)
+    decimals = 0 if unit_index == 0 else 1
+    return f"{size:,.{decimals}f} {_BYTE_UNITS[unit_index]}"
 
 
 def _fmt_median(value: float | None) -> str:
