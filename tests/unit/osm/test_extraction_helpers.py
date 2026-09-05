@@ -35,24 +35,19 @@ def test_copy_unescape_returns_plain_bytes_without_copying() -> None:
     assert extraction._copy_unescape(wire) is wire
 
 
-def test_parse_tags_passes_unescaped_bytes_to_json_loader(
+def test_load_tags_avoids_stdlib_fallback_for_valid_json(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    seen: list[object] = []
-
-    def loads(value: object) -> object:
-        seen.append(value)
-        return {"description": "value"}
-
     monkeypatch.setattr(
-        extraction,
-        "orjson",
-        SimpleNamespace(loads=loads),
-        raising=False,
+        extraction.json,
+        "loads",
+        lambda *_args, **_kwargs: pytest.fail("valid JSON must not use the slower fallback"),
     )
 
-    assert extraction._parse_tags(b'{"description":"value"}') == {"description": "value"}
-    assert seen == [b'{"description":"value"}']
+    assert extraction._load_tags(b'{"description":"caf\xc3\xa9","count":2}') == {
+        "description": "café",
+        "count": 2,
+    }
 
 
 def test_parse_tags_falls_back_to_stdlib(monkeypatch: pytest.MonkeyPatch) -> None:

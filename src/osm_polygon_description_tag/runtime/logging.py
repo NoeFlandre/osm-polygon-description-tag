@@ -34,9 +34,10 @@ import sys
 import threading
 import uuid
 from collections.abc import Callable, Iterable, Mapping
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, Any
+
+from osm_polygon_description_tag.runtime.time import utc_now_iso
 
 _REDACTED = "[REDACTED]"
 
@@ -90,11 +91,6 @@ _CREDENTIAL_RE = re.compile(
 )
 
 
-class _SafeJsonFormatter(json.JSONEncoder):
-    def default(self, o: object) -> object:
-        return str(o)
-
-
 class _BufferedEvent:
     __slots__ = ("raw", "record")
 
@@ -120,10 +116,6 @@ def _scrub(payload: dict[str, object]) -> dict[str, object]:
         if key in _ALLOWED_FIELDS:
             cleaned[key] = _scrub_value(value)
     return cleaned
-
-
-def _utcnow_iso() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 def _ensure_log_directory(subdir: Path) -> None:
@@ -204,7 +196,7 @@ class RunLogger:
     ) -> None:
         self._data_root = data_root
         self._run_id = run_id
-        self._clock: Callable[[], str] = clock or _utcnow_iso
+        self._clock: Callable[[], str] = clock or utc_now_iso
         self._lock = threading.Lock()
         self._buffered: list[_BufferedEvent] = []
         self._buffer_preflight = buffer_preflight
@@ -263,7 +255,9 @@ class RunLogger:
         for key, value in fields.items():
             record[key] = value
         scrubbed = _scrub(record)
-        raw = json.dumps(scrubbed, ensure_ascii=False, sort_keys=True, cls=_SafeJsonFormatter)
+        # pragma: no mutate start - ensure_ascii=None equals False; exact JSON bytes are tested
+        raw = json.dumps(scrubbed, ensure_ascii=False, sort_keys=True, default=str)
+        # pragma: no mutate end
         if self._observer is not None:
             with contextlib.suppress(Exception):
                 self._observer(dict(scrubbed))
@@ -339,7 +333,8 @@ class RunLogger:
             if _rotation_needed(self._path, self._max_bytes):
                 self._rotate_locked()
 
-    def _close_active_for_rotation(self) -> None:
+    def _close_handle(self) -> None:
+        """Close the active handle while the caller holds the lock."""
         assert self._handle is not None
         self._handle.flush()
         with contextlib.suppress(OSError):
@@ -350,7 +345,7 @@ class RunLogger:
     def _rotate_locked(self) -> None:
         assert self._handle is not None
         assert self._path is not None
-        self._close_active_for_rotation()
+        self._close_handle()
         subdir = self._path.parent
         backup_chain = _backup_chain(subdir, self._backups)
         staging = subdir / f".run-and-publish.rotate.{uuid.uuid4().hex}.jsonl"
@@ -377,11 +372,7 @@ class RunLogger:
     def close(self) -> None:
         with self._lock:
             if self._handle is not None:
-                self._handle.flush()
-                with contextlib.suppress(OSError):
-                    os.fsync(self._handle.fileno())
-                self._handle.close()
-                self._handle = None
+                self._close_handle()
 
 
 def configure_rotation(logger: RunLogger, *, max_bytes: int, backups: int) -> None:

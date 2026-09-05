@@ -270,21 +270,6 @@ def test_format_bytes_uses_stable_binary_units(value: int, expected: str) -> Non
 
 @pytest.mark.parametrize(
     ("value", "expected"),
-    [
-        (0, (0.0, 0)),
-        (1_024, (1.0, 1)),
-        (1_024**4, (1.0, 4)),
-        (1_024**5, (1_024.0, 4)),
-    ],
-)
-def test_scale_bytes_uses_binary_units_and_caps_at_tib(
-    value: int, expected: tuple[float, int]
-) -> None:
-    assert docs_module._scale_bytes(value) == expected
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
     [(None, "—"), (12.0, "12"), (12.5, "12.5")],
 )
 def test_format_median_distinguishes_missing_integer_and_fractional_values(

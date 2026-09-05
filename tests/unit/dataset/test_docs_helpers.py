@@ -130,9 +130,9 @@ def test_ensure_h3_map_reuses_valid_cache_or_aggregates_and_forwards_counts(
         patch.object(docs_module, "_h3_map_input_sha256", return_value="hash") as input_hash,
         patch.object(docs_module, "_cached_h3_occupied_cells", return_value=3) as cached,
         patch.object(docs_module, "aggregate_h3_density") as aggregate,
-        patch.object(docs_module, "_write_h3_map_png") as write_map,
+        patch.object(docs_module, "render_density_map") as write_map,
     ):
-        assert docs_module._ensure_h3_map(tmp_path, 7, stats, {}) == ("hash", 3)
+        assert docs_module._ensure_h3_map(tmp_path, stats, {}) == ("hash", 3)
 
     input_hash.assert_called_once_with(stats)
     cached.assert_called_once_with(
@@ -148,12 +148,12 @@ def test_ensure_h3_map_reuses_valid_cache_or_aggregates_and_forwards_counts(
         patch.object(docs_module, "_h3_map_input_sha256", return_value="new-hash"),
         patch.object(docs_module, "_cached_h3_occupied_cells", return_value=None),
         patch.object(docs_module, "aggregate_h3_density", return_value=counts) as aggregate,
-        patch.object(docs_module, "_write_h3_map_png") as write_map,
+        patch.object(docs_module, "render_density_map") as write_map,
     ):
-        assert docs_module._ensure_h3_map(tmp_path, 7, stats, {}) == ("new-hash", 2)
+        assert docs_module._ensure_h3_map(tmp_path, stats, {}) == ("new-hash", 2)
 
     aggregate.assert_called_once_with(tmp_path)
-    write_map.assert_called_once_with(tmp_path, 7, 2, counts=counts)
+    write_map.assert_called_once_with(counts, tmp_path / docs_module.H3_MAP_ASSET_RELATIVE_PATH)
 
 
 @pytest.mark.parametrize(
@@ -229,7 +229,8 @@ def test_ensure_area_histogram_reuses_or_rebuilds_and_returns_current_row_count(
             docs_module, "_area_histogram_input_sha256", return_value="hash"
         ) as input_hash,
         patch.object(docs_module, "_histogram_cache_is_valid", return_value=True) as valid,
-        patch.object(docs_module, "_write_area_histogram_png") as write_histogram,
+        patch.object(docs_module, "aggregate_area_histogram") as aggregate,
+        patch.object(docs_module, "render_area_histogram") as write_histogram,
     ):
         assert docs_module._ensure_area_histogram(tmp_path, stats, {}) == ("hash", 9)
 
@@ -240,15 +241,21 @@ def test_ensure_area_histogram_reuses_or_rebuilds_and_returns_current_row_count(
         "hash",
     )
     write_histogram.assert_not_called()
+    aggregate.assert_not_called()
 
+    counts = {"1-10 m²": 9}
     with (
         patch.object(docs_module, "_area_histogram_input_sha256", return_value="new-hash"),
         patch.object(docs_module, "_histogram_cache_is_valid", return_value=False),
-        patch.object(docs_module, "_write_area_histogram_png") as write_histogram,
+        patch.object(docs_module, "aggregate_area_histogram", return_value=counts) as aggregate,
+        patch.object(docs_module, "render_area_histogram") as write_histogram,
     ):
         assert docs_module._ensure_area_histogram(tmp_path, stats, {}) == ("new-hash", 9)
 
-    write_histogram.assert_called_once_with(tmp_path)
+    aggregate.assert_called_once_with(tmp_path)
+    write_histogram.assert_called_once_with(
+        counts, tmp_path / docs_module._AREA_HISTOGRAM_ASSET_RELATIVE_PATH
+    )
 
 
 def test_render_h3_map_block_is_a_stable_relative_markdown_reference() -> None:
@@ -289,60 +296,6 @@ def test_render_stats_block_uses_zero_defaults_and_actual_medians() -> None:
 
 def test_format_bytes_handles_values_above_the_last_named_unit() -> None:
     assert docs_module._fmt_bytes(1024**5) == "1,024.0 TiB"
-
-
-def test_write_h3_map_png_uses_supplied_or_aggregated_counts(
-    tmp_path: Path,
-) -> None:
-    supplied = {"a": 1}
-    with (
-        patch.object(docs_module, "aggregate_h3_density") as aggregate,
-        patch.object(docs_module, "render_density_map") as render,
-    ):
-        docs_module._write_h3_map_png(tmp_path, 7, 1, counts=supplied)
-
-    aggregate.assert_not_called()
-    render.assert_called_once_with(supplied, tmp_path / docs_module.H3_MAP_ASSET_RELATIVE_PATH)
-
-    generated = {"b": 2}
-    with (
-        patch.object(docs_module, "aggregate_h3_density", return_value=generated) as aggregate,
-        patch.object(docs_module, "render_density_map") as render,
-    ):
-        docs_module._write_h3_map_png(tmp_path, 7, 1)
-
-    aggregate.assert_called_once_with(tmp_path)
-    render.assert_called_once_with(generated, tmp_path / docs_module.H3_MAP_ASSET_RELATIVE_PATH)
-
-
-def test_write_area_histogram_png_uses_supplied_or_aggregated_counts(
-    tmp_path: Path,
-) -> None:
-    supplied = {"1-10 m²": 1}
-    with (
-        patch.object(docs_module, "aggregate_area_histogram") as aggregate,
-        patch.object(docs_module, "render_area_histogram") as render,
-    ):
-        assert docs_module._write_area_histogram_png(tmp_path, counts=supplied) == supplied
-
-    aggregate.assert_not_called()
-    render.assert_called_once_with(
-        supplied,
-        tmp_path / docs_module._AREA_HISTOGRAM_ASSET_RELATIVE_PATH,
-    )
-
-    generated = {"1-10 m²": 2}
-    with (
-        patch.object(docs_module, "aggregate_area_histogram", return_value=generated) as aggregate,
-        patch.object(docs_module, "render_area_histogram") as render,
-    ):
-        assert docs_module._write_area_histogram_png(tmp_path) == generated
-
-    aggregate.assert_called_once_with(tmp_path)
-    render.assert_called_once_with(
-        generated,
-        tmp_path / docs_module._AREA_HISTOGRAM_ASSET_RELATIVE_PATH,
-    )
 
 
 def test_write_dataset_docs_renders_stats_map_and_canonical_json(
@@ -438,7 +391,7 @@ def test_generate_dataset_docs_forwards_clock_and_orchestrates_all_outputs(
 
     collect.assert_called_once_with(tmp_path, clock=clock)
     read_cache.assert_called_once_with(tmp_path / "stats.json")
-    ensure_h3.assert_called_once_with(tmp_path, 5, stats, previous)
+    ensure_h3.assert_called_once_with(tmp_path, stats, previous)
     ensure_area.assert_called_once_with(tmp_path, stats, previous)
     write_hero.assert_called_once_with(tmp_path)
     write_docs.assert_called_once_with(tmp_path, template, stats)

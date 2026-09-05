@@ -60,21 +60,6 @@ DataRoot = Annotated[Path | None, typer.Option("--data-root")]
 Osmium = Annotated[str, typer.Option("--osmium")]
 
 
-def _namespace(
-    *,
-    source_root: Path | None,
-    data_root: Path | None,
-    osmium: str,
-    **values: object,
-) -> SimpleNamespace:
-    return SimpleNamespace(
-        source_root=source_root,
-        data_root=data_root,
-        osmium=osmium,
-        **values,
-    )
-
-
 def _resolve_paths(args: SimpleNamespace) -> Paths:
     defaults = Paths.defaults()
     return Paths(
@@ -84,7 +69,9 @@ def _resolve_paths(args: SimpleNamespace) -> Paths:
 
 
 def _print_json(payload: dict[str, object]) -> None:
+    # pragma: no mutate start - ensure_ascii=None equals False; exact JSON bytes are tested
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    # pragma: no mutate end
 
 
 class _Interrupted(Exception):
@@ -288,7 +275,7 @@ def inspect_command(
 ) -> None:
     _invoke(
         handle_inspect,
-        _namespace(source_root=source_root, data_root=data_root, osmium=osmium),
+        SimpleNamespace(source_root=source_root, data_root=data_root, osmium=osmium),
     )
 
 
@@ -301,7 +288,7 @@ def build_one_command(
 ) -> None:
     _invoke(
         handle_build_one,
-        _namespace(
+        SimpleNamespace(
             source_root=source_root,
             data_root=data_root,
             osmium=osmium,
@@ -318,7 +305,7 @@ def build_all_command(
 ) -> None:
     _invoke(
         handle_build_all,
-        _namespace(source_root=source_root, data_root=data_root, osmium=osmium),
+        SimpleNamespace(source_root=source_root, data_root=data_root, osmium=osmium),
     )
 
 
@@ -330,7 +317,7 @@ def validate_command(
 ) -> None:
     _invoke(
         handle_validate,
-        _namespace(source_root=source_root, data_root=data_root, osmium=osmium),
+        SimpleNamespace(source_root=source_root, data_root=data_root, osmium=osmium),
     )
 
 
@@ -342,7 +329,7 @@ def generate_card_command(
 ) -> None:
     _invoke(
         handle_card,
-        _namespace(source_root=source_root, data_root=data_root, osmium=osmium),
+        SimpleNamespace(source_root=source_root, data_root=data_root, osmium=osmium),
     )
 
 
@@ -357,7 +344,7 @@ def migrate_schema_command(
 ) -> None:
     _invoke(
         handle_migrate_schema,
-        _namespace(source_root=source_root, data_root=data_root, osmium=osmium),
+        SimpleNamespace(source_root=source_root, data_root=data_root, osmium=osmium),
     )
 
 
@@ -374,7 +361,7 @@ def trackio_snapshot_command(
 ) -> None:
     _invoke(
         handle_trackio_snapshot,
-        _namespace(
+        SimpleNamespace(
             source_root=source_root,
             data_root=data_root,
             osmium=osmium,
@@ -393,7 +380,7 @@ def publish_plan_command(
 ) -> None:
     _invoke(
         handle_publish_plan,
-        _namespace(source_root=source_root, data_root=data_root, osmium=osmium),
+        SimpleNamespace(source_root=source_root, data_root=data_root, osmium=osmium),
     )
 
 
@@ -412,7 +399,7 @@ def publish_command(
 ) -> None:
     _invoke(
         handle_publish,
-        _namespace(
+        SimpleNamespace(
             source_root=source_root,
             data_root=data_root,
             osmium=osmium,
@@ -441,7 +428,7 @@ def run_and_publish_command(
     try:
         _invoke(
             handle_run_and_publish,
-            _namespace(
+            SimpleNamespace(
                 source_root=source_root,
                 data_root=data_root,
                 osmium=osmium,

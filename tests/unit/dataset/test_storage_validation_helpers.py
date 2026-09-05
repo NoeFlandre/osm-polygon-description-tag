@@ -32,7 +32,6 @@ from osm_polygon_description_tag.dataset.storage import (
     _UniquenessIndex,
     _validate_area,
     _validate_bbox,
-    _validate_finalized_artifacts_strict,
     _validate_geo_metadata_header,
     _validate_geometry,
     _validate_geometry_metadata_column,
@@ -44,6 +43,7 @@ from osm_polygon_description_tag.dataset.storage import (
     _validate_source,
     _ValidationState,
     validate_finalized_artifacts,
+    validate_finalized_artifacts_strict,
     write_geoparquet,
 )
 
@@ -540,7 +540,7 @@ def test_validate_finalized_artifacts_strict_validates_every_parquet(
         patch.object(storage, "validate_finalized_artifacts", return_value=result) as base,
         patch.object(storage, "validate_geoparquet") as strict,
     ):
-        assert _validate_finalized_artifacts_strict(tmp_path) is result
+        assert validate_finalized_artifacts_strict(tmp_path) is result
 
     base.assert_called_once_with(tmp_path)
     assert strict.call_args_list == [

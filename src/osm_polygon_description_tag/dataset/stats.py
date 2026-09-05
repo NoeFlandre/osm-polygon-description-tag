@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import duckdb
 import pyarrow as pa
@@ -75,21 +75,6 @@ def _quantile_or_none(
     if result is None or result[0] is None:
         return None
     return float(result[0])
-
-
-def _safe_map(value: object) -> dict[str, int]:
-    """Convert DuckDB map output into a deterministic string-to-int dict."""
-    if value is None:
-        return {}
-    items = value.items() if isinstance(value, dict) else []
-    cleaned: dict[str, int] = {}
-    for key, count in items:
-        if key is None:
-            continue
-        # pragma: no mutate start - cast is static-only; int performs the runtime conversion
-        cleaned[str(key)] = int(cast(int, count))
-        # pragma: no mutate end
-    return cleaned
 
 
 def _suffix_counts(connection: duckdb.DuckDBPyConnection, map_column: str) -> dict[str, int]:

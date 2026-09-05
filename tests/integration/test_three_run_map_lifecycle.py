@@ -167,7 +167,7 @@ def _install_hf_stubs(
     return log
 
 
-def _stub_h3_render(monkeypatch: pytest.MonkeyPatch, data_root: Path) -> None:
+def _stub_h3_render(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub the H3 map rendering to write a deterministic PNG.
 
     The deterministic PNG is enough to exercise publication-state
@@ -175,27 +175,19 @@ def _stub_h3_render(monkeypatch: pytest.MonkeyPatch, data_root: Path) -> None:
     """
     from PIL import Image
 
-    def _write_png(
-        data_root_arg: Path,
-        total_rows: int,
-        occupied_cells: int,
-        counts: dict[str, int] | None = None,
-    ) -> None:
-        assets_dir = data_root_arg / "assets"
-        assets_dir.mkdir(parents=True, exist_ok=True)
-        target = assets_dir / "description_polygon_density.png"
+    def _write_png(counts: dict[str, int], target: Path) -> None:
+        target.parent.mkdir(parents=True, exist_ok=True)
         Image.new("RGB", (16, 8), (255, 255, 255)).save(target)
 
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.docs._write_h3_map_png",
+        "osm_polygon_description_tag.dataset.docs.render_density_map",
         _write_png,
-        raising=False,
     )
 
 
 def test_three_run_map_lifecycle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     paths, source_root, data_root = _setup_two_sources(tmp_path)
-    _stub_h3_render(monkeypatch, data_root)
+    _stub_h3_render(monkeypatch)
 
     # -------------------------------------------------------------------------
     # Run 1: build alpha, upload alpha, build beta, interrupt during beta's upload.

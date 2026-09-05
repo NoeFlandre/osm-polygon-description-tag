@@ -101,26 +101,16 @@ def _write_if_changed(path: Path, text: str) -> bool:
     # pragma: no mutate end
 
 
-def _write_bytes_if_changed(path: Path, data: bytes) -> bool:
-    """Atomically write binary data only when bytes differ."""
-    return _atomic_write_if_changed(path, data)
-
-
 def _fmt_int(value: int) -> str:
     return f"{value:,}"
 
 
-def _scale_bytes(value: int) -> tuple[float, int]:
+def _fmt_bytes(value: int) -> str:
     size = float(value)
     unit_index = 0
     while size >= 1024 and unit_index < len(_BYTE_UNITS) - 1:
         size /= 1024
         unit_index += 1
-    return size, unit_index
-
-
-def _fmt_bytes(value: int) -> str:
-    size, unit_index = _scale_bytes(value)
     decimals = 0 if unit_index == 0 else 1
     return f"{size:,.{decimals}f} {_BYTE_UNITS[unit_index]}"
 
@@ -215,37 +205,12 @@ def _render_h3_map_block() -> str:
     return f"![{H3_MAP_TITLE}]({H3_MAP_ASSET_RELATIVE_PATH})\n"
 
 
-def _write_h3_map_png(
-    data_root: Path,
-    total_rows: int,
-    occupied_cells: int,
-    *,
-    counts: Mapping[str, int] | None = None,
-) -> None:
-    """Render the H3 density PNG, accepting precomputed counts for tests."""
-    render_density_map(
-        counts if counts is not None else aggregate_h3_density(data_root),
-        data_root / H3_MAP_ASSET_RELATIVE_PATH,
-    )
-
-
 def _area_histogram_input_sha256(stats: Mapping[str, Any]) -> str:
     """Return the stable area-histogram cache identity."""
     mapping = {
         str(entry["parquet"]): str(entry["output_sha256"]) for entry in stats.get("files", [])
     }
     return area_histogram_input_sha256(mapping)
-
-
-def _write_area_histogram_png(
-    data_root: Path,
-    *,
-    counts: Mapping[str, int] | None = None,
-) -> dict[str, int]:
-    """Aggregate and render the area histogram."""
-    values = counts if counts is not None else aggregate_area_histogram(data_root)
-    render_area_histogram(values, data_root / _AREA_HISTOGRAM_ASSET_RELATIVE_PATH)
-    return dict(values)
 
 
 def _cached_h3_occupied_cells(
@@ -267,7 +232,6 @@ def _is_nonnegative_int(value: object) -> bool:
 
 def _ensure_h3_map(
     data_root: Path,
-    total_rows: int,
     stats: Mapping[str, Any],
     previous_stats: Mapping[str, Any],
 ) -> tuple[str, int]:
@@ -277,7 +241,7 @@ def _ensure_h3_map(
     if occupied_cells is None:
         h3_counts = aggregate_h3_density(data_root)
         occupied_cells = len(h3_counts)
-        _write_h3_map_png(data_root, total_rows, occupied_cells, counts=h3_counts)
+        render_density_map(h3_counts, map_path)
     return input_sha256, occupied_cells
 
 
@@ -304,12 +268,12 @@ def _ensure_area_histogram(
     input_sha256 = _area_histogram_input_sha256(stats)
     histogram_path = data_root / _AREA_HISTOGRAM_ASSET_RELATIVE_PATH
     if not _histogram_cache_is_valid(histogram_path, previous_stats, input_sha256):
-        _write_area_histogram_png(data_root)
+        render_area_histogram(aggregate_area_histogram(data_root), histogram_path)
     return input_sha256, int(stats["rows"])
 
 
 def _write_dataset_hero(data_root: Path) -> None:
-    _write_bytes_if_changed(
+    _atomic_write_if_changed(
         data_root / _DATASET_CARD_HERO_ASSET_RELATIVE_PATH,
         dataset_card_hero().read_bytes(),
     )
@@ -350,9 +314,8 @@ def generate_dataset_docs(
 ) -> dict[str, Any]:
     """Write deterministic stats, README, and derived media artifacts."""
     stats = collect_stats(data_root, clock=clock)
-    total_rows = int(stats["rows"])
     previous_stats = _read_json_object(data_root / "stats.json")
-    map_input_sha256, occupied_cells = _ensure_h3_map(data_root, total_rows, stats, previous_stats)
+    map_input_sha256, occupied_cells = _ensure_h3_map(data_root, stats, previous_stats)
     stats["h3_map_input_sha256"] = map_input_sha256
     stats["h3_occupied_cells"] = occupied_cells
 

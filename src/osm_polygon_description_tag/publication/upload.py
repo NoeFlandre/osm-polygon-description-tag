@@ -134,15 +134,10 @@ def _run_with_retry(
     attempt = 0
     delay = backoff_seconds
 
-    def _invoke() -> None:
-        _invoke_runner(command, timeout, _runner)
-
     while True:
         try:
-            _invoke()
+            _invoke_runner(command, timeout, _runner)
             return
-        except KeyboardInterrupt:
-            raise
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
             retryable, exit_code, kind = _failure_details(error)
             decision = _called_error_retry(
@@ -248,7 +243,7 @@ def execute_upload(
     if runner is None:
         _run_default_upload(command, timeout, retry_observer)
     else:
-        _run_injected_upload(runner, command)
+        runner(command)
 
 
 def _require_confirmation(plan: UploadPlan, confirmation: str | None) -> None:
@@ -268,7 +263,3 @@ def _run_default_upload(
         if "unexpected keyword argument 'retry_observer'" not in str(error):
             raise
         _default_runner_with_retry(command, timeout=timeout)
-
-
-def _run_injected_upload(runner: Runner, command: list[str]) -> None:
-    runner(command)

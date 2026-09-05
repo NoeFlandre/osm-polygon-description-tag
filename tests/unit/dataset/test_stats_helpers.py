@@ -69,10 +69,6 @@ def test_description_word_stats_handles_values_and_empty_results() -> None:
     assert "SELECT entry.value AS value" in localized_query
 
 
-def test_safe_map_runtime_conversion_is_independent_of_static_cast() -> None:
-    assert stats_module._safe_map({"en": "3"}) == {"en": 3}
-
-
 def test_map_sql_expression_supports_map_and_hub_list_representations() -> None:
     map_type = pa.map_(pa.string(), pa.string())
     list_type = pa.list_(

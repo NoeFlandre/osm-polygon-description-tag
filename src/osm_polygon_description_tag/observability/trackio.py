@@ -200,9 +200,7 @@ def build_dataset_summary(stats: Mapping[str, Any]) -> list[dict[str, object]]:
     rows = _integer(stats.get("rows"))
     base_values = _integer(stats.get("base_description_values"))
     localized_values = _integer(stats.get("localized_description_values"))
-    technical_rejections = sum(
-        count for reason, count in _rejections(stats).items() if reason != "no_nonempty_description"
-    )
+    technical_rejections = _technical_rejections(_rejections(stats))
     unique_objects = _integer(stats.get("unique_osm_objects", rows))
     duplicate_rate = _number(
         stats.get(

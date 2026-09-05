@@ -151,21 +151,6 @@ class OrchestrationReport:
 # ---------------------------------------------------------------------------
 
 
-def _default_subprocess_runner(command: list[str], *, timeout: float | None = None) -> None:
-    """Default production subprocess boundary.
-
-    Private hook so tests can monkeypatch the real ``subprocess.run`` call.
-    The signature forwards ``timeout`` so the orchestrator's
-    ``upload_timeout`` reaches ``subprocess.run``.
-    """
-    subprocess.run(  # noqa: S603 - controlled argument array, no shell
-        command,
-        check=True,
-        shell=False,
-        timeout=timeout,
-    )
-
-
 def _execute_publication(
     paths: Paths,
     source: Source,
@@ -210,8 +195,6 @@ def _upload_source_plan(
             _run_default_source_upload(plan, timeout=timeout, logger=logger)
         else:
             _run_injected_source_upload(paths, source, upload_runner)
-    except KeyboardInterrupt:
-        raise
     except (PublicationError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         raise OrchestratorError(f"upload failed for {source.name}: {error}") from error
 
@@ -274,8 +257,6 @@ def _call_source_verifier(
 ) -> str:
     try:
         verified = verifier(REPO_ID, plan.files)
-    except KeyboardInterrupt:
-        raise
     except Exception as error:
         raise OrchestratorError(f"Hub verifier failed for {source.name}: {error}") from error
     if not verified:
@@ -807,8 +788,6 @@ def _reconcile_remote(
 def _call_remote_reconcile(reconcile: Callable[..., object], plan: Any) -> object:
     try:
         return reconcile(REPO_ID, {item.relative_path for item in plan.files})
-    except KeyboardInterrupt:
-        raise
     except Exception as error:
         raise OrchestratorError(f"remote artifact reconciliation failed: {error}") from error
 

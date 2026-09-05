@@ -41,9 +41,7 @@ from osm_polygon_description_tag.dataset.geography.area_histogram import (
     _bucket_index,
 )
 from osm_polygon_description_tag.dataset.geography.area_rendering import (
-    _atomic_save_png,
     _format_count_tick,
-    atomic_save_png_for_testing,
 )
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
@@ -684,38 +682,20 @@ def test_render_area_histogram_preserves_mtime_on_byte_identical_re_render(
 
 def test_render_area_histogram_atomic_cleanup_on_failure(tmp_path: Path) -> None:
     """A failure inside the renderer cleans up the temporary file."""
-    real_atomic = _atomic_save_png
+    from matplotlib.figure import Figure
 
-    def failing_atomic(_fig: object, target: Path) -> None:
-        raise RuntimeError("simulated failure")
+    figures_before = area_rendering_module.plt.get_fignums()
+    out = tmp_path / "hist.png"
+    out.write_bytes(b"original")
+    with (
+        patch.object(Figure, "savefig", side_effect=RuntimeError("simulated failure")),
+        pytest.raises(RuntimeError, match="simulated failure"),
+    ):
+        render_area_histogram({}, out)
 
-    import osm_polygon_description_tag.dataset.geography.area_rendering as rendering_module
-
-    rendering_module._atomic_save_png = failing_atomic  # type: ignore[assignment]
-    try:
-        counts = {label: 0 for label in AREA_BUCKET_LABELS}
-        out = tmp_path / "hist.png"
-        with pytest.raises(RuntimeError, match="simulated failure"):
-            render_area_histogram(counts, out)
-    finally:
-        rendering_module._atomic_save_png = real_atomic  # type: ignore[assignment]
-    assert not (tmp_path / "hist.png").exists()
-    leftovers = [
-        p for p in tmp_path.iterdir() if p.name.startswith(".hist.png.") and p.name.endswith(".tmp")
-    ]
-    assert leftovers == []
-
-
-def test_render_area_histogram_constant_exposed_for_testing(tmp_path: Path) -> None:
-    """The test-only re-export of ``_atomic_save_png`` is wired up."""
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots()
-    ax.plot([0, 1], [0, 1])
-    target = tmp_path / "tiny.png"
-    atomic_save_png_for_testing(fig, target)
-    plt.close(fig)
-    assert target.is_file()
+    assert out.read_bytes() == b"original"
+    assert list(tmp_path.glob(".hist.png.*.tmp")) == []
+    assert area_rendering_module.plt.get_fignums() == figures_before
 
 
 def test_render_area_histogram_byte_stable_for_empty_dataset(tmp_path: Path) -> None:
@@ -814,12 +794,12 @@ def test_generate_dataset_docs_recomputes_when_render_version_changes(
 
     calls: list[Path] = []
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.docs._write_area_histogram_png",
-        lambda root: calls.append(root),
+        "osm_polygon_description_tag.dataset.docs.render_area_histogram",
+        lambda counts, target: calls.append(target),
     )
     generate_dataset_docs(data_root, template_path, clock=_frozen_clock)
 
-    assert calls == [data_root]
+    assert calls == [data_root / "assets" / "area_distribution.png"]
 
 
 def test_generate_dataset_docs_recomputes_histogram_when_parquet_changes(

@@ -92,14 +92,8 @@ def _build_caption(counts: Mapping[str, int]) -> str:
 
 
 def _bar_labels(counts: Mapping[str, int]) -> tuple[list[str], list[int]]:
-    """Return aligned label/value lists, dropping empty leading buckets for legibility."""
-    labels: list[str] = []
-    values: list[int] = []
-    for label in AREA_BUCKET_LABELS:
-        count = int(counts.get(label, 0))
-        labels.append(label)
-        values.append(count)
-    return labels, values
+    """Return every bucket label with its count, including empty buckets."""
+    return list(AREA_BUCKET_LABELS), [int(counts.get(label, 0)) for label in AREA_BUCKET_LABELS]
 
 
 def render_area_histogram(
@@ -209,11 +203,6 @@ def _set_area_limits(ax: Any, values: Sequence[int]) -> None:
     max_value = max(values) if values else 1
     # pragma: no mutate end
     ax.set_xlim(left=1.0, right=max(max_value * 4.0, 10.0))
-
-
-def atomic_save_png_for_testing(fig: Any, output_path: Path) -> None:
-    """Test-only re-export of :func:`_atomic_save_png` for failure-path coverage."""
-    _atomic_save_png(fig, output_path)
 
 
 __all__: Final[Sequence[str]] = (

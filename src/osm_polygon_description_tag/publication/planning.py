@@ -38,11 +38,6 @@ ALLOWED_TOP_LEVEL = {
     "stats.json",
 }
 
-# The exact uploader-owned cache directory layout. ``hf upload-large-folder``
-# creates ``<data-root>/.cache/huggingface`` while it runs to enable
-# resumable uploads; this directory must be permitted locally but it must
-# NEVER appear in any upload plan or include flag.
-_UPLOADER_CACHE_RELATIVE = ".cache/huggingface"
 _LOCAL_WORK_RELATIVE = ".work"
 
 # The exact uploader-owned asset filenames that may appear under
@@ -215,6 +210,10 @@ def _validate_data_root(data_root: Path) -> None:
         raise PublicationError(f"data root is not a regular directory: {data_root}")
 
 
+# The exact uploader-owned cache directory layout. ``hf upload-large-folder``
+# creates ``<data-root>/.cache/huggingface`` while it runs to enable
+# resumable uploads; this directory must be permitted locally but it must
+# NEVER appear in any upload plan or include flag.
 def _validate_uploader_cache(entry: Path) -> None:
     if entry.is_symlink():
         raise PublicationError(f"uploader cache must be a real directory, not a symlink: {entry}")

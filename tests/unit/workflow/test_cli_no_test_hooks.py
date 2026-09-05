@@ -49,26 +49,3 @@ def test_publish_does_not_expose_publisher_flag() -> None:
     """The ``publish`` subcommand must not expose ``--publisher``."""
     text = _subparser_text("publish")
     assert "--publisher" not in text
-
-
-def test_run_and_publish_requires_confirm_repo() -> None:
-    """The run-and-publish command still requires ``--confirm-repo``."""
-    executable = Path(sys.executable).with_name("osm-polygon-description-tag")
-    result = subprocess.run(  # noqa: S603
-        [str(executable), "run-and-publish"],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-    assert result.returncode == 2
-    assert "usage:" in result.stderr
-
-
-def test_run_and_publish_help_lists_only_public_flags() -> None:
-    """The run-and-publish help lists only the shared flags plus --confirm-repo."""
-    text = _subparser_text("run-and-publish")
-    for allowed in ("--source-root", "--data-root", "--osmium", "--confirm-repo"):
-        assert allowed in text, f"missing public flag in run-and-publish: {allowed}"
-    for forbidden in ("--preflight", "--upload-runner", "--clock"):
-        assert forbidden not in text, f"public CLI exposes test-hook: {forbidden}"

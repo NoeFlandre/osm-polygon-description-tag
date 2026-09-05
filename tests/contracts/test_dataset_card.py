@@ -98,9 +98,8 @@ def test_generation_preserves_handwritten_sections(
         raising=False,
     )
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.docs._write_h3_map_png",
-        lambda data_root, total_rows, occupied_cells, counts=None: None,
-        raising=False,
+        "osm_polygon_description_tag.dataset.docs.render_density_map",
+        lambda counts, output_path: None,
     )
 
     generate_dataset_docs(data_root, TEMPLATE, clock=lambda: "2026-07-27T00:00:00+00:00")
@@ -140,9 +139,8 @@ def test_generated_block_contains_only_backed_numbers(
         raising=False,
     )
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.docs._write_h3_map_png",
-        lambda data_root, total_rows, occupied_cells, counts=None: None,
-        raising=False,
+        "osm_polygon_description_tag.dataset.docs.render_density_map",
+        lambda counts, output_path: None,
     )
 
     stats = generate_dataset_docs(data_root, TEMPLATE, clock=lambda: "2026-07-27T00:00:00+00:00")

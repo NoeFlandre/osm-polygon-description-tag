@@ -108,7 +108,6 @@ def _format_count_tick(value: float, _position: int | None = None) -> str:
 
 
 def _build_caption(
-    cells: Mapping[str, int],
     total_rows: int,
     occupied_cells: int,
 ) -> str:
@@ -172,7 +171,7 @@ def render_density_map(
     sorted_cells: Sequence[tuple[str, int]] = tuple(sorted(cells.items()))
     total_rows = sum(int(value) for value in cells.values())
     occupied_cells = len(sorted_cells)
-    caption = _build_caption(cells, total_rows, occupied_cells)
+    caption = _build_caption(total_rows, occupied_cells)
 
     fig, ax = plt.subplots(figsize=_FIGSIZE, dpi=_DPI)
     fig.set_facecolor("white")
@@ -251,14 +250,6 @@ def _draw_empty_colorbar(fig: Any, ax: Any, cmap: mcolors.Colormap) -> None:
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     fig.colorbar(sm, ax=ax, fraction=_COLORBAR_FRACTION, pad=_COLORBAR_PAD)
-
-
-def atomic_save_png_for_testing(
-    fig: Any,
-    output_path: Path,
-) -> None:
-    """Test-only re-export of :func:`_atomic_save_png` for failure-path coverage."""
-    _atomic_save_png(fig, output_path)
 
 
 __all__ = [

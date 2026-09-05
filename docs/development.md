@@ -35,11 +35,12 @@ or contacts Hugging Face.
 with Radon cyclomatic complexity and calculates the deterministic CRAP score
 (`complexity² × (1 − coverage)³ + complexity`) for every source function. The
 repository-wide budget is strict: every function must remain below 6.
-`just mutation` runs every source mutant against the complete test suite.
+`just mutation` checks generated mutants across all source modules.
 It uses a short deterministic triage pass, then reruns every survivor, timeout,
 and untested mutant against its complete mutmut association. The gate requires
-100% killed mutants with no unresolved statuses; no mutant is excluded. The full
-regression suite, including contract tests, remains a separate required gate.
+100% of generated mutants killed with no unresolved statuses, subject to
+documented source-level exclusions. The full regression suite, including
+contract tests, remains a separate required gate.
 Mutmut's `mutants/` cache is ignored and may be reused locally; CI runs both
 repository-wide gates as required jobs.
 

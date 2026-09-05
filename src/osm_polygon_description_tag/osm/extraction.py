@@ -224,22 +224,17 @@ def _decode_copy_text(field: bytes, encoding: str) -> str:
     return _copy_unescape(field).decode(encoding)
 
 
-def _parse_copy_integer(field: bytes) -> int:
-    # pragma: no mutate start - UTF-8 codec names are case-insensitive
-    return int(_decode_copy_text(field, "utf-8"))
-    # pragma: no mutate end
-
-
 def _parse_escaped_record(fields: list[bytes]) -> ExportRecord:
     geometry, osm_type, osm_id, version, changeset, timestamp, tags = fields
     # pragma: no mutate start - codec names are case-insensitive
     geometry_text = _decode_copy_text(geometry, "ascii")
     osm_type_text = _decode_copy_text(osm_type, "utf-8")
+    identifier = int(_decode_copy_text(osm_id, "utf-8"))
     # pragma: no mutate end
     return ExportRecord(
         geometry_ewkb_hex=geometry_text,
         osm_type=osm_type_text,
-        osm_id=_parse_copy_integer(osm_id),
+        osm_id=identifier,
         version=_nullable_int(version),
         changeset=_nullable_int(changeset),
         timestamp=_nullable_str(timestamp),
@@ -324,9 +319,6 @@ def stream_export(
     """
     command = export_command(source, config, executable=executable)
     proc, stdout, drain, stderr_buffer = _start_export(command, stderr_cap_bytes)
-    # pragma: no mutate start - wait always assigns the code before it is read
-    return_code = -1
-    # pragma: no mutate end
     try:
         yield from iter_records(stdout)
         stdout.close()

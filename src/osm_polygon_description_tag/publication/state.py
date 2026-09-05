@@ -76,11 +76,7 @@ def _write_publication_state(
     artifact_identity: str,
     completed_at: str,
 ) -> dict[str, object]:
-    state = read_publication_state(data_root)
-    if state.get("schema_version") != 1:
-        raise PublicationStateError(
-            f"unsupported publication state schema: {state.get('schema_version')!r}"
-        )
+    state = _current_state(data_root)
     published = cast_dict(state.setdefault("published", {}))
     published[source_name] = {
         "source_sha256": source_sha256,

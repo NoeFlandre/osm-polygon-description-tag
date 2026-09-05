@@ -146,27 +146,20 @@ def _setup_pre_h3_dataset(tmp_path: Path) -> tuple[Paths, Path, Path]:
     return Paths(source_root=source_root, data_root=data_root), source_root, data_root
 
 
-def _stub_png_render(monkeypatch: pytest.MonkeyPatch, data_root: Path) -> None:
+def _stub_png_render(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub matplotlib to a no-op so the test does not pull in matplotlib's image backend."""
 
-    def _stub_write_h3_map_png(
-        data_root_arg: Path,
-        total_rows: int,
-        occupied_cells: int,
-        counts: dict[str, int] | None = None,
-    ) -> None:
+    def _write_png(counts: dict[str, int], target: Path) -> None:
         from PIL import Image
 
-        target = data_root_arg / "assets" / "description_polygon_density.png"
         target.parent.mkdir(parents=True, exist_ok=True)
         # Tiny deterministic PNG; the bytes feed directly into the
         # publication-state identity check.
         Image.new("RGB", (16, 8), (255, 255, 255)).save(target)
 
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.docs._write_h3_map_png",
-        _stub_write_h3_map_png,
-        raising=False,
+        "osm_polygon_description_tag.dataset.docs.render_density_map",
+        _write_png,
     )
 
 
@@ -254,7 +247,7 @@ def test_pre_h3_migration_refreshes_readme_writes_map_and_uploads_metadata(
 ) -> None:
     """A pre-feature dataset must be repaired in a single run with one metadata upload."""
     paths, _source_root, data_root = _setup_pre_h3_dataset(tmp_path)
-    _stub_png_render(monkeypatch, data_root)
+    _stub_png_render(monkeypatch)
     log = _install_external_boundaries(monkeypatch)
 
     assert not (data_root / "assets").exists()
@@ -318,7 +311,7 @@ def test_pre_h3_migration_refreshes_before_remote_reconciliation(
 ) -> None:
     """The map must exist before the production reconciliation plan is built."""
     paths, _source_root, data_root = _setup_pre_h3_dataset(tmp_path)
-    _stub_png_render(monkeypatch, data_root)
+    _stub_png_render(monkeypatch)
 
     uploads: list[list[str]] = []
     reconciliations: list[set[str]] = []
@@ -358,7 +351,7 @@ def test_orchestrator_repairs_stale_readme_before_metadata_publish(
 ) -> None:
     """Orchestrator repairs a stale README before publishing metadata."""
     paths, _source_root, data_root = _setup_pre_h3_dataset(tmp_path)
-    _stub_png_render(monkeypatch, data_root)
+    _stub_png_render(monkeypatch)
     log = _install_external_boundaries(monkeypatch)
 
     # Plant a stale README that already has the H3 marker block but with

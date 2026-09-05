@@ -4,7 +4,7 @@ import json
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import pytest
 
@@ -129,19 +129,6 @@ def test_shift_backups_does_not_replace_a_directory(tmp_path: Path) -> None:
     assert destination.read_text(encoding="utf-8") == "old"
 
 
-def test_utcnow_iso_uses_utc_and_returns_datetime_isoformat() -> None:
-    now = Mock()
-    now.isoformat.return_value = "2026-08-22T00:00:00+00:00"
-    fake_datetime = Mock()
-    fake_datetime.now.return_value = now
-
-    with patch.object(logging_module, "datetime", fake_datetime):
-        assert logging_module._utcnow_iso() == "2026-08-22T00:00:00+00:00"
-
-    fake_datetime.now.assert_called_once_with(logging_module.UTC)
-    now.isoformat.assert_called_once_with()
-
-
 def test_validate_rotation_paths_checks_backup_symlinks_and_active_path() -> None:
     backup = Mock()
     backup.is_symlink.return_value = False
@@ -180,35 +167,63 @@ def test_logger_initial_defaults_are_stable(tmp_path: Path) -> None:
     assert logger._handle is None
 
 
-def test_close_active_for_rotation_flushes_syncs_closes_and_clears_handle(
+def test_close_flushes_syncs_closes_and_clears_handle(tmp_path: Path) -> None:
+    logger = _buffered_logger(tmp_path)
+    handle = Mock()
+    handle.fileno.return_value = 23
+    logger._handle = handle
+
+    def assert_active_handle_locked() -> None:
+        assert logger._lock.locked()
+        assert logger._handle is handle
+
+    handle.flush.side_effect = assert_active_handle_locked
+    handle.close.side_effect = assert_active_handle_locked
+    with patch.object(logging_module.os, "fsync") as fsync:
+        handle.attach_mock(fsync, "fsync")
+        logger.close()
+
+    assert handle.mock_calls == [call.flush(), call.fileno(), call.fsync(23), call.close()]
+    assert logger._handle is None
+    assert not logger._lock.locked()
+
+
+@pytest.mark.parametrize("operation", ["close", "maybe_rotate"])
+@pytest.mark.parametrize(
+    ("stage", "error_type"),
+    [("flush", OSError), ("fsync", RuntimeError), ("close", OSError)],
+)
+def test_close_and_rotation_preserve_active_state_on_failure(
     tmp_path: Path,
+    operation: str,
+    stage: str,
+    error_type: type[Exception],
 ) -> None:
     logger = _buffered_logger(tmp_path)
+    active = tmp_path / "active.jsonl"
+    active.write_bytes(b"existing log\n")
     handle = Mock()
     handle.fileno.return_value = 23
     logger._handle = handle
+    logger._path = active
+    logger.configure_rotation(max_bytes=1, backups=1)
+    error = error_type(f"{stage} failed")
+    if stage != "fsync":
+        getattr(handle, stage).side_effect = error
 
-    with patch.object(logging_module.os, "fsync") as fsync:
-        logger._close_active_for_rotation()
+    with (
+        patch.object(logging_module.os, "fsync", side_effect=error if stage == "fsync" else None),
+        pytest.raises(error_type) as raised,
+    ):
+        getattr(logger, operation)()
 
-    handle.flush.assert_called_once_with()
-    handle.fileno.assert_called_once_with()
-    fsync.assert_called_once_with(23)
-    handle.close.assert_called_once_with()
-    assert logger._handle is None
-
-
-def test_close_active_for_rotation_swallows_fsync_os_errors(tmp_path: Path) -> None:
-    logger = _buffered_logger(tmp_path)
-    handle = Mock()
-    handle.fileno.return_value = 23
-    logger._handle = handle
-
-    with patch.object(logging_module.os, "fsync", side_effect=OSError("sync failed")):
-        logger._close_active_for_rotation()
-
-    handle.close.assert_called_once_with()
-    assert logger._handle is None
+    assert raised.value is error
+    assert logger._handle is handle
+    assert logger._path == active
+    assert active.read_bytes() == b"existing log\n"
+    assert not logger._lock.locked()
+    if stage != "close":
+        handle.close.assert_not_called()
 
 
 def test_emit_writes_one_human_line_and_buffers_the_original_record(tmp_path: Path) -> None:
@@ -281,7 +296,7 @@ def test_append_raw_reports_exact_error_when_not_opened(tmp_path: Path) -> None:
         logger.append_raw("raw")
 
 
-def test_rotate_locked_forwards_all_paths_and_reopens_active_file(tmp_path: Path) -> None:
+def test_maybe_rotate_forwards_all_paths_and_reopens_active_file(tmp_path: Path) -> None:
     logger = _buffered_logger(tmp_path)
     logs_dir = tmp_path / "logs"
     logs_dir.mkdir()
@@ -297,7 +312,14 @@ def test_rotate_locked_forwards_all_paths_and_reopens_active_file(tmp_path: Path
     ]
     logger._path = active
     logger._handle = old_handle
-    logger._backups = 2
+    logger.configure_rotation(max_bytes=1, backups=2)
+
+    def assert_active_handle_locked() -> None:
+        assert logger._lock.locked()
+        assert logger._handle is old_handle
+
+    old_handle.flush.side_effect = assert_active_handle_locked
+    old_handle.close.side_effect = assert_active_handle_locked
 
     with (
         patch.object(logging_module.uuid, "uuid4", return_value=SimpleNamespace(hex="abc")),
@@ -310,7 +332,7 @@ def test_rotate_locked_forwards_all_paths_and_reopens_active_file(tmp_path: Path
         patch("builtins.open", return_value=new_handle) as open_active,
         patch.object(logging_module.os, "fsync") as fsync,
     ):
-        logger._rotate_locked()
+        logger.maybe_rotate()
 
     staging = logs_dir / ".run-and-publish.rotate.abc.jsonl"
     backup.assert_called_once_with(logs_dir, 2)
@@ -373,9 +395,12 @@ def test_close_swallows_fsync_os_errors(tmp_path: Path) -> None:
         run_id="close-sync-run",
         stderr=StringIO(),
     )
+    handle = logger._handle
+    assert handle is not None
     with patch.object(logging_module.os, "fsync", side_effect=OSError("sync failed")):
         logger.close()
 
+    assert handle.closed
     assert logger._handle is None
 
 
@@ -389,7 +414,7 @@ def test_approve_and_deny_locking_state_is_safe_for_follow_up_events(tmp_path: P
     logger.close()
 
 
-def test_event_serialization_is_unicode_safe_sorted_and_uses_custom_encoder(
+def test_event_serialization_is_unicode_safe_sorted_and_stringifies_unknown_objects(
     tmp_path: Path,
 ) -> None:
     class Marker:
@@ -410,18 +435,6 @@ def test_event_serialization_is_unicode_safe_sorted_and_uses_custom_encoder(
         '{"event": "unicode", "level": "INFO", "result": {"a": "marker", "z": 1}, '
         '"run_id": "json-run", "safe_value": "é", "ts": "t"}'
     )
-
-
-def test_event_requests_explicit_canonical_json_options(tmp_path: Path) -> None:
-    logger = _buffered_logger(tmp_path)
-    with patch.object(logging_module.json, "dumps", return_value="raw") as dumps:
-        logger.event("canonical")
-
-    assert dumps.call_args.kwargs == {
-        "ensure_ascii": False,
-        "sort_keys": True,
-        "cls": logging_module._SafeJsonFormatter,
-    }
 
 
 def test_flush_is_a_no_op_without_handle_and_swallows_sync_errors(tmp_path: Path) -> None:

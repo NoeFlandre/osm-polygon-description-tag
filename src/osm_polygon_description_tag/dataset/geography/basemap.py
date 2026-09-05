@@ -9,7 +9,7 @@ wikidata-only visualisation.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Final
 
@@ -20,13 +20,9 @@ _LAND_COLOR: Final[str] = "#e8e0d0"
 _LAND_EDGE: Final[str] = "#b8aa90"
 
 
-def _bundled_basemap_path() -> Path:
-    return Path(__file__).parents[2] / "_data" / LAND_BASEMAP_FILENAME
-
-
 def bundled_basemap_path() -> Path:
     """Return the immutable package path for the bundled land reference."""
-    return _bundled_basemap_path()
+    return Path(__file__).parents[2] / "_data" / LAND_BASEMAP_FILENAME
 
 
 def load_land_basemap(path: Path | None = None) -> list[Any]:
@@ -36,7 +32,7 @@ def load_land_basemap(path: Path | None = None) -> list[Any]:
     can still produce a valid ocean-only no-data map; the package build and
     tests separately enforce that the public asset is present and valid.
     """
-    candidate = path or _bundled_basemap_path()
+    candidate = path or bundled_basemap_path()
     if not candidate.is_file() or candidate.stat().st_size == 0:
         return []
     payload = _read_basemap_payload(candidate)
@@ -101,18 +97,11 @@ def _draw_polygon(ax: Any, coordinates: Any) -> None:
         _draw_ring(ax, coordinates[0])
 
 
-def _outer_rings(coordinates: Any) -> Iterator[Any]:
-    """Yield the first ring from each valid MultiPolygon member."""
+def _draw_multipolygon(ax: Any, coordinates: Any) -> None:
     if not isinstance(coordinates, list):
         return
     for polygon in coordinates:
-        if isinstance(polygon, list) and polygon:
-            yield polygon[0]
-
-
-def _draw_multipolygon(ax: Any, coordinates: Any) -> None:
-    for ring in _outer_rings(coordinates):
-        _draw_ring(ax, ring)
+        _draw_polygon(ax, polygon)
 
 
 __all__ = [

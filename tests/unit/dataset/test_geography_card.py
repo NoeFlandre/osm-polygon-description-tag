@@ -166,9 +166,8 @@ def test_generation_installs_map_block_with_correct_relative_path(
     )
     # Patch the dataset.reporting module to also use a stub for the PNG.
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.docs._write_h3_map_png",
-        lambda data_root, total_rows, occupied_cells, counts=None: None,
-        raising=False,
+        "osm_polygon_description_tag.dataset.docs.render_density_map",
+        lambda counts, output_path: None,
     )
 
     generate_dataset_docs(
@@ -271,9 +270,8 @@ def test_generation_preserves_existing_stats_block(
         raising=False,
     )
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.docs._write_h3_map_png",
-        lambda data_root, total_rows, occupied_cells, counts=None: None,
-        raising=False,
+        "osm_polygon_description_tag.dataset.docs.render_density_map",
+        lambda counts, output_path: None,
     )
 
     generate_dataset_docs(data_root, dataset_card_template())
@@ -310,9 +308,8 @@ def test_byte_level_regression_only_map_block_changes(
         raising=False,
     )
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.docs._write_h3_map_png",
-        lambda data_root, total_rows, occupied_cells, counts=None: None,
-        raising=False,
+        "osm_polygon_description_tag.dataset.docs.render_density_map",
+        lambda counts, output_path: None,
     )
     generate_dataset_docs(data_root, template)
     readme_a = (data_root / "README.md").read_text(encoding="utf-8")
@@ -350,9 +347,8 @@ def test_idempotent_regeneration_does_not_duplicate_map_block(
         raising=False,
     )
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.docs._write_h3_map_png",
-        lambda data_root, total_rows, occupied_cells, counts=None: None,
-        raising=False,
+        "osm_polygon_description_tag.dataset.docs.render_density_map",
+        lambda counts, output_path: None,
     )
     for _ in range(3):
         generate_dataset_docs(data_root, dataset_card_template())
@@ -462,9 +458,8 @@ def test_generated_readme_preserves_surrounding_prose_by_stripping_markers(
 
     # Stub the PNG writer because matplotlib is not the contract under test.
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.docs._write_h3_map_png",
-        lambda data_root, total_rows, occupied_cells, counts=None: None,
-        raising=False,
+        "osm_polygon_description_tag.dataset.docs.render_density_map",
+        lambda counts, output_path: None,
     )
 
     generate_dataset_docs(data_root, dataset_card_template())

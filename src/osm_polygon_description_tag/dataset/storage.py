@@ -30,6 +30,7 @@ from shapely.errors import ShapelyError
 from osm_polygon_description_tag.dataset.manifest import (
     MANIFEST_SCHEMA_VERSION,
     ManifestError,
+    _fsync_dir,
     _manifest_path_for,
     output_identity_for,
     read_manifest,
@@ -83,14 +84,6 @@ def _owned_temp(target: Path) -> Path:
 def _fsync_path(path: Path) -> None:
     with open(path, "rb") as handle:  # pragma: no mutate - mode does not affect fsync
         os.fsync(handle.fileno())
-
-
-def _fsync_dir(directory: Path) -> None:
-    fd = os.open(str(directory), os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
 
 
 def _stream_rewrite_with_metadata(
@@ -530,7 +523,7 @@ def _validate_manifest_pair(parquet: Path, manifests_dir: Path) -> Path:
     return manifest_path
 
 
-def _validate_finalized_artifacts_strict(data_root):
+def validate_finalized_artifacts_strict(data_root):
     """Run :func:`validate_finalized_artifacts` followed by :func:`validate_geoparquet`.
 
     Use this when downstream code is about to load the validated
@@ -541,11 +534,6 @@ def _validate_finalized_artifacts_strict(data_root):
     for parquet in result["parquets"]:
         validate_geoparquet(parquet)
     return result
-
-
-def validate_finalized_artifacts_strict(data_root):
-    """Validate finalized artifact pairs and every GeoParquet payload."""
-    return _validate_finalized_artifacts_strict(data_root)
 
 
 __all__ = [

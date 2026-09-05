@@ -256,8 +256,6 @@ def _upload_metadata(
             upload_timeout,
             logger,
         )
-    except KeyboardInterrupt:
-        raise
     except (PublicationError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         raise OrchestratorError(f"final metadata upload failed: {error}") from error
     if logger is not None:
@@ -308,8 +306,6 @@ def _verify_metadata(
 def _call_metadata_verifier(verifier: HubVerifier, metadata_plan: UploadPlan) -> str:
     try:
         verified = verifier(REPO_ID, metadata_plan.files)
-    except KeyboardInterrupt:
-        raise
     except Exception as error:
         raise OrchestratorError(f"final Hub verifier failed: {error}") from error
     if not verified:

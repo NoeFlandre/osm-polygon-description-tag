@@ -16,8 +16,8 @@ from osm_polygon_description_tag.cli import (
     handle_validate,
     run,
 )
-from osm_polygon_description_tag.config import DEFAULT_SOURCE_ROOT
 from osm_polygon_description_tag.publication import PublicationError
+from osm_polygon_description_tag.runtime import config as runtime_config
 from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
 
@@ -180,13 +180,25 @@ def test_captured_help_disables_rich_terminal_forcing(
     assert "--confirm-repo" in capsys.readouterr().out
 
 
-def test_inspect_uses_approved_default_paths(capsys: pytest.CaptureFixture[str]) -> None:
-    # inspect with a non-existent default source root exits non-zero but prints the path attempt.
-    # Use a non-existent custom root so we only assert the parser accepted defaults.
-    exit_code = run(["inspect", "--source-root", "/no/such/raw"])
+def test_inspect_uses_default_paths_when_root_options_are_omitted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source_root = tmp_path / "default-raw"
+    source_root.mkdir()
+    (source_root / "default.osm.pbf").write_bytes(b"source")
+    data_root = tmp_path / "default-generated"
+    monkeypatch.setattr(runtime_config, "DEFAULT_SOURCE_ROOT", source_root)
+    monkeypatch.setattr(runtime_config, "DEFAULT_DATA_ROOT", data_root)
+
+    assert run(["inspect"]) == 0
+
     captured = capsys.readouterr()
-    assert exit_code != 0
-    assert DEFAULT_SOURCE_ROOT.name in str(captured.err) or "/no/such/raw" in str(captured.err)
+    assert captured.err == ""
+    payload = json.loads(captured.out)
+    assert payload["source_root"] == str(source_root)
+    assert payload["data_root"] == str(data_root)
+    assert payload["osmium_executable"] == "osmium"
+    assert [source["name"] for source in payload["sources"]] == ["default.osm.pbf"]
 
 
 def test_publish_rejects_wrong_plan_identity(

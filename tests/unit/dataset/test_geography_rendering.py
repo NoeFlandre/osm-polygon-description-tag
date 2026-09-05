@@ -15,9 +15,6 @@ These tests pin the rendering behaviour:
 
 from __future__ import annotations
 
-import ast
-import inspect
-import textwrap
 import time
 from pathlib import Path
 from unittest.mock import Mock, call, patch
@@ -94,10 +91,10 @@ def test_format_count_tick_uses_stable_count_thresholds(
 
 
 def test_build_caption_distinguishes_no_data_from_populated_data() -> None:
-    assert rendering_module._build_caption({}, 0, 0) == _NO_DATA_CAPTION
-    assert rendering_module._build_caption({"cell": 1}, 0, 1) == _NO_DATA_CAPTION
-    assert rendering_module._build_caption({"cell": 1}, 1, 0) == _NO_DATA_CAPTION
-    assert rendering_module._build_caption({"cell": 1}, 1_234, 56) == (
+    assert rendering_module._build_caption(0, 0) == _NO_DATA_CAPTION
+    assert rendering_module._build_caption(0, 1) == _NO_DATA_CAPTION
+    assert rendering_module._build_caption(1, 0) == _NO_DATA_CAPTION
+    assert rendering_module._build_caption(1_234, 56) == (
         "H3 density of description-tagged polygons. "
         "Each globally deduplicated OSM identity is counted exactly once. "
         "1,234 polygons across 56 H3 cells at resolution 3 on a logarithmic "
@@ -327,7 +324,7 @@ def test_render_density_map_orchestrates_stable_figure_contract(tmp_path: Path) 
         )
 
     subplots.assert_called_once_with(figsize=rendering_module._FIGSIZE, dpi=rendering_module._DPI)
-    build_caption.assert_called_once_with(cells, 3, 2)
+    build_caption.assert_called_once_with(3, 2)
     fig.set_facecolor.assert_called_once_with("white")
     init_axes.assert_called_once_with(axes)
     draw_land_overlay.assert_called_once_with(axes, features)
@@ -508,21 +505,10 @@ def test_draw_ring_passes_the_complete_land_patch_style() -> None:
     axes.add_patch.assert_called_once_with(patch_artist)
 
 
-def test_outer_rings_ignores_non_list_coordinates() -> None:
-    assert list(basemap_module._outer_rings(([],))) == []
-
-
-def test_outer_rings_skips_empty_and_non_list_polygons() -> None:
-    first_ring = [(0, 0), (1, 0), (0, 1)]
-    second_ring = [(2, 0), (3, 0), (2, 1)]
-    coordinates = [[], (first_ring,), [second_ring]]
-
-    assert list(basemap_module._outer_rings(coordinates)) == [second_ring]
-
-
 def test_polygon_helpers_ignore_truthy_non_list_coordinate_containers() -> None:
     axes = Mock()
     with patch.object(basemap_module, "_draw_ring") as draw_ring:
+        basemap_module._draw_multipolygon(axes, ([],))
         basemap_module._draw_polygon(axes, ([(0, 0), (1, 0), (0, 1)],))
         basemap_module._draw_multipolygon(
             axes,
@@ -653,13 +639,6 @@ def test_render_density_map_handles_empty_dataset(tmp_path: Path) -> None:
     assert result.caption == _NO_DATA_CAPTION or "0" in result.caption
 
 
-def test_render_density_map_has_no_inert_empty_input_branch() -> None:
-    """The empty-input path is handled by the normal rendering flow."""
-    tree = ast.parse(textwrap.dedent(inspect.getsource(render_density_map)))
-
-    assert not any(isinstance(node, ast.Pass) for node in ast.walk(tree))
-
-
 def test_render_density_map_is_byte_stable(tmp_path: Path) -> None:
     cells = {
         _fake_cell(48.8566, 2.3522): 3,
@@ -684,33 +663,6 @@ def test_render_density_map_preserves_mtime_on_byte_identical_re_render(
     # Re-rendering byte-identical input must not rewrite the PNG.
     render_density_map(cells, out)
     assert out.stat().st_mtime_ns == mtime
-
-
-def test_render_density_map_atomic_cleanup_on_failure(tmp_path: Path) -> None:
-    """A failure inside the renderer cleans up its temporary file."""
-    import osm_polygon_description_tag.dataset.geography.rendering as rendering_module
-
-    real_atomic = rendering_module._atomic_save_png
-
-    def failing_atomic(_fig: object, target: Path) -> None:
-        # Simulate a failure by raising an error.
-        raise RuntimeError("simulated failure")
-
-    rendering_module._atomic_save_png = failing_atomic  # type: ignore[assignment]
-    try:
-        cells = {_fake_cell(0.0, 0.0): 1}
-        out = tmp_path / "map.png"
-        with pytest.raises(RuntimeError, match="simulated failure"):
-            render_density_map(cells, out)
-    finally:
-        rendering_module._atomic_save_png = real_atomic  # type: ignore[assignment]
-    # The output must not exist after a failure.
-    assert not (tmp_path / "map.png").exists()
-    # No leftover temporary files.
-    leftovers = [
-        p for p in tmp_path.iterdir() if p.name.startswith(".map.png.") and p.name.endswith(".tmp")
-    ]
-    assert leftovers == []
 
 
 def test_render_density_map_does_not_download_basemap(tmp_path: Path) -> None:

@@ -18,16 +18,9 @@ from click import Command, Context
 from typer._click.exceptions import ClickException, UsageError
 
 import osm_polygon_description_tag.cli as cli
-import osm_polygon_description_tag.observability.trackio as trackio
 import osm_polygon_description_tag.workflow.orchestrator as orchestrator
-import osm_polygon_description_tag.workflow.source_runner as source_runner
-from osm_polygon_description_tag.dataset.geography.rendering import (
-    atomic_save_png_for_testing,
-)
 from osm_polygon_description_tag.dataset.manifest import _empty_policy_hash
 from osm_polygon_description_tag.publication.models import PublishRetry
-from osm_polygon_description_tag.runtime.logging import _SafeJsonFormatter
-from osm_polygon_description_tag.workflow.source_runner import OrchestratorError
 
 
 def _cli_args(tmp_path: Path, **values: object) -> SimpleNamespace:
@@ -62,22 +55,6 @@ def test_cli_migration_handler_reports_migrated_files(
     }
 
 
-def test_cli_namespace_preserves_common_and_command_values(tmp_path: Path) -> None:
-    args = cli._namespace(
-        source_root=tmp_path / "raw",
-        data_root=tmp_path / "generated",
-        osmium="osmium-custom",
-        basename="region.osm.pbf",
-    )
-
-    assert vars(args) == {
-        "source_root": tmp_path / "raw",
-        "data_root": tmp_path / "generated",
-        "osmium": "osmium-custom",
-        "basename": "region.osm.pbf",
-    }
-
-
 def test_cli_resolve_paths_uses_supplied_roots(tmp_path: Path) -> None:
     args = _cli_args(tmp_path)
     paths = cli._resolve_paths(args)
@@ -92,60 +69,6 @@ def test_cli_print_json_is_sorted_and_indented(capsys: pytest.CaptureFixture[str
     assert capsys.readouterr().out == (
         '{\n  "a": {\n    "value": "café",\n    "é": true\n  },\n  "z": 1\n}\n'
     )
-
-
-def test_cli_print_json_forwards_explicit_unicode_options(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    captured: dict[str, object] = {}
-
-    def dumps(payload: object, **kwargs: object) -> str:
-        captured["payload"] = payload
-        captured.update(kwargs)
-        return "encoded"
-
-    monkeypatch.setattr(cli.json, "dumps", dumps)
-    cli._print_json({"value": "café"})
-
-    assert captured == {
-        "payload": {"value": "café"},
-        "ensure_ascii": False,
-        "indent": 2,
-        "sort_keys": True,
-    }
-    assert capsys.readouterr().out == "encoded\n"
-
-
-def test_cli_inspect_reports_the_complete_public_payload(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    args = _cli_args(tmp_path)
-    source = SimpleNamespace(
-        name="region.osm.pbf",
-        output_name="region.parquet",
-        size_bytes=12,
-        mtime_ns=34,
-    )
-    export_config = tmp_path / "export.json"
-    monkeypatch.setattr(cli, "osmium_export_config", lambda: export_config)
-    monkeypatch.setattr(cli, "discover_sources", lambda root: [source])
-
-    assert cli.handle_inspect(args) == 0
-    assert json.loads(capsys.readouterr().out) == {
-        "source_root": str(args.source_root),
-        "data_root": str(args.data_root),
-        "osmium_executable": "fake-osmium",
-        "export_config": str(export_config),
-        "source_count": 1,
-        "sources": [
-            {
-                "name": "region.osm.pbf",
-                "output_name": "region.parquet",
-                "size_bytes": 12,
-                "mtime_ns": 34,
-            }
-        ],
-    }
 
 
 def test_cli_invoke_calls_handler_and_translates_keyboard_interrupt() -> None:
@@ -382,16 +305,25 @@ def test_cli_inspect_handler_reports_discovered_sources(
         "discover_sources",
         lambda root: [source] if root == args.source_root else [],
     )
+    export_config = tmp_path / "export.json"
+    monkeypatch.setattr(cli, "osmium_export_config", lambda: export_config)
 
     assert cli.handle_inspect(args) == 0
-    assert json.loads(capsys.readouterr().out)["sources"] == [
-        {
-            "name": "region.osm.pbf",
-            "output_name": "region.parquet",
-            "size_bytes": 12,
-            "mtime_ns": 34,
-        }
-    ]
+    assert json.loads(capsys.readouterr().out) == {
+        "source_root": str(args.source_root),
+        "data_root": str(args.data_root),
+        "osmium_executable": "fake-osmium",
+        "export_config": str(export_config),
+        "source_count": 1,
+        "sources": [
+            {
+                "name": "region.osm.pbf",
+                "output_name": "region.parquet",
+                "size_bytes": 12,
+                "mtime_ns": 34,
+            }
+        ],
+    }
 
 
 def test_cli_build_all_handler_reports_each_result(
@@ -677,47 +609,6 @@ def test_publish_retry_preserves_public_error_context() -> None:
     assert error.kind == "http"
 
 
-def test_safe_json_formatter_stringifies_unknown_objects() -> None:
-    value = object()
-    assert _SafeJsonFormatter().default(value) == str(value)
-
-
-def test_trackio_reads_stats_from_data_root(tmp_path: Path) -> None:
-    stats_path = tmp_path / "stats.json"
-    stats_path.write_text('{"rows": 3}\n', encoding="utf-8")
-    assert trackio._read_stats(tmp_path) == {"rows": 3}
-
-
-def test_atomic_png_testing_helper_delegates_to_atomic_writer(tmp_path: Path) -> None:
-    import matplotlib.pyplot as plt
-
-    figure, _axis = plt.subplots()
-    output = tmp_path / "figure.png"
-    atomic_save_png_for_testing(figure, output)
-    plt.close(figure)
-    assert output.is_file()
-
-
-def test_orchestrator_default_subprocess_runner_forwards_timeout(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[dict[str, object]] = []
-
-    def fake_run(command: list[str], **kwargs: object) -> None:
-        calls.append({"command": command, **kwargs})
-
-    monkeypatch.setattr(orchestrator.subprocess, "run", fake_run)
-    orchestrator._default_subprocess_runner(["hf", "upload"], timeout=4.5)
-    assert calls == [
-        {
-            "command": ["hf", "upload"],
-            "check": True,
-            "shell": False,
-            "timeout": 4.5,
-        }
-    ]
-
-
 def test_orchestrator_subprocess_bridge_restores_upload_runner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -736,14 +627,6 @@ def test_orchestrator_subprocess_bridge_restores_upload_runner(
     assert result == "ok"
     assert commands == [["hf", "upload"]]
     assert publication_upload._default_runner_with_retry is original
-
-
-def test_source_runner_translates_publication_state_errors() -> None:
-    from osm_polygon_description_tag.publication.state import PublicationStateError
-
-    translated = source_runner._translate_state_error(PublicationStateError("invalid state"))
-    assert isinstance(translated, OrchestratorError)
-    assert str(translated) == "invalid state"
 
 
 def test_default_hub_verifier_factory_uses_lazy_api(monkeypatch: pytest.MonkeyPatch) -> None:
