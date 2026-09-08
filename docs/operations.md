@@ -6,9 +6,9 @@ Keep code and data separate:
 
 | Purpose | Path | Rule |
 | --- | --- | --- |
-| Code checkout | `/Users/noeflandre/osm-polygon-description-tag` | Git-managed source |
+| Code checkout | `/Volumes/Seagate M3/projects/osm-polygon-description-tag` | Git-managed source |
 | Immutable raw PBFs | `/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw` | Read-only; never an output or temp directory |
-| Generated artifacts | `/Volumes/Seagate M3/projects/osm-polygon-description-tag` | Parquet, manifests, stats, logs, and local state |
+| Generated artifacts | `/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root` | Parquet, manifests, stats, logs, and local state |
 
 Local state under the data root is explicitly separated:
 
@@ -69,7 +69,7 @@ identities and the policy hash still match.
 Events are written to:
 
 ```text
-/Volumes/Seagate M3/projects/osm-polygon-description-tag/logs/run-and-publish.jsonl
+/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root/logs/run-and-publish.jsonl
 ```
 
 The active log rotates at 10 MiB with five backups using same-directory atomic

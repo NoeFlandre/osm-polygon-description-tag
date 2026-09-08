@@ -14,7 +14,7 @@ typecheck:
     uv run ty check
 
 test:
-    uv run pytest --cov=osm_polygon_description_tag --cov-report=term-missing --cov-fail-under=90
+    uv run pytest --cov=osm_polygon_description_tag --cov-branch --cov-report=term-missing --cov-fail-under=90
 
 test-integration:
     uv run pytest tests/integration -q
@@ -22,7 +22,7 @@ test-integration:
 # Generate deterministic CRAP risk reports from test coverage and Radon.
 risk:
     mkdir -p reports
-    uv run pytest --cov=osm_polygon_description_tag --cov-report=json:reports/coverage.json --cov-fail-under=90
+    uv run pytest --cov=osm_polygon_description_tag --cov-branch --cov-report=json:reports/coverage.json --cov-fail-under=90
     uv run radon cc src/osm_polygon_description_tag -s -j > reports/radon.json
     uv run python scripts/quality_metrics.py crap \
         --coverage-json reports/coverage.json \
@@ -36,9 +36,9 @@ risk:
 # Run the all-source mutation gate for all source modules; mutmut resumes from its ignored cache.
 mutation:
     mkdir -p reports
-    if test -d "/Volumes/Seagate M3/projects/osm-polygon-description-tag"; then \
-        mkdir -p "/Volumes/Seagate M3/projects/osm-polygon-description-tag/.mutmut-tmp"; \
-        TMPDIR="/Volumes/Seagate M3/projects/osm-polygon-description-tag/.mutmut-tmp" \
+    if test -d "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root"; then \
+        mkdir -p "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root/.mutmut-tmp"; \
+        TMPDIR="/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root/.mutmut-tmp" \
             uv run python -m scripts.run_mutation_gate --max-children 8; \
     else \
         uv run python -m scripts.run_mutation_gate --max-children 8; \
@@ -90,11 +90,11 @@ check:
     uv run ruff format --check .
     uv run ruff check .
     uv run ty check
-    uv run pytest --cov=osm_polygon_description_tag --cov-report=term-missing --cov-fail-under=90
+    uv run pytest --cov=osm_polygon_description_tag --cov-branch --cov-report=term-missing --cov-fail-under=90
     uv build
 
 run-and-publish:
     uv run osm-polygon-description-tag run-and-publish \
       --source-root "/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw" \
-      --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag" \
+      --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root" \
       --confirm-repo NoeFlandre/osm-polygon-description-tag

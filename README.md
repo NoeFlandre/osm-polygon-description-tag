@@ -30,7 +30,7 @@ Read the documentation:
 ## Quick start
 
 ```bash
-cd /Users/noeflandre/osm-polygon-description-tag
+cd /Volumes/Seagate\ M3/projects/osm-polygon-description-tag
 uv sync --locked
 just run-and-publish
 ```
@@ -54,7 +54,7 @@ command. It builds or reuses the cached image, mounts the generated-data root
 at `/data`, and mounts `/data/raw` read-only:
 
 ```bash
-just docker-run "/Volumes/Seagate M3/projects/osm-polygon-description-tag"
+just docker-run "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root"
 ```
 
 The host data root retains checkpoints and publication state, so `Ctrl-C` and
@@ -65,9 +65,9 @@ the container boundary.
 
 ## Boundaries
 
-- Code: `/Users/noeflandre/osm-polygon-description-tag`
+- Code: `/Volumes/Seagate M3/projects/osm-polygon-description-tag`
 - Immutable raw PBFs: `/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw`
-- Generated data: `/Volumes/Seagate M3/projects/osm-polygon-description-tag`
+- Generated data: `/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root`
 - Hugging Face dataset: `NoeFlandre/osm-polygon-description-tag`
 
 The raw source is read-only. Tests, documentation builds, and CI do not access

@@ -32,7 +32,10 @@ COMMANDS = (
     "publish-plan",
     "publish",
     "run-and-publish",
+    "language",
 )
+LANGUAGE_COMMANDS = ("prepare", "run", "validate", "export", "publish", "grid")
+GRID_COMMANDS = ("prepare", "stage", "submit", "status", "collect")
 COMMON_OPTIONS = ("--source-root", "--data-root", "--osmium")
 HELP_OPTION = {"--help"}
 COMMAND_OPTIONS = {
@@ -52,6 +55,82 @@ COMMAND_OPTIONS = {
     "publish-plan": {*COMMON_OPTIONS, *HELP_OPTION},
     "publish": {*COMMON_OPTIONS, *HELP_OPTION, "--plan"},
     "run-and-publish": {*COMMON_OPTIONS, *HELP_OPTION, "--confirm-repo"},
+    "language": {*HELP_OPTION},
+}
+LANGUAGE_COMMAND_OPTIONS = {
+    "prepare": {
+        *HELP_OPTION,
+        "--source-root",
+        "--run-dir",
+        "--project-root",
+        "--min-alphabetic-chars",
+        "--min-score",
+        "--min-margin",
+    },
+    "run": {
+        *HELP_OPTION,
+        "--source-root",
+        "--run-dir",
+        "--shard",
+        "--batch-size",
+        "--budget-seconds",
+        "--project-root",
+    },
+    "validate": {*HELP_OPTION, "--run-dir", "--shard"},
+    "export": {*HELP_OPTION, "--run-dir", "--export-dir", "--card-section"},
+    "publish": {
+        *HELP_OPTION,
+        "--export-dir",
+        "--repo",
+        "--confirm-repo",
+        "--baseline-revision",
+        "--apply",
+    },
+    "grid": {*HELP_OPTION},
+}
+REMOTE_OPTIONS = ("--remote-project-dir", "--remote-source-dir", "--remote-run-dir")
+GRID_COMMAND_OPTIONS = {
+    "stage": {
+        *HELP_OPTION,
+        "--run-dir",
+        "--shard",
+        "--project-root",
+        "--source-root",
+        "--remote-bundle-dir",
+        "--processing-seconds",
+        "--batch-size",
+        "--walltime-seconds",
+        "--apply",
+    },
+    "prepare": {
+        *HELP_OPTION,
+        *REMOTE_OPTIONS,
+        "--run-dir",
+        "--shard",
+        "--processing-seconds",
+        "--batch-size",
+    },
+    "submit": {
+        *HELP_OPTION,
+        *REMOTE_OPTIONS,
+        "--run-dir",
+        "--shard",
+        "--site",
+        "--walltime-seconds",
+        "--processing-seconds",
+        "--batch-size",
+        "--allow-daytime",
+        "--apply",
+    },
+    "status": {*HELP_OPTION, "--run-dir", "--shard", "--apply"},
+    "collect": {
+        *HELP_OPTION,
+        "--run-dir",
+        "--shard",
+        "--remote-bundle-dir",
+        "--retrieved-run-dir",
+        "--apply",
+    },
 }
 
 
@@ -110,6 +189,42 @@ def test_every_command_keeps_exact_public_options(command: str) -> None:
     assert result.returncode == 0
     assert result.stderr == ""
     assert long_options == COMMAND_OPTIONS[command]
+
+
+def test_language_group_exposes_its_exact_subcommands() -> None:
+    result = _cli("language", "--help")
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert _public_commands(result.stdout) == set(LANGUAGE_COMMANDS)
+
+
+@pytest.mark.parametrize("command", LANGUAGE_COMMANDS)
+def test_every_language_subcommand_keeps_exact_public_options(command: str) -> None:
+    result = _cli("language", command, "--help")
+    long_options = set(re.findall(r"--[a-z][a-z-]*", result.stdout))
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert long_options == LANGUAGE_COMMAND_OPTIONS[command]
+
+
+def test_the_grid_group_exposes_its_exact_subcommands() -> None:
+    result = _cli("language", "grid", "--help")
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert _public_commands(result.stdout) == set(GRID_COMMANDS)
+
+
+@pytest.mark.parametrize("command", GRID_COMMANDS)
+def test_every_grid_subcommand_keeps_exact_public_options(command: str) -> None:
+    result = _cli("language", "grid", command, "--help")
+    long_options = set(re.findall(r"--[a-z][a-z-]*", result.stdout))
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert long_options == GRID_COMMAND_OPTIONS[command]
 
 
 def test_build_one_keeps_required_basename() -> None:

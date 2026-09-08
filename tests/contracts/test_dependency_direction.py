@@ -19,6 +19,7 @@ CANONICAL_DEPENDENCIES = {
     "observability": {"runtime", "dataset", "observability"},
     "workflow": {"runtime", "osm", "dataset", "publication", "observability", "workflow"},
 }
+CONSOLE_MODULES = ("cli", "language_cli")
 COMPATIBILITY_MODULES = (
     "_logging",
     "_resources",
@@ -225,13 +226,15 @@ def test_canonical_package_imports_only_allowed_lower_layers(package_name: str) 
     assert violations == []
 
 
-def test_cli_imports_only_canonical_packages() -> None:
-    canonical_packages = set(CANONICAL_DEPENDENCIES)
-    imports = _package_imports(PACKAGE_ROOT / "cli.py")
+@pytest.mark.parametrize("module_name", CONSOLE_MODULES)
+def test_console_modules_import_only_canonical_packages(module_name: str) -> None:
+    """Console entry points compose canonical packages and never the shims."""
+    allowed = set(CANONICAL_DEPENDENCIES) | set(CONSOLE_MODULES)
+    imports = _package_imports(PACKAGE_ROOT / f"{module_name}.py")
     violations = [
         imported_module
         for imported_module in imports
-        if imported_module.split(".", maxsplit=1)[0] not in canonical_packages
+        if imported_module.split(".", maxsplit=1)[0] not in allowed
     ]
     assert violations == []
 

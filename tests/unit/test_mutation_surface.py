@@ -18,6 +18,7 @@ from click import Command, Context
 from typer._click.exceptions import ClickException, UsageError
 
 import osm_polygon_description_tag.cli as cli
+import osm_polygon_description_tag.runtime.presentation as presentation
 import osm_polygon_description_tag.workflow.orchestrator as orchestrator
 from osm_polygon_description_tag.dataset.manifest import _empty_policy_hash
 from osm_polygon_description_tag.publication.models import PublishRetry
@@ -64,7 +65,7 @@ def test_cli_resolve_paths_uses_supplied_roots(tmp_path: Path) -> None:
 
 
 def test_cli_print_json_is_sorted_and_indented(capsys: pytest.CaptureFixture[str]) -> None:
-    cli._print_json({"z": 1, "a": {"value": "café", "é": True}})
+    presentation.print_json({"z": 1, "a": {"value": "café", "é": True}})
 
     assert capsys.readouterr().out == (
         '{\n  "a": {\n    "value": "café",\n    "é": true\n  },\n  "z": 1\n}\n'

@@ -68,7 +68,7 @@ external generated-data root at `/data`, and mounts its `/data/raw` source
 directory read-only:
 
 ```bash
-just docker-run "/Volumes/Seagate M3/projects/osm-polygon-description-tag"
+just docker-run "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root"
 ```
 
 The mounted data root retains Parquets, manifests, logs, caches, and

@@ -6,7 +6,6 @@ operational events, and domain errors are confined to stderr.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 import uuid
@@ -19,10 +18,12 @@ import typer
 from typer import rich_utils
 from typer._click.exceptions import ClickException, Exit, UsageError
 
+from osm_polygon_description_tag.dataset.languages.detector import LanguageDetectionError
 from osm_polygon_description_tag.dataset.manifest import ManifestError
 from osm_polygon_description_tag.dataset.migration import MigrationError, migrate_dataset_schema
 from osm_polygon_description_tag.dataset.reporting import ReportingError, generate_dataset_docs
 from osm_polygon_description_tag.dataset.storage import StorageError, validate_geoparquet
+from osm_polygon_description_tag.language_cli import language_app
 from osm_polygon_description_tag.observability.trackio import (
     TrackioRecorder,
     publish_snapshot,
@@ -36,7 +37,7 @@ from osm_polygon_description_tag.publication import (
 )
 from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.runtime.logging import RunLogger
-from osm_polygon_description_tag.runtime.presentation import TerminalPresenter
+from osm_polygon_description_tag.runtime.presentation import TerminalPresenter, print_json
 from osm_polygon_description_tag.runtime.resources import (
     dataset_card_template,
     osmium_export_config,
@@ -54,6 +55,7 @@ app = typer.Typer(
     no_args_is_help=False,
     pretty_exceptions_enable=False,
 )
+app.add_typer(language_app, name="language")
 
 SourceRoot = Annotated[Path | None, typer.Option("--source-root")]
 DataRoot = Annotated[Path | None, typer.Option("--data-root")]
@@ -66,12 +68,6 @@ def _resolve_paths(args: SimpleNamespace) -> Paths:
         source_root=args.source_root or defaults.source_root,
         data_root=args.data_root or defaults.data_root,
     ).validate()
-
-
-def _print_json(payload: dict[str, object]) -> None:
-    # pragma: no mutate start - ensure_ascii=None equals False; exact JSON bytes are tested
-    print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
-    # pragma: no mutate end
 
 
 class _Interrupted(Exception):
@@ -88,7 +84,7 @@ def _invoke(handler: Callable[[SimpleNamespace], int], args: SimpleNamespace) ->
 def handle_inspect(args: SimpleNamespace) -> int:
     paths = _resolve_paths(args)
     sources = discover_sources(paths.source_root)
-    _print_json(
+    print_json(
         {
             "source_root": str(paths.source_root),
             "data_root": str(paths.data_root),
@@ -132,7 +128,7 @@ def handle_build_one(args: SimpleNamespace) -> int:
     if match is None:
         raise ValueError(f"source not discovered: {args.basename}")
     result = executor(match)
-    _print_json(
+    print_json(
         {
             "source_name": result.source_name,
             "output_name": result.output_name,
@@ -151,7 +147,7 @@ def handle_build_all(args: SimpleNamespace) -> int:
     paths, executor = _build_paths_and_executor(args)
     sources = discover_sources(paths.source_root)
     results: list[BuildResult] = build_all(sources, build=executor)
-    _print_json(
+    print_json(
         {
             "count": len(results),
             "results": [
@@ -177,14 +173,14 @@ def handle_validate(args: SimpleNamespace) -> int:
     for parquet in sorted(data_dir.glob("*.parquet")):
         rows_total += validate_geoparquet(parquet)
         files += 1
-    _print_json({"files": files, "rows": rows_total})
+    print_json({"files": files, "rows": rows_total})
     return 0
 
 
 def handle_card(args: SimpleNamespace) -> int:
     paths = _resolve_paths(args)
     stats = generate_dataset_docs(paths.data_root, dataset_card_template())
-    _print_json(
+    print_json(
         {
             "output_files": stats["output_files"],
             "rows": stats["rows"],
@@ -198,14 +194,14 @@ def handle_migrate_schema(args: SimpleNamespace) -> int:
     """Upgrade existing legacy map Parquets without reading raw PBFs."""
     paths = _resolve_paths(args)
     migrated = migrate_dataset_schema(paths.data_root)
-    _print_json({"data_root": str(paths.data_root), "migrated_files": migrated})
+    print_json({"data_root": str(paths.data_root), "migrated_files": migrated})
     return 0
 
 
 def handle_publish_plan(args: SimpleNamespace) -> int:
     paths = _resolve_paths(args)
     plan = create_upload_plan(paths.data_root)
-    _print_json(
+    print_json(
         {
             "repo_id": plan.repo_id,
             "identity_sha256": plan.identity_sha256,
@@ -221,7 +217,7 @@ def handle_publish(args: SimpleNamespace) -> int:
     paths = _resolve_paths(args)
     plan = create_upload_plan(paths.data_root)
     execute_upload(plan, confirmation=args.plan)
-    _print_json({"repo_id": plan.repo_id, "identity_sha256": plan.identity_sha256})
+    print_json({"repo_id": plan.repo_id, "identity_sha256": plan.identity_sha256})
     return 0
 
 
@@ -251,7 +247,7 @@ def handle_run_and_publish(args: SimpleNamespace) -> int:
     finally:
         if logger is not None:
             logger.close()
-    _print_json(report.to_payload())
+    print_json(report.to_payload())
     return 0
 
 
@@ -263,7 +259,7 @@ def handle_trackio_snapshot(args: SimpleNamespace) -> int:
         space_id=args.space_id,
         run_name=args.run_name,
     )
-    _print_json(report.to_payload())
+    print_json(report.to_payload())
     return 0
 
 
@@ -451,6 +447,7 @@ _ERROR_TYPES = (
     PreflightError,
     OrchestratorError,
     MigrationError,
+    LanguageDetectionError,
 )
 
 

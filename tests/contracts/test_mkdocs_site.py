@@ -42,7 +42,7 @@ def test_public_docs_state_operational_boundaries() -> None:
     text = "\n".join((ROOT / "docs" / page).read_text(encoding="utf-8") for page in PUBLIC_PAGES)
 
     assert "/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw" in text
-    assert "/Volumes/Seagate M3/projects/osm-polygon-description-tag" in text
+    assert "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root" in text
     assert "just run-and-publish" in text
     assert "Hugging Face" in text
     assert "area_m2" in text

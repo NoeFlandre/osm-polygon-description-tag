@@ -1,3 +1,4 @@
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -24,7 +25,7 @@ def _fake_osmium(
     loop: bool = False,
 ) -> Path:
     program = tmp_path / "fake-osmium.py"
-    lines = [f"#!{sys.executable}", "import sys"]
+    lines = ["import sys"]
     if loop:
         lines += [
             "import time",
@@ -38,8 +39,13 @@ def _fake_osmium(
     lines.append(f"sys.stderr.buffer.write({stderr!r})")
     lines.append(f"sys.exit({exit_code})")
     program.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    program.chmod(0o755)
-    return program
+    launcher = tmp_path / "fake-osmium"
+    launcher.write_text(
+        f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(program))} "$@"\n',
+        encoding="utf-8",
+    )
+    launcher.chmod(0o755)
+    return launcher
 
 
 def test_stream_export_yields_records_on_success(tmp_path: Path) -> None:
@@ -86,9 +92,12 @@ def test_stream_export_bounds_retained_stderr(tmp_path: Path) -> None:
 
 
 def test_osmium_version_returns_first_stdout_line(tmp_path: Path) -> None:
-    exe = tmp_path / "ver.py"
+    program = tmp_path / "ver.py"
+    exe = tmp_path / "ver"
+    program.write_text("import sys\nsys.stdout.write('osmium version 1.16.0\\n')\n", "utf-8")
     exe.write_text(
-        f"#!{sys.executable}\nimport sys\nsys.stdout.write('osmium version 1.16.0\\n')\n", "utf-8"
+        f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(program))} "$@"\n',
+        "utf-8",
     )
     exe.chmod(0o755)
     assert osmium_version(executable=str(exe)) == "osmium version 1.16.0"

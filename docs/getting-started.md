@@ -16,7 +16,7 @@ brew install hf
 Install the locked Python environment from the repository:
 
 ```bash
-cd /Users/noeflandre/osm-polygon-description-tag
+cd /Volumes/Seagate\ M3/projects/osm-polygon-description-tag
 uv sync --locked
 ```
 
@@ -58,7 +58,7 @@ uv run osm-polygon-description-tag generate-card
 Generated artifacts belong under:
 
 ```text
-/Volumes/Seagate M3/projects/osm-polygon-description-tag
+/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root
 ```
 
 ## Run the complete workflow

@@ -53,6 +53,7 @@ nav:
   - Getting started: getting-started.md
   - Dataset contract: dataset-contract.md
   - Operations: operations.md
+  - Language detection: language-detection.md
   - CLI reference: cli.md
   - Development: development.md
   - Architecture: architecture.md

@@ -15,7 +15,9 @@ def test_paths_use_approved_defaults() -> None:
     assert paths.source_root == DEFAULT_SOURCE_ROOT
     assert paths.data_root == DEFAULT_DATA_ROOT
     assert paths.source_root == Path("/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw")
-    assert paths.data_root == Path("/Volumes/Seagate M3/projects/osm-polygon-description-tag")
+    assert paths.data_root == Path(
+        "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root"
+    )
 
 
 def test_output_cannot_be_inside_source(tmp_path: Path) -> None:

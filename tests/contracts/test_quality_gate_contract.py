@@ -8,7 +8,12 @@ from pathlib import Path
 
 from packaging.requirements import Requirement
 
-from scripts.run_mutation_gate import complete_associations, trim_associations
+from scripts.run_mutation_gate import (
+    complete_associations,
+    escalation_stages,
+    recorded_associations,
+    trim_associations,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -22,6 +27,16 @@ def _dev_dependency_names() -> set[str]:
 
 def test_quality_tools_are_locked_as_development_dependencies() -> None:
     assert {"radon", "mutmut"} <= _dev_dependency_names()
+
+
+def test_local_and_ci_coverage_commands_explicitly_measure_branches() -> None:
+    commands = [
+        line for line in (PROJECT_ROOT / "justfile").read_text().splitlines() if "--cov=" in line
+    ]
+    assert commands
+    assert all("--cov-branch" in command for command in commands)
+    workflow = (PROJECT_ROOT / ".github/workflows/quality.yml").read_text()
+    assert "--cov-branch" in workflow
 
 
 def test_crap_report_is_deterministic_and_uses_the_documented_formula(tmp_path: Path) -> None:
@@ -280,7 +295,8 @@ def test_mutation_fast_pass_prioritizes_function_module_tests() -> None:
     ] == ("tests/test_trackio.py::test_slow",)
 
 
-def test_mutation_associations_fall_back_to_tests_from_the_same_module() -> None:
+def test_mutation_associations_add_every_test_of_the_same_module() -> None:
+    """A single recorded hit must not hide the module's own killing tests."""
     associations = {
         "pkg.alpha.x_direct": {"tests/test_alpha.py::test_direct"},
         "pkg.alpha.x_indirect": set(),
@@ -290,18 +306,73 @@ def test_mutation_associations_fall_back_to_tests_from_the_same_module() -> None
     assert complete_associations(
         associations,
         {
-            "tests/test_alpha.py::test_direct",
-            "tests/test_alpha.py::test_indirect",
-            "tests/test_beta.py::test_other",
+            "tests/test_alpha.py::test_direct": 1.0,
+            "tests/test_alpha.py::test_indirect": 2.0,
+            "tests/test_beta.py::test_other": 3.0,
         },
     ) == {
-        "pkg.alpha.x_direct": ("tests/test_alpha.py::test_direct",),
+        "pkg.alpha.x_direct": (
+            "tests/test_alpha.py::test_direct",
+            "tests/test_alpha.py::test_indirect",
+        ),
         "pkg.alpha.x_indirect": (
             "tests/test_alpha.py::test_direct",
             "tests/test_alpha.py::test_indirect",
         ),
         "pkg.beta.x_uncovered": ("tests/test_beta.py::test_other",),
     }
+
+
+def test_mutation_associations_run_the_likeliest_and_cheapest_tests_first() -> None:
+    """``pytest -x`` stops at the first failure, so ordering decides the cost."""
+    associations = {
+        "pkg.trackio.x_build": {
+            "tests/test_other.py::test_slow",
+            "tests/test_other.py::test_quick",
+            "tests/test_trackio.py::test_focused",
+        }
+    }
+    durations = {
+        "tests/test_other.py::test_slow": 9.0,
+        "tests/test_other.py::test_quick": 0.1,
+        "tests/test_trackio.py::test_focused": 4.0,
+    }
+
+    assert complete_associations(associations, durations) == {
+        "pkg.trackio.x_build": (
+            "tests/test_trackio.py::test_focused",
+            "tests/test_other.py::test_quick",
+            "tests/test_other.py::test_slow",
+        )
+    }
+
+
+def test_mutation_recording_survives_an_interrupted_narrow_pass(tmp_path: Path) -> None:
+    stats = {
+        "function_hashes": {"pkg.alpha.x_direct": "hash"},
+        "tests_by_mangled_function_name": {
+            "pkg.alpha.x_direct": ["tests/test_alpha.py::b", "tests/test_alpha.py::a"]
+        },
+    }
+    path = tmp_path / "recorded.json"
+
+    first = recorded_associations(stats, path)
+
+    assert first == {"pkg.alpha.x_direct": ("tests/test_alpha.py::a", "tests/test_alpha.py::b")}
+    narrowed = {
+        "function_hashes": {"pkg.alpha.x_direct": "hash"},
+        "tests_by_mangled_function_name": {"pkg.alpha.x_direct": ["tests/test_alpha.py::a"]},
+    }
+    assert recorded_associations(narrowed, path) == first
+
+
+def test_mutation_escalation_grows_the_selection_before_the_exact_pass() -> None:
+    stages = escalation_stages(5)
+
+    assert stages[0] == 5
+    assert stages[-1] is None
+    assert list(stages[:-1]) == sorted(stages[:-1])
+    assert len(set(stages)) == len(stages)
 
 
 def test_quality_recipes_and_required_mutation_gate_are_publicly_wired() -> None:

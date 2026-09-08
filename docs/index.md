@@ -32,7 +32,7 @@ no hand-written dataset counts or freshness claims.
 
 ## Project boundaries
 
-Code lives in `/Users/noeflandre/osm-polygon-description-tag`.
+Code lives in `/Volumes/Seagate M3/projects/osm-polygon-description-tag`.
 
 Immutable raw PBFs live at:
 
@@ -43,7 +43,7 @@ Immutable raw PBFs live at:
 Generated local artifacts live at:
 
 ```text
-/Volumes/Seagate M3/projects/osm-polygon-description-tag
+/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root
 ```
 
 The raw source is read-only. Tests, documentation builds, and CI do not read

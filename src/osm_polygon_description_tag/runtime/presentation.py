@@ -1,13 +1,21 @@
-"""Interactive stderr presentation for redacted operational events."""
+"""Interactive stderr presentation and the canonical stdout JSON document."""
 
 from __future__ import annotations
 
+import json
 import sys
 from collections.abc import Mapping
 from typing import TextIO
 
 from rich.console import Console
 from tqdm import tqdm
+
+
+def print_json(payload: Mapping[str, object]) -> None:
+    """Write one deterministic JSON document to stdout."""
+    # pragma: no mutate start - ensure_ascii=None equals False; exact JSON bytes are tested
+    print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    # pragma: no mutate end
 
 
 class TerminalPresenter:
@@ -71,4 +79,4 @@ class TerminalPresenter:
             self._progress = None
 
 
-__all__ = ["TerminalPresenter"]
+__all__ = ["TerminalPresenter", "print_json"]

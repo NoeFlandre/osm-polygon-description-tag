@@ -540,6 +540,25 @@ def test_polygon_helpers_forward_each_valid_outer_ring_to_the_axes() -> None:
     ]
 
 
+def test_polygon_helpers_forward_axes_and_outer_rings() -> None:
+    axes = Mock()
+    polygon = [
+        [(0, 0), (1, 0), (0, 1)],
+        [(0.1, 0.1), (0.2, 0.1), (0.1, 0.2)],
+    ]
+    multipolygon = [polygon, [[(2, 2), (3, 2), (2, 3)]]]
+
+    with patch.object(basemap_module, "_draw_ring") as draw_ring:
+        basemap_module._draw_polygon(axes, polygon)
+        basemap_module._draw_multipolygon(axes, multipolygon)
+
+    assert draw_ring.call_args_list == [
+        call(axes, polygon[0]),
+        call(axes, polygon[0]),
+        call(axes, multipolygon[1][0]),
+    ]
+
+
 def test_draw_landmasses_supports_polygon_multipolygon_and_bad_features() -> None:
     """Only valid outer rings become beige land patches."""
 

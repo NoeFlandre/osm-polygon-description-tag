@@ -78,7 +78,7 @@ def test_pre_commit_and_just_are_configured() -> None:
     ):
         assert recipe in justfile
     assert '"/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw"' in justfile
-    assert '"/Volumes/Seagate M3/projects/osm-polygon-description-tag"' in justfile
+    assert '"/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root"' in justfile
     assert "NoeFlandre/osm-polygon-description-tag" in justfile
 
 

@@ -1,9 +1,18 @@
-"""Run the repository-wide mutation gate with a fast pass and exact confirmation.
+"""Run the repository-wide mutation gate with escalating passes and exact confirmation.
 
-Mutmut associates every source function with the tests that execute it.  The fast
-pass keeps only the shortest deterministic subset of those already-proven tests;
-every mutant that is not killed there is then rerun against the complete original
-association.  No mutant is excluded: the second pass is the correctness gate.
+Mutmut associates every source function with the tests that execute it, and runs
+each mutant under ``pytest -x``.  Two consequences shape this gate:
+
+* Ordering decides the cost of a kill.  Every selection is ordered
+  focused-tests-first and then cheapest-first, so a mutant that dies usually
+  dies within the first test or two instead of after a whole module's suite.
+* Only a survivor has to pay for its complete association.  The gate therefore
+  escalates: a small selection first, a wider one next, and finally the exact
+  complete association recorded by mutmut.
+
+Already-resolved mutants are read from the candidate's metadata and never rerun,
+so an interrupted or repeated run resumes instead of starting over.  No mutant is
+excluded: the last pass is the correctness gate.
 """
 
 from __future__ import annotations
@@ -17,6 +26,55 @@ from typing import Any
 
 from scripts.check_mutation_score import STATUS_BY_EXIT_CODE
 
+DEFAULT_MAX_CHILDREN = 8
+DEFAULT_FAST_TESTS_PER_FUNCTION = 5
+_ESCALATION_FACTOR = 8
+
+
+def test_priority(
+    function_name: str, test_name: str, durations: Mapping[str, float]
+) -> tuple[int, float, str]:
+    """Rank one test for one function: focused first, then cheapest, then by name."""
+
+    nodeid = test_name.lower()
+    module_name = function_name.partition(".x")[0].rsplit(".", 1)[-1].lower()
+    function_name_only = function_name.rsplit(".", 1)[-1]
+    function_name_only = function_name_only.removeprefix("x__").lower()
+    focused = module_name in nodeid or function_name_only in nodeid
+    return (
+        0 if focused else 1,
+        float(durations.get(test_name, float("inf"))),
+        test_name,
+    )
+
+
+def order_tests(
+    function_name: str, test_names: Iterable[str], durations: Mapping[str, float]
+) -> tuple[str, ...]:
+    """Order one function's tests so the likeliest, cheapest kill runs first."""
+
+    return tuple(
+        sorted(
+            set(test_names),
+            key=lambda test_name: test_priority(function_name, test_name, durations),
+        )
+    )
+
+
+def escalation_stages(
+    fast_tests_per_function: int = DEFAULT_FAST_TESTS_PER_FUNCTION,
+) -> tuple[int | None, ...]:
+    """Return the per-function test budgets to try, ending with the exact pass.
+
+    A wider intermediate budget resolves most of what the fast pass misses
+    without paying for every function's complete association, and ``None``
+    is the final exact pass that decides the gate.
+    """
+
+    if fast_tests_per_function < 1:
+        raise ValueError("fast_tests_per_function must be positive")
+    return (fast_tests_per_function, fast_tests_per_function * _ESCALATION_FACTOR, None)
+
 
 def trim_associations(
     associations: Mapping[str, Iterable[str]],
@@ -28,68 +86,59 @@ def trim_associations(
 
     if max_tests < 1:
         raise ValueError("max_tests must be positive")
-
-    def priority(function_name: str, test_name: str) -> tuple[int, float, str]:
-        nodeid = test_name.lower()
-        module_name = function_name.partition(".x")[0].rsplit(".", 1)[-1].lower()
-        function_name_only = function_name.rsplit(".", 1)[-1]
-        function_name_only = function_name_only.removeprefix("x__").lower()
-        focused = module_name in nodeid or function_name_only in nodeid
-        return (
-            0 if focused else 1,
-            float(durations.get(test_name, float("inf"))),
-            test_name,
-        )
-
     return {
-        function_name: tuple(
-            sorted(
-                set(test_names),
-                key=lambda test_name: priority(function_name, test_name),
-            )[:max_tests]
-        )
+        function_name: order_tests(function_name, test_names, durations)[:max_tests]
         for function_name, test_names in sorted(associations.items())
     }
 
 
 def complete_associations(
     associations: Mapping[str, Iterable[str]],
-    all_tests: Iterable[str],
+    durations: Mapping[str, float],
 ) -> dict[str, tuple[str, ...]]:
     """Give unassociated functions the nearest reliable test selection.
 
-    Mutmut records exact trampoline hits, but helpers reached through patched
-    boundaries can be omitted from that map even when tests for the same
-    module exercise their behavior.  Reusing tests from the same module keeps
-    those mutants observable.  A module with no recorded hits falls back to
-    the complete collected test set, so an untested function is reported as a
-    survivor rather than silently classified as ``no_tests``.
+    Mutmut records exact trampoline hits, but that map is demonstrably
+    incomplete: functions reached through a CLI entry point or a patched
+    boundary can end up associated with a single unrelated test even though a
+    whole module's suite exercises them, which reports killable mutants as
+    survivors.  Every function therefore also receives the tests recorded for
+    its module and the tests named after it, and a module with no recorded hits
+    at all falls back to the complete collected test set, so an untested
+    function is reported as a survivor rather than silently classified as
+    ``no_tests``.
     """
 
     normalized = {
-        function_name: tuple(sorted(set(test_names)))
-        for function_name, test_names in sorted(associations.items())
+        function_name: set(test_names) for function_name, test_names in sorted(associations.items())
     }
     module_tests: dict[str, set[str]] = {}
     for function_name, test_names in normalized.items():
         module_name = function_name.partition(".x")[0]
         module_tests.setdefault(module_name, set()).update(test_names)
-    complete_test_set = tuple(sorted(set(all_tests)))
+    complete_test_set = set(durations)
 
-    completed: dict[str, tuple[str, ...]] = {}
-    for function_name, test_names in normalized.items():
-        if test_names:
-            completed[function_name] = test_names
-            continue
-        module_name = function_name.partition(".x")[0]
-        module_leaf = module_name.rsplit(".", 1)[-1].lower()
-        same_module_tests = {
-            test_name for test_name in complete_test_set if module_leaf in test_name.lower()
-        }
-        completed[function_name] = tuple(
-            sorted(module_tests.get(module_name, set()) | same_module_tests) or complete_test_set
+    return {
+        function_name: order_tests(
+            function_name,
+            test_names | _module_neighbourhood(function_name, module_tests, complete_test_set),
+            durations,
         )
-    return completed
+        for function_name, test_names in normalized.items()
+    }
+
+
+def _module_neighbourhood(
+    function_name: str, module_tests: Mapping[str, set[str]], complete_test_set: set[str]
+) -> set[str]:
+    """Return every test that plausibly exercises one function's module."""
+
+    module_name = function_name.partition(".x")[0]
+    module_leaf = module_name.rsplit(".", 1)[-1].lower()
+    same_module_tests = {
+        test_name for test_name in complete_test_set if module_leaf in test_name.lower()
+    }
+    return (module_tests.get(module_name, set()) | same_module_tests) or complete_test_set
 
 
 def unresolved_mutants(mutants_root: Path) -> list[str]:
@@ -106,6 +155,39 @@ def unresolved_mutants(mutants_root: Path) -> list[str]:
 
 def _stats_path() -> Path:
     return Path("mutants") / "mutmut-stats.json"
+
+
+def _recorded_path() -> Path:
+    return Path("mutants") / "mutmut-recorded-tests.json"
+
+
+def recorded_associations(stats: Mapping[str, Any], path: Path) -> dict[str, tuple[str, ...]]:
+    """Return mutmut's own recording, preserved across escalating passes.
+
+    Each pass overwrites the stats file with the selection it wants mutmut to
+    run, so the recording has to be kept separately: without it, a run
+    interrupted during an early narrow pass would treat that narrow selection
+    as the truth and report false survivors when resumed.
+    """
+
+    if path.is_file():
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return {name: tuple(tests) for name, tests in payload.items()}
+    recorded = {
+        function_name: tuple(sorted(stats["tests_by_mangled_function_name"].get(function_name, ())))
+        for function_name in stats["function_hashes"]
+    }
+    path.write_text(
+        json.dumps(
+            {name: list(tests) for name, tests in recorded.items()},
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return recorded
 
 
 def _read_stats() -> dict[str, Any]:
@@ -164,7 +246,7 @@ def _verify_mutmut_can_fail(runner: Any) -> None:
 
 
 def run_gate(*, max_children: int, fast_tests_per_function: int) -> None:
-    """Run fast mutation triage, then exact confirmation for every survivor."""
+    """Escalate mutation triage, then confirm every survivor exactly."""
 
     import mutmut
     import mutmut.__main__ as mutmut_main
@@ -173,43 +255,37 @@ def run_gate(*, max_children: int, fast_tests_per_function: int) -> None:
     _verify_mutmut_can_fail(runner)
 
     stats = _read_stats()
-    recorded_associations = stats["tests_by_mangled_function_name"]
-    all_function_associations = {
-        function_name: recorded_associations.get(function_name, ())
-        for function_name in stats["function_hashes"]
-    }
+    durations = stats["duration_by_test"]
     full_associations = complete_associations(
-        all_function_associations,
-        stats["duration_by_test"],
+        recorded_associations(stats, _recorded_path()), durations
     )
-    fast_associations = trim_associations(
-        full_associations,
-        stats["duration_by_test"],
-        max_tests=fast_tests_per_function,
-    )
-    _write_stats(_replace_associations(stats, fast_associations))
 
     original_forced_fail = mutmut_main.run_forced_fail_test
     mutmut_main.run_forced_fail_test = lambda _runner: None
     try:
-        fast_names = unresolved_mutants(Path("mutants"))
-        if fast_names:
-            mutmut_main._run(fast_names, max_children)
-
-        remaining_names = unresolved_mutants(Path("mutants"))
-        current_stats = _read_stats()
-        _write_stats(_replace_associations(current_stats, full_associations))
-        if remaining_names:
-            mutmut._reset_globals()
-            mutmut_main._run(remaining_names, max_children)
+        for index, max_tests in enumerate(escalation_stages(fast_tests_per_function)):
+            selection = (
+                full_associations
+                if max_tests is None
+                else trim_associations(full_associations, durations, max_tests=max_tests)
+            )
+            _write_stats(_replace_associations(_read_stats(), selection))
+            remaining = unresolved_mutants(Path("mutants"))
+            if not remaining:
+                break
+            if index:
+                mutmut._reset_globals()
+            mutmut_main._run(remaining, max_children)
     finally:
         mutmut_main.run_forced_fail_test = original_forced_fail
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--max-children", type=int, default=8)
-    parser.add_argument("--fast-tests-per-function", type=int, default=5)
+    parser.add_argument("--max-children", type=int, default=DEFAULT_MAX_CHILDREN)
+    parser.add_argument(
+        "--fast-tests-per-function", type=int, default=DEFAULT_FAST_TESTS_PER_FUNCTION
+    )
     return parser.parse_args()
 
 

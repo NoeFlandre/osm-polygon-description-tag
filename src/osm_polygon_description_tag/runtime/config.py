@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_SOURCE_ROOT = Path("/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw")
-DEFAULT_DATA_ROOT = Path("/Volumes/Seagate M3/projects/osm-polygon-description-tag")
+DEFAULT_DATA_ROOT = Path("/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root")
 
 
 class UnsafePathError(ValueError):

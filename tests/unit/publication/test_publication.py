@@ -1,6 +1,7 @@
 import subprocess
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from shapely.geometry import Polygon
@@ -244,6 +245,23 @@ def test_required_metadata_collection_rejects_mismatched_document_paths(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(planning, "_required_document_paths", lambda _root: ())
+
+    with pytest.raises(ValueError):
+        _collect_required_metadata_items(tmp_path)
+
+
+def test_required_metadata_collection_rejects_mismatched_artifact_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        planning,
+        "DOCUMENT_ARTIFACTS",
+        (SimpleNamespace(relative_path="README.md"), SimpleNamespace(relative_path="stats.json")),
+    )
+    monkeypatch.setattr(
+        planning, "_required_document_paths", lambda _root: (tmp_path / "README.md",)
+    )
+    (tmp_path / "README.md").write_text("# Card\n", encoding="utf-8")
 
     with pytest.raises(ValueError):
         _collect_required_metadata_items(tmp_path)

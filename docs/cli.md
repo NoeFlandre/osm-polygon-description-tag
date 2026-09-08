@@ -43,7 +43,7 @@ The complete stoppable and resumable operation:
 ```bash
 uv run osm-polygon-description-tag run-and-publish \
   --source-root "/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw" \
-  --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag" \
+  --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root" \
   --confirm-repo NoeFlandre/osm-polygon-description-tag
 ```
 
@@ -77,7 +77,7 @@ dashboard:
 
 ```bash
 uv run osm-polygon-description-tag trackio-snapshot \
-  --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag" \
+  --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root" \
   --run-name snapshot-2026-07-31
 ```
 
@@ -86,6 +86,54 @@ points during a live run and syncs the completed local database after the run.
 The cumulative curves use PBF index steps sorted by filename, never elapsed
 time. The dashboard also contains the per-PBF table, summary, ranked regional
 plots, H3 map, and area histogram.
+
+## `language`
+
+The `language` group produces the additive `language-v1` annotations. It is
+documented in full, including limitations and recovery behaviour, in the
+[language detection runbook](language-detection.md).
+
+```bash
+uv run osm-polygon-description-tag language prepare --source-root <src> --run-dir <run> --project-root .
+uv run osm-polygon-description-tag language run --source-root <src> --run-dir <run> --shard region.parquet
+uv run osm-polygon-description-tag language validate --run-dir <run>
+uv run osm-polygon-description-tag language export --run-dir <run> --export-dir <export>
+uv run osm-polygon-description-tag language publish --export-dir <export> --repo <repo> --confirm-repo <repo>
+```
+
+`prepare` freezes an immutable input snapshot, `run` spends a bounded
+processing budget on one shard and pauses resumably, and `validate` reports
+completeness read-only. `export` refuses anything but a fully complete run, and
+`publish` plans by default: it uploads only with `--apply` and a matching
+`--baseline-revision`.
+
+The nested `language grid` group prepares, stages, submits, reconciles, and collects one
+tiny Grid'5000 job. `submit` and `status` contact no scheduler unless `--apply`
+is passed, and the policy preflight fails closed on anything it cannot
+positively interpret.
+
+```bash
+uv run --no-sync osm-polygon-description-tag language grid stage --run-dir <run> --shard region.parquet \
+  --project-root <project> --source-root <src> --remote-bundle-dir /home/user/language-bundle
+uv run --no-sync osm-polygon-description-tag language grid prepare --run-dir <run> --shard region.parquet \
+  --remote-project-dir /home/user/project --remote-source-dir /tmp/src --remote-run-dir /tmp/run
+uv run --no-sync osm-polygon-description-tag language grid submit --run-dir <run> --shard region.parquet --site nancy ...
+uv run --no-sync osm-polygon-description-tag language grid status --run-dir <run> --shard region.parquet
+uv run --no-sync osm-polygon-description-tag language grid collect --run-dir <run> --shard region.parquet
+```
+
+`stage` prepares a portable one-shard payload locally and prints the transfer
+plan; `--apply` enables the transfer. The paths must be visible in the current
+filesystem, normally on the site's frontend/shared storage. These commands use
+an already-installed operator environment; do not install dependencies on the
+frontend. `prepare` alone
+writes script metadata and does not transfer inputs. Both write the shard's
+initial zero-cursor checkpoint, so a job that dies during setup is still
+collectable; `stage` also reports any uncheckpointed orphan part or receipt it
+moved aside under `quarantined`. See the runbook for retrieval, terminal-job
+reconciliation, crash recovery, and explicit paused-run continuation. No
+Grid'5000 job, OAR command, SSH session, production run, or Hub upload has been
+executed for this implementation.
 
 ## Output and exit codes
 
