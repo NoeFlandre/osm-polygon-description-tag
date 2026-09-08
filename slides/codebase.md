@@ -138,13 +138,13 @@ can be audited, interrupted, resumed, and reproduced.
 
 ```text
 code checkout
-  /Users/noeflandre/osm-polygon-description-tag
+  /Volumes/Seagate M3/projects/osm-polygon-description-tag
 
 immutable raw PBFs
   /Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw
 
 generated data + state
-  /Volumes/Seagate M3/projects/osm-polygon-description-tag
+  /Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root
 ```
 
 <div class="source-note">Sources: docs/index.md; docs/operations.md; docs/getting-started.md</div>
@@ -393,7 +393,7 @@ pre-commit, Just, and GitHub Actions.
 # Read the contract, then run the workflow
 
 ```bash
-cd /Users/noeflandre/osm-polygon-description-tag
+cd /Volumes/Seagate\ M3/projects/osm-polygon-description-tag
 uv sync --locked
 just run-and-publish
 ```
