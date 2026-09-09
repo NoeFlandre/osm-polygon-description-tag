@@ -90,6 +90,23 @@ staging a shard on another machine does not change it. Re-running `prepare`
 with unchanged inputs is idempotent; if any source file changed, it fails
 rather than silently rewriting the identity.
 
+### V2 pilot policy
+
+V2 is a separate run that uses the same pinned Lingua implementation and
+source snapshot as V1, but lowers only the minimum raw score from `0.80` to
+`0.70`. The margin (`0.20`), minimum alphabetic characters (`5`), and
+mixed/short-text handling are unchanged. Select it explicitly when preparing
+the new run:
+
+```bash
+uv run osm-polygon-description-tag language prepare --source-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root/data" --run-dir "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root/language-run-v2" --project-root . --policy-version v2
+```
+
+For the pilot, process only `afghanistan-latest.parquet`,
+`albania-latest.parquet`, and `algeria-latest.parquet`. Alsace is intentionally
+excluded. V2 output must be compared with V1 before any broader run; it is not
+published to Hugging Face as part of this pilot.
+
 ### 2. Process one shard
 
 ```bash

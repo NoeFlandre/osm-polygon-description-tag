@@ -3,6 +3,8 @@
 import pytest
 
 from osm_polygon_description_tag.dataset.languages.models import (
+    DEFAULT_LANGUAGE_POLICY,
+    V2_LANGUAGE_POLICY,
     LanguageModelIdentity,
     LanguagePolicy,
     LanguageResult,
@@ -69,6 +71,14 @@ def test_policy_accepts_inclusive_minimum_and_threshold_boundaries() -> None:
     assert policy.min_score == 1.0
     assert policy.min_margin == 1.0
     assert policy.tie_epsilon == 1.0
+
+
+def test_v2_policy_lowers_only_the_minimum_confidence_threshold() -> None:
+    assert V2_LANGUAGE_POLICY.min_alphabetic_chars == DEFAULT_LANGUAGE_POLICY.min_alphabetic_chars
+    assert V2_LANGUAGE_POLICY.min_score == 0.70
+    assert V2_LANGUAGE_POLICY.min_margin == DEFAULT_LANGUAGE_POLICY.min_margin
+    assert V2_LANGUAGE_POLICY.tie_epsilon == DEFAULT_LANGUAGE_POLICY.tie_epsilon
+    assert V2_LANGUAGE_POLICY != DEFAULT_LANGUAGE_POLICY
 
 
 def test_a_status_may_be_given_by_its_string_spelling() -> None:

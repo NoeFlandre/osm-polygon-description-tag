@@ -249,6 +249,7 @@ def language_model_identity(
 
 
 DEFAULT_LANGUAGE_POLICY = LanguagePolicy()
+V2_LANGUAGE_POLICY: Final = LanguagePolicy(min_score=0.70)
 
 
 __all__ = [
@@ -256,6 +257,7 @@ __all__ = [
     "DEFAULT_LANGUAGE_SCOPE",
     "LINGUA_LIBRARY_NAME",
     "PINNED_LINGUA_VERSION",
+    "V2_LANGUAGE_POLICY",
     "LanguageModelIdentity",
     "LanguagePolicy",
     "LanguageResult",

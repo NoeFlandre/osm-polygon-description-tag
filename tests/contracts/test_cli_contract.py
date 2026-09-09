@@ -63,6 +63,7 @@ LANGUAGE_COMMAND_OPTIONS = {
         "--source-root",
         "--run-dir",
         "--project-root",
+        "--policy-version",
         "--min-alphabetic-chars",
         "--min-score",
         "--min-margin",

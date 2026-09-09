@@ -19,6 +19,7 @@ from osm_polygon_description_tag.dataset.languages.detector import build_lingua_
 from osm_polygon_description_tag.dataset.languages.models import (
     DEFAULT_LANGUAGE_POLICY,
     DEFAULT_LANGUAGE_SCOPE,
+    V2_LANGUAGE_POLICY,
     LanguagePolicy,
 )
 from osm_polygon_description_tag.dataset.languages.snapshot import (
@@ -107,20 +108,39 @@ BudgetSeconds = Annotated[
     float, typer.Option("--budget-seconds", help="Monotonic processing budget for this attempt")
 ]
 MinChars = Annotated[
-    int,
+    int | None,
     typer.Option("--min-alphabetic-chars", help="Minimum letters before detection is attempted"),
 ]
-MinScore = Annotated[float, typer.Option("--min-score", help="Minimum raw top score to accept")]
+MinScore = Annotated[
+    float | None, typer.Option("--min-score", help="Minimum raw top score to accept")
+]
 MinMargin = Annotated[
-    float, typer.Option("--min-margin", help="Minimum raw score margin over the runner-up")
+    float | None, typer.Option("--min-margin", help="Minimum raw score margin over the runner-up")
+]
+PolicyVersion = Annotated[
+    str, typer.Option("--policy-version", help="Named policy preset: v1 or v2")
 ]
 
 
-def _policy(min_alphabetic_chars: int, min_score: float, min_margin: float) -> LanguagePolicy:
+def _policy(
+    min_alphabetic_chars: int | None,
+    min_score: float | None,
+    min_margin: float | None,
+    *,
+    policy_version: str = "v1",
+) -> LanguagePolicy:
+    if policy_version == "v1":
+        base = DEFAULT_LANGUAGE_POLICY
+    elif policy_version == "v2":
+        base = V2_LANGUAGE_POLICY
+    else:
+        raise ValueError("policy_version must be 'v1' or 'v2'")
     return LanguagePolicy(
-        min_alphabetic_chars=min_alphabetic_chars,
-        min_score=min_score,
-        min_margin=min_margin,
+        min_alphabetic_chars=(
+            base.min_alphabetic_chars if min_alphabetic_chars is None else min_alphabetic_chars
+        ),
+        min_score=base.min_score if min_score is None else min_score,
+        min_margin=base.min_margin if min_margin is None else min_margin,
     )
 
 
@@ -212,15 +232,21 @@ def prepare_command(
     source_root: SourceRoot,
     run_dir: RunDir,
     project_root: ProjectRoot = Path(),
-    min_alphabetic_chars: MinChars = DEFAULT_LANGUAGE_POLICY.min_alphabetic_chars,
-    min_score: MinScore = DEFAULT_LANGUAGE_POLICY.min_score,
-    min_margin: MinMargin = DEFAULT_LANGUAGE_POLICY.min_margin,
+    min_alphabetic_chars: MinChars = None,
+    min_score: MinScore = None,
+    min_margin: MinMargin = None,
+    policy_version: PolicyVersion = "v1",
 ) -> None:
     handle_prepare(
         source_root,
         run_dir,
         project_root,
-        _policy(min_alphabetic_chars, min_score, min_margin),
+        _policy(
+            min_alphabetic_chars,
+            min_score,
+            min_margin,
+            policy_version=policy_version,
+        ),
     )
 
 

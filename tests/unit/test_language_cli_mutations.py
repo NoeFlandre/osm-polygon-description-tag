@@ -11,6 +11,7 @@ import pytest
 from osm_polygon_description_tag import language_cli
 from osm_polygon_description_tag.dataset.languages.detector import LanguageDetector
 from osm_polygon_description_tag.dataset.languages.models import (
+    V2_LANGUAGE_POLICY,
     LanguagePolicy,
     language_model_identity,
 )
@@ -57,6 +58,31 @@ def test_prepare_command_forwards_all_language_policy_options(
         "project_root": Path("/project"),
         "policy": LanguagePolicy(min_alphabetic_chars=17, min_score=0.91, min_margin=0.13),
     }
+
+
+def test_prepare_command_selects_the_named_v2_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    received: dict[str, object] = {}
+
+    def fake_handle_prepare(
+        source_root: Path,
+        run_dir: Path,
+        project_root: Path,
+        policy: LanguagePolicy,
+    ) -> None:
+        received["policy"] = policy
+
+    monkeypatch.setattr(language_cli, "handle_prepare", fake_handle_prepare)
+
+    language_cli.prepare_command(
+        Path("/source"),
+        Path("/run"),
+        Path("/project"),
+        policy_version="v2",
+    )
+
+    assert received["policy"] == V2_LANGUAGE_POLICY
 
 
 def test_handle_prepare_emits_complete_snapshot_metadata(
