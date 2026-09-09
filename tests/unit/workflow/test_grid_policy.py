@@ -103,6 +103,19 @@ def test_the_observed_usage_policy_schema_yields_a_job_count() -> None:
     assert parse_usage_policy_json(OBSERVED_POLICY) == (0, ())
 
 
+def test_the_current_usagepolicycheck_json_schema_is_accepted() -> None:
+    live_policy = json.dumps(
+        {
+            "start_time": "2026-09-02 10:48:36 +0200",
+            "stop_time": "2026-09-16 10:48:36 +0200",
+            "jobs": {},
+            "total_jobs": {},
+            "limits": {"nancy": {"gros": {"time": 15940800, "nb_cores": 2214}}},
+        }
+    )
+    assert parse_usage_policy_json(live_policy) == (0, ())
+
+
 def test_usage_policy_fields_have_strict_types_and_consistent_job_count() -> None:
     malformed = json.dumps(
         {"start_time": "0", "stop_time": 0, "jobs": [], "total_jobs": 0, "limits": {}}

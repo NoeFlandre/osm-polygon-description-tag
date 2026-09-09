@@ -145,6 +145,8 @@ def parse_usage_policy_json(text: str) -> tuple[int | None, tuple[str, ...]]:
 
 def _historical_job_count(payload: Mapping[str, object]) -> tuple[int | None, tuple[str, ...]]:
     total = payload["total_jobs"]
+    if isinstance(total, Mapping):
+        return 0, ()
     if type(total) is not int or total < 0:
         return None, ("usage policy total_jobs is not a non-negative integer",)
     jobs = cast(list[object], payload["jobs"])  # pragma: no mutate - static narrowing
@@ -169,14 +171,48 @@ def _observed_policy_object(text: str) -> tuple[dict[str, object] | None, tuple[
 
 
 def _usage_policy_shape_notes(payload: Mapping[str, object]) -> tuple[str, ...]:
+    start_time = payload["start_time"]
+    stop_time = payload["stop_time"]
+    if _is_current_usage_policy_time(start_time) and _is_current_usage_policy_time(stop_time):
+        return tuple(_current_usage_policy_shape_notes(payload))
+
     notes: list[str] = []
-    for name in ("start_time", "stop_time"):
-        if type(payload[name]) is not int:
+    for name, value in (("start_time", start_time), ("stop_time", stop_time)):
+        if type(value) is not int:
             notes.append(f"usage policy {name} must be an integer")
-    notes.extend(_job_list_notes(payload["jobs"]))
+    notes.extend(_legacy_usage_policy_shape_notes(payload))
+    return tuple(notes)
+
+
+def _is_current_usage_policy_time(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        datetime.strptime(value, "%Y-%m-%d %H:%M:%S %z")
+    except ValueError:
+        return False
+    return True
+
+
+def _legacy_usage_policy_shape_notes(payload: Mapping[str, object]) -> list[str]:
+    notes = list(_job_list_notes(payload["jobs"]))
+    total = payload["total_jobs"]
+    if type(total) is not int or total < 0:
+        notes.append("usage policy total_jobs is not a non-negative integer")
     if not isinstance(payload["limits"], Mapping):
         notes.append("usage policy limits must be an object")
-    return tuple(notes)
+    return notes
+
+
+def _current_usage_policy_shape_notes(payload: Mapping[str, object]) -> list[str]:
+    notes: list[str] = []
+    if not isinstance(payload["jobs"], Mapping):
+        notes.append("usage policy jobs must be an object")
+    if not isinstance(payload["total_jobs"], Mapping):
+        notes.append("usage policy total_jobs must be an object")
+    if not isinstance(payload["limits"], Mapping):
+        notes.append("usage policy limits must be an object")
+    return notes
 
 
 def _job_list_notes(jobs: object) -> tuple[str, ...]:
