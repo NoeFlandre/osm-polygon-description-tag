@@ -85,6 +85,11 @@ def test_prepare_command_selects_the_named_v2_policy(
     assert received["policy"] == V2_LANGUAGE_POLICY
 
 
+def test_prepare_policy_rejects_an_unknown_named_policy() -> None:
+    with pytest.raises(ValueError, match="policy_version must be 'v1' or 'v2'"):
+        language_cli._policy(None, None, None, policy_version="v3")
+
+
 def test_handle_prepare_emits_complete_snapshot_metadata(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

@@ -121,6 +121,11 @@ PolicyVersion = Annotated[
     str, typer.Option("--policy-version", help="Named policy preset: v1 or v2")
 ]
 
+_POLICY_PRESETS = {
+    "v1": DEFAULT_LANGUAGE_POLICY,
+    "v2": V2_LANGUAGE_POLICY,
+}
+
 
 def _policy(
     min_alphabetic_chars: int | None,
@@ -129,12 +134,10 @@ def _policy(
     *,
     policy_version: str = "v1",
 ) -> LanguagePolicy:
-    if policy_version == "v1":
-        base = DEFAULT_LANGUAGE_POLICY
-    elif policy_version == "v2":
-        base = V2_LANGUAGE_POLICY
-    else:
-        raise ValueError("policy_version must be 'v1' or 'v2'")
+    try:
+        base = _POLICY_PRESETS[policy_version]
+    except KeyError:
+        raise ValueError("policy_version must be 'v1' or 'v2'") from None
     return LanguagePolicy(
         min_alphabetic_chars=(
             base.min_alphabetic_chars if min_alphabetic_chars is None else min_alphabetic_chars
