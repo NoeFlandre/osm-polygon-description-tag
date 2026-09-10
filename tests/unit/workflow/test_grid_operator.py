@@ -7,6 +7,7 @@ import stat
 import subprocess
 import sys
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -39,6 +40,8 @@ from osm_polygon_description_tag.storage import write_geoparquet
 from osm_polygon_description_tag.workflow.grid_operator import (
     GridOperatorError,
     JobBundle,
+    JobPaths,
+    SubmissionIntent,
     acknowledge_collected_results,
     build_bundle_transfer_argv,
     build_result_retrieval_argv,
@@ -793,6 +796,202 @@ def test_transfer_and_retrieval_are_explicit_no_shell_argv_contracts(
         f"{expected_destination}/",
     )
     assert all("sh -c" not in item for item in (*send, *receive))
+
+
+def test_submission_passes_through_the_caller_walltime_and_retry_choice(
+    prepared: tuple[Path, Path, SnapshotManifest],
+) -> None:
+    """A non-default walltime and ``night_noretry=False`` must not be defaulted."""
+    _, run, snapshot = prepared
+    walltime = MAX_WALLTIME_SECONDS - 300
+    bundle, paths = prepare_job(run, snapshot, SHARD, walltime_seconds=walltime, **REMOTE)
+    observed: list[tuple[str, ...]] = []
+
+    # Planning alone must already carry both choices into the argv it prints.
+    planned, planned_result = submit_job(
+        paths,
+        bundle,
+        policy=_verdict(),
+        allowed_root=run,
+        walltime_seconds=walltime,
+        night_noretry=False,
+    )
+    assert planned_result is None
+    assert planned.walltime_seconds == walltime
+    assert "core=1,walltime=0:25:00" in planned.argv
+    assert "night=noretry" not in planned.argv
+
+    plan, result = submit_job(
+        paths,
+        bundle,
+        policy=_verdict(),
+        allowed_root=run,
+        apply=True,
+        walltime_seconds=walltime,
+        night_noretry=False,
+        runner=_runner(  # type: ignore[arg-type]
+            [CommandResult((), 0, "OAR_JOB_ID=6917618" + chr(10), "")], observed
+        ),
+    )
+
+    assert result is not None
+    assert plan.walltime_seconds == walltime
+    assert "core=1,walltime=0:25:00" in plan.argv
+    assert "core=1,walltime=0:25:00" in observed[0]
+    assert "night=noretry" not in plan.argv
+    assert "night=noretry" not in observed[0]
+
+
+def test_result_retrieval_binds_labels_and_the_exact_remote_source(tmp_path: Path) -> None:
+    """Both inputs are refused under their own label, and the source is exact."""
+    staging = tmp_path / "staging"
+
+    with pytest.raises(GridOperatorError) as error:
+        build_result_retrieval_argv("/scratch/a b", staging, SHARD)
+    assert str(error.value) == "remote run directory must not contain shell metacharacters"
+
+    with pytest.raises(GridOperatorError) as error:
+        build_result_retrieval_argv("/scratch/run", staging, "region.txt")
+    assert str(error.value) == "shard must be a Parquet path"
+
+    key = shard_paths(staging, SHARD).root.name
+    assert build_result_retrieval_argv("/scratch/run/", staging, SHARD)[-2] == (
+        f"/scratch/run/shards/{key}/"
+    )
+    assert build_result_retrieval_argv("/scratch/runX", staging, SHARD)[-2] == (
+        f"/scratch/runX/shards/{key}/"
+    )
+    assert build_result_retrieval_argv("/", staging, SHARD)[-2] == f"//shards/{key}/"
+
+
+def test_planning_honours_explicit_limits_and_evaluation_time(
+    prepared: tuple[Path, Path, SnapshotManifest],
+) -> None:
+    """A plan must use the caller's attempt limit, freshness demand, and clock."""
+    _, run, snapshot = prepared
+    bundle, paths = prepare_job(run, snapshot, SHARD, **REMOTE)
+    captured_at = datetime(2026, 9, 9, 21, 0, tzinfo=UTC)
+    policy = PolicyVerdict(
+        PolicyDecision.ALLOWED,
+        ("test verdict",),
+        PolicyEvidence(0, False, True, (), captured_at=captured_at),
+    )
+
+    # The caller's own instant makes the evidence fresh; the real clock would not.
+    fresh, _ = submit_job(
+        paths,
+        bundle,
+        policy=policy,
+        allowed_root=run,
+        require_fresh_policy=True,
+        now=captured_at,
+    )
+    assert fresh.may_apply
+
+    # A stale instant must block precisely because freshness was demanded.
+    stale, _ = submit_job(
+        paths,
+        bundle,
+        policy=policy,
+        allowed_root=run,
+        require_fresh_policy=True,
+        now=datetime(2026, 9, 10, 21, 0, tzinfo=UTC),
+    )
+    assert not stale.may_apply
+    assert stale.blocked_reason is not None
+
+    # The attempt limit is the caller's, and it is reached at the first attempt.
+    _write_submitted_intent(paths, bundle)
+    limited, _ = submit_job(
+        paths,
+        bundle,
+        policy=policy,
+        allowed_root=run,
+        max_attempts=1,
+        now=captured_at,
+    )
+    assert not limited.may_apply
+    assert limited.blocked_reason is not None
+    assert "maximum of 1 attempts" in limited.blocked_reason
+
+
+def _write_submitted_intent(paths: JobPaths, bundle: JobBundle) -> None:
+    """Record a terminal, acknowledged first attempt so a retry may be planned."""
+    intent = SubmissionIntent(
+        bundle_id=bundle.bundle_id,
+        shard=bundle.shard,
+        job_name=f"lang-{bundle.bundle_id[:16]}",
+        walltime_seconds=MAX_WALLTIME_SECONDS,
+        cores=1,
+        recorded_at="2026-09-09T21:00:00+00:00",
+        job_id=6917617,
+        outcome="submitted",
+        terminal_state="terminated",
+        reconciled_at="2026-09-09T21:05:00+00:00",
+        result_acknowledged=True,
+    )
+    paths.intent.write_text(json.dumps(intent.to_payload()), encoding="utf-8")
+
+
+def test_an_applied_submission_records_a_utc_intent_and_requests_night_noretry(
+    prepared: tuple[Path, Path, SnapshotManifest],
+) -> None:
+    """Without an injected clock the intent is still timezone-aware UTC."""
+    _, run, snapshot = prepared
+    bundle, paths = prepare_job(run, snapshot, SHARD, **REMOTE)
+    observed: list[tuple[str, ...]] = []
+
+    plan, result = submit_job(
+        paths,
+        bundle,
+        policy=_verdict(),
+        allowed_root=run,
+        apply=True,
+        runner=_runner(  # type: ignore[arg-type]
+            [CommandResult((), 0, "OAR_JOB_ID=6917617\n", "")], observed
+        ),
+    )
+
+    assert result is not None
+    assert observed and "night=noretry" in observed[0]
+    assert "night=noretry" in plan.argv
+    recorded = read_intent(paths.intent)
+    assert recorded.recorded_at.endswith("+00:00")
+    assert datetime.fromisoformat(recorded.recorded_at).tzinfo is not None
+    assert plan.walltime_seconds == MAX_WALLTIME_SECONDS
+
+
+def test_bundle_transfer_binds_identity_label_and_exact_destination(
+    portable_prepared: tuple[Path, Path, Path, SnapshotManifest],
+) -> None:
+    """The transfer argv is a safety contract, so pin each part of it.
+
+    Only a verified ``PreparedJob`` may be transferred, the payload is checked
+    against *this* bundle rather than whatever bundle it happens to contain,
+    the remote path is refused under its own label, and the destination keeps
+    exactly one trailing separator.
+    """
+    project, source, run, snapshot = portable_prepared
+    prepared = prepare_portable_job(
+        run, project, source, snapshot, SHARD, remote_bundle_dir="/scratch/lang-bundle"
+    )
+
+    with pytest.raises(GridOperatorError) as error:
+        build_bundle_transfer_argv(object(), "/scratch/lang-bundle")  # type: ignore[arg-type]
+    assert str(error.value) == "prepared bundle must be a PreparedJob"
+
+    foreign = replace(prepared, bundle=replace(prepared.bundle, source_sha256="c" * 64))
+    with pytest.raises(GridOperatorError):
+        build_bundle_transfer_argv(foreign, "/scratch/lang-bundle")
+
+    with pytest.raises(GridOperatorError) as error:
+        build_bundle_transfer_argv(prepared, "/scratch/a b")
+    assert str(error.value) == "remote bundle directory must not contain shell metacharacters"
+
+    # Only "/" is stripped, and a root destination stays rooted.
+    assert build_bundle_transfer_argv(prepared, "/scratch/bundle/")[-1] == "/scratch/bundle/"
+    assert build_bundle_transfer_argv(prepared, "/scratch/bundleX")[-1] == "/scratch/bundleX/"
+    assert build_bundle_transfer_argv(prepared, "/")[-1] == "//"
 
 
 @pytest.mark.parametrize(
