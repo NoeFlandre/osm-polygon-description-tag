@@ -26,6 +26,7 @@ from osm_polygon_description_tag.dataset.languages.checkpoint import (
 from osm_polygon_description_tag.dataset.languages.models import (
     LanguageResult,
     LanguageStatus,
+    cascade_model_identity,
 )
 from osm_polygon_description_tag.dataset.languages.snapshot import (
     SnapshotManifest,
@@ -770,22 +771,80 @@ def test_transfer_and_retrieval_are_explicit_no_shell_argv_contracts(
     incoming = tmp_path / "incoming"
     receive = build_result_retrieval_argv("/scratch/remote/lang-bundle/run", incoming, SHARD)
 
-    assert send[0] == "rsync"
-    assert "--protect-args" in send
-    assert "--" in send
-    assert all("sh -c" not in item for item in (*send, *receive))
-    assert receive[0] == "rsync"
+    # The argv is the safety contract: pin it exactly rather than spot-checking
+    # flags, so a dropped --checksum or a missing -- separator cannot pass.
     expected_destination = shard_paths(incoming, SHARD).root
-    assert receive[-1] == f"{expected_destination}/"
+    assert send == (
+        "rsync",
+        "--archive",
+        "--checksum",
+        "--protect-args",
+        "--",
+        f"{prepared_bundle.payload_root}/",
+        "/scratch/remote/lang-bundle/",
+    )
+    assert receive == (
+        "rsync",
+        "--archive",
+        "--checksum",
+        "--protect-args",
+        "--",
+        f"/scratch/remote/lang-bundle/run/shards/{expected_destination.name}/",
+        f"{expected_destination}/",
+    )
+    assert all("sh -c" not in item for item in (*send, *receive))
 
 
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
-        ({"remote_project_dir": "relative/path"}, "must be an absolute path"),
-        ({"remote_run_dir": "/scratch/a b"}, "shell metacharacters"),
-        ({"remote_source_dir": "/scratch/$(evil)"}, "shell metacharacters"),
-        ({"remote_source_dir": ""}, "non-empty string"),
+        # Each message names the offending input, so an operator can tell which
+        # path was refused; assert the full text, not just the failure kind.
+        (
+            {"remote_project_dir": "relative/path"},
+            "remote project directory must be an absolute path",
+        ),
+        (
+            {"remote_project_dir": ""},
+            "remote project directory must be a non-empty string",
+        ),
+        (
+            {"remote_project_dir": "/scratch/../evil"},
+            "remote project directory must not contain traversal components",
+        ),
+        (
+            {"remote_run_dir": "/scratch/a b"},
+            "remote run directory must not contain shell metacharacters",
+        ),
+        (
+            {"remote_run_dir": "relative/run"},
+            "remote run directory must be an absolute path",
+        ),
+        (
+            {"remote_source_dir": "/scratch/$(evil)"},
+            "remote source directory must not contain shell metacharacters",
+        ),
+        ({"remote_source_dir": ""}, "remote source directory must be a non-empty string"),
+        (
+            {"remote_source_dir": "/scratch/../evil"},
+            "remote source directory must not contain traversal components",
+        ),
+        (
+            {"remote_bundle_dir": "/scratch/../bundle"},
+            "remote bundle directory must not contain traversal components",
+        ),
+        (
+            {"remote_bundle_dir": "/scratch/bundle;rm"},
+            "remote bundle directory must not contain shell metacharacters",
+        ),
+        (
+            {"glotlid_model_path": "models/model_v3.bin"},
+            "remote GlotLID model path must be an absolute path",
+        ),
+        (
+            {"glotlid_model_path": "/models/../model_v3.bin"},
+            "remote GlotLID model path must not contain traversal components",
+        ),
         ({"processing_seconds": 0}, "processing budget must be between"),
         ({"processing_seconds": MAX_PROCESSING_SECONDS + 1}, "processing budget must be between"),
         ({"batch_size": 0}, "batch size must be a positive integer"),
@@ -798,8 +857,10 @@ def test_the_job_script_rejects_unsafe_parameters(
 ) -> None:
     _, _, snapshot = prepared
 
-    with pytest.raises(GridOperatorError, match=message):
+    with pytest.raises(GridOperatorError) as error:
         render_job_script(bundle_for_shard(snapshot, SHARD), **{**REMOTE, **overrides})
+
+    assert message in str(error.value)
 
 
 def test_preparing_a_job_writes_an_executable_script_and_bundle(
@@ -889,6 +950,40 @@ def test_planning_contacts_no_scheduler_and_reports_the_argv(
     assert "night=noretry" in plan.argv
     assert not paths.intent.exists()
     assert json.loads(json.dumps(plan.to_payload()))["may_apply"] is True
+
+
+def test_submit_job_defaults_are_fail_safe(
+    prepared: tuple[Path, Path, SnapshotManifest],
+) -> None:
+    """Every default on the submission entry point must be the safe one.
+
+    ``apply`` defaulting to ``True`` would submit a real job from a plain call,
+    ``night_noretry`` defaulting to ``False`` would let a postponed night job
+    be retried silently, and ``require_fresh_policy`` defaulting to ``True``
+    would make planning demand live evidence it never gathered.
+    """
+    _, run, snapshot = prepared
+    bundle, paths = prepare_job(run, snapshot, SHARD, **REMOTE)
+    observed: list[tuple[str, ...]] = []
+    unknown_freshness = PolicyVerdict(
+        PolicyDecision.ALLOWED,
+        ("test verdict",),
+        PolicyEvidence(0, False, True, (), captured_at=None),
+    )
+
+    plan, result = submit_job(
+        paths,
+        bundle,
+        policy=unknown_freshness,
+        allowed_root=run,
+        runner=_runner([], observed),  # type: ignore[arg-type]
+    )
+
+    assert result is None
+    assert observed == []
+    assert not paths.intent.exists()
+    assert "night=noretry" in plan.argv
+    assert plan.may_apply
 
 
 def test_a_blocked_policy_prevents_applying(
@@ -1684,3 +1779,48 @@ def test_a_missing_preflight_executable_is_unknown_rather_than_clear() -> None:
         raise SchedulerError(f"scheduler executable is not available: {argv[0]}")
 
     assert gather_policy_outputs("nancy", runner=_absent) == (None, None)
+
+
+def test_cascade_job_script_passes_the_pinned_glotlid_path(
+    prepared: tuple[Path, Path, SnapshotManifest],
+    tmp_path: Path,
+) -> None:
+    source, _, original = prepared
+    run = tmp_path / "cascade-run"
+    snapshot = prepare_snapshot(
+        source,
+        run,
+        code_fingerprint=original.code_fingerprint,
+        lock_fingerprint=original.lock_fingerprint,
+        model_identity=cascade_model_identity(original.model_identity.policy),
+    )
+
+    _, paths = prepare_job(
+        run,
+        snapshot,
+        SHARD,
+        **REMOTE,
+        glotlid_model_path="/home/user/models/glotlid-v3/model_v3.bin",
+    )
+    script = paths.script.read_text(encoding="utf-8")
+
+    assert 'export PATH="${PATH}:$HOME/.local/bin"' in script
+    assert "--glotlid-model-path /home/user/models/glotlid-v3/model_v3.bin" in script
+
+
+def test_cascade_job_requires_a_pinned_glotlid_path(
+    prepared: tuple[Path, Path, SnapshotManifest],
+    tmp_path: Path,
+) -> None:
+    source, _, original = prepared
+    run = tmp_path / "cascade-run"
+    snapshot = prepare_snapshot(
+        source,
+        run,
+        code_fingerprint=original.code_fingerprint,
+        lock_fingerprint=original.lock_fingerprint,
+        model_identity=cascade_model_identity(original.model_identity.policy),
+    )
+
+    with pytest.raises(GridOperatorError, match="requires a GlotLID model path"):
+        prepare_job(run, snapshot, SHARD, **REMOTE)

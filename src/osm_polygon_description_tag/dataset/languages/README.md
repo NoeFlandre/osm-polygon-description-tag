@@ -2,8 +2,9 @@
 
 ## Purpose
 
-Annotate the language of every actual OpenStreetMap description value with
-deterministic, conservative, resumable processing.
+Annotate every actual OpenStreetMap description value with deterministic,
+conservative, resumable processing. Lingua 2.2 is primary; the pinned GlotLID v3
+model is consulted only when Lingua returns `uncertain`.
 
 ## Responsibilities
 
@@ -22,13 +23,15 @@ or schema 3.
 
 Import stable contracts from `osm_polygon_description_tag.dataset.languages`,
 for example `LanguagePolicy`, `LanguageResult`, `DescriptionEntry`,
-`build_lingua_detector`, and `extract_description_entries`. Snapshot,
+`build_lingua_detector`, `build_language_detector`, and
+`extract_description_entries`. Snapshot,
 checkpoint, worker, annotation, and validation modules are imported directly.
 
 ## Allowed dependencies
 
-The `runtime` package, other `dataset` modules, PyArrow, and Python's standard
-library. Lingua is an optional extra imported lazily, never at module load.
+The `runtime` package, other `dataset` modules, PyArrow, and Python's
+standard library. Lingua and the Linux-only GlotLID runtime are optional extras
+imported lazily, never at module load.
 
 ## Data flow and side effects
 
@@ -39,7 +42,9 @@ part, a receipt, and a checkpoint, in that order. `validate_run` only reads.
 ## Safety and determinism invariants
 
 The counting unit is one description value, not one polygon. Original text is
-preserved exactly and localized suffixes are opaque. Scores are raw detector
+preserved exactly and localized suffixes are opaque. A fallback
+result is marked with reason `fallback_glotlid_v3`; unresolved fallback output
+keeps Lingua's original `uncertain` result. Scores are raw detector
 outputs, never calibrated probabilities, and no accuracy is claimed. The
 checkpoint is the single source of truth on resume, so an interruption at any
 write boundary neither loses nor duplicates annotations. Every persisted

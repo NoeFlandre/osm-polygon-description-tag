@@ -121,11 +121,30 @@ def complete_associations(
     return {
         function_name: order_tests(
             function_name,
-            test_names | _module_neighbourhood(function_name, module_tests, complete_test_set),
+            _selected_tests(function_name, test_names, module_tests, complete_test_set),
             durations,
         )
         for function_name, test_names in normalized.items()
     }
+
+
+def _selected_tests(
+    function_name: str,
+    test_names: set[str],
+    module_tests: Mapping[str, set[str]],
+    complete_test_set: set[str],
+) -> set[str]:
+    """Return every test that must run against one function's mutants.
+
+    No recorded hit is not evidence of an untested function: a private helper
+    reached through an adapter or a patched boundary records no trampoline hit
+    at all, and inheriting only its siblings' tests reports killable mutants as
+    survivors. Such a function therefore runs the whole collected suite.
+    """
+
+    if not test_names:
+        return complete_test_set
+    return test_names | _module_neighbourhood(function_name, module_tests, complete_test_set)
 
 
 def _module_neighbourhood(
@@ -138,7 +157,7 @@ def _module_neighbourhood(
     same_module_tests = {
         test_name for test_name in complete_test_set if module_leaf in test_name.lower()
     }
-    return (module_tests.get(module_name, set()) | same_module_tests) or complete_test_set
+    return module_tests.get(module_name, set()) | same_module_tests
 
 
 def unresolved_mutants(mutants_root: Path) -> list[str]:

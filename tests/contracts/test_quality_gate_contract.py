@@ -299,8 +299,8 @@ def test_mutation_associations_add_every_test_of_the_same_module() -> None:
     """A single recorded hit must not hide the module's own killing tests."""
     associations = {
         "pkg.alpha.x_direct": {"tests/test_alpha.py::test_direct"},
-        "pkg.alpha.x_indirect": set(),
-        "pkg.beta.x_uncovered": set(),
+        "pkg.alpha.x_sibling": {"tests/test_alpha.py::test_indirect"},
+        "pkg.beta.x_other": {"tests/test_beta.py::test_other"},
     }
 
     assert complete_associations(
@@ -315,12 +315,36 @@ def test_mutation_associations_add_every_test_of_the_same_module() -> None:
             "tests/test_alpha.py::test_direct",
             "tests/test_alpha.py::test_indirect",
         ),
-        "pkg.alpha.x_indirect": (
+        "pkg.alpha.x_sibling": (
             "tests/test_alpha.py::test_direct",
             "tests/test_alpha.py::test_indirect",
         ),
-        "pkg.beta.x_uncovered": ("tests/test_beta.py::test_other",),
+        "pkg.beta.x_other": ("tests/test_beta.py::test_other",),
     }
+
+
+def test_mutation_associations_run_everything_for_an_unrecorded_function() -> None:
+    """A helper mutmut never recorded entering must not inherit only siblings.
+
+    ``_score`` in the GlotLID adapter records no trampoline hit because it is
+    reached through the adapter. Giving it just the tests recorded for its
+    sibling functions reported killable mutants as survivors, so a function
+    with no recording of its own runs the whole collected suite.
+    """
+    associations = {
+        "pkg.glotlid.x__adapter": {"tests/test_fallback.py::test_adapter"},
+        "pkg.glotlid.x__score": set(),
+    }
+    durations = {
+        "tests/test_fallback.py::test_adapter": 1.0,
+        "tests/test_fallback.py::test_score_rejects_nan": 2.0,
+        "tests/test_elsewhere.py::test_other": 3.0,
+    }
+
+    selection = complete_associations(associations, durations)
+
+    assert set(selection["pkg.glotlid.x__score"]) == set(durations)
+    assert selection["pkg.glotlid.x__adapter"] == ("tests/test_fallback.py::test_adapter",)
 
 
 def test_mutation_associations_run_the_likeliest_and_cheapest_tests_first() -> None:

@@ -3,12 +3,19 @@
 import pytest
 
 from osm_polygon_description_tag.dataset.languages.models import (
+    CASCADE_DETECTOR_NAME,
     DEFAULT_LANGUAGE_POLICY,
+    GLOTLID_MODEL_FILENAME,
+    GLOTLID_MODEL_REPOSITORY,
+    GLOTLID_MODEL_REVISION,
+    GLOTLID_MODEL_SHA256,
     V2_LANGUAGE_POLICY,
     LanguageModelIdentity,
     LanguagePolicy,
     LanguageResult,
     LanguageStatus,
+    cascade_model_identity,
+    glotlid_model_identity,
     language_model_identity,
 )
 
@@ -217,6 +224,53 @@ def test_fingerprints_track_the_configuration() -> None:
     assert default.policy_fingerprint == scoped.policy_fingerprint
     assert default.binary_artifact_hash is None
     assert default.library_version == "2.2.0"
+
+
+def test_cascade_identity_records_the_pinned_glotlid_fallback() -> None:
+    primary = language_model_identity(DEFAULT_LANGUAGE_POLICY)
+    cascade = cascade_model_identity(DEFAULT_LANGUAGE_POLICY)
+
+    assert cascade.detector_name == CASCADE_DETECTOR_NAME
+    assert cascade.library_name == primary.library_name
+    assert cascade.library_version == primary.library_version
+    assert cascade.model_repository == GLOTLID_MODEL_REPOSITORY
+    assert cascade.model_filename == GLOTLID_MODEL_FILENAME
+    assert cascade.model_revision == GLOTLID_MODEL_REVISION
+    assert cascade.binary_artifact_hash == GLOTLID_MODEL_SHA256
+    assert cascade.config_fingerprint != primary.config_fingerprint
+
+
+def test_fallback_identity_fingerprints_are_pinned_exactly() -> None:
+    """Every field of the GlotLID and cascade payloads is provenance-bearing.
+
+    These fingerprints are written into each annotation row and bind the
+    snapshot, so a renamed key or a swapped constant must change the digest
+    rather than silently keep the old provenance.
+    """
+    glotlid = glotlid_model_identity(LanguagePolicy())
+    glotlid_unicode = glotlid_model_identity(LanguagePolicy(), language_scope=("é",))
+    cascade = cascade_model_identity(LanguagePolicy())
+    cascade_unicode = cascade_model_identity(LanguagePolicy(), language_scope=("é",))
+    cascade_v2 = cascade_model_identity(V2_LANGUAGE_POLICY)
+
+    assert glotlid.config_fingerprint == (
+        "82793fadae76e47402c1d0840ba2ba396f76762ed5c585da3946a348ec4962b2"
+    )
+    assert glotlid_unicode.config_fingerprint == (
+        "e31d870af6da07a944a634fc5909d737de5c46fed87a2e0d96d922f52dd4e554"
+    )
+    assert cascade.config_fingerprint == (
+        "1476b84d5c8081da7feefc7947bf41662d356b44ad69c2460c623909420461cf"
+    )
+    assert cascade_unicode.config_fingerprint == (
+        "f7f36b0dd1185966b09d6b330a2a0693ab4e57dbb5a7bedd341674dab9843e3f"
+    )
+    assert cascade_v2.config_fingerprint == (
+        "d44d60393cf58ab8a4c6d83c31346bf720f47a7a08cb62010123de54e6bb3170"
+    )
+    assert cascade_v2.policy_fingerprint == (
+        "ee1bf70f81105efe95c0548328d5ec0adecd5c4533665c480450a51205e2527d"
+    )
 
 
 def test_identity_fingerprints_use_canonical_and_unicode_safe_serialization() -> None:

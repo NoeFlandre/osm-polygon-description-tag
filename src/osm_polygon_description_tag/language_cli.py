@@ -15,12 +15,21 @@ from typing import Annotated
 import typer
 
 from osm_polygon_description_tag.dataset.languages.checkpoint import exclusive_worker_lock
-from osm_polygon_description_tag.dataset.languages.detector import build_lingua_detector
+from osm_polygon_description_tag.dataset.languages.detector import (
+    FallbackLanguageDetector,
+    LanguageDetector,
+    build_language_detector,
+    build_lingua_detector,
+)
 from osm_polygon_description_tag.dataset.languages.models import (
+    CASCADE_DETECTOR_NAME,
     DEFAULT_LANGUAGE_POLICY,
     DEFAULT_LANGUAGE_SCOPE,
+    LINGUA_DETECTOR_NAME,
     V2_LANGUAGE_POLICY,
+    LanguageModelIdentity,
     LanguagePolicy,
+    cascade_model_identity,
 )
 from osm_polygon_description_tag.dataset.languages.snapshot import (
     SnapshotError,
@@ -121,6 +130,10 @@ PolicyVersion = Annotated[
     str, typer.Option("--policy-version", help="Named policy preset: v1 or v2")
 ]
 
+GlotLIDModelPath = Annotated[
+    Path | None, typer.Option("--glotlid-model-path", help="Pinned GlotLID v3 model file")
+]
+
 _POLICY_PRESETS = {
     "v1": DEFAULT_LANGUAGE_POLICY,
     "v2": V2_LANGUAGE_POLICY,
@@ -147,33 +160,53 @@ def _policy(
     )
 
 
+def _prepare_identity(
+    policy: LanguagePolicy, model_identity: LanguageModelIdentity | None
+) -> LanguageModelIdentity:
+    identity = model_identity or cascade_model_identity(policy)
+    if not isinstance(identity, LanguageModelIdentity):
+        raise TypeError("model_identity must be a LanguageModelIdentity")
+    if identity.policy != policy:
+        raise SnapshotError("model identity policy does not match the requested policy")
+    return identity
+
+
+def _prepare_report(
+    source_root: Path, run_dir: Path, snapshot: SnapshotManifest
+) -> dict[str, object]:
+    return {
+        "snapshot_id": snapshot.snapshot_id,
+        "run_dir": str(run_dir),
+        "source_root": str(source_root),
+        "source_file_count": len(snapshot.source_files),
+        "input_row_count": sum(item.row_count for item in snapshot.source_files),
+        "model_config_fingerprint": snapshot.model_config_fingerprint,
+        "detector_name": snapshot.model_identity.detector_name,
+        "library_name": snapshot.model_identity.library_name,
+        "library_version": snapshot.model_identity.library_version,
+        "shards": [item.relative_path for item in snapshot.source_files],
+    }
+
+
 def handle_prepare(
     source_root: Path,
     run_dir: Path,
     project_root: Path,
     policy: LanguagePolicy,
+    *,
+    model_identity: LanguageModelIdentity | None = None,
 ) -> SnapshotManifest:
     """Freeze the immutable input snapshot for one run directory."""
+    identity = _prepare_identity(policy, model_identity)
     snapshot = prepare_snapshot(
         source_root,
         run_dir,
         code_fingerprint=fingerprint_project_source(project_root),
         lock_fingerprint=fingerprint_lockfile(project_root),
+        model_identity=identity,
         policy=policy,
     )
-    print_json(
-        {
-            "snapshot_id": snapshot.snapshot_id,
-            "run_dir": str(run_dir),
-            "source_root": str(source_root),
-            "source_file_count": len(snapshot.source_files),
-            "input_row_count": sum(item.row_count for item in snapshot.source_files),
-            "model_config_fingerprint": snapshot.model_config_fingerprint,
-            "library_name": snapshot.model_identity.library_name,
-            "library_version": snapshot.model_identity.library_version,
-            "shards": [item.relative_path for item in snapshot.source_files],
-        }
-    )
+    print_json(_prepare_report(source_root, run_dir, snapshot))
     return snapshot
 
 
@@ -184,6 +217,8 @@ def handle_run(
     batch_size: int,
     budget_seconds: float,
     project_root: Path = Path(),
+    *,
+    glotlid_model_path: Path | None = None,
 ) -> None:
     """Process one staged shard within a bounded monotonic budget.
 
@@ -193,10 +228,9 @@ def handle_run(
     snapshot = read_snapshot(run_dir)
     with exclusive_worker_lock(run_dir):
         verify_project_identity(snapshot, project_root)
-        scope = snapshot.model_identity.language_scope
-        detector = build_lingua_detector(
-            snapshot.model_identity.policy,
-            language_codes=None if scope == DEFAULT_LANGUAGE_SCOPE else scope,
+        detector = _build_detector_for_snapshot(
+            snapshot.model_identity,
+            glotlid_model_path=glotlid_model_path,
         )
         if detector.identity.config_fingerprint != snapshot.model_config_fingerprint:
             raise SnapshotError("detector configuration does not match the immutable snapshot")
@@ -230,6 +264,26 @@ def handle_validate(run_dir: Path, shard: str | None) -> None:
     print_json({"run_dir": str(run_dir), **report.to_payload()})
 
 
+def _build_detector_for_snapshot(
+    identity: LanguageModelIdentity,
+    *,
+    glotlid_model_path: Path | None,
+) -> LanguageDetector | FallbackLanguageDetector:
+    scope = identity.language_scope
+    language_codes = None if scope == DEFAULT_LANGUAGE_SCOPE else scope
+    if identity.detector_name == CASCADE_DETECTOR_NAME:
+        return build_language_detector(
+            identity.policy,
+            language_codes=language_codes,
+            glotlid_model_path=glotlid_model_path,
+        )
+    if identity.detector_name == LINGUA_DETECTOR_NAME:
+        if glotlid_model_path is not None:
+            raise SnapshotError("GlotLID model path requires a cascade snapshot")
+        return build_lingua_detector(identity.policy, language_codes=language_codes)
+    raise SnapshotError(f"unsupported detector in snapshot: {identity.detector_name!r}")
+
+
 @language_app.command("prepare", help="Freeze an immutable input snapshot")
 def prepare_command(
     source_root: SourceRoot,
@@ -240,16 +294,18 @@ def prepare_command(
     min_margin: MinMargin = None,
     policy_version: PolicyVersion = "v1",
 ) -> None:
+    policy = _policy(
+        min_alphabetic_chars,
+        min_score,
+        min_margin,
+        policy_version=policy_version,
+    )
     handle_prepare(
         source_root,
         run_dir,
         project_root,
-        _policy(
-            min_alphabetic_chars,
-            min_score,
-            min_margin,
-            policy_version=policy_version,
-        ),
+        policy,
+        model_identity=cascade_model_identity(policy),
     )
 
 
@@ -261,8 +317,17 @@ def run_command(
     batch_size: BatchSize = DEFAULT_BATCH_SIZE,
     budget_seconds: BudgetSeconds = DEFAULT_BUDGET_SECONDS,
     project_root: ProjectRoot = Path(),
+    glotlid_model_path: GlotLIDModelPath = None,
 ) -> None:
-    handle_run(source_root, run_dir, shard, batch_size, budget_seconds, project_root)
+    handle_run(
+        source_root,
+        run_dir,
+        shard,
+        batch_size,
+        budget_seconds,
+        project_root,
+        glotlid_model_path=glotlid_model_path,
+    )
 
 
 @language_app.command("validate", help="Report run completeness read-only")
@@ -295,6 +360,9 @@ RemoteRun = Annotated[
 ]
 RemoteBundle = Annotated[
     str, typer.Option("--remote-bundle-dir", help="Absolute remote root for a portable bundle")
+]
+RemoteGlotLIDModelPath = Annotated[
+    str | None, typer.Option("--glotlid-model-path", help="Absolute pinned GlotLID v3 model path")
 ]
 RetrievedRun = Annotated[
     Path | None,
@@ -388,6 +456,7 @@ def handle_grid_prepare(
     remote_run_dir: str,
     processing_seconds: int,
     batch_size: int,
+    glotlid_model_path: str | None = None,
 ) -> None:
     """Write the immutable bundle and job script for one shard."""
     snapshot = read_snapshot(run_dir)
@@ -400,6 +469,7 @@ def handle_grid_prepare(
         remote_run_dir=remote_run_dir,
         processing_seconds=processing_seconds,
         batch_size=batch_size,
+        glotlid_model_path=glotlid_model_path,
     )
     print_json(
         {
@@ -426,6 +496,7 @@ def handle_grid_submit(
     apply: bool,
     *,
     runner: CommandRunner | None = None,
+    glotlid_model_path: str | None = None,
 ) -> None:
     """Plan a submission, and perform it only behind the apply gate."""
     snapshot = read_snapshot(run_dir)
@@ -439,6 +510,7 @@ def handle_grid_submit(
         processing_seconds=processing_seconds,
         batch_size=batch_size,
         walltime_seconds=walltime_seconds,
+        glotlid_model_path=glotlid_model_path,
     )
     if prepared is None:
         prepared = prepare_job(
@@ -451,6 +523,7 @@ def handle_grid_submit(
             processing_seconds=processing_seconds,
             batch_size=batch_size,
             walltime_seconds=walltime_seconds,
+            glotlid_model_path=glotlid_model_path,
             remote_bundle_dir=None,
         )
     bundle, paths = prepared
@@ -506,6 +579,7 @@ def _reuse_verified_staged_job(
     processing_seconds: int,
     batch_size: int,
     walltime_seconds: int,
+    glotlid_model_path: str | None = None,
 ) -> tuple[JobBundle, JobPaths] | None:
     """Re-prepare a staged job so every requested setting remains immutable."""
     if not (run_dir / "jobs").exists():
@@ -524,6 +598,7 @@ def _reuse_verified_staged_job(
             processing_seconds=processing_seconds,
             batch_size=batch_size,
             walltime_seconds=walltime_seconds,
+            glotlid_model_path=glotlid_model_path,
             remote_bundle_dir=_infer_remote_bundle_dir(
                 remote_project_dir, remote_source_dir, remote_run_dir
             ),
@@ -608,6 +683,7 @@ def handle_grid_stage(
     batch_size: int,
     walltime_seconds: int,
     apply: bool,
+    glotlid_model_path: str | None = None,
     runner: CommandRunner | None = None,
 ) -> None:
     """Prepare a portable bundle and transfer it only behind the apply gate."""
@@ -623,6 +699,7 @@ def handle_grid_stage(
         processing_seconds=processing_seconds,
         batch_size=batch_size,
         walltime_seconds=walltime_seconds,
+        glotlid_model_path=glotlid_model_path,
     )
     transfer_argv = build_bundle_transfer_argv(prepared, remote_bundle_dir)
     remote_paths = _portable_remote_paths(remote_bundle_dir)
@@ -819,6 +896,7 @@ def grid_prepare_command(
     remote_run_dir: RemoteRun,
     processing_seconds: ProcessingSeconds = MAX_PROCESSING_SECONDS,
     batch_size: BatchSize = DEFAULT_BATCH_SIZE,
+    glotlid_model_path: RemoteGlotLIDModelPath = None,
 ) -> None:
     handle_grid_prepare(
         run_dir,
@@ -828,6 +906,7 @@ def grid_prepare_command(
         remote_run_dir,
         processing_seconds,
         batch_size,
+        glotlid_model_path,
     )
 
 
@@ -841,6 +920,7 @@ def grid_stage_command(
     processing_seconds: ProcessingSeconds = MAX_PROCESSING_SECONDS,
     batch_size: BatchSize = DEFAULT_BATCH_SIZE,
     walltime_seconds: Walltime = MAX_WALLTIME_SECONDS,
+    glotlid_model_path: RemoteGlotLIDModelPath = None,
     apply: Apply = False,
 ) -> None:
     handle_grid_stage(
@@ -852,6 +932,7 @@ def grid_stage_command(
         processing_seconds=processing_seconds,
         batch_size=batch_size,
         walltime_seconds=walltime_seconds,
+        glotlid_model_path=glotlid_model_path,
         apply=apply,
     )
 
@@ -869,6 +950,7 @@ def grid_submit_command(
     batch_size: BatchSize = DEFAULT_BATCH_SIZE,
     allow_daytime: AllowDaytime = False,
     apply: Apply = False,
+    glotlid_model_path: RemoteGlotLIDModelPath = None,
 ) -> None:
     handle_grid_submit(
         run_dir,
@@ -882,6 +964,7 @@ def grid_submit_command(
         batch_size,
         allow_daytime,
         apply,
+        glotlid_model_path=glotlid_model_path,
     )
 
 

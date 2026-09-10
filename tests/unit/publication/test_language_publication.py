@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
 import pyarrow.parquet as pq
@@ -16,6 +17,9 @@ from osm_polygon_description_tag.dataset.languages.checkpoint import (
     shard_paths,
 )
 from osm_polygon_description_tag.dataset.languages.models import (
+    CASCADE_DETECTOR_NAME,
+    GLOTLID_MODEL_REPOSITORY,
+    GLOTLID_MODEL_REVISION,
     LanguageResult,
     LanguageStatus,
 )
@@ -433,6 +437,17 @@ def test_the_card_section_reports_validated_counts_and_no_accuracy_claim(
     assert "mixed_text" in section
     assert "may be misclassified as a supported language" in prose
     assert "When the detector identifies mixed-language evidence" in prose
+
+
+def test_the_card_section_identifies_the_cascade_fallback(export: LanguageExport) -> None:
+    cascade = replace(export, detector_name=CASCADE_DETECTOR_NAME)
+
+    section = render_language_card_section(cascade)
+
+    assert f"detector pipeline `{CASCADE_DETECTOR_NAME}`" in section
+    assert f"GlotLID v3 (`{GLOTLID_MODEL_REPOSITORY}`" in section
+    assert GLOTLID_MODEL_REVISION in section
+    assert "only when Lingua returns `uncertain`" in section
 
 
 def test_the_card_section_never_claims_a_measured_score(export: LanguageExport) -> None:

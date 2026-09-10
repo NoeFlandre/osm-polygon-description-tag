@@ -47,6 +47,10 @@ from osm_polygon_description_tag.dataset.languages.checkpoint import (
     shard_paths,
     write_checkpoint,
 )
+from osm_polygon_description_tag.dataset.languages.models import (
+    CASCADE_DETECTOR_NAME,
+    LINGUA_DETECTOR_NAME,
+)
 from osm_polygon_description_tag.dataset.languages.paths import relative_posix_path
 from osm_polygon_description_tag.dataset.languages.payloads import PayloadReader, require_object
 from osm_polygon_description_tag.dataset.languages.snapshot import (
@@ -465,6 +469,30 @@ def job_paths(run_dir: Path, bundle: JobBundle) -> JobPaths:
     )
 
 
+def _validated_script_inputs(
+    remote_project_dir: str,
+    remote_source_dir: str,
+    remote_run_dir: str,
+    processing_seconds: int,
+    batch_size: int,
+    walltime_seconds: int,
+    remote_bundle_dir: str | None,
+    glotlid_model_path: str | None,
+) -> str:
+    for path, label in (
+        (remote_project_dir, "remote project directory"),
+        (remote_source_dir, "remote source directory"),
+        (remote_run_dir, "remote run directory"),
+    ):
+        _validate_remote_path(path, label)
+    bundle_dir = remote_bundle_dir or str(Path(remote_project_dir).parent)
+    _validate_remote_path(bundle_dir, "remote bundle directory")
+    _validate_job_limits(processing_seconds, batch_size, walltime_seconds)
+    if glotlid_model_path is not None:
+        _validate_remote_path(glotlid_model_path, "remote GlotLID model path")
+    return bundle_dir
+
+
 def render_job_script(
     bundle: JobBundle,
     *,
@@ -475,23 +503,34 @@ def render_job_script(
     batch_size: int = 512,
     walltime_seconds: int = MAX_WALLTIME_SECONDS,
     remote_bundle_dir: str | None = None,
+    glotlid_model_path: str | None = None,
 ) -> str:
     """Render the script the job runs on its allocated compute node.
 
     Dependency installation and inference both happen here, inside the job, so
     a frontend is never used for anything but file management and scheduling.
     """
-    _validate_remote_path(remote_project_dir, "remote project directory")
-    _validate_remote_path(remote_source_dir, "remote source directory")
-    _validate_remote_path(remote_run_dir, "remote run directory")
-    bundle_dir = remote_bundle_dir or str(Path(remote_project_dir).parent)
-    _validate_remote_path(bundle_dir, "remote bundle directory")
-    _validate_job_limits(processing_seconds, batch_size, walltime_seconds)
+    bundle_dir = _validated_script_inputs(
+        remote_project_dir,
+        remote_source_dir,
+        remote_run_dir,
+        processing_seconds,
+        batch_size,
+        walltime_seconds,
+        remote_bundle_dir,
+        glotlid_model_path,
+    )
     exports = "\n".join(f"export {name}=1" for name in _THREAD_LIMIT_VARIABLES)
     quoted_project = shlex.quote(remote_project_dir)
     quoted_source = shlex.quote(remote_source_dir)
     quoted_run = shlex.quote(remote_run_dir)
     quoted_shard = shlex.quote(bundle.shard)
+    glotlid_option = ""
+    if glotlid_model_path is not None:
+        line_continuation = "\\" + "\n"
+        glotlid_option = (
+            f" {line_continuation}  --glotlid-model-path {shlex.quote(glotlid_model_path)}"
+        )
     scratch_prefix = f"osm-polygon-description-tag-{bundle.bundle_id[:16]}.XXXXXX"
     verify_step = _render_payload_verification(bundle_dir) if remote_bundle_dir is not None else ""
     return f"""#!/usr/bin/env bash
@@ -524,6 +563,7 @@ for variable in {" ".join(_THREAD_LIMIT_VARIABLES)}; do
 done
 
 cd {quoted_project}
+export PATH="${{PATH}}:$HOME/.local/bin"
 uv sync --frozen --no-dev --extra language
 {verify_step}
 
@@ -532,7 +572,7 @@ uv run --no-sync osm-polygon-description-tag language run \\
   --run-dir {quoted_run} \\
   --shard {quoted_shard} \\
   --batch-size {batch_size} \\
-  --budget-seconds {processing_seconds}
+  --budget-seconds {processing_seconds}{glotlid_option}
 
 uv run --no-sync osm-polygon-description-tag language validate \\
   --run-dir {quoted_run} \\
@@ -621,6 +661,22 @@ def _require_absolute(value: str, label: str) -> None:
         raise GridOperatorError(f"{label} must be an absolute path")
 
 
+def _glotlid_model_path_for_snapshot(
+    snapshot: SnapshotManifest,
+    glotlid_model_path: str | None,
+) -> str | None:
+    detector_name = snapshot.model_identity.detector_name
+    if detector_name == CASCADE_DETECTOR_NAME:
+        if glotlid_model_path is None:
+            raise GridOperatorError("cascade job requires a GlotLID model path")
+        return glotlid_model_path
+    if detector_name == LINGUA_DETECTOR_NAME:
+        if glotlid_model_path is not None:
+            raise GridOperatorError("GlotLID model path requires a cascade snapshot")
+        return None
+    raise GridOperatorError(f"unsupported detector for Grid jobs: {detector_name!r}")
+
+
 def prepare_job(
     run_dir: Path,
     snapshot: SnapshotManifest,
@@ -633,6 +689,7 @@ def prepare_job(
     batch_size: int = 512,
     walltime_seconds: int = MAX_WALLTIME_SECONDS,
     remote_bundle_dir: str | None = None,
+    glotlid_model_path: str | None = None,
     submission_locked: bool = False,
 ) -> tuple[JobBundle, JobPaths]:
     """Write the immutable bundle, job script, and initial checkpoint of a shard.
@@ -645,6 +702,7 @@ def prepare_job(
     existing = _existing_bundle(paths)
     if existing is not None and existing != bundle:
         raise GridOperatorError("a different bundle is already prepared in this job directory")
+    remote_model_path = _glotlid_model_path_for_snapshot(snapshot, glotlid_model_path)
     script = render_job_script(
         bundle,
         remote_project_dir=remote_project_dir,
@@ -654,6 +712,7 @@ def prepare_job(
         batch_size=batch_size,
         walltime_seconds=walltime_seconds,
         remote_bundle_dir=remote_bundle_dir,
+        glotlid_model_path=remote_model_path,
     )
     config = _job_config_payload(
         bundle,
@@ -947,6 +1006,7 @@ def prepare_portable_job(
     processing_seconds: int = MAX_PROCESSING_SECONDS,
     batch_size: int = 512,
     walltime_seconds: int = MAX_WALLTIME_SECONDS,
+    glotlid_model_path: str | None = None,
 ) -> PreparedJob:
     """Prepare a self-contained local payload for an injected transport.
 
@@ -971,6 +1031,7 @@ def prepare_portable_job(
             batch_size=batch_size,
             walltime_seconds=walltime_seconds,
             remote_bundle_dir=base,
+            glotlid_model_path=glotlid_model_path,
             submission_locked=True,
         )
         return _stage_portable_payload(paths, bundle, project_root, source_dir, snapshot)

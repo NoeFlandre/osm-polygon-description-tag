@@ -89,9 +89,10 @@ plots, H3 map, and area histogram.
 
 ## `language`
 
-The `language` group produces the additive `language-v1` annotations. It is
-documented in full, including limitations and recovery behaviour, in the
-[language detection runbook](language-detection.md).
+The `language` group produces the additive `language-v1` annotations. Its default
+detector is Lingua 2.2.0 with the pinned GlotLID v3 fallback used only when
+Lingua is `uncertain`. It is documented in full, including limitations and
+recovery behaviour, in the [language detection runbook](language-detection.md).
 
 ```bash
 uv run osm-polygon-description-tag language prepare --source-root <src> --run-dir <run> --project-root .
@@ -123,7 +124,8 @@ uv run --no-sync osm-polygon-description-tag language grid collect --run-dir <ru
 ```
 
 `stage` prepares a portable one-shard payload locally and prints the transfer
-plan; `--apply` enables the transfer. The paths must be visible in the current
+plan; `--apply` enables the transfer. Cascade Grid jobs require an explicit
+remote path to the pinned GlotLID v3 model. The paths must be visible in the current
 filesystem, normally on the site's frontend/shared storage. These commands use
 an already-installed operator environment; do not install dependencies on the
 frontend. `prepare` alone

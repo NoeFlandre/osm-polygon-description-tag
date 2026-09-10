@@ -46,6 +46,22 @@ One row per description value, in `language-v1/data/*.parquet`:
 | `snapshot_id` | string | The immutable input snapshot this row came from |
 | `model_config_fingerprint` | string | Detector library, version, scope, and policy |
 
+## Detector pipeline
+
+The production detector is a deterministic cascade:
+
+- Lingua 2.2.0 is the primary detector and applies the conservative policy.
+- The pinned GlotLID v3 model is called only when Lingua returns `uncertain`.
+- If GlotLID also returns `uncertain`, the original Lingua result is retained.
+- A fallback-resolved row has `reason=fallback_glotlid_v3`; all other reasons
+  retain their normal meaning.
+
+The fallback artifact is `cis-lmu/glotlid`, file `model_v3.bin`, revision
+`85cd6716494360367b75f642b5bc78667605d0b4`, with SHA-256
+`a818b6bd42a628ab47d3dfc1578c7ea615c45381f3494c42535e31e8c4cafc9e`. Its
+Linux runtime is pinned to `fasttext-numpy2==0.10.2`. The snapshot records this
+identity, so a run cannot silently switch models.
+
 ## Limitations
 
 - `top_score`, `runner_up_score`, and `margin` are **raw detector scores, not
@@ -78,7 +94,7 @@ auditing the result, so each is independently repeatable.
 ### 1. Freeze the input snapshot
 
 ```bash
-uv run osm-polygon-description-tag language prepare --source-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root/data" --run-dir "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root/language-run" --project-root .
+uv run osm-polygon-description-tag language prepare --source-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root/data" --run-dir "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root/language-run-lingua-glotlid-v3-full" --project-root .
 ```
 
 This writes `snapshot.json`, binding every source Parquet's relative path,
@@ -90,27 +106,13 @@ staging a shard on another machine does not change it. Re-running `prepare`
 with unchanged inputs is idempotent; if any source file changed, it fails
 rather than silently rewriting the identity.
 
-### V2 pilot policy
-
-V2 is a separate run that uses the same pinned Lingua implementation and
-source snapshot as V1, but lowers only the minimum raw score from `0.80` to
-`0.70`. The margin (`0.20`), minimum alphabetic characters (`5`), and
-mixed/short-text handling are unchanged. Select it explicitly when preparing
-the new run:
-
-```bash
-uv run osm-polygon-description-tag language prepare --source-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root/data" --run-dir "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root/language-run-v2" --project-root . --policy-version v2
-```
-
-For the pilot, process only `afghanistan-latest.parquet`,
-`albania-latest.parquet`, and `algeria-latest.parquet`. Alsace is intentionally
-excluded. V2 output must be compared with V1 before any broader run; it is not
-published to Hugging Face as part of this pilot.
-
 ### 2. Process one shard
 
 ```bash
-uv run osm-polygon-description-tag language run --source-root <staged-source> --run-dir <run-dir> --project-root <staged-project> --shard region.parquet --batch-size 512 --budget-seconds 1200
+uv run osm-polygon-description-tag language run \
+  --source-root <staged-source> --run-dir <run-dir> --project-root <staged-project> \
+  --shard region.parquet --batch-size 512 --budget-seconds 1200 \
+  --glotlid-model-path <model_v3.bin>
 ```
 
 `run` requires only the selected shard's file to be present, not the whole
@@ -168,19 +170,29 @@ one. Real errors propagate; they are never converted into a completed result.
 
 ## Grid'5000
 
-!!! warning "Preflight is mandatory before any real run"
-    No account entitlement, current quota, site capacity, or live scheduler
-    state has been verified for this implementation. All of these remain
-    mandatory checks before an authorised run.
+!!! warning "Preflight is mandatory before every run"
+    Account entitlement, current quota, site capacity, and live scheduler
+    state are never assumed. They remain mandatory checks before each
+    authorised run, and the preflight fails closed on anything it cannot
+    positively interpret.
 
-!!! danger "Nothing here has been executed"
-    **No Grid'5000 job has been run, no OAR or `quota` command has been
-    invoked against a real site, no SSH session has been opened, no production
-    dataset has been processed, and no Hugging Face upload has been
-    performed.** Everything below was developed and validated against local
-    synthetic fixtures only. Production data stays under the requested Seagate
-    project root, and it only gets there when you later run the workflow
-    yourself with those paths.
+!!! danger "Execution status"
+    **The full dataset has not been processed and nothing has been published
+    to Hugging Face.** What has actually run on Grid'5000 is a three-shard
+    pilot on site `nancy` under the V2 policy: OAR jobs `6917617`
+    (`afghanistan-latest.parquet`), `6917620` (`albania-latest.parquet`), and
+    `6917621` (`algeria-latest.parquet`), each one core with a 1800 s
+    walltime, all reconciled to `terminated`, collected, and acknowledged on
+    2026-09-09. That pilot covered 2 267 of 906 631 snapshot rows (0.25 %).
+
+    Those pilot results are **not** publishable: `snapshot_id` binds the code
+    and lockfile fingerprints, and both have since changed, so a full run
+    starts from a fresh snapshot. Publication additionally refuses any
+    incomplete run, so the Hugging Face step stays blocked until all 386
+    shards are complete under one snapshot.
+
+    Production data stays under the requested Seagate project root; it only
+    gets there when the workflow is run with those paths.
 
 ### Job shape
 
@@ -255,7 +267,8 @@ Prepare a portable payload containing the project, lockfile, immutable
 snapshot, exactly one source shard, and validated resume artifacts:
 
 ```bash
-uv run --no-sync osm-polygon-description-tag language grid stage --run-dir <run-dir> --project-root <project> --source-root <source> --shard region.parquet --remote-bundle-dir /home/user/language-bundle
+uv run --no-sync osm-polygon-description-tag language grid stage --run-dir <run-dir> --project-root <project> --source-root <source> --shard region.parquet --remote-bundle-dir /home/user/language-bundle \
+  --glotlid-model-path /home/user/models/glotlid-v3/model_v3.bin
 ```
 
 This creates local staging files and prints the exact transfer argument vector.
@@ -265,7 +278,8 @@ After collection, stage again to include the newly committed checkpoint before
 an explicitly requested continuation.
 
 ```bash
-uv run --no-sync osm-polygon-description-tag language grid prepare --run-dir <run-dir> --shard region.parquet --remote-project-dir /home/user/project --remote-source-dir /tmp/staging/source --remote-run-dir /tmp/staging/run
+uv run --no-sync osm-polygon-description-tag language grid prepare --run-dir <run-dir> --shard region.parquet --remote-project-dir /home/user/project --remote-source-dir /tmp/staging/source --remote-run-dir /tmp/staging/run \
+  --glotlid-model-path /home/user/models/glotlid-v3/model_v3.bin
 ```
 
 `prepare` is the lower-level script/metadata operation for already staged inputs;
@@ -278,7 +292,7 @@ user's shell. Spaces and metacharacters in a local script path therefore remain
 part of the filename, not executable syntax.
 
 ```bash
-uv run --no-sync osm-polygon-description-tag language grid submit --run-dir <run-dir> --shard region.parquet --site nancy --remote-project-dir ... --remote-source-dir ... --remote-run-dir ...
+uv run --no-sync osm-polygon-description-tag language grid submit --run-dir <run-dir> --shard region.parquet --site nancy --remote-project-dir ... --remote-source-dir ... --remote-run-dir ... --glotlid-model-path /home/user/models/glotlid-v3/model_v3.bin
 ```
 
 Without `--apply` this only plans: it contacts no scheduler and prints the
@@ -427,12 +441,11 @@ Every annotation row records the `snapshot_id` and `model_config_fingerprint`
 that produced it. The snapshot in turn records the source file hashes, the
 schema identity, the detector policy, and the code and lockfile fingerprints.
 
-The detector version is pinned exactly and verified at construction time: a
-mismatch between the pinned version and the installed distribution fails
-closed. The configuration fingerprint is a hash of the library, version,
-accuracy mode, language scope, and policy — it is **not** presented as a binary
-artifact hash, and `binary_artifact_hash` stays unset until a wheel digest is
-independently verified.
+Lingua and its version are pinned and verified at construction time. For the
+cascade, the configuration fingerprint also records the exact GlotLID repository,
+revision, runtime, and model SHA-256; `binary_artifact_hash` is populated only
+with that independently verified pinned artifact. Legacy pure-Lingua snapshots
+may keep it unset.
 
 Detection is deterministic: scores within the fixed tie epsilon produce an
 uncertain result without a language label, so the provider's ordering of tied
@@ -442,5 +455,6 @@ languages cannot change the annotation.
 
 The annotated text is OpenStreetMap data, © OpenStreetMap contributors,
 available under the Open Database License (ODbL). Language labels are derived
-annotations produced with `lingua-language-detector`, distributed under the
-Apache License 2.0.
+annotations produced with the pinned `lingua-language-detector` primary and the
+documented GlotLID v3 fallback. The dataset card records both upstream
+attributions and exact model provenance.

@@ -116,6 +116,45 @@ def test_the_current_usagepolicycheck_json_schema_is_accepted() -> None:
     assert parse_usage_policy_json(live_policy) == (0, ())
 
 
+@pytest.mark.parametrize(
+    ("field", "message"),
+    [
+        ("jobs", "usage policy jobs must be an object"),
+        ("total_jobs", "usage policy total_jobs must be an object"),
+        ("limits", "usage policy limits must be an object"),
+    ],
+)
+def test_the_current_usage_policy_schema_rejects_a_non_object_field(
+    field: str, message: str
+) -> None:
+    """The live OAR3 shape reports every field it cannot positively interpret."""
+    payload = {
+        "start_time": "2026-09-02 10:48:36 +0200",
+        "stop_time": "2026-09-16 10:48:36 +0200",
+        "jobs": {},
+        "total_jobs": {},
+        "limits": {},
+    }
+    payload[field] = []
+
+    count, notes = parse_usage_policy_json(json.dumps(payload))
+
+    assert count is None
+    assert message in notes
+
+
+def test_a_negative_legacy_total_is_refused_without_inventing_a_count() -> None:
+    """A legacy payload whose total is negative stays unknown, never zero."""
+    payload = json.dumps(
+        {"start_time": 0, "stop_time": 0, "jobs": [], "total_jobs": -1, "limits": {}}
+    )
+
+    count, notes = parse_usage_policy_json(payload)
+
+    assert count is None
+    assert "usage policy total_jobs is not a non-negative integer" in notes
+
+
 def test_usage_policy_fields_have_strict_types_and_consistent_job_count() -> None:
     malformed = json.dumps(
         {"start_time": "0", "stop_time": 0, "jobs": [], "total_jobs": 0, "limits": {}}

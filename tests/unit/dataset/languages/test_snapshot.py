@@ -16,6 +16,7 @@ from osm_polygon_description_tag.dataset.languages import snapshot as snapshot_m
 from osm_polygon_description_tag.dataset.languages.checkpoint import WorkerBusyError
 from osm_polygon_description_tag.dataset.languages.models import (
     LanguagePolicy,
+    cascade_model_identity,
     language_model_identity,
 )
 from osm_polygon_description_tag.dataset.languages.snapshot import (
@@ -85,6 +86,26 @@ def test_snapshot_is_immutable_and_portable_across_source_root_paths(tmp_path: P
     assert payload["source_files"][0]["schema_version"] == 3
     assert read_snapshot(tmp_path / "run") == first
     assert first.model_config_fingerprint == first.model_identity.config_fingerprint
+
+
+def test_snapshot_round_trips_the_cascade_fallback_identity(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    _write_source(source / "region.parquet")
+    run = tmp_path / "run"
+    identity = cascade_model_identity(LanguagePolicy(), language_scope=("eng", "fra"))
+
+    prepare_snapshot(
+        source,
+        run,
+        code_fingerprint="a" * 64,
+        lock_fingerprint="b" * 64,
+        model_identity=identity,
+    )
+
+    payload = json.loads((run / "snapshot.json").read_text(encoding="utf-8"))
+    assert payload["model_identity"]["detector_name"] == "lingua+glotlid-v3-fallback"
+    assert payload["model_identity"]["model_filename"] == "model_v3.bin"
+    assert read_snapshot(run).model_identity == identity
 
 
 def test_snapshot_rejects_source_drift_instead_of_overwriting_identity(tmp_path: Path) -> None:
@@ -729,3 +750,64 @@ def test_non_parquet_files_in_the_source_tree_are_ignored(tmp_path: Path) -> Non
     snapshot = _prepare(source, tmp_path / "run")
 
     assert [item.relative_path for item in snapshot.source_files] == ["region.parquet"]
+
+
+def test_legacy_lingua_payload_without_cascade_fields_remains_readable(
+    tmp_path: Path,
+) -> None:
+    _, run, snapshot = _prepared(tmp_path)
+    payload = json.loads((run / "snapshot.json").read_text(encoding="utf-8"))
+    for key in (
+        "detector_name",
+        "model_repository",
+        "model_filename",
+        "model_revision",
+        "runtime_library_name",
+        "runtime_library_version",
+    ):
+        payload["model_identity"].pop(key)
+    legacy_payload = dict(payload)
+    legacy_payload["model_identity"] = {
+        key: value
+        for key, value in payload["model_identity"].items()
+        if key in snapshot_module._LEGACY_MODEL_FIELDS
+    }
+    legacy_payload.pop("snapshot_id")
+    payload["snapshot_id"] = snapshot_module._sha256_json(legacy_payload)
+    (run / "snapshot.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    assert read_snapshot(run).model_identity == language_model_identity(LanguagePolicy())
+
+
+def test_cascade_snapshot_requires_a_verified_binary_hash(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    _write_source(source / "region.parquet")
+    run = tmp_path / "run"
+    identity = cascade_model_identity(LanguagePolicy())
+    prepare_snapshot(
+        source,
+        run,
+        code_fingerprint="a" * 64,
+        lock_fingerprint="b" * 64,
+        model_identity=identity,
+    )
+
+    _rewrite(
+        run, lambda payload: payload["model_identity"].__setitem__("binary_artifact_hash", None)
+    )
+    with pytest.raises(SnapshotError, match="pinned binary artifact hash is required"):
+        read_snapshot(run)
+
+    _rewrite(
+        run,
+        lambda payload: payload["model_identity"].__setitem__("binary_artifact_hash", "0" * 64),
+    )
+    with pytest.raises(SnapshotError, match="does not match derived value"):
+        read_snapshot(run)
+
+    _rewrite(
+        run,
+        lambda payload: payload["model_identity"].__setitem__("binary_artifact_hash", True),
+    )
+    with pytest.raises(SnapshotError, match="must be a string or null"):
+        read_snapshot(run)

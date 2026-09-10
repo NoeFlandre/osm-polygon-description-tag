@@ -10,6 +10,17 @@ from typing import Final
 LINGUA_LIBRARY_NAME: Final = "lingua-language-detector"
 PINNED_LINGUA_VERSION: Final = "2.2.0"
 DEFAULT_LANGUAGE_SCOPE: Final = ("all_supported",)
+LINGUA_DETECTOR_NAME: Final = "lingua"
+GLOTLID_DETECTOR_NAME: Final = "glotlid-v3"
+CASCADE_DETECTOR_NAME: Final = "lingua+glotlid-v3-fallback"
+GLOTLID_LIBRARY_NAME: Final = "GlotLID"
+GLOTLID_LIBRARY_VERSION: Final = "v3"
+GLOTLID_MODEL_REPOSITORY: Final = "cis-lmu/glotlid"
+GLOTLID_MODEL_FILENAME: Final = "model_v3.bin"
+GLOTLID_MODEL_REVISION: Final = "85cd6716494360367b75f642b5bc78667605d0b4"
+GLOTLID_MODEL_SHA256: Final = "a818b6bd42a628ab47d3dfc1578c7ea615c45381f3494c42535e31e8c4cafc9e"
+GLOTLID_RUNTIME_LIBRARY_NAME: Final = "fasttext-numpy2"
+GLOTLID_RUNTIME_LIBRARY_VERSION: Final = "0.10.2"
 
 
 class LanguageStatus(StrEnum):
@@ -164,14 +175,19 @@ def _validate_margin(result: LanguageResult) -> None:
 class LanguageModelIdentity:
     """Pinned detector metadata, separate from each text result.
 
-    ``config_fingerprint`` identifies this library/version, scope, accuracy
-    mode, and policy configuration. ``binary_artifact_hash`` is intentionally
-    ``None`` until a separately verified wheel/artifact digest is supplied; a
-    configuration hash is not presented as a binary hash.
+    ``config_fingerprint`` identifies the primary library, optional fallback,
+    scope, accuracy mode, and policy configuration. The optional external
+    fields identify the pinned fallback artifact; they are empty for Lingua.
     """
 
     policy: LanguagePolicy
     language_scope: tuple[str, ...]
+    detector_name: str = LINGUA_DETECTOR_NAME
+    model_repository: str | None = None
+    model_filename: str | None = None
+    model_revision: str | None = None
+    runtime_library_name: str | None = None
+    runtime_library_version: str | None = None
     library_name: str = field(init=False)
     library_version: str = field(init=False)
     policy_fingerprint: str = field(init=False)
@@ -184,23 +200,131 @@ class LanguageModelIdentity:
         scope = _validated_scope(self.language_scope)
         policy_payload = _policy_payload(self.policy)
         object.__setattr__(self, "language_scope", scope)
-        object.__setattr__(self, "library_name", LINGUA_LIBRARY_NAME)
-        object.__setattr__(self, "library_version", PINNED_LINGUA_VERSION)
         object.__setattr__(self, "policy_fingerprint", _sha256_json(policy_payload))
-        object.__setattr__(
-            self,
-            "config_fingerprint",
-            _sha256_json(
-                {
-                    "library_name": LINGUA_LIBRARY_NAME,
-                    "library_version": PINNED_LINGUA_VERSION,
-                    "accuracy_mode": "high_accuracy",
-                    "language_scope": scope,
-                    "policy": policy_payload,
-                }
-            ),
-        )
-        object.__setattr__(self, "binary_artifact_hash", None)
+        if self.detector_name == LINGUA_DETECTOR_NAME:
+            _set_lingua_identity(self, scope, policy_payload)
+        elif self.detector_name == GLOTLID_DETECTOR_NAME:
+            _set_glotlid_identity(self, scope, policy_payload)
+        elif self.detector_name == CASCADE_DETECTOR_NAME:
+            _set_cascade_identity(self, scope, policy_payload)
+        else:
+            raise ValueError(f"unsupported detector_name: {self.detector_name!r}")
+
+
+def _external_metadata(identity: LanguageModelIdentity) -> tuple[str | None, ...]:
+    return (
+        identity.model_repository,
+        identity.model_filename,
+        identity.model_revision,
+        identity.runtime_library_name,
+        identity.runtime_library_version,
+    )
+
+
+def _require_lingua_metadata(identity: LanguageModelIdentity) -> None:
+    if any(value is not None for value in _external_metadata(identity)):
+        raise ValueError("Lingua identity must not contain external model metadata")
+
+
+def _require_glotlid_metadata(identity: LanguageModelIdentity) -> None:
+    expected = (
+        GLOTLID_MODEL_REPOSITORY,
+        GLOTLID_MODEL_FILENAME,
+        GLOTLID_MODEL_REVISION,
+        GLOTLID_RUNTIME_LIBRARY_NAME,
+        GLOTLID_RUNTIME_LIBRARY_VERSION,
+    )
+    if _external_metadata(identity) != expected:
+        raise ValueError("GlotLID identity metadata is not pinned to the supported v3 artifact")
+
+
+def _set_lingua_identity(
+    identity: LanguageModelIdentity,
+    scope: tuple[str, ...],
+    policy_payload: dict[str, object],
+) -> None:
+    _require_lingua_metadata(identity)
+    object.__setattr__(identity, "library_name", LINGUA_LIBRARY_NAME)
+    object.__setattr__(identity, "library_version", PINNED_LINGUA_VERSION)
+    object.__setattr__(identity, "binary_artifact_hash", None)
+    object.__setattr__(
+        identity,
+        "config_fingerprint",
+        _sha256_json(
+            {
+                "library_name": LINGUA_LIBRARY_NAME,
+                "library_version": PINNED_LINGUA_VERSION,
+                "accuracy_mode": "high_accuracy",
+                "language_scope": scope,
+                "policy": policy_payload,
+            }
+        ),
+    )
+
+
+def _set_glotlid_identity(
+    identity: LanguageModelIdentity,
+    scope: tuple[str, ...],
+    policy_payload: dict[str, object],
+) -> None:
+    _require_glotlid_metadata(identity)
+    object.__setattr__(identity, "library_name", GLOTLID_LIBRARY_NAME)
+    object.__setattr__(identity, "library_version", GLOTLID_LIBRARY_VERSION)
+    object.__setattr__(identity, "binary_artifact_hash", GLOTLID_MODEL_SHA256)
+    object.__setattr__(identity, "config_fingerprint", _glotlid_fingerprint(scope, policy_payload))
+
+
+def _set_cascade_identity(
+    identity: LanguageModelIdentity,
+    scope: tuple[str, ...],
+    policy_payload: dict[str, object],
+) -> None:
+    _require_glotlid_metadata(identity)
+    object.__setattr__(identity, "library_name", LINGUA_LIBRARY_NAME)
+    object.__setattr__(identity, "library_version", PINNED_LINGUA_VERSION)
+    object.__setattr__(identity, "binary_artifact_hash", GLOTLID_MODEL_SHA256)
+    object.__setattr__(identity, "config_fingerprint", _cascade_fingerprint(scope, policy_payload))
+
+
+def _glotlid_fingerprint(scope: tuple[str, ...], policy: dict[str, object]) -> str:
+    return _sha256_json(
+        {
+            "detector_name": GLOTLID_DETECTOR_NAME,
+            "library_name": GLOTLID_LIBRARY_NAME,
+            "library_version": GLOTLID_LIBRARY_VERSION,
+            "model_repository": GLOTLID_MODEL_REPOSITORY,
+            "model_filename": GLOTLID_MODEL_FILENAME,
+            "model_revision": GLOTLID_MODEL_REVISION,
+            "runtime_library_name": GLOTLID_RUNTIME_LIBRARY_NAME,
+            "runtime_library_version": GLOTLID_RUNTIME_LIBRARY_VERSION,
+            "binary_artifact_hash": GLOTLID_MODEL_SHA256,
+            "language_scope": scope,
+            "policy": policy,
+        }
+    )
+
+
+def _cascade_fingerprint(scope: tuple[str, ...], policy: dict[str, object]) -> str:
+    return _sha256_json(
+        {
+            "detector_name": CASCADE_DETECTOR_NAME,
+            "primary_library_name": LINGUA_LIBRARY_NAME,
+            "primary_library_version": PINNED_LINGUA_VERSION,
+            "fallback": {
+                "library_name": GLOTLID_LIBRARY_NAME,
+                "library_version": GLOTLID_LIBRARY_VERSION,
+                "model_repository": GLOTLID_MODEL_REPOSITORY,
+                "model_filename": GLOTLID_MODEL_FILENAME,
+                "model_revision": GLOTLID_MODEL_REVISION,
+                "runtime_library_name": GLOTLID_RUNTIME_LIBRARY_NAME,
+                "runtime_library_version": GLOTLID_RUNTIME_LIBRARY_VERSION,
+                "binary_artifact_hash": GLOTLID_MODEL_SHA256,
+            },
+            "accuracy_mode": "high_accuracy",
+            "language_scope": scope,
+            "policy": policy,
+        }
+    )
 
 
 def _policy_payload(policy: LanguagePolicy) -> dict[str, object]:
@@ -248,13 +372,60 @@ def language_model_identity(
     return LanguageModelIdentity(policy=policy, language_scope=language_scope)
 
 
+def glotlid_model_identity(
+    policy: LanguagePolicy,
+    *,
+    language_scope: tuple[str, ...] = DEFAULT_LANGUAGE_SCOPE,
+) -> LanguageModelIdentity:
+    """Build deterministic metadata for the pinned GlotLID v3 artifact."""
+    return LanguageModelIdentity(
+        policy=policy,
+        language_scope=language_scope,
+        detector_name=GLOTLID_DETECTOR_NAME,
+        model_repository=GLOTLID_MODEL_REPOSITORY,
+        model_filename=GLOTLID_MODEL_FILENAME,
+        model_revision=GLOTLID_MODEL_REVISION,
+        runtime_library_name=GLOTLID_RUNTIME_LIBRARY_NAME,
+        runtime_library_version=GLOTLID_RUNTIME_LIBRARY_VERSION,
+    )
+
+
+def cascade_model_identity(
+    policy: LanguagePolicy,
+    *,
+    language_scope: tuple[str, ...] = DEFAULT_LANGUAGE_SCOPE,
+) -> LanguageModelIdentity:
+    """Build metadata for Lingua 2.2 with the pinned GlotLID v3 fallback."""
+    return LanguageModelIdentity(
+        policy=policy,
+        language_scope=language_scope,
+        detector_name=CASCADE_DETECTOR_NAME,
+        model_repository=GLOTLID_MODEL_REPOSITORY,
+        model_filename=GLOTLID_MODEL_FILENAME,
+        model_revision=GLOTLID_MODEL_REVISION,
+        runtime_library_name=GLOTLID_RUNTIME_LIBRARY_NAME,
+        runtime_library_version=GLOTLID_RUNTIME_LIBRARY_VERSION,
+    )
+
+
 DEFAULT_LANGUAGE_POLICY = LanguagePolicy()
 V2_LANGUAGE_POLICY: Final = LanguagePolicy(min_score=0.70)
 
 
 __all__ = [
+    "CASCADE_DETECTOR_NAME",
     "DEFAULT_LANGUAGE_POLICY",
     "DEFAULT_LANGUAGE_SCOPE",
+    "GLOTLID_DETECTOR_NAME",
+    "GLOTLID_LIBRARY_NAME",
+    "GLOTLID_LIBRARY_VERSION",
+    "GLOTLID_MODEL_FILENAME",
+    "GLOTLID_MODEL_REPOSITORY",
+    "GLOTLID_MODEL_REVISION",
+    "GLOTLID_MODEL_SHA256",
+    "GLOTLID_RUNTIME_LIBRARY_NAME",
+    "GLOTLID_RUNTIME_LIBRARY_VERSION",
+    "LINGUA_DETECTOR_NAME",
     "LINGUA_LIBRARY_NAME",
     "PINNED_LINGUA_VERSION",
     "V2_LANGUAGE_POLICY",
@@ -262,5 +433,7 @@ __all__ = [
     "LanguagePolicy",
     "LanguageResult",
     "LanguageStatus",
+    "cascade_model_identity",
+    "glotlid_model_identity",
     "language_model_identity",
 ]

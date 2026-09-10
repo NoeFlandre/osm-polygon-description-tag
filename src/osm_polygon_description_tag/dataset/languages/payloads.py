@@ -31,6 +31,10 @@ class PayloadReader:
             raise self._error(f"{self._label} payload is missing {key}")
         return self._payload[key]
 
+    def has(self, key: str) -> bool:
+        """Return whether an optional field is present in this payload."""
+        return key in self._payload
+
     def text(self, key: str) -> str:
         """Return a string field, rejecting every other type."""
         value = self.raw(key)

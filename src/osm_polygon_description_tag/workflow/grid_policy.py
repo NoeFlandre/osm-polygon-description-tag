@@ -147,12 +147,13 @@ def _historical_job_count(payload: Mapping[str, object]) -> tuple[int | None, tu
     total = payload["total_jobs"]
     if isinstance(total, Mapping):
         return 0, ()
-    if type(total) is not int or total < 0:
-        return None, ("usage policy total_jobs is not a non-negative integer",)
+    # The shape gate above already proved a legacy total is a non-negative int,
+    # so re-checking it here would be unreachable rather than defensive.
+    total_jobs = cast(int, total)  # pragma: no mutate - static narrowing
     jobs = cast(list[object], payload["jobs"])  # pragma: no mutate - static narrowing
-    if len(jobs) != total:
+    if len(jobs) != total_jobs:
         return None, ("usage policy total_jobs does not match jobs",)
-    return total, ()
+    return total_jobs, ()
 
 
 def _observed_policy_object(text: str) -> tuple[dict[str, object] | None, tuple[str, ...]]:

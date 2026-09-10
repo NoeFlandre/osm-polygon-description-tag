@@ -3,6 +3,7 @@
 import importlib.metadata as metadata
 import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from pathlib import Path
 from typing import Protocol, cast
 
 from osm_polygon_description_tag.dataset.languages.models import (
@@ -13,6 +14,7 @@ from osm_polygon_description_tag.dataset.languages.models import (
     LanguagePolicy,
     LanguageResult,
     LanguageStatus,
+    cascade_model_identity,
     language_model_identity,
 )
 from osm_polygon_description_tag.dataset.languages.records import DescriptionEntry
@@ -247,6 +249,50 @@ class LanguageDetector:
         return _score_result(ranked, model_text, self._policy, self._mixed_provider)
 
 
+class FallbackLanguageDetector:
+    """Use a secondary detector only when the primary detector is uncertain."""
+
+    __slots__ = ("_fallback", "_identity", "_primary")
+
+    def __init__(
+        self,
+        primary: LanguageDetectionCallable,
+        fallback: LanguageDetectionCallable,
+        *,
+        identity: LanguageModelIdentity | None = None,
+    ) -> None:
+        if not callable(primary):
+            raise TypeError("primary detector must be callable")
+        if not callable(fallback):
+            raise TypeError("fallback detector must be callable")
+        self._primary = primary
+        self._fallback = fallback
+        self._identity = identity
+
+    @property
+    def identity(self) -> LanguageModelIdentity:
+        """Return the cascade identity when the detector is production-bound."""
+        if self._identity is None:
+            raise LanguageDetectionError("fallback detector has no model identity")
+        return self._identity
+
+    def __call__(self, text: str) -> LanguageResult:
+        primary_result = self._primary(text)
+        if primary_result.status is not LanguageStatus.UNCERTAIN:
+            return primary_result
+        fallback_result = self._fallback(text)
+        if fallback_result.status is not LanguageStatus.DETECTED:
+            return primary_result
+        return LanguageResult(
+            fallback_result.language_code,
+            fallback_result.top_score,
+            fallback_result.runner_up_score,
+            fallback_result.margin,
+            fallback_result.status,
+            "fallback_glotlid_v3",
+        )
+
+
 def compute_language_confidence_values(detector: object, text: str) -> dict[str, float]:
     """Adapt Lingua ``ConfidenceValue`` items to lowercase ISO 639-3 keys."""
     method = getattr(detector, "compute_language_confidence_values", None)
@@ -413,6 +459,24 @@ def build_lingua_detector(
     )
 
 
+def build_language_detector(
+    policy: LanguagePolicy = DEFAULT_LANGUAGE_POLICY,
+    *,
+    language_codes: Sequence[str] | None = None,
+    glotlid_model_path: Path | None = None,
+) -> FallbackLanguageDetector:
+    """Construct Lingua 2.2 with GlotLID v3 only as an uncertainty fallback."""
+    from osm_polygon_description_tag.dataset.languages.glotlid import build_glotlid_detector
+
+    primary = build_lingua_detector(policy, language_codes=language_codes)
+    fallback = build_glotlid_detector(policy, model_path=glotlid_model_path)
+    return FallbackLanguageDetector(
+        primary,
+        fallback,
+        identity=cascade_model_identity(policy, language_scope=primary.identity.language_scope),
+    )
+
+
 def detect_description_entries(
     entries: Iterable[DescriptionEntry],
     detector: LanguageDetectionCallable,
@@ -422,10 +486,12 @@ def detect_description_entries(
 
 
 __all__ = [
+    "FallbackLanguageDetector",
     "LanguageDetectionCallable",
     "LanguageDetectionError",
     "LanguageDetector",
     "LanguageLibraryVersionError",
+    "build_language_detector",
     "build_lingua_detector",
     "compute_language_confidence_values",
     "detect_description_entries",

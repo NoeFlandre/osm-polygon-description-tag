@@ -25,6 +25,7 @@ from osm_polygon_description_tag.dataset.languages.checkpoint import (
 from osm_polygon_description_tag.dataset.languages.models import (
     DEFAULT_LANGUAGE_POLICY,
     DEFAULT_LANGUAGE_SCOPE,
+    LINGUA_DETECTOR_NAME,
     LanguageModelIdentity,
     LanguagePolicy,
     language_model_identity,
@@ -121,9 +122,15 @@ def _source_file_from_payload(payload: object) -> SourceFileSnapshot:
 def _model_payload(identity: LanguageModelIdentity) -> dict[str, object]:
     policy = identity.policy
     return {
+        "detector_name": identity.detector_name,
         "library_name": identity.library_name,
         "library_version": identity.library_version,
         "language_scope": list(identity.language_scope),
+        "model_repository": identity.model_repository,
+        "model_filename": identity.model_filename,
+        "model_revision": identity.model_revision,
+        "runtime_library_name": identity.runtime_library_name,
+        "runtime_library_version": identity.runtime_library_version,
         "policy": {
             "min_alphabetic_chars": policy.min_alphabetic_chars,
             "min_score": policy.min_score,
@@ -134,6 +141,22 @@ def _model_payload(identity: LanguageModelIdentity) -> dict[str, object]:
         "config_fingerprint": identity.config_fingerprint,
         "binary_artifact_hash": identity.binary_artifact_hash,
     }
+
+
+_LEGACY_MODEL_FIELDS: Final = (
+    "library_name",
+    "library_version",
+    "language_scope",
+    "policy",
+    "policy_fingerprint",
+    "config_fingerprint",
+    "binary_artifact_hash",
+)
+
+
+def _legacy_model_payload(identity: LanguageModelIdentity) -> dict[str, object]:
+    payload = _model_payload(identity)
+    return {name: payload[name] for name in _LEGACY_MODEL_FIELDS}
 
 
 def _policy_from_payload(reader: PayloadReader) -> LanguagePolicy:
@@ -152,33 +175,100 @@ def _policy_from_payload(reader: PayloadReader) -> LanguagePolicy:
 
 
 _DERIVED_MODEL_FIELDS: Final = (
+    "detector_name",
     "library_name",
     "library_version",
+    "model_repository",
+    "model_filename",
+    "model_revision",
+    "runtime_library_name",
+    "runtime_library_version",
     "policy_fingerprint",
     "config_fingerprint",
+)
+_OPTIONAL_MODEL_FIELDS: Final = frozenset(
+    {
+        "detector_name",
+        "model_repository",
+        "model_filename",
+        "model_revision",
+        "runtime_library_name",
+        "runtime_library_version",
+    }
 )
 
 
 def _derived_identity(reader: PayloadReader, policy: LanguagePolicy) -> LanguageModelIdentity:
     try:
-        return language_model_identity(policy, language_scope=reader.texts("language_scope"))
+        return LanguageModelIdentity(
+            policy=policy,
+            language_scope=reader.texts("language_scope"),
+            detector_name=reader.text("detector_name")
+            if reader.has("detector_name")
+            else LINGUA_DETECTOR_NAME,
+            model_repository=_optional_text(reader, "model_repository"),
+            model_filename=_optional_text(reader, "model_filename"),
+            model_revision=_optional_text(reader, "model_revision"),
+            runtime_library_name=_optional_text(reader, "runtime_library_name"),
+            runtime_library_version=_optional_text(reader, "runtime_library_version"),
+        )
     except SnapshotError:
         raise
     except (TypeError, ValueError) as error:
         raise SnapshotError(f"invalid snapshot model identity: {error}") from error
 
 
+def _optional_text(reader: PayloadReader, key: str, default: str | None = None) -> str | None:
+    if not reader.has(key):
+        return default
+    value = reader.raw(key)
+    if value is not None and not isinstance(value, str):
+        raise SnapshotError(f"snapshot field {key} must be a string or null")
+    return value
+
+
 def _verify_derived_fields(reader: PayloadReader, identity: LanguageModelIdentity) -> None:
     for name in _DERIVED_MODEL_FIELDS:
-        if reader.text(name) != getattr(identity, name):
+        if name in _OPTIONAL_MODEL_FIELDS:
+            if not reader.has(name):
+                continue
+            value = reader.raw(name)
+        else:
+            value = reader.text(name)
+        if value != getattr(identity, name):
             raise SnapshotError(f"model identity field does not match derived value: {name}")
+
+
+def _binary_artifact_hash(reader: PayloadReader) -> str | None:
+    value = reader.raw("binary_artifact_hash")
+    if value is not None and not isinstance(value, str):
+        raise SnapshotError("snapshot field binary_artifact_hash must be a string or null")
+    return value
+
+
+def _validate_binary_hash(binary_hash: str | None, expected: str | None) -> None:
+    if expected is None:
+        if binary_hash is not None:
+            raise SnapshotError(
+                "binary artifact hash must remain unset until independently verified"
+            )
+        return
+    if binary_hash is None:
+        raise SnapshotError("pinned binary artifact hash is required")
+    if binary_hash != expected:
+        raise SnapshotError(
+            "model identity field does not match derived value: binary_artifact_hash"
+        )
+
+
+def _validate_binary_artifact_hash(reader: PayloadReader, identity: LanguageModelIdentity) -> None:
+    _validate_binary_hash(_binary_artifact_hash(reader), identity.binary_artifact_hash)
 
 
 def _model_from_payload(reader: PayloadReader) -> LanguageModelIdentity:
     identity = _derived_identity(reader, _policy_from_payload(reader))
     _verify_derived_fields(reader, identity)
-    if reader.raw("binary_artifact_hash") is not None:
-        raise SnapshotError("binary artifact hash must remain unset until independently verified")
+    _validate_binary_artifact_hash(reader, identity)
     return identity
 
 
@@ -209,7 +299,7 @@ class SnapshotManifest:
         _validate_fingerprint(self.code_fingerprint, "code fingerprint")
         _validate_fingerprint(self.lock_fingerprint, "lock fingerprint")
         _validate_fingerprint(self.snapshot_id, "snapshot id")
-        if self.snapshot_id != _sha256_json(self._identity_payload()):
+        if not self._matches_canonical_id():
             raise SnapshotError("snapshot id does not match canonical content")
 
     def _validate_versions(self) -> None:
@@ -235,12 +325,30 @@ class SnapshotManifest:
                 return item
         raise SnapshotError(f"source file is not in snapshot: {normalized}")
 
+    def _matches_canonical_id(self) -> bool:
+        if self.snapshot_id == _sha256_json(self._identity_payload()):
+            return True
+        return (
+            self.model_identity.detector_name == LINGUA_DETECTOR_NAME
+            and self.snapshot_id == _sha256_json(self._legacy_identity_payload())
+        )
+
     def _identity_payload(self) -> dict[str, object]:
         return {
             "snapshot_schema_version": self.snapshot_schema_version,
             "source_schema_version": self.source_schema_version,
             "source_files": [item.to_payload() for item in self.source_files],
             "model_identity": _model_payload(self.model_identity),
+            "code_fingerprint": self.code_fingerprint,
+            "lock_fingerprint": self.lock_fingerprint,
+        }
+
+    def _legacy_identity_payload(self) -> dict[str, object]:
+        return {
+            "snapshot_schema_version": self.snapshot_schema_version,
+            "source_schema_version": self.source_schema_version,
+            "source_files": [item.to_payload() for item in self.source_files],
+            "model_identity": _legacy_model_payload(self.model_identity),
             "code_fingerprint": self.code_fingerprint,
             "lock_fingerprint": self.lock_fingerprint,
         }

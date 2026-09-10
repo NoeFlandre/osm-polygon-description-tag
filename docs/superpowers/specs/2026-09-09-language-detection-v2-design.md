@@ -1,5 +1,7 @@
 # Language Detection V2 Design
 
+> Historical design note: this document describes the superseded Lingua-only V2 pilot. The active pipeline uses Lingua 2.2.0 as primary and GlotLID v3 only as a fallback when Lingua is uncertain.
+
 ## Goal
 
 Run a directly comparable second language-detection pilot for Afghanistan,

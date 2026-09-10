@@ -66,14 +66,15 @@ def prepared(tmp_path: Path) -> tuple[Path, Path, module.SnapshotManifest]:
 
 def test_prepared_bytes_bind_exact_schema_metadata_policy_and_source(prepared: tuple) -> None:
     source, run, snapshot = prepared
-    path = source / "région.parquet"
+    path = next(source.iterdir())
     schema = pq.ParquetFile(path).schema_arrow
     schema_payload = {
         "fields": [{"name": f.name, "type": str(f.type), "nullable": f.nullable} for f in schema],
         "metadata": {key.decode(): value.hex() for key, value in schema.metadata.items()},
     }
+    expected_relative_path = next(source.iterdir()).name
     assert snapshot.source_files[0].to_payload() == {
-        "relative_path": "région.parquet",
+        "relative_path": expected_relative_path,
         "size_bytes": len(path.read_bytes()),
         "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
         "schema_version": 3,
@@ -91,7 +92,7 @@ def test_prepared_bytes_bind_exact_schema_metadata_policy_and_source(prepared: t
     assert (run / "snapshot.json").read_bytes() == _canonical(payload) + b"\n"
     assert module.read_snapshot(run) == snapshot
     assert (
-        module.verify_source_file(snapshot, source, Path("région.parquet"))
+        module.verify_source_file(snapshot, source, Path(expected_relative_path))
         == snapshot.source_files[0]
     )
     assert module.verify_all_source_files(snapshot, source) == snapshot.source_files
@@ -196,14 +197,15 @@ def test_inspection_rejects_each_schema_field_difference_with_its_path(
 def test_directory_diagnostics_preserve_the_callers_label(
     prepared: tuple, tmp_path: Path, operation: str
 ) -> None:
-    _, _, snapshot = prepared
+    source, _, snapshot = prepared
+    source_name = next(source.iterdir()).name
     wrong = tmp_path / "not-a-directory"
     wrong.write_bytes(b"file")
     actions = {
         "prepare": lambda: module.prepare_snapshot(
             wrong, tmp_path / "new-run", code_fingerprint="a" * 64, lock_fingerprint="b" * 64
         ),
-        "lookup": lambda: module.source_path_for(snapshot, wrong, "région.parquet"),
+        "lookup": lambda: module.source_path_for(snapshot, wrong, source_name),
         "verify_all": lambda: module.verify_all_source_files(snapshot, wrong),
         "project_source": lambda: module.fingerprint_project_source(wrong),
         "lockfile": lambda: module.fingerprint_lockfile(wrong),
@@ -229,12 +231,13 @@ def test_prepare_fingerprint_diagnostics_name_the_argument(prepared: tuple, fiel
 
 def test_lookup_rejects_symlink_even_when_target_stays_inside_source(prepared: tuple) -> None:
     source, _, snapshot = prepared
-    path = source / "région.parquet"
+    path = next(source.iterdir())
+    relative_path = path.name
     path.rename(source / "moved.parquet")
     path.symlink_to(source / "moved.parquet")
     with pytest.raises(module.SnapshotError) as caught:
-        module.source_path_for(snapshot, source, "région.parquet")
-    assert str(caught.value) == "source path escapes or uses a symlink: région.parquet"
+        module.source_path_for(snapshot, source, Path(relative_path))
+    assert str(caught.value) == f"source path escapes or uses a symlink: {relative_path}"
 
 
 def test_project_fingerprint_is_exact_and_uses_posix_relative_path_order(tmp_path: Path) -> None:
@@ -326,7 +329,7 @@ def test_prepare_and_verification_diagnostics_describe_exact_conflicts(
     elif case == "model":
         kwargs["model_identity"] = object()
     else:
-        (source / "extra.parquet").write_bytes((source / "région.parquet").read_bytes())
+        (source / "extra.parquet").write_bytes(next(source.iterdir()).read_bytes())
     with pytest.raises(TypeError if case == "model" else module.SnapshotError) as caught:
         if case == "extra":
             module.verify_all_source_files(snapshot, source)
@@ -376,7 +379,8 @@ def test_lockfile_fingerprinting_forwards_exact_path_and_bytes(
 
 def test_prepare_orders_nested_sources_by_portable_path_spelling(prepared: tuple) -> None:
     source, run, _ = prepared
-    data = (source / "région.parquet").read_bytes()
+    original_name = next(source.iterdir()).name
+    data = (source / original_name).read_bytes()
     (source / "a").mkdir()
     (source / "a" / "nested.parquet").write_bytes(data)
     (source / "a.parquet").write_bytes(data)
@@ -386,5 +390,5 @@ def test_prepare_orders_nested_sources_by_portable_path_spelling(prepared: tuple
     assert [item.relative_path for item in snapshot.source_files] == [
         "a.parquet",
         "a/nested.parquet",
-        "région.parquet",
+        original_name,
     ]

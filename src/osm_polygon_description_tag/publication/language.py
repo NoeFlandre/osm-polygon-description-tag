@@ -40,6 +40,13 @@ from osm_polygon_description_tag.dataset.languages.checkpoint import (
     read_checkpoint,
     shard_paths,
 )
+from osm_polygon_description_tag.dataset.languages.models import (
+    CASCADE_DETECTOR_NAME,
+    GLOTLID_MODEL_REPOSITORY,
+    GLOTLID_MODEL_REVISION,
+    GLOTLID_MODEL_SHA256,
+    LINGUA_DETECTOR_NAME,
+)
 from osm_polygon_description_tag.dataset.languages.payloads import PayloadReader, require_object
 from osm_polygon_description_tag.dataset.languages.snapshot import SnapshotManifest, read_snapshot
 from osm_polygon_description_tag.dataset.languages.validation import validate_run
@@ -104,10 +111,12 @@ class LanguageExport:
     library_version: str
     files: tuple[str, ...]
     stats: LanguageStats
+    detector_name: str = LINGUA_DETECTOR_NAME
 
     def to_payload(self) -> dict[str, object]:
         return {
             "config_name": self.config_name,
+            "detector_name": self.detector_name,
             "snapshot_id": self.snapshot_id,
             "model_config_fingerprint": self.model_config_fingerprint,
             "library_name": self.library_name,
@@ -236,6 +245,7 @@ def _export_language_annotations(run_dir: Path, export_root: Path) -> LanguageEx
         library_version=snapshot.model_identity.library_version,
         files=tuple(f"{LANGUAGE_DATA_PREFIX}/{name}" for name in sorted(names)),
         stats=stats.result(),
+        detector_name=snapshot.model_identity.detector_name,
     )
     atomic_write_json(export_root / LANGUAGE_STATS_PATH, export.to_payload())
     atomic_write_json(export_root / LANGUAGE_MANIFEST_PATH, _export_seal(export))
@@ -299,6 +309,9 @@ def read_language_export(export_root: Path) -> LanguageExport:
     export = LanguageExport(
         export_root=export_root,
         config_name=LANGUAGE_CONFIG_NAME,
+        detector_name=reader.text("detector_name")
+        if reader.has("detector_name")
+        else LINGUA_DETECTOR_NAME,
         snapshot_id=reader.text("snapshot_id"),
         model_config_fingerprint=reader.text("model_config_fingerprint"),
         library_name=reader.text("library_name"),
@@ -377,6 +390,31 @@ def language_config_yaml() -> str:
     )
 
 
+def _language_provenance(export: LanguageExport) -> str:
+    base = (
+        f"Produced by `{export.library_name}` {export.library_version} using detector "
+        f"pipeline `{export.detector_name}` over input snapshot `{export.snapshot_id}` "
+        f"with detector configuration `{export.model_config_fingerprint}`."
+    )
+    if export.detector_name != CASCADE_DETECTOR_NAME:
+        return base
+    return (
+        f"{base} Lingua is primary; GlotLID v3 (`{GLOTLID_MODEL_REPOSITORY}`, revision "
+        f"`{GLOTLID_MODEL_REVISION}`, SHA-256 `{GLOTLID_MODEL_SHA256}`) is used only "
+        "when Lingua returns `uncertain`."
+    )
+
+
+def _language_attribution(export: LanguageExport) -> str:
+    base = (
+        f"Language labels are derived annotations produced with `{export.library_name}`, "
+        "which is distributed under the Apache License 2.0."
+    )
+    if export.detector_name == CASCADE_DETECTOR_NAME:
+        return f"{base} Unresolved values additionally use GlotLID v3."
+    return base
+
+
 def render_language_card_section(export: LanguageExport) -> str:
     """Render the dataset-card section from validated, exported counts only."""
     stats = export.stats
@@ -401,9 +439,7 @@ three rows.
 | Non-linguistic | {stats.non_linguistic_count} |
 | Distinct languages assigned | {stats.distinct_language_count} |
 
-**Provenance.** Produced by `{export.library_name}` {export.library_version}
-over input snapshot `{export.snapshot_id}` with detector configuration
-`{export.model_config_fingerprint}`.
+**Provenance.** {_language_provenance(export)}
 
 **Limitations.**
 
@@ -427,8 +463,7 @@ over input snapshot `{export.snapshot_id}` with detector configuration
 
 **Licensing and attribution.** The annotated text is OpenStreetMap data,
 © OpenStreetMap contributors, available under the Open Database License (ODbL).
-Language labels are derived annotations produced with
-`{export.library_name}`, which is distributed under the Apache License 2.0.
+{_language_attribution(export)}
 """
 
 

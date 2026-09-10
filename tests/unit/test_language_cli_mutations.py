@@ -11,8 +11,10 @@ import pytest
 from osm_polygon_description_tag import language_cli
 from osm_polygon_description_tag.dataset.languages.detector import LanguageDetector
 from osm_polygon_description_tag.dataset.languages.models import (
+    CASCADE_DETECTOR_NAME,
     V2_LANGUAGE_POLICY,
     LanguagePolicy,
+    cascade_model_identity,
     language_model_identity,
 )
 
@@ -33,6 +35,8 @@ def test_prepare_command_forwards_all_language_policy_options(
         run_dir: Path,
         project_root: Path,
         policy: LanguagePolicy,
+        *,
+        model_identity: object,
     ) -> None:
         received.update(
             source_root=source_root,
@@ -70,6 +74,8 @@ def test_prepare_command_selects_the_named_v2_policy(
         run_dir: Path,
         project_root: Path,
         policy: LanguagePolicy,
+        *,
+        model_identity: object,
     ) -> None:
         received["policy"] = policy
 
@@ -105,7 +111,9 @@ def test_handle_prepare_emits_complete_snapshot_metadata(
             SimpleNamespace(relative_path="south.parquet", row_count=6),
         ),
         model_config_fingerprint="config-456",
-        model_identity=SimpleNamespace(library_name="fake-detector", library_version="1.2.3"),
+        model_identity=SimpleNamespace(
+            detector_name="fake-detector", library_name="fake-detector", library_version="1.2.3"
+        ),
     )
     received: dict[str, object] = {}
 
@@ -115,6 +123,7 @@ def test_handle_prepare_emits_complete_snapshot_metadata(
         *,
         code_fingerprint: str,
         lock_fingerprint: str,
+        model_identity: object,
         policy: LanguagePolicy,
     ) -> object:
         received.update(
@@ -122,6 +131,7 @@ def test_handle_prepare_emits_complete_snapshot_metadata(
             run_dir=received_run_dir,
             code_fingerprint=code_fingerprint,
             lock_fingerprint=lock_fingerprint,
+            model_identity=model_identity,
             policy=policy,
         )
         return snapshot
@@ -138,9 +148,11 @@ def test_handle_prepare_emits_complete_snapshot_metadata(
         "run_dir": run_dir,
         "code_fingerprint": "code-hash",
         "lock_fingerprint": "lock-hash",
+        "model_identity": cascade_model_identity(policy),
         "policy": policy,
     }
     assert _payload(capsys) == {
+        "detector_name": "fake-detector",
         "input_row_count": 10,
         "library_name": "fake-detector",
         "library_version": "1.2.3",
@@ -521,3 +533,115 @@ def test_handle_publish_rejects_apply_without_an_exact_baseline_error(
         "applying a publication requires the baseline revision the plan was built against"
     )
     assert calls == []
+
+
+def test_handle_prepare_defaults_to_the_cascade_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source_root = Path("/source")
+    run_dir = Path("/run")
+    project_root = Path("/project")
+    policy = LanguagePolicy()
+    identity = cascade_model_identity(policy)
+    snapshot = SimpleNamespace(
+        snapshot_id="snapshot-123",
+        source_files=(SimpleNamespace(relative_path="north.parquet", row_count=4),),
+        model_config_fingerprint=identity.config_fingerprint,
+        model_identity=identity,
+    )
+    received: dict[str, object] = {}
+
+    def fake_prepare_snapshot(
+        received_source_root: Path,
+        received_run_dir: Path,
+        *,
+        code_fingerprint: str,
+        lock_fingerprint: str,
+        model_identity: object,
+        policy: LanguagePolicy,
+    ) -> object:
+        received.update(
+            source_root=received_source_root,
+            run_dir=received_run_dir,
+            code_fingerprint=code_fingerprint,
+            lock_fingerprint=lock_fingerprint,
+            model_identity=model_identity,
+            policy=policy,
+        )
+        return snapshot
+
+    monkeypatch.setattr(language_cli, "fingerprint_project_source", lambda _: "code-hash")
+    monkeypatch.setattr(language_cli, "fingerprint_lockfile", lambda _: "lock-hash")
+    monkeypatch.setattr(language_cli, "prepare_snapshot", fake_prepare_snapshot)
+
+    assert language_cli.handle_prepare(source_root, run_dir, project_root, policy) is snapshot
+    assert received["model_identity"] == identity
+    assert _payload(capsys)["detector_name"] == CASCADE_DETECTOR_NAME
+
+
+def test_handle_run_uses_the_cascade_builder_and_forwards_the_glotlid_path(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source_root = Path("/source")
+    run_dir = Path("/run")
+    shard = "north.parquet"
+    policy = LanguagePolicy()
+    identity = cascade_model_identity(policy)
+    snapshot = SimpleNamespace(
+        snapshot_id="snapshot-123",
+        model_identity=identity,
+        model_config_fingerprint=identity.config_fingerprint,
+    )
+    detector = LanguageDetector(lambda _: {"eng": 1.0}, policy=policy, identity=identity)
+    received: dict[str, object] = {}
+    outcome = SimpleNamespace(
+        shard=shard,
+        status="complete",
+        is_complete=True,
+        resumed_from=0,
+        input_cursor=4,
+        input_row_count=4,
+        annotation_count=4,
+        completed_parts=("part-1.parquet",),
+    )
+
+    def fake_build(
+        received_policy: LanguagePolicy,
+        *,
+        language_codes: tuple[str, ...] | None = None,
+        glotlid_model_path: Path | None = None,
+    ) -> LanguageDetector:
+        received.update(
+            policy=received_policy,
+            language_codes=language_codes,
+            glotlid_model_path=glotlid_model_path,
+        )
+        return detector
+
+    def fake_process(*args: object, **kwargs: object) -> object:
+        return outcome
+
+    monkeypatch.setattr(language_cli, "read_snapshot", lambda _: snapshot)
+    monkeypatch.setattr(language_cli, "verify_project_identity", lambda *_: None)
+    monkeypatch.setattr(language_cli, "build_language_detector", fake_build)
+    monkeypatch.setattr(language_cli, "exclusive_worker_lock", lambda _: nullcontext())
+    monkeypatch.setattr(language_cli, "process_shard", fake_process)
+
+    model_path = Path("/models/model_v3.bin")
+    language_cli.handle_run(
+        source_root,
+        run_dir,
+        shard,
+        3,
+        12.5,
+        glotlid_model_path=model_path,
+    )
+
+    assert received == {
+        "policy": policy,
+        "language_codes": None,
+        "glotlid_model_path": model_path,
+    }
+    assert _payload(capsys)["status"] == "complete"

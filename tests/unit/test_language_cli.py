@@ -20,6 +20,7 @@ from osm_polygon_description_tag.dataset.languages.detector import LanguageDetec
 from osm_polygon_description_tag.dataset.languages.models import (
     DEFAULT_LANGUAGE_SCOPE,
     LanguagePolicy,
+    cascade_model_identity,
     language_model_identity,
 )
 from osm_polygon_description_tag.storage import write_geoparquet
@@ -129,6 +130,7 @@ def test_run_refuses_a_detector_with_a_different_configuration(
         identity=language_model_identity(LanguagePolicy(), language_scope=("eng",)),
     )
     monkeypatch.setattr(language_cli, "build_lingua_detector", lambda *args, **kwargs: detector)
+    monkeypatch.setattr(language_cli, "build_language_detector", lambda *args, **kwargs: detector)
 
     code = run(
         [
@@ -161,14 +163,35 @@ def stub_detector(monkeypatch: pytest.MonkeyPatch) -> list[LanguagePolicy]:
     """Replace the real Lingua construction so the CLI loads no language model."""
     policies: list[LanguagePolicy] = []
 
-    def _build(policy: LanguagePolicy, *, language_codes: tuple[str, ...] | None = None) -> object:
+    def _build(
+        policy: LanguagePolicy,
+        *,
+        language_codes: tuple[str, ...] | None = None,
+        glotlid_model_path: Path | None = None,
+    ) -> object:
         policies.append(policy)
         identity = language_model_identity(
             policy, language_scope=language_codes or DEFAULT_LANGUAGE_SCOPE
         )
         return LanguageDetector(_confidence_values, policy=policy, identity=identity)
 
+    def _build_cascade(
+        policy: LanguagePolicy,
+        *,
+        language_codes: tuple[str, ...] | None = None,
+        glotlid_model_path: Path | None = None,
+    ) -> object:
+        _build(policy, language_codes=language_codes, glotlid_model_path=glotlid_model_path)
+        return LanguageDetector(
+            _confidence_values,
+            policy=policy,
+            identity=cascade_model_identity(
+                policy, language_scope=language_codes or DEFAULT_LANGUAGE_SCOPE
+            ),
+        )
+
     monkeypatch.setattr(language_cli, "build_lingua_detector", _build)
+    monkeypatch.setattr(language_cli, "build_language_detector", _build_cascade)
     return policies
 
 
@@ -607,6 +630,8 @@ _REMOTE = [
     "/scratch/staging/source",
     "--remote-run-dir",
     "/scratch/staging/run",
+    "--glotlid-model-path",
+    "/home/user/models/glotlid-v3/model_v3.bin",
 ]
 
 
@@ -772,6 +797,7 @@ def test_grid_stage_plans_a_portable_transfer_without_the_apply_gate(
             "processing_seconds": 1200,
             "batch_size": 512,
             "walltime_seconds": 1800,
+            "glotlid_model_path": None,
         },
     )
     assert calls["transfer"] == (prepared, "/scratch/bundle")
@@ -1309,6 +1335,8 @@ def test_grid_stage_quarantines_and_reports_uncheckpointed_orphans(
         SHARD,
         "--remote-bundle-dir",
         "/scratch/language-bundle",
+        "--glotlid-model-path",
+        "/home/user/models/glotlid-v3/model_v3.bin",
     ]
     assert run(stage_argv) == 0
     capsys.readouterr()
@@ -1389,6 +1417,8 @@ def test_grid_stage_then_submit_reuses_the_exact_staged_script_contract(
                 SHARD,
                 "--remote-bundle-dir",
                 remote_bundle_dir,
+                "--glotlid-model-path",
+                "/home/user/models/glotlid-v3/model_v3.bin",
                 "--processing-seconds",
                 str(processing_seconds),
                 "--batch-size",
@@ -1432,6 +1462,8 @@ def test_grid_stage_then_submit_reuses_the_exact_staged_script_contract(
             str(run_dir),
             "--shard",
             SHARD,
+            "--glotlid-model-path",
+            "/home/user/models/glotlid-v3/model_v3.bin",
             "--site",
             "nancy",
             "--remote-project-dir",

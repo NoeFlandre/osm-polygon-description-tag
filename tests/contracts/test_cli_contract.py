@@ -76,6 +76,7 @@ LANGUAGE_COMMAND_OPTIONS = {
         "--batch-size",
         "--budget-seconds",
         "--project-root",
+        "--glotlid-model-path",
     },
     "validate": {*HELP_OPTION, "--run-dir", "--shard"},
     "export": {*HELP_OPTION, "--run-dir", "--export-dir", "--card-section"},
@@ -89,7 +90,12 @@ LANGUAGE_COMMAND_OPTIONS = {
     },
     "grid": {*HELP_OPTION},
 }
-REMOTE_OPTIONS = ("--remote-project-dir", "--remote-source-dir", "--remote-run-dir")
+REMOTE_OPTIONS = (
+    "--remote-project-dir",
+    "--remote-source-dir",
+    "--remote-run-dir",
+    "--glotlid-model-path",
+)
 GRID_COMMAND_OPTIONS = {
     "stage": {
         *HELP_OPTION,
@@ -102,6 +108,7 @@ GRID_COMMAND_OPTIONS = {
         "--batch-size",
         "--walltime-seconds",
         "--apply",
+        "--glotlid-model-path",
     },
     "prepare": {
         *HELP_OPTION,
