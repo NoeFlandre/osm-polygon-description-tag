@@ -4,7 +4,7 @@ A living record of the `language-v1` cascade rollout: what is finished, what is
 not, and what the next operator has to do. Update it in the same commit as the
 work it describes.
 
-**Last updated:** 2026-09-11 · **Code:** `8508b8a` on `main`
+**Last updated:** 2026-09-11 · **Code:** `b691b14` on `main`
 
 ## Summary
 
@@ -66,6 +66,35 @@ reports/mutation-summary.json --minimum-score 100`.
 The denominator is short of the full 18 054: `validation.py`'s 338 mutants were
 reset when an interrupted run truncated its `.py.meta`, and mutmut has not yet
 regenerated them. Expect the total to return to 18 054 on the next full run.
+
+#### The gate is now selection-driven, not guesswork
+
+The cost used to be the gate's own test selection. Mutmut associates a function
+with the tests that entered its trampoline, and 221 of 1 096 functions had no
+recorded test at all, which forced the gate to run the whole 2 618-test suite
+for each of their mutants.
+
+Per-test coverage contexts give the same association exactly. Mutmut mutates
+function bodies, so a test that never executes a line of a function cannot
+observe that function's mutation: the covering tests are precisely the tests
+that can kill its mutants. `just mutation` now records that map first
+(`just mutation-contexts`) and the gate consumes it.
+
+Measured effect on a full sweep:
+
+| | Before | After |
+| --- | --- | --- |
+| Test executions | 748 103 | 149 525 (**5.0x fewer**) |
+| Selection per function, median | 161 | 79 |
+| Selection per function, mean | 683 | 136 |
+| Worst selection | 2 618 | 737 |
+| `_cascade_fingerprint` | 2 618 | 73 |
+| `glotlid._score` | 2 618 | 38 |
+
+The map is keyed by mutmut's own mangled names, derived from the AST; all 1 096
+names it generates are covered, and a contract test pins that shape so the fast
+path cannot degrade silently. Where coverage says nothing about a function, the
+previous selection stands, because running more tests is always sound.
 
 Mechanics already verified, so nobody needs to re-diagnose them:
 
@@ -133,6 +162,18 @@ Blocked by design, not skipped. `export` refuses any run that is not complete
 (currently 3 of 386 shards under the old pilot snapshot, 0 of 386 under the new
 one), so nothing can be published until stage 2 finishes. The dataset repo is
 reachable and authenticated; it currently carries **no** `language-v1/` files.
+
+## Running the suite from the mounted volume
+
+Keep temporary directories **outside** the project tree: several tests walk up
+from a temp path looking for `pyproject.toml`, and a `TMPDIR` inside the repo
+makes them find the real one. `/Volumes/Seagate M3/tmp/osm-pdt` works.
+
+Two end-to-end job-script tests skip when the temp path contains a shell
+metacharacter, which every absolute path on a volume named `Seagate M3` does.
+That is not a defect: a remote path may not contain shell metacharacters,
+because OAR evaluates the stored command through a shell. Point `TMPDIR` at a
+plain path to run them.
 
 ## Performance notes
 
