@@ -33,16 +33,21 @@ risk:
         --report reports/crap.json \
         --max-crap-score 6
 
+# Record which tests execute which source lines. The mutation gate turns this
+# into the exact covering-test set per function, which is what keeps it fast:
+# a test that never runs a function's lines cannot kill that function's mutants.
+mutation-contexts:
+    mkdir -p data-root/.tmp
+    TMPDIR="$PWD/data-root/.tmp" COVERAGE_FILE="$PWD/data-root/.tmp/.coverage-ctx" \
+        uv run pytest -q -p no:cacheprovider \
+        --cov=osm_polygon_description_tag --cov-branch --cov-context=test --cov-report=
+
 # Run the all-source mutation gate for all source modules; mutmut resumes from its ignored cache.
-mutation:
-    mkdir -p reports
-    if test -d "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root"; then \
-        mkdir -p "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root/.mutmut-tmp"; \
-        TMPDIR="/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root/.mutmut-tmp" \
-            uv run python -m scripts.run_mutation_gate --max-children 8; \
-    else \
-        uv run python -m scripts.run_mutation_gate --max-children 8; \
-    fi
+mutation: mutation-contexts
+    mkdir -p reports data-root/.tmp
+    TMPDIR="$PWD/data-root/.tmp" \
+        uv run python -m scripts.run_mutation_gate --max-children 8 \
+        --coverage-file data-root/.tmp/.coverage-ctx
     uv run python scripts/check_mutation_score.py \
         --mutants-root mutants \
         --output reports/mutation-summary.json \

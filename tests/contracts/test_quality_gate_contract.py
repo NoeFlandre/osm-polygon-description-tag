@@ -8,6 +8,11 @@ from pathlib import Path
 
 from packaging.requirements import Requirement
 
+from scripts.coverage_associations import (
+    associations_for_file,
+    mangled_names,
+    module_name_for,
+)
 from scripts.run_mutation_gate import (
     complete_associations,
     escalation_stages,
@@ -397,6 +402,99 @@ def test_mutation_escalation_grows_the_selection_before_the_exact_pass() -> None
     assert stages[-1] is None
     assert list(stages[:-1]) == sorted(stages[:-1])
     assert len(set(stages)) == len(stages)
+
+
+def test_coverage_associations_name_functions_the_way_mutmut_does() -> None:
+    """The map is only usable if its keys match mutmut's mangled names."""
+    source = """
+def top_level():
+    return 1
+
+
+class Holder:
+    def method(self):
+        return 2
+
+    async def coroutine(self):
+        return 3
+"""
+
+    spans = mangled_names(source, "pkg.mod")
+
+    assert set(spans) == {
+        "pkg.mod.x_top_level",
+        "pkg.mod.xǁHolderǁmethod",
+        "pkg.mod.xǁHolderǁcoroutine",
+    }
+    start, end = spans["pkg.mod.x_top_level"]
+    assert start <= end
+
+
+def test_coverage_associations_keep_only_tests_that_execute_the_function(
+    tmp_path: Path,
+) -> None:
+    """A test that never runs a function's lines cannot kill its mutants."""
+    module = tmp_path / "mod.py"
+    module.write_text(
+        "def first():\n    return 1\n\n\ndef second():\n    return 2\n",
+        encoding="utf-8",
+    )
+    contexts = {
+        2: ["tests/test_a.py::test_first|run"],
+        6: ["tests/test_b.py::test_second|run", "tests/test_b.py::test_second|setup"],
+    }
+
+    associations = associations_for_file(module, "pkg.mod", contexts)
+
+    assert associations["pkg.mod.x_first"] == ("tests/test_a.py::test_first",)
+    assert associations["pkg.mod.x_second"] == ("tests/test_b.py::test_second",)
+
+
+def test_coverage_associations_report_an_uncovered_function_as_having_no_tests(
+    tmp_path: Path,
+) -> None:
+    """An uncovered function must surface as a gap, not inherit a neighbour."""
+    module = tmp_path / "mod.py"
+    module.write_text("def covered():\n    return 1\n\n\ndef bare():\n    return 2\n", "utf-8")
+
+    associations = associations_for_file(
+        module, "pkg.mod", {2: ["tests/test_a.py::test_covered|run"]}
+    )
+
+    assert associations["pkg.mod.x_covered"] == ("tests/test_a.py::test_covered",)
+    assert associations["pkg.mod.x_bare"] == ()
+
+
+def test_every_source_function_gets_a_mutmut_shaped_name() -> None:
+    """The fast selection is keyed by mutmut's names, so they must all match.
+
+    If mutmut ever changes how it mangles a name, the coverage-derived
+    selection silently stops applying to that function and the gate quietly
+    falls back to running far more tests, so pin the shape here.
+    """
+    derived: set[str] = set()
+    for path in sorted((PROJECT_ROOT / "src").rglob("*.py")):
+        module = module_name_for(
+            path.relative_to(PROJECT_ROOT), Path("src"), "osm_polygon_description_tag"
+        )
+        derived |= set(mangled_names(path.read_text(encoding="utf-8"), module))
+
+    assert "osm_polygon_description_tag.workflow.grid_policy.x_parse_usage_policy_json" in derived
+    assert "osm_polygon_description_tag.dataset.languages.models.x__cascade_fingerprint" in derived
+    assert (
+        "osm_polygon_description_tag.publication.language_hub"
+        ".xǁHuggingFaceLanguageHubǁ_downloaded_sha256" in derived
+    )
+
+
+def test_coverage_association_module_names_match_the_installed_package() -> None:
+    name = module_name_for(
+        Path("src/osm_polygon_description_tag/workflow/grid_policy.py"),
+        Path("src"),
+        "osm_polygon_description_tag",
+    )
+
+    assert name == "osm_polygon_description_tag.workflow.grid_policy"
 
 
 def test_quality_recipes_and_required_mutation_gate_are_publicly_wired() -> None:

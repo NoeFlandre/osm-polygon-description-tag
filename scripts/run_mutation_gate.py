@@ -180,6 +180,26 @@ def _recorded_path() -> Path:
     return Path("mutants") / "mutmut-recorded-tests.json"
 
 
+def coverage_selection(
+    coverage_file: Path, durations: Mapping[str, float]
+) -> dict[str, tuple[str, ...]]:
+    """Return exact per-function associations from per-test coverage contexts.
+
+    Returns an empty mapping when the coverage file is absent, so the gate
+    still runs on mutmut's own recording alone.
+    """
+
+    if not coverage_file.is_file():
+        return {}
+    from scripts.coverage_associations import build_associations
+
+    known = set(durations)
+    associations = build_associations(coverage_file, Path("src"), "osm_polygon_description_tag")
+    return {
+        name: tuple(test for test in tests if test in known) for name, tests in associations.items()
+    }
+
+
 def recorded_associations(stats: Mapping[str, Any], path: Path) -> dict[str, tuple[str, ...]]:
     """Return mutmut's own recording, preserved across escalating passes.
 
@@ -264,7 +284,9 @@ def _verify_mutmut_can_fail(runner: Any) -> None:
         runner._pytest_add_cli_args_test_selection = original_selection
 
 
-def run_gate(*, max_children: int, fast_tests_per_function: int) -> None:
+def run_gate(
+    *, max_children: int, fast_tests_per_function: int, coverage_file: Path = Path()
+) -> None:
     """Escalate mutation triage, then confirm every survivor exactly."""
 
     import mutmut
@@ -278,6 +300,13 @@ def run_gate(*, max_children: int, fast_tests_per_function: int) -> None:
     full_associations = complete_associations(
         recorded_associations(stats, _recorded_path()), durations
     )
+    # Prefer the exact covering-test set; keep the recorded selection wherever
+    # coverage has nothing to say, because running more tests is always sound.
+    covered = coverage_selection(coverage_file, durations)
+    if covered:
+        full_associations = {
+            name: covered.get(name) or selection for name, selection in full_associations.items()
+        }
 
     original_forced_fail = mutmut_main.run_forced_fail_test
     mutmut_main.run_forced_fail_test = lambda _runner: None
@@ -303,6 +332,12 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--max-children", type=int, default=DEFAULT_MAX_CHILDREN)
     parser.add_argument(
+        "--coverage-file",
+        type=Path,
+        default=Path("data-root/.tmp/.coverage-ctx"),
+        help="per-test coverage contexts used for exact test selection",
+    )
+    parser.add_argument(
         "--fast-tests-per-function", type=int, default=DEFAULT_FAST_TESTS_PER_FUNCTION
     )
     return parser.parse_args()
@@ -315,6 +350,7 @@ def main() -> None:
     run_gate(
         max_children=args.max_children,
         fast_tests_per_function=args.fast_tests_per_function,
+        coverage_file=args.coverage_file,
     )
 
 
