@@ -389,3 +389,55 @@ def test_builder_rejects_an_identity_that_changes_runtime_version(
 
     with pytest.raises(LanguageDetectionError, match="changed during construction"):
         build_glotlid_detector(model_path=model)
+
+
+def _adapter_for(result: tuple[object, object]) -> _GlotLIDAdapter:
+    """Drive the adapter with a stand-in model that returns ``result``."""
+    return _GlotLIDAdapter(SimpleNamespace(predict=lambda text, k: result))
+
+
+@pytest.mark.parametrize("score", [0.0, 0.5, 1.0])
+def test_glotlid_accepts_scores_on_and_inside_the_probability_bounds(score: float) -> None:
+    """Both bounds are inclusive, so neither endpoint may be refused."""
+    assert _adapter_for((["__label__eng_Latn"], [score]))("hello there") == {"eng": score}
+
+
+@pytest.mark.parametrize("score", [-0.01, 1.01, float("nan"), float("inf"), float("-inf")])
+def test_glotlid_refuses_scores_outside_the_probability_bounds(score: float) -> None:
+    with pytest.raises(GlotLIDLabelError) as error:
+        _adapter_for((["__label__eng_Latn"], [score]))("hello there")
+
+    assert str(error.value) == "GlotLID scores must be between 0 and 1"
+
+
+@pytest.mark.parametrize("score", [True, False, "0.5", None, b"0.5", [0.5]])
+def test_glotlid_refuses_a_non_numeric_score_by_name(score: object) -> None:
+    """A bool is an int at runtime, so it has to be refused explicitly."""
+    with pytest.raises(GlotLIDLabelError) as error:
+        _adapter_for((["__label__eng_Latn"], [score]))("hello there")
+
+    assert str(error.value) == "GlotLID scores must be numeric"
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        ("__label__eng_Latn", [0.5]),
+        (["__label__eng_Latn"], "0.5"),
+        ("__label__eng_Latn", "0.5"),
+    ],
+)
+def test_glotlid_refuses_string_prediction_sequences(result: tuple[object, object]) -> None:
+    """A bare string would otherwise zip character by character."""
+    with pytest.raises(GlotLIDLabelError) as error:
+        _adapter_for(result)("hello there")
+
+    assert str(error.value) == "GlotLID predictions must be sequences"
+
+
+def test_glotlid_refuses_unequal_length_predictions() -> None:
+    """Labels and scores are paired strictly; a short tail must not be dropped."""
+    with pytest.raises(GlotLIDLabelError) as error:
+        _adapter_for((["__label__eng_Latn", "__label__fra_Latn"], [0.5]))("hello there")
+
+    assert str(error.value) == "GlotLID predictions must be equal-length sequences"
