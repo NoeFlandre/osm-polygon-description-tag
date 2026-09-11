@@ -4,7 +4,7 @@ A living record of the `language-v1` cascade rollout: what is finished, what is
 not, and what the next operator has to do. Update it in the same commit as the
 work it describes.
 
-**Last updated:** 2026-09-11 · **Code:** `0f29f79` on `main`
+**Last updated:** 2026-09-11 · **Code:** `8508b8a` on `main`
 
 ## Summary
 
@@ -12,7 +12,7 @@ work it describes.
 | --- | --- |
 | Cascade implementation (Lingua primary, GlotLID v3 fallback) | **Done** |
 | Local quality gates except mutation | **Done** |
-| Mutation gate at 100 % | **Not done** — 94.47 %, campaign in progress |
+| Mutation gate at 100 % | **Not done** — 94.63 %, 921 survivors |
 | Grid'5000 full-dataset run | **Not done** — prepared, blocked |
 | Hugging Face publication | **Not done** — blocked on the run above |
 
@@ -58,17 +58,40 @@ complexity 5, ruff format and lint, `ty`, pre-commit, `uv lock --check`,
 
 ### 1. Mutation gate at 100 %
 
-Last complete campaign: **17 056 / 18 054 killed (94.47 %)** — 963 survived,
-30 timeout, 4 suspicious, 1 interrupted. Afterwards, 121 previously surviving
-mutants across six functions were verified killed individually.
+Current candidate: **16 764 / 17 716 killed (94.63 %)** — 921 survived,
+30 timeout, 1 interrupted. Reproduce with
+`python scripts/check_mutation_score.py --mutants-root mutants --output
+reports/mutation-summary.json --minimum-score 100`.
+
+The denominator is short of the full 18 054: `validation.py`'s 338 mutants were
+reset when an interrupted run truncated its `.py.meta`, and mutmut has not yet
+regenerated them. Expect the total to return to 18 054 on the next full run.
+
+Mechanics already verified, so nobody needs to re-diagnose them:
+
+- The escalation ladder is sound and cheap. For every cluster checked, the
+  killing test is inside the stage-two selection of 40 tests, so killable
+  mutants do not pay for the full suite.
+- `mutmut._run` **does** re-execute a mutant that already has a cached exit
+  code, so a resumed run picks up newly added tests. This was confirmed
+  directly: `models.x__cascade_fingerprint__mutmut_1` went from exit code 0
+  (survived) to 1 (killed) on a re-run with no source change.
+- The runtime is dominated by *true* survivors. A function with no recorded
+  trampoline hit runs the whole 2 618-test suite in the final stage, so each
+  surviving mutant costs minutes. With ~900 survivors a full convergence run is
+  several hours, and the candidate lives on the external drive, which makes it
+  slower still.
 
 Next steps:
 
-1. Finish the running campaign to get a true survivor list with the corrected
-   selection.
+1. Run the gate to completion on an idle machine. Do not interrupt it: killing
+   it mid-write has twice truncated a `.py.meta`, which silently drops that
+   file's results. If it must be stopped, check for zero-byte `.py.meta` files
+   afterwards and delete them so mutmut regenerates them.
 2. Work the clusters. The recurring shapes are unasserted error-label strings,
    unasserted keyword-argument defaults, and payload or argv content that no
-   test compares exactly.
+   test compares exactly. Pinning one such contract typically kills a whole
+   cluster: six functions and 121 mutants fell to four tests this way.
 3. Prefer test-only fixes: they do not change `fingerprint_project_source`,
    so they do not invalidate a prepared Grid snapshot. Remove genuinely
    unreachable code rather than excluding its mutants.
