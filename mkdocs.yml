@@ -54,6 +54,7 @@ nav:
   - Dataset contract: dataset-contract.md
   - Operations: operations.md
   - Language detection: language-detection.md
+  - Language rollout status: language-rollout-status.md
   - CLI reference: cli.md
   - Development: development.md
   - Architecture: architecture.md

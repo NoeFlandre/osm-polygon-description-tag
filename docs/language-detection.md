@@ -191,6 +191,17 @@ one. Real errors propagate; they are never converted into a completed result.
     incomplete run, so the Hugging Face step stays blocked until all 386
     shards are complete under one snapshot.
 
+    The cascade run is prepared but has not been submitted. Its snapshot
+    `639783b0...` is frozen over all 386 shards (906 631 rows) under the v1
+    policy, the pinned GlotLID artifact is staged on `nancy` with a verified
+    SHA-256, and one shard's portable payload transferred with all 106 staged
+    files byte-identical to its stage manifest. Two things still block it: the
+    frontend operator environment fails with the NumPy baseline error described
+    below, and weekday daytime in Europe/Paris is refused by default, which
+    leaves only the night window. At roughly three minutes per shard and a
+    concurrency of one, a full pass is on the order of twenty hours of
+    supervised submission.
+
     Production data stays under the requested Seagate project root; it only
     gets there when the workflow is run with those paths.
 
@@ -262,6 +273,35 @@ The examples use `uv run --no-sync` to prevent an implicit installation during
 frontend operations. The generated job requires `bash` and `uv` on the compute
 node; transfers require `rsync`, and scheduler operations require the site's
 OAR and quota tools. Check these prerequisites before an authorised run.
+
+!!! warning "Build the operator environment for the frontend's own CPU"
+    An environment built on an allocated compute node can be unusable on the
+    frontend that must run `oarsub`. A `nancy` operator environment built this
+    way failed on the frontend with `NumPy was built with baseline
+    optimizations: (X86_V2) but your machine doesn't support: (X86_V2)`, which
+    breaks every `grid` subcommand before it reaches the scheduler. Build the
+    operator environment on a machine whose CPU baseline the frontend also
+    satisfies, and check it with a harmless
+    `osm-polygon-description-tag --help` before staging anything.
+
+### Stage the pinned GlotLID model once
+
+The cascade needs the pinned fallback model on storage the compute node can
+read; `--glotlid-model-path` is an absolute path, and the job verifies its
+SHA-256 before loading it. Fetch it once into the shared home and check the
+digest against the pinned constant:
+
+```bash
+mkdir -p ~/models/glotlid-v3
+curl -sSL -o ~/models/glotlid-v3/model_v3.bin \
+  "https://huggingface.co/cis-lmu/glotlid/resolve/85cd6716494360367b75f642b5bc78667605d0b4/model_v3.bin"
+sha256sum ~/models/glotlid-v3/model_v3.bin
+# must print a818b6bd42a628ab47d3dfc1578c7ea615c45381f3494c42535e31e8c4cafc9e
+```
+
+The artifact is about 1.6 GiB, so confirm `quota -p -w` has room before
+fetching it. A digest that does not match the pinned constant must never be
+used: the loader refuses it, and so should you.
 
 Prepare a portable payload containing the project, lockfile, immutable
 snapshot, exactly one source shard, and validated resume artifacts:
