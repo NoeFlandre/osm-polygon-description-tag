@@ -4,7 +4,7 @@ A living record of the `language-v1` cascade rollout: what is finished, what is
 not, and what the next operator has to do. Update it in the same commit as the
 work it describes.
 
-**Last updated:** 2026-09-11 · **Code:** `b691b14` on `main`
+**Last updated:** 2026-09-11 · **Code:** `5f76bc7` on `main`
 
 ## Summary
 
@@ -110,6 +110,24 @@ Mechanics already verified, so nobody needs to re-diagnose them:
   surviving mutant costs minutes. With ~900 survivors a full convergence run is
   several hours, and the candidate lives on the external drive, which makes it
   slower still.
+
+#### Clusters closed so far
+
+Working a cluster at a time is what actually moves the score, and pinning one
+contract usually kills all of it:
+
+| Cluster | Mutants | Result |
+| --- | --- | --- |
+| Fingerprints, rsync argv, validator labels, `submit_job` defaults | 121 | all killed |
+| GlotLID adapter score and prediction contracts | 23 | 21 killed, 2 equivalent |
+
+The two remaining GlotLID mutants are `cast(None, labels)` and
+`cast(None, scores)`. `typing.cast` erases its first argument at runtime, so
+these cannot change behaviour and no test can distinguish them. They belong to
+the equivalence class this repository already excludes with
+`# pragma: no mutate`; apply that marking when driving the gate to zero, and
+note that doing so changes `code_fingerprint` and therefore invalidates a
+prepared Grid snapshot.
 
 Next steps:
 
