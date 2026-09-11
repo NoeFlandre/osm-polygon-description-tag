@@ -30,13 +30,17 @@ def _strip_phase(context: str) -> str:
     return context
 
 
-def module_name_for(path: Path, source_root: Path, package_root: str) -> str:
-    """Return the dotted module name of one source file."""
-    relative = path.relative_to(source_root).with_suffix("")
+def module_name_for(path: Path, source_root: Path) -> str:
+    """Return the dotted module name of one source file.
+
+    Raises ``ValueError`` when the file lies outside ``source_root``, which is
+    how coverage entries measured elsewhere get skipped.
+    """
+    relative = path.resolve().relative_to(source_root.resolve()).with_suffix("")
     parts = list(relative.parts)
     if parts and parts[-1] == "__init__":
         parts.pop()
-    return ".".join([package_root, *parts[1:]]) if parts[:1] == [package_root] else ".".join(parts)
+    return ".".join(parts)
 
 
 def mangled_names(source: str, module: str) -> dict[str, tuple[int, int]]:
@@ -88,9 +92,7 @@ def associations_for_file(
     return {name: tuple(sorted(tests)) for name, tests in covering.items()}
 
 
-def build_associations(
-    coverage_file: Path, source_root: Path, package_root: str
-) -> dict[str, tuple[str, ...]]:
+def build_associations(coverage_file: Path, source_root: Path) -> dict[str, tuple[str, ...]]:
     """Return ``{mangled function name: covering tests}`` for the whole package."""
 
     from coverage import CoverageData
@@ -103,7 +105,7 @@ def build_associations(
         if path.suffix != ".py":
             continue
         try:
-            module = module_name_for(path, source_root, package_root)
+            module = module_name_for(path, source_root)
         except ValueError:
             continue
         associations.update(associations_for_file(path, module, data.contexts_by_lineno(str(path))))

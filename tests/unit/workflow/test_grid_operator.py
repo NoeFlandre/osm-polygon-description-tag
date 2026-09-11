@@ -37,6 +37,7 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
 )
 from osm_polygon_description_tag.dataset.languages.worker import ProcessingBudget, process_shard
 from osm_polygon_description_tag.storage import write_geoparquet
+from osm_polygon_description_tag.workflow import grid_operator
 from osm_polygon_description_tag.workflow.grid_operator import (
     GridOperatorError,
     JobBundle,
@@ -229,9 +230,31 @@ def test_the_job_script_bounds_threads_and_installs_from_the_lockfile(
     assert "verify_prepared_bundle" not in script
 
 
+@pytest.fixture
+def shell_safe_tmp(tmp_path: Path) -> Path:
+    """Skip when the temp path cannot serve as a remote directory.
+
+    A remote path may not contain shell metacharacters, because OAR evaluates
+    the stored command through a shell. Temp directories on a mounted volume
+    routinely contain a space, which is exactly what that rule forbids, so the
+    end-to-end job-script runs below need a plain path to stand in for one.
+    """
+    offending = [
+        character for character in grid_operator._SHELL_METACHARACTERS if character in str(tmp_path)
+    ]
+    if offending:
+        pytest.skip(
+            "remote directories may not contain shell metacharacters "
+            f"(found {offending!r} in the temp path); point TMPDIR at a plain "
+            "path to run the end-to-end job-script tests"
+        )
+    return tmp_path
+
+
 def test_bare_prepared_job_script_runs_without_a_portable_payload(
     prepared: tuple[Path, Path, SnapshotManifest],
     tmp_path: Path,
+    shell_safe_tmp: Path,
 ) -> None:
     _, run, snapshot = prepared
     bundle, paths = prepare_job(
@@ -370,6 +393,7 @@ def test_a_portable_job_contains_code_lock_input_and_resume_state(
 def test_generated_script_runs_verifier_after_external_fake_uv_environment(
     portable_prepared: tuple[Path, Path, Path, SnapshotManifest],
     tmp_path: Path,
+    shell_safe_tmp: Path,
 ) -> None:
     project, source, run, snapshot = portable_prepared
     prepared = prepare_portable_job(

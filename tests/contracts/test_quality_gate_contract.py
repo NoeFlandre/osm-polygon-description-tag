@@ -474,9 +474,7 @@ def test_every_source_function_gets_a_mutmut_shaped_name() -> None:
     """
     derived: set[str] = set()
     for path in sorted((PROJECT_ROOT / "src").rglob("*.py")):
-        module = module_name_for(
-            path.relative_to(PROJECT_ROOT), Path("src"), "osm_polygon_description_tag"
-        )
+        module = module_name_for(path, PROJECT_ROOT / "src")
         derived |= set(mangled_names(path.read_text(encoding="utf-8"), module))
 
     assert "osm_polygon_description_tag.workflow.grid_policy.x_parse_usage_policy_json" in derived
@@ -489,9 +487,8 @@ def test_every_source_function_gets_a_mutmut_shaped_name() -> None:
 
 def test_coverage_association_module_names_match_the_installed_package() -> None:
     name = module_name_for(
-        Path("src/osm_polygon_description_tag/workflow/grid_policy.py"),
-        Path("src"),
-        "osm_polygon_description_tag",
+        PROJECT_ROOT / "src/osm_polygon_description_tag/workflow/grid_policy.py",
+        PROJECT_ROOT / "src",
     )
 
     assert name == "osm_polygon_description_tag.workflow.grid_policy"

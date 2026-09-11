@@ -84,7 +84,10 @@ def test_the_submission_argv_is_explicit_and_bounded(script: Path, tmp_path: Pat
     argv = build_oarsub_argv(_request(script), allowed_root=tmp_path)
 
     assert argv[:5] == ("oarsub", "-l", "core=1,walltime=0:30:00", "-n", "lang-abc")
-    assert argv[-1] == str(script.resolve())
+    # OAR evaluates the stored command through a shell, so the script path is
+    # quoted. Assert the quoted form, which also holds when the path contains a
+    # space -- as it does whenever the run directory lives on a mounted volume.
+    assert argv[-1] == shlex.quote(str(script.resolve()))
     assert "night=noretry" not in argv
 
 

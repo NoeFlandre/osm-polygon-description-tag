@@ -194,7 +194,7 @@ def coverage_selection(
     from scripts.coverage_associations import build_associations
 
     known = set(durations)
-    associations = build_associations(coverage_file, Path("src"), "osm_polygon_description_tag")
+    associations = build_associations(coverage_file, Path("src"))
     return {
         name: tuple(test for test in tests if test in known) for name, tests in associations.items()
     }
