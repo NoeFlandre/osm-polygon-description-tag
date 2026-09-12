@@ -125,12 +125,18 @@ class ShardPaths:
 
 def _shard_key(shard: str) -> str:
     _validate_relative_shard(shard)
-    return hashlib.sha256(shard.encode("utf-8")).hexdigest()[:32]
+    shard_bytes = shard.encode("utf-8")  # pragma: no mutate - codec alias only
+    return hashlib.sha256(shard_bytes).hexdigest()[:32]
+
+
+def shards_root(run_dir: Path) -> Path:
+    """Return the single directory that owns every shard's state."""
+    return run_dir / "shards"
 
 
 def shard_paths(run_dir: Path, shard: str) -> ShardPaths:
     """Return deterministic owned paths without creating any filesystem state."""
-    root = run_dir / "shards" / _shard_key(shard)
+    root = shards_root(run_dir) / _shard_key(shard)
     return ShardPaths(root, root / "parts", root / "receipts", root / "checkpoint.json")
 
 
@@ -233,7 +239,9 @@ def _validated_parts(completed_parts: tuple[str, ...]) -> tuple[str, ...]:
         _part_offset(part)
     if len(set(parts)) != len(parts):
         raise CheckpointError("checkpoint contains duplicate completed parts")
-    if parts != tuple(sorted(parts, key=_part_offset)):
+    # Every name validated above is ``part-<fixed-width zero-padded digits>``,
+    # so lexicographic order is cursor order and needs no sort key.
+    if parts != tuple(sorted(parts)):
         raise CheckpointError("checkpoint completed parts are not cursor ordered")
     return parts
 
@@ -431,7 +439,8 @@ def _read_json_object(path: Path, label: str) -> Mapping[str, object]:
     if path.is_symlink():
         raise CheckpointError(f"{label} must not be a symlink: {path}")
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")  # pragma: no mutate - codec alias only
+        payload = json.loads(text)
     except (OSError, UnicodeError) as error:
         raise CheckpointError(f"cannot read {label} {path}: {error}") from error
     except json.JSONDecodeError as error:

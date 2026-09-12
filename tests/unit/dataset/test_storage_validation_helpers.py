@@ -46,6 +46,7 @@ from osm_polygon_description_tag.dataset.storage import (
     validate_finalized_artifacts_strict,
     write_geoparquet,
 )
+from tests.helpers.messages import exactly
 
 
 def _columns(row: dict[str, object]) -> dict[str, list[object]]:
@@ -134,7 +135,7 @@ def test_stream_records_writes_an_empty_schema_batch_for_empty_input() -> None:
 
 @pytest.mark.parametrize("batch_size", [0, -1])
 def test_require_batch_size_rejects_non_positive_values(batch_size: int) -> None:
-    with pytest.raises(ValueError, match="batch_size must be positive"):
+    with pytest.raises(ValueError, match=exactly("batch_size must be positive")):
         _require_batch_size(batch_size)
 
 
@@ -598,10 +599,14 @@ def test_fsync_dir_uses_the_owned_directory_and_closes_the_fd(
     synced: list[int] = []
     closed: list[int] = []
 
+    def open_directory(path: str, flags: int, **_kwargs: object) -> int:
+        opened.append((path, flags))
+        return 17
+
     monkeypatch.setattr(
         storage.os,
         "open",
-        lambda path, flags: opened.append((path, flags)) or 17,
+        open_directory,
     )
     monkeypatch.setattr(storage.os, "fsync", lambda fd: synced.append(fd))
     monkeypatch.setattr(storage.os, "close", lambda fd: closed.append(fd))

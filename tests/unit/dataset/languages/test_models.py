@@ -18,6 +18,7 @@ from osm_polygon_description_tag.dataset.languages.models import (
     glotlid_model_identity,
     language_model_identity,
 )
+from tests.helpers.messages import exactly
 
 
 def _detected(**overrides: object) -> LanguageResult:
@@ -45,7 +46,7 @@ def test_a_boolean_threshold_is_rejected() -> None:
 
 @pytest.mark.parametrize("value", [-0.1, 1.5, float("nan"), float("inf")])
 def test_an_out_of_range_threshold_is_rejected(value: float) -> None:
-    with pytest.raises(ValueError, match="finite and between 0 and 1"):
+    with pytest.raises(ValueError, match=exactly("min_score must be finite and between 0 and 1.0")):
         LanguagePolicy(min_score=value)
 
 
@@ -191,7 +192,7 @@ def test_a_language_code_must_be_lowercase_iso_639_3(code: object) -> None:
 
 
 def test_an_identity_requires_a_policy() -> None:
-    with pytest.raises(TypeError, match="policy must be a LanguagePolicy"):
+    with pytest.raises(TypeError, match=exactly("policy must be a LanguagePolicy")):
         LanguageModelIdentity(policy="strict", language_scope=("all_supported",))  # type: ignore[arg-type]
 
 

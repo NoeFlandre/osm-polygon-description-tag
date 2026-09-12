@@ -319,10 +319,15 @@ def test_write_state_fsyncs_the_file_and_parent_directory(
     synced_descriptors: list[int] = []
     closed_descriptors: list[int] = []
     directory_fd = 321
+
+    def open_directory(path: str, flags: int, **_kwargs: object) -> int:
+        opened_directories.append((path, flags))
+        return directory_fd
+
     monkeypatch.setattr(
         dedup_module.os,
         "open",
-        lambda path, flags: (opened_directories.append((path, flags)) or directory_fd),
+        open_directory,
     )
     monkeypatch.setattr(
         dedup_module.os, "fsync", lambda descriptor: synced_descriptors.append(descriptor)

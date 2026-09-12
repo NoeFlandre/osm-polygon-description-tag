@@ -26,7 +26,9 @@ from osm_polygon_description_tag.storage import write_geoparquet
 from osm_polygon_description_tag.workflow import grid_operator
 from osm_polygon_description_tag.workflow.grid_operator import (
     JOB_CONFIG_FILENAME,
+    MAX_PROCESSING_SECONDS,
     MAX_WALLTIME_SECONDS,
+    REQUIRED_CORES,
     GridOperatorError,
     PreparedJob,
     build_bundle_transfer_argv,
@@ -37,6 +39,7 @@ from osm_polygon_description_tag.workflow.grid_operator import (
     verify_prepared_bundle,
 )
 from tests.conftest import make_record_dict
+from tests.helpers.messages import exactly
 
 SHARD = "region.parquet"
 REMOTE_BUNDLE = "/scratch/lang-bundle"
@@ -149,9 +152,9 @@ def test_prepare_portable_job_rejects_invalid_remote_and_config_inputs(
 @pytest.mark.parametrize(
     ("drift", "message"),
     [
-        ("source", "source file does not match snapshot"),
-        ("project", "project source does not match the bundle"),
-        ("lock", "project lockfile does not match the bundle"),
+        ("source", f"source file does not match snapshot: {SHARD}"),
+        ("project", "project source does not match the bundle code fingerprint"),
+        ("lock", "project lockfile does not match the bundle lock fingerprint"),
     ],
 )
 def test_prepare_portable_job_revalidates_source_and_project_identity(
@@ -176,7 +179,7 @@ def test_prepare_portable_job_revalidates_source_and_project_identity(
     else:
         (project / "uv.lock").write_text("version = 2\n", encoding="utf-8")
 
-    with pytest.raises(GridOperatorError, match=message):
+    with pytest.raises(GridOperatorError, match=exactly(message)):
         _stage(portable_inputs)
 
 
@@ -191,7 +194,10 @@ def test_prepare_portable_job_rejects_a_foreign_run_snapshot(
         lock_fingerprint=fingerprint_lockfile(project),
     )
 
-    with pytest.raises(GridOperatorError, match="run snapshot does not match"):
+    with pytest.raises(
+        GridOperatorError,
+        match=exactly("run snapshot does not match the requested portable bundle"),
+    ):
         _stage((project, source, run, foreign))
 
 
@@ -273,7 +279,7 @@ def test_prepare_portable_job_rejects_invalid_resume_checkpoint_shapes(
     else:
         state.parts.mkdir()
 
-    with pytest.raises(GridOperatorError, match=message):
+    with pytest.raises(GridOperatorError, match=exactly(message)):
         _stage(portable_inputs)
 
 
@@ -304,7 +310,9 @@ def test_prepare_portable_job_rejects_resume_state_with_unexpected_run_artifacts
     _write_paused_checkpoint(run, snapshot)
     (run / "shards" / "unexpected-shard").mkdir()
 
-    with pytest.raises(GridOperatorError, match="resume state failed collection validation"):
+    with pytest.raises(
+        GridOperatorError, match=exactly("resume state failed collection validation")
+    ):
         prepare_portable_job(
             run, project, portable_inputs[1], snapshot, SHARD, remote_bundle_dir=REMOTE_BUNDLE
         )
@@ -316,7 +324,10 @@ def test_prepare_portable_job_rejects_resume_checkpoint_with_foreign_identity(
     project, _, run, snapshot = portable_inputs
     _write_paused_checkpoint(run, snapshot, snapshot_id="c" * 64)
 
-    with pytest.raises(GridOperatorError, match="not bound to this job bundle"):
+    with pytest.raises(
+        GridOperatorError,
+        match=exactly("existing shard checkpoint is not bound to this job bundle"),
+    ):
         prepare_portable_job(
             run, project, portable_inputs[1], snapshot, SHARD, remote_bundle_dir=REMOTE_BUNDLE
         )
@@ -352,7 +363,9 @@ def test_verify_prepared_bundle_rejects_a_canonical_foreign_staged_snapshot(
     staged_snapshot.write_text(foreign.to_json(), encoding="utf-8")
     _refresh_stage_descriptor(prepared.manifest, f"run/{SNAPSHOT_FILENAME}", staged_snapshot)
 
-    with pytest.raises(GridOperatorError, match="staged snapshot id does not match bundle"):
+    with pytest.raises(
+        GridOperatorError, match=exactly("staged snapshot id does not match bundle")
+    ):
         verify_prepared_bundle(prepared.payload_root)
 
 
@@ -445,7 +458,9 @@ def test_verify_prepared_bundle_rejects_missing_and_malformed_stage_manifests(
 ) -> None:
     prepared = _stage(portable_inputs)
     prepared.manifest.unlink()
-    with pytest.raises(GridOperatorError, match="missing its stage manifest"):
+    with pytest.raises(
+        GridOperatorError, match=exactly("portable payload is missing its stage manifest")
+    ):
         verify_prepared_bundle(prepared.payload_root)
 
     prepared.manifest.write_text("{not-json", encoding="utf-8")
@@ -457,8 +472,12 @@ def test_verify_prepared_bundle_rejects_missing_and_malformed_stage_manifests(
     ("field", "value", "message"),
     [
         ("stage_schema_version", 2, "unsupported stage schema version"),
-        ("bundle_id", "c" * 64, "stage manifest bundle id does not match"),
-        ("resume_state_fingerprint", "d" * 64, "resume state fingerprint does not match"),
+        ("bundle_id", "c" * 64, "stage manifest bundle id does not match bundle"),
+        (
+            "resume_state_fingerprint",
+            "d" * 64,
+            "stage manifest resume state fingerprint does not match payload",
+        ),
     ],
 )
 def test_verify_prepared_bundle_rejects_tampered_stage_metadata(
@@ -470,7 +489,7 @@ def test_verify_prepared_bundle_rejects_tampered_stage_metadata(
     prepared = _stage(portable_inputs)
     _rewrite_json(prepared.manifest, lambda payload: payload.__setitem__(field, value))
 
-    with pytest.raises(GridOperatorError, match=message):
+    with pytest.raises(GridOperatorError, match=exactly(message)):
         verify_prepared_bundle(prepared.payload_root)
 
 
@@ -478,10 +497,14 @@ def test_verify_prepared_bundle_rejects_tampered_stage_metadata(
     ("field", "value", "message"),
     [
         ("job_config_schema_version", 2, "unsupported job config schema version"),
-        ("bundle_id", "c" * 64, "job config bundle id does not match"),
-        ("cores", 2, "job config must request exactly"),
+        ("bundle_id", "c" * 64, "job config bundle id does not match the prepared bundle"),
+        ("cores", 2, f"job config must request exactly {REQUIRED_CORES} core"),
         ("thread_limit", 2, "job config thread limit must be 1"),
-        ("processing_seconds", 0, "processing budget must be between"),
+        (
+            "processing_seconds",
+            0,
+            f"processing budget must be between 1 and {MAX_PROCESSING_SECONDS} seconds",
+        ),
     ],
 )
 def test_verify_prepared_bundle_rejects_tampered_job_config(
@@ -495,7 +518,7 @@ def test_verify_prepared_bundle_rejects_tampered_job_config(
     _rewrite_json(config, lambda payload: payload.__setitem__(field, value))
     _refresh_stage_descriptor(prepared.manifest, JOB_CONFIG_FILENAME, config)
 
-    with pytest.raises(GridOperatorError, match=message):
+    with pytest.raises(GridOperatorError, match=exactly(message)):
         verify_prepared_bundle(prepared.payload_root)
 
 
@@ -528,7 +551,9 @@ def test_verify_prepared_bundle_rejects_a_foreign_expected_bundle(
         lock_fingerprint=fingerprint_lockfile(project),
     )
 
-    with pytest.raises(GridOperatorError, match="does not match the expected bundle"):
+    with pytest.raises(
+        GridOperatorError, match=exactly("staged bundle does not match the expected bundle")
+    ):
         verify_prepared_bundle(
             prepared.payload_root, expected_bundle=bundle_for_shard(foreign_snapshot, SHARD)
         )
@@ -537,7 +562,7 @@ def test_verify_prepared_bundle_rejects_a_foreign_expected_bundle(
 def test_bundle_transfer_requires_a_verified_prepared_job(
     portable_inputs: tuple[Path, Path, Path, SnapshotManifest],
 ) -> None:
-    with pytest.raises(GridOperatorError, match="must be a PreparedJob"):
+    with pytest.raises(GridOperatorError, match=exactly("prepared bundle must be a PreparedJob")):
         build_bundle_transfer_argv(object(), REMOTE_BUNDLE)  # type: ignore[arg-type]
 
     prepared = _stage(portable_inputs)
@@ -561,7 +586,7 @@ def test_result_retrieval_rejects_invalid_remote_shard_and_local_paths(
 ) -> None:
     with pytest.raises(GridOperatorError, match="absolute path"):
         build_result_retrieval_argv("relative", tmp_path / "staging", SHARD)
-    with pytest.raises(GridOperatorError, match="Parquet path"):
+    with pytest.raises(GridOperatorError, match=exactly("shard must be a Parquet path")):
         build_result_retrieval_argv("/scratch/run", tmp_path / "staging", "region.txt")
 
     local_file = tmp_path / "local-file"

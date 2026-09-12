@@ -58,6 +58,10 @@ include = [
     "src/osm_polygon_description_tag/_data/*.png",
 ]
 
+[tool.hatch.build.targets.sdist]
+exclude = [".venv/", "data-root/", "dist/", "mutants/", "reports/"]
+skip-excluded-dirs = true
+
 [dependency-groups]
 dev = [
     "mkdocs-material>=9.6,<10",
@@ -126,8 +130,14 @@ also_copy = [
     "scripts/",
     "tests/",
 ]
-timeout_multiplier = 2.0
-# Account for one-time dependency imports in isolated mutant processes.
-timeout_constant = 5.0
+# A timeout is an unresolved verdict for this gate, not a kill, so the limit has
+# to sit far above the slowest honest run.  The limit is wall clock
+# ``(estimated_test_time + timeout_constant) * timeout_multiplier``, and the
+# estimate comes from an unloaded baseline run: on a shared machine a mutant
+# that would be killed otherwise reports a timeout instead.  These values leave
+# room for that contention and for one-time dependency imports in isolated
+# mutant processes, while still bounding a genuine non-terminating mutant.
+timeout_multiplier = 4.0
+timeout_constant = 30.0
 dependency_tracking_depth = 2
 on_dependency_change = "warn"

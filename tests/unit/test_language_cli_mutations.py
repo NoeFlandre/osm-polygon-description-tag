@@ -17,6 +17,7 @@ from osm_polygon_description_tag.dataset.languages.models import (
     cascade_model_identity,
     language_model_identity,
 )
+from tests.helpers.messages import exactly
 
 
 def _payload(capsys: pytest.CaptureFixture[str]) -> dict[str, object]:
@@ -92,7 +93,7 @@ def test_prepare_command_selects_the_named_v2_policy(
 
 
 def test_prepare_policy_rejects_an_unknown_named_policy() -> None:
-    with pytest.raises(ValueError, match="policy_version must be 'v1' or 'v2'"):
+    with pytest.raises(ValueError, match=exactly("policy_version must be 'v1' or 'v2'")):
         language_cli._policy(None, None, None, policy_version="v3")
 
 

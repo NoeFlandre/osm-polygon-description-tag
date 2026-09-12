@@ -35,6 +35,7 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
 )
 from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
+from tests.helpers.messages import exactly
 
 
 def _write_source(path: Path, *, text: str = "A synthetic description") -> None:
@@ -117,7 +118,9 @@ def test_snapshot_rejects_source_drift_instead_of_overwriting_identity(tmp_path:
         _prepare(source, run)
     with pytest.raises(SnapshotError, match="does not match snapshot"):
         verify_source_file(snapshot, source, "region.parquet")
-    with pytest.raises(SnapshotError, match="do not match immutable snapshot"):
+    with pytest.raises(
+        SnapshotError, match=exactly("source directory files do not match immutable snapshot")
+    ):
         verify_all_source_files(snapshot, source)
 
 
@@ -132,7 +135,9 @@ def test_verify_all_source_files_rejects_an_extra_parquet(tmp_path: Path) -> Non
     source, _, snapshot = _prepared(tmp_path)
     _write_source(source / "extra.parquet", text="Another synthetic description")
 
-    with pytest.raises(SnapshotError, match="do not match immutable snapshot"):
+    with pytest.raises(
+        SnapshotError, match=exactly("source directory files do not match immutable snapshot")
+    ):
         verify_all_source_files(snapshot, source)
 
 
@@ -164,7 +169,9 @@ def test_snapshot_rejects_output_inside_the_immutable_source(tmp_path: Path) -> 
     source = tmp_path / "source"
     _write_source(source / "region.parquet")
 
-    with pytest.raises(SnapshotError, match="outside the immutable source"):
+    with pytest.raises(
+        SnapshotError, match=exactly("run output must be outside the immutable source directory")
+    ):
         _prepare(source, source / "run")
 
 
@@ -173,7 +180,9 @@ def test_snapshot_rejects_a_run_directory_containing_the_source(tmp_path: Path) 
     source = parent / "source"
     _write_source(source / "region.parquet")
 
-    with pytest.raises(SnapshotError, match="must not contain the immutable source"):
+    with pytest.raises(
+        SnapshotError, match=exactly("run output must not contain the immutable source directory")
+    ):
         _prepare(source, parent)
 
 
@@ -200,7 +209,9 @@ def test_snapshot_rejects_an_unusable_run_directory(tmp_path: Path) -> None:
     occupied = tmp_path / "occupied"
     occupied.mkdir()
     occupied.joinpath("stray.txt").write_text("stray", encoding="utf-8")
-    with pytest.raises(SnapshotError, match="non-empty run directory"):
+    with pytest.raises(
+        SnapshotError, match=exactly("cannot initialize snapshot in a non-empty run directory")
+    ):
         _prepare(source, occupied)
 
     as_file = tmp_path / "as-file"
@@ -232,7 +243,7 @@ def test_snapshot_rejects_a_non_identity_model_argument(tmp_path: Path) -> None:
     source = tmp_path / "source"
     _write_source(source / "region.parquet")
 
-    with pytest.raises(TypeError, match="LanguageModelIdentity"):
+    with pytest.raises(TypeError, match=exactly("model_identity must be a LanguageModelIdentity")):
         prepare_snapshot(
             source,
             tmp_path / "run",
@@ -393,7 +404,9 @@ def test_snapshot_payload_rejects_a_tampered_identity(tmp_path: Path) -> None:
     _, run, _ = _prepared(tmp_path)
     _rewrite(run, lambda payload: payload["source_files"][0].__setitem__("row_count", 99))
 
-    with pytest.raises(SnapshotError, match="does not match canonical content"):
+    with pytest.raises(
+        SnapshotError, match=exactly("snapshot id does not match canonical content")
+    ):
         read_snapshot(run)
 
 
@@ -435,9 +448,13 @@ def test_manifest_rejects_unsorted_or_duplicated_source_files() -> None:
     first = SourceFileSnapshot("a.parquet", 1, "a" * 64, 3, "b" * 64, 1)
     second = SourceFileSnapshot("b.parquet", 1, "c" * 64, 3, "d" * 64, 1)
 
-    with pytest.raises(SnapshotError, match="must be sorted"):
+    with pytest.raises(
+        SnapshotError, match=exactly("source files must be sorted by relative path")
+    ):
         SnapshotManifest("e" * 64, 1, 3, (second, first), identity, "f" * 64, "0" * 64)
-    with pytest.raises(SnapshotError, match="duplicate relative paths"):
+    with pytest.raises(
+        SnapshotError, match=exactly("source files must not contain duplicate relative paths")
+    ):
         SnapshotManifest("e" * 64, 1, 3, (first, first), identity, "f" * 64, "0" * 64)
 
 
@@ -448,7 +465,7 @@ def test_manifest_rejects_unsupported_versions_and_identities() -> None:
         SnapshotManifest("e" * 64, 2, 3, (), identity, "f" * 64, "0" * 64)
     with pytest.raises(SnapshotError, match="source schema version must be 3"):
         SnapshotManifest("e" * 64, 1, 2, (), identity, "f" * 64, "0" * 64)
-    with pytest.raises(TypeError, match="LanguageModelIdentity"):
+    with pytest.raises(TypeError, match=exactly("model_identity must be a LanguageModelIdentity")):
         SnapshotManifest("e" * 64, 1, 3, (), "identity", "f" * 64, "0" * 64)  # type: ignore[arg-type]
 
 
@@ -639,12 +656,16 @@ def test_project_identity_verification_rejects_code_or_lock_drift(tmp_path: Path
     verify_project_identity(snapshot, project)
 
     source_code.write_text("VALUE = 2\n", encoding="utf-8")
-    with pytest.raises(SnapshotError, match="code fingerprint"):
+    with pytest.raises(
+        SnapshotError, match=exactly("project source does not match snapshot code fingerprint")
+    ):
         verify_project_identity(snapshot, project)
 
     source_code.write_text("VALUE = 1\n", encoding="utf-8")
     lock.write_text("lock = 2\n", encoding="utf-8")
-    with pytest.raises(SnapshotError, match="lock fingerprint"):
+    with pytest.raises(
+        SnapshotError, match=exactly("project lockfile does not match snapshot lock fingerprint")
+    ):
         verify_project_identity(snapshot, project)
 
 
@@ -690,7 +711,9 @@ def test_a_path_object_is_accepted_wherever_a_relative_path_is(tmp_path: Path) -
 
 
 def test_a_non_canonical_relative_path_is_rejected() -> None:
-    with pytest.raises(SnapshotError, match="portable POSIX spelling"):
+    with pytest.raises(
+        SnapshotError, match=exactly("source relative paths must use portable POSIX spelling")
+    ):
         SourceFileSnapshot("a//b.parquet", 10, "a" * 64, 3, "b" * 64, 1)
 
 
@@ -795,19 +818,57 @@ def test_cascade_snapshot_requires_a_verified_binary_hash(tmp_path: Path) -> Non
     _rewrite(
         run, lambda payload: payload["model_identity"].__setitem__("binary_artifact_hash", None)
     )
-    with pytest.raises(SnapshotError, match="pinned binary artifact hash is required"):
+    with pytest.raises(SnapshotError, match=exactly("pinned binary artifact hash is required")):
         read_snapshot(run)
 
     _rewrite(
         run,
         lambda payload: payload["model_identity"].__setitem__("binary_artifact_hash", "0" * 64),
     )
-    with pytest.raises(SnapshotError, match="does not match derived value"):
+    with pytest.raises(
+        SnapshotError,
+        match=exactly("model identity field does not match derived value: binary_artifact_hash"),
+    ):
         read_snapshot(run)
 
     _rewrite(
         run,
         lambda payload: payload["model_identity"].__setitem__("binary_artifact_hash", True),
     )
-    with pytest.raises(SnapshotError, match="must be a string or null"):
+    with pytest.raises(
+        SnapshotError,
+        match=exactly("snapshot field binary_artifact_hash must be a string or null"),
+    ):
+        read_snapshot(run)
+
+
+def test_an_optional_model_identity_field_names_itself_when_it_is_not_text(
+    tmp_path: Path,
+) -> None:
+    """The operator needs the field name: six optional fields share this refusal."""
+    _, run, _ = _prepared(tmp_path)
+    _rewrite(run, lambda payload: payload["model_identity"].__setitem__("model_repository", 7))
+
+    with pytest.raises(
+        SnapshotError, match=exactly("snapshot field model_repository must be a string or null")
+    ):
+        read_snapshot(run)
+
+
+def test_an_absent_optional_identity_field_does_not_stop_the_remaining_checks(
+    tmp_path: Path,
+) -> None:
+    """An absent optional field must skip only itself, not every later field."""
+
+    def drop_optional_and_corrupt_later(payload: dict[str, Any]) -> None:
+        payload["model_identity"].pop("model_repository")
+        payload["model_identity"]["config_fingerprint"] = "c" * 64
+
+    _, run, _ = _prepared(tmp_path)
+    _rewrite(run, drop_optional_and_corrupt_later)
+
+    with pytest.raises(
+        SnapshotError,
+        match=exactly("model identity field does not match derived value: config_fingerprint"),
+    ):
         read_snapshot(run)

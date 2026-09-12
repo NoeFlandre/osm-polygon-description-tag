@@ -20,15 +20,138 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
+import tempfile
+import threading
 from collections.abc import Iterable, Mapping
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from scripts.check_mutation_score import STATUS_BY_EXIT_CODE
 
 DEFAULT_MAX_CHILDREN = 8
-DEFAULT_FAST_TESTS_PER_FUNCTION = 5
+DEFAULT_FAST_TESTS_PER_FUNCTION = 1
+DEFAULT_MUTATION_BATCH_SIZE = 4
 _ESCALATION_FACTOR = 8
+
+
+def bounded_pytest_runner(
+    runner_class: type[Any],
+    scratch_root: Path | None,
+    *,
+    skip_clean_tests: bool = False,
+) -> type[Any]:
+    """Wrap a pytest runner with one disposable directory per worker process."""
+
+    class BoundedPytestRunner(runner_class):
+        def run_tests(self, *, mutant_name: str | None, tests: Iterable[str]) -> int:
+            if mutant_name is None:
+                if skip_clean_tests:
+                    return 0
+                return super().run_tests(mutant_name=mutant_name, tests=tests)
+            if scratch_root is None:
+                return super().run_tests(mutant_name=mutant_name, tests=tests)
+
+            worker_root = scratch_root / str(os.getpid())
+            worker_root.mkdir(parents=True, exist_ok=True)
+            previous_args = self._pytest_add_cli_args
+            previous_environment = {
+                name: os.environ.get(name) for name in ("TMPDIR", "TMP", "TEMP")
+            }
+            previous_tempfile_dir = tempfile.tempdir
+            self._pytest_add_cli_args = [*previous_args, f"--basetemp={worker_root}"]
+            for name in previous_environment:
+                os.environ[name] = str(worker_root)
+            tempfile.tempdir = None
+            try:
+                return super().run_tests(mutant_name=mutant_name, tests=tests)
+            finally:
+                self._pytest_add_cli_args = previous_args
+                tempfile.tempdir = previous_tempfile_dir
+                for name, value in previous_environment.items():
+                    if value is None:
+                        os.environ.pop(name, None)
+                    else:
+                        os.environ[name] = value
+                shutil.rmtree(worker_root, ignore_errors=True)
+
+    BoundedPytestRunner.__name__ = f"Bounded{runner_class.__name__}"
+    return BoundedPytestRunner
+
+
+def _process_is_alive(pid: int) -> bool:
+    """Return whether a process exists without inspecting unrelated processes."""
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _remove_finished_worker_dirs(scratch_root: Path) -> None:
+    """Remove only numeric worker directories whose exact PID has exited."""
+
+    if not scratch_root.is_dir():
+        return
+    for worker_root in scratch_root.iterdir():
+        if worker_root.is_symlink() or not worker_root.is_dir():
+            continue
+        try:
+            pid = int(worker_root.name)
+        except ValueError:
+            continue
+        if not _process_is_alive(pid):
+            shutil.rmtree(worker_root, ignore_errors=True)
+
+
+class _MutationScratchJanitor:
+    """Keep abandoned hard-timeout directories from accumulating on the SSD."""
+
+    def __init__(self, scratch_root: Path, *, interval_s: float = 1.0) -> None:
+        self.scratch_root = scratch_root
+        self.interval_s = interval_s
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def __enter__(self) -> _MutationScratchJanitor:
+        self.scratch_root.mkdir(parents=True, exist_ok=True)
+        _remove_finished_worker_dirs(self.scratch_root)
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join()
+        _remove_finished_worker_dirs(self.scratch_root)
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval_s):
+            _remove_finished_worker_dirs(self.scratch_root)
+
+
+@contextmanager
+def _bounded_runner_patch(
+    mutmut_main: Any, scratch_root: Path | None, *, skip_clean_tests: bool = False
+):
+    """Install the bounded runner only while mutmut executes mutant workers."""
+
+    if scratch_root is None and not skip_clean_tests:
+        yield
+        return
+    original_runner = mutmut_main.PytestRunner
+    mutmut_main.PytestRunner = bounded_pytest_runner(
+        original_runner, scratch_root, skip_clean_tests=skip_clean_tests
+    )
+    try:
+        yield
+    finally:
+        mutmut_main.PytestRunner = original_runner
 
 
 def test_priority(
@@ -74,6 +197,25 @@ def escalation_stages(
     if fast_tests_per_function < 1:
         raise ValueError("fast_tests_per_function must be positive")
     return (fast_tests_per_function, fast_tests_per_function * _ESCALATION_FACTOR, None)
+
+
+def mutation_batches(
+    mutant_names: Iterable[str], *, batch_size: int = DEFAULT_MUTATION_BATCH_SIZE
+) -> tuple[tuple[str, ...], ...]:
+    """Split a mutation pass into bounded, lossless named batches."""
+
+    if batch_size < 1:
+        raise ValueError("batch_size must be positive")
+    names = tuple(mutant_names)
+    return tuple(names[start : start + batch_size] for start in range(0, len(names), batch_size))
+
+
+def clean_test_selection(
+    associations: Mapping[str, Iterable[str]],
+) -> tuple[str, ...]:
+    """Return the exact test union needed to preflight a mutation pass."""
+
+    return tuple(sorted({test for tests in associations.values() for test in tests}))
 
 
 def trim_associations(
@@ -193,10 +335,13 @@ def coverage_selection(
         return {}
     from scripts.coverage_associations import build_associations
 
-    known = set(durations)
     associations = build_associations(coverage_file, Path("src"))
     return {
-        name: tuple(test for test in tests if test in known) for name, tests in associations.items()
+        # The coverage database comes from the current test run. Keep tests
+        # added after mutmut's cached duration map; ``order_tests`` already
+        # places their unknown duration after known tests.
+        name: tuple(tests)
+        for name, tests in associations.items()
     }
 
 
@@ -309,23 +454,44 @@ def run_gate(
         }
 
     original_forced_fail = mutmut_main.run_forced_fail_test
-    mutmut_main.run_forced_fail_test = lambda _runner: None
+
+    def skip_forced_fail_test(_runner: Any) -> None:
+        return None
+
+    mutmut_main.run_forced_fail_test = cast(Any, skip_forced_fail_test)
+    scratch_base = os.environ.get("MUTATION_TMP_ROOT")
+    scratch_root = Path(scratch_base) / str(os.getpid()) if scratch_base is not None else None
     try:
-        for index, max_tests in enumerate(escalation_stages(fast_tests_per_function)):
-            selection = (
-                full_associations
-                if max_tests is None
-                else trim_associations(full_associations, durations, max_tests=max_tests)
-            )
-            _write_stats(_replace_associations(_read_stats(), selection))
-            remaining = unresolved_mutants(Path("mutants"))
-            if not remaining:
-                break
-            if index:
-                mutmut._reset_globals()
-            mutmut_main._run(remaining, max_children)
+        os.environ["MUTANT_UNDER_TEST"] = ""
+        clean_tests = clean_test_selection(full_associations)
+        if runner.run_tests(mutant_name=None, tests=clean_tests) != 0:
+            raise SystemExit("clean mutation preflight failed")
+        with (
+            _MutationScratchJanitor(scratch_root) if scratch_root is not None else nullcontext(),
+            _bounded_runner_patch(mutmut_main, scratch_root, skip_clean_tests=True),
+        ):
+            for max_tests in escalation_stages(fast_tests_per_function):
+                selection = (
+                    full_associations
+                    if max_tests is None
+                    else trim_associations(full_associations, durations, max_tests=max_tests)
+                )
+                _write_stats(_replace_associations(_read_stats(), selection))
+                remaining = unresolved_mutants(Path("mutants"))
+                if not remaining:
+                    break
+                for mutant_batch in mutation_batches(remaining):
+                    # Load the just-written selection instead of reusing the prior pass's map.
+                    mutmut._reset_globals()
+                    mutmut.tests_by_mangled_function_name.clear()
+                    mutmut.tests_by_mangled_function_name.update(
+                        {name: set(tests) for name, tests in selection.items()}
+                    )
+                    mutmut.duration_by_test.clear()
+                    mutmut.duration_by_test.update(durations)
+                    mutmut_main._run(mutant_batch, max_children)
     finally:
-        mutmut_main.run_forced_fail_test = original_forced_fail
+        mutmut_main.run_forced_fail_test = cast(Any, original_forced_fail)
 
 
 def _parse_args() -> argparse.Namespace:

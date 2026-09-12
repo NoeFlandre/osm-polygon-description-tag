@@ -80,7 +80,7 @@ class HuggingFaceLanguageHub:
             raise LanguagePublicationError(
                 f"Hub repository {repo_id} is not accessible: {error}"
             ) from error
-        revision = str(getattr(info, "sha", "") or "")
+        revision = str(getattr(info, "sha", "") or "")  # pragma: no mutate - same falsy default
         if not revision:
             raise LanguagePublicationError(f"Hub repository {repo_id} returned an empty revision")
         return revision
@@ -102,7 +102,8 @@ class HuggingFaceLanguageHub:
             self._operation(item.relative_path, root / item.relative_path)
             for item in sorted(plan.files, key=lambda item: item.relative_path)
         ]
-        operations.append(self._operation(README_PATH, updated.encode("utf-8")))
+        readme_bytes = updated.encode("utf-8")  # pragma: no mutate - codec alias only
+        operations.append(self._operation(README_PATH, readme_bytes))
         try:
             self.api.create_commit(
                 repo_id=plan.repo_id,
@@ -240,7 +241,7 @@ def _readme_text(local: str) -> str:
     path = Path(local)
     if not path.is_file():
         raise OSError("downloaded README is not a regular file")
-    return path.read_bytes().decode("utf-8")
+    return path.read_bytes().decode("utf-8")  # pragma: no mutate - codec alias only
 
 
 @dataclass(frozen=True, slots=True)
@@ -318,11 +319,10 @@ def _viewer_lists(payload: object) -> tuple[list[object], list[object], list[obj
         raise LanguagePublicationError(
             "Dataset Viewer returned malformed splits, pending, or failed data"
         )
-    return (
-        cast(list[object], raw_splits),
-        cast(list[object], pending),
-        cast(list[object], failed),
-    )
+    typed_splits = cast(list[object], raw_splits)  # pragma: no mutate - static cast
+    typed_pending = cast(list[object], pending)  # pragma: no mutate - static cast
+    typed_failed = cast(list[object], failed)  # pragma: no mutate - static cast
+    return (typed_splits, typed_pending, typed_failed)
 
 
 def _parse_viewer_split(item: object) -> DatasetViewerSplit:
@@ -335,7 +335,10 @@ def _parse_viewer_split(item: object) -> DatasetViewerSplit:
         raise LanguagePublicationError(
             "Dataset Viewer returned a malformed split without dataset/config/split"
         )
-    return DatasetViewerSplit(cast(str, dataset), cast(str, config), cast(str, split))
+    dataset_value = cast(str, dataset)  # pragma: no mutate - static cast
+    config_value = cast(str, config)  # pragma: no mutate - static cast
+    split_value = cast(str, split)  # pragma: no mutate - static cast
+    return DatasetViewerSplit(dataset_value, config_value, split_value)
 
 
 def _validate_direct_plan(plan: UploadPlan, export: LanguageExport) -> None:

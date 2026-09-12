@@ -76,6 +76,7 @@ from osm_polygon_description_tag.workflow.grid_scheduler import (
     SubmissionOutcome,
 )
 from tests.conftest import make_record_dict
+from tests.helpers.messages import exactly
 
 SHARD = "region.parquet"
 REMOTE = {
@@ -198,9 +199,11 @@ def test_a_bundle_round_trips_and_rejects_a_tampered_identity(
 
     assert JobBundle.from_payload(payload) == bundle_for_shard(snapshot, SHARD)
 
-    with pytest.raises(GridOperatorError, match="does not match its canonical content"):
+    with pytest.raises(
+        GridOperatorError, match=exactly("bundle id does not match its canonical content")
+    ):
         JobBundle.from_payload({**payload, "input_row_count": 99})
-    with pytest.raises(GridOperatorError, match="unsupported bundle schema version"):
+    with pytest.raises(GridOperatorError, match=exactly("unsupported bundle schema version")):
         JobBundle.from_payload({**payload, "bundle_schema_version": 2})
     with pytest.raises(GridOperatorError, match="must be a string"):
         JobBundle.from_payload({**payload, "shard": 7})
@@ -338,7 +341,9 @@ def test_the_job_script_quotes_paths_and_requires_processing_inside_walltime(
     assert "--shard region.parquet" in script
     assert "verify_prepared_bundle" in script
 
-    with pytest.raises(GridOperatorError, match="must be less than walltime"):
+    with pytest.raises(
+        GridOperatorError, match=exactly("processing budget must be less than walltime")
+    ):
         render_job_script(
             bundle,
             **REMOTE,
@@ -605,7 +610,9 @@ def test_collection_does_not_report_success_with_invalid_local_artifacts(
         parts.mkdir(parents=True)
         (parts / "part-99999999.parquet").write_bytes(b"uncommitted")
 
-    with pytest.raises(GridOperatorError, match="imported results failed local"):
+    with pytest.raises(
+        GridOperatorError, match=exactly("imported results failed local collection validation")
+    ):
         import_retrieved_results(local, incoming, SHARD)
 
 
@@ -620,7 +627,9 @@ def test_collection_refuses_older_progress_without_touching_complete_results(
     checkpoint = shard_paths(local, SHARD).checkpoint
     before = checkpoint.read_bytes()
 
-    with pytest.raises(GridOperatorError, match="regress"):
+    with pytest.raises(
+        GridOperatorError, match=exactly("retrieved checkpoint would regress local progress")
+    ):
         import_retrieved_results(local, incoming, SHARD)
 
     assert checkpoint.read_bytes() == before
@@ -757,7 +766,9 @@ def test_collection_refuses_to_import_its_own_run(
     source, local, _, snapshot = collection_runs
     _process_collection_fixture(source, local, snapshot)
 
-    with pytest.raises(GridOperatorError, match="must be distinct"):
+    with pytest.raises(
+        GridOperatorError, match=exactly("retrieved and local shard directories must be distinct")
+    ):
         import_retrieved_results(local, local, SHARD)
 
 
@@ -1119,7 +1130,10 @@ def test_repreparing_a_bundle_rejects_changed_limits_or_remote_paths(
     original_config = paths.config.read_bytes()
     original_script = paths.script.read_bytes()
 
-    with pytest.raises(GridOperatorError, match="prepared job config is immutable"):
+    with pytest.raises(
+        GridOperatorError,
+        match=exactly("prepared job config is immutable; restage with a new job bundle"),
+    ):
         prepare_job(
             run,
             snapshot,
@@ -1127,7 +1141,10 @@ def test_repreparing_a_bundle_rejects_changed_limits_or_remote_paths(
             **REMOTE,
             walltime_seconds=MAX_WALLTIME_SECONDS - 1,
         )
-    with pytest.raises(GridOperatorError, match="prepared job config is immutable"):
+    with pytest.raises(
+        GridOperatorError,
+        match=exactly("prepared job config is immutable; restage with a new job bundle"),
+    ):
         prepare_job(
             run,
             snapshot,
@@ -1153,7 +1170,10 @@ def test_a_conflicting_bundle_in_a_job_directory_is_rejected(
     )
     paths.bundle.write_text(json.dumps(foreign.to_payload()), encoding="utf-8")
 
-    with pytest.raises(GridOperatorError, match="different bundle is already prepared"):
+    with pytest.raises(
+        GridOperatorError,
+        match=exactly("a different bundle is already prepared in this job directory"),
+    ):
         prepare_job(run, snapshot, SHARD, **REMOTE)
 
 
@@ -1282,7 +1302,9 @@ def test_planning_rejects_a_walltime_different_from_prepared_job_config(
         walltime_seconds=MAX_WALLTIME_SECONDS - 1,
     )
 
-    with pytest.raises(GridOperatorError, match="differs from prepared job config"):
+    with pytest.raises(
+        GridOperatorError, match=exactly("submission walltime differs from prepared job config")
+    ):
         plan_submission(paths, bundle, policy=_verdict(), allowed_root=run)
 
 
@@ -1552,7 +1574,9 @@ def test_collected_acknowledgment_requires_terminal_reconciliation(
         budget=ProcessingBudget(0.000001),
     )
 
-    with pytest.raises(GridOperatorError, match="terminal scheduler state"):
+    with pytest.raises(
+        GridOperatorError, match=exactly("collected results require a terminal scheduler state")
+    ):
         acknowledge_collected_results(paths, collect_results(run, SHARD))
 
 
@@ -1797,7 +1821,7 @@ def test_reconciliation_rejects_a_non_callable_job_name_resolver(
         runner=_runner([CommandResult((), -1, "", "", True)]),  # type: ignore[arg-type]
     )
 
-    with pytest.raises(GridOperatorError, match="resolver must be callable"):
+    with pytest.raises(GridOperatorError, match=exactly("job-name resolver must be callable")):
         reconcile_job(  # type: ignore[arg-type]
             paths,
             apply=True,
@@ -1907,10 +1931,10 @@ def test_an_unreadable_intent_is_reported(
     ("mutation", "message"),
     [
         ({"intent_schema_version": 9}, "unsupported intent schema version"),
-        ({"job_id": "7"}, "job_id must be an integer or null"),
-        ({"outcome": 7}, "outcome must be a string or null"),
-        ({"detail": []}, "detail must be a string or null"),
-        ({"shard": None}, "must be a string"),
+        ({"job_id": "7"}, "intent field job_id must be an integer or null"),
+        ({"outcome": 7}, "intent field outcome must be a string or null"),
+        ({"detail": []}, "intent field detail must be a string or null"),
+        ({"shard": None}, "intent field shard must be a string"),
     ],
 )
 def test_a_malformed_intent_payload_is_rejected(
@@ -1931,7 +1955,7 @@ def test_a_malformed_intent_payload_is_rejected(
     payload = json.loads(paths.intent.read_text(encoding="utf-8"))
     paths.intent.write_text(json.dumps({**payload, **mutation}), encoding="utf-8")
 
-    with pytest.raises(GridOperatorError, match=message):
+    with pytest.raises(GridOperatorError, match=exactly(message)):
         read_intent(paths.intent)
 
 
@@ -1964,7 +1988,7 @@ def test_collecting_results_validates_what_the_job_produced(
 def test_gathering_policy_evidence_rejects_an_unsafe_site(site: object) -> None:
     from osm_polygon_description_tag.workflow.grid_operator import gather_policy_outputs
 
-    with pytest.raises(GridOperatorError, match="site must be a simple alphanumeric name"):
+    with pytest.raises(GridOperatorError, match=exactly("site must be a simple alphanumeric name")):
         gather_policy_outputs(site)  # type: ignore[arg-type]
 
 
@@ -2045,5 +2069,68 @@ def test_cascade_job_requires_a_pinned_glotlid_path(
         model_identity=cascade_model_identity(original.model_identity.policy),
     )
 
-    with pytest.raises(GridOperatorError, match="requires a GlotLID model path"):
+    with pytest.raises(
+        GridOperatorError, match=exactly("cascade job requires a GlotLID model path")
+    ):
         prepare_job(run, snapshot, SHARD, **REMOTE)
+
+
+def test_the_job_name_is_the_bundle_id_truncated_to_sixteen_characters(
+    prepared: tuple[Path, Path, SnapshotManifest],
+) -> None:
+    """The name is how a submission is later resolved, so its width is a contract."""
+    _, run, snapshot = prepared
+    bundle, paths = prepare_job(run, snapshot, SHARD, **REMOTE)
+
+    request = grid_operator._submission_request(bundle, MAX_WALLTIME_SECONDS, True, paths)
+
+    assert request.name == f"lang-{bundle.bundle_id[:16]}"
+    assert len(request.name) == len("lang-") + 16
+    assert request.cores == 1
+
+
+@pytest.mark.parametrize("batch_size", [0, -1, True, 1.0, "512", None])
+def test_a_batch_size_that_is_not_a_positive_integer_is_refused_exactly(
+    batch_size: object,
+) -> None:
+    with pytest.raises(GridOperatorError) as caught:
+        grid_operator._validate_batch_size(batch_size)
+
+    assert str(caught.value) == "batch size must be a positive integer"
+
+
+def test_the_smallest_positive_batch_size_is_accepted() -> None:
+    assert grid_operator._validate_batch_size(1) == 1
+
+
+def test_payload_files_are_listed_in_posix_relative_path_order(tmp_path: Path) -> None:
+    """The stage manifest binds files in this order, so it must be deterministic."""
+    root = tmp_path / "payload"
+    for relative in ("b/z.txt", "a/y.txt", "a/b.txt", "top.txt"):
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("x", encoding="utf-8")
+
+    listed = [path.relative_to(root).as_posix() for path in grid_operator._payload_files(root)]
+
+    assert listed == sorted(listed)
+    assert listed == ["a/b.txt", "a/y.txt", "b/z.txt", "top.txt"]
+
+
+def test_a_resume_payload_directory_is_named_by_sixteen_fingerprint_characters(
+    portable_prepared: tuple[Path, Path, Path, SnapshotManifest],
+) -> None:
+    project, source, run, snapshot = portable_prepared
+    prepared_job = prepare_portable_job(
+        run,
+        project,
+        source,
+        snapshot,
+        SHARD,
+        remote_bundle_dir="/home/user/bundle",
+    )
+
+    name = prepared_job.payload_root.name
+    assert name.startswith("payload")
+    if name != "payload":
+        assert len(name) == len("payload-") + 16

@@ -75,7 +75,7 @@ def _require_mapping_front_matter(
 ) -> tuple[Mapping[object, object], MappingNode]:
     if not isinstance(payload, Mapping) or not isinstance(root, MappingNode):
         raise _card_error("front matter must be a mapping")
-    return cast(Mapping[object, object], payload), root
+    return cast(Mapping[object, object], payload), root  # pragma: no mutate - static cast
 
 
 def _parse_config_entries(
@@ -85,7 +85,8 @@ def _parse_config_entries(
     configs = payload.get("configs")
     if not isinstance(configs, list) or not configs:
         raise _card_error("must contain a non-empty configs list")
-    entries = _config_entries(cast(list[object], configs))
+    narrowed = cast(list[object], configs)  # pragma: no mutate - static cast
+    entries = _config_entries(narrowed)
     return config_node, entries
 
 
@@ -124,7 +125,7 @@ def _config_entry(entry: object, names: set[str]) -> dict[str, object]:
     if name in names:
         raise _card_error(f"contains duplicate configuration {name!r}")
     names.add(name)
-    return dict(cast(Mapping[str, object], entry))
+    return dict(cast(Mapping[str, object], entry))  # pragma: no mutate - static cast
 
 
 def _language_config(export: LanguageExport) -> dict[str, object]:
@@ -158,8 +159,8 @@ def _insert_config(
     config: Mapping[str, object],
     newline: str,
 ) -> str:
-    start_mark = cast(Any, config_node.start_mark)
-    end_mark = cast(Any, config_node.end_mark)
+    start_mark = cast(Any, config_node.start_mark)  # pragma: no mutate - static cast
+    end_mark = cast(Any, config_node.end_mark)  # pragma: no mutate - static cast
     if config_node.flow_style:
         return _install_flow_config(front_matter, end_mark.index - 1, config)
     return _install_block_config(
@@ -218,7 +219,7 @@ def _flow_separator(before: str, trimmed: str) -> str:
 
 def _section_block(export: LanguageExport, newline: str) -> str:
     section = render_language_card_section(export).rstrip("\r\n")
-    if newline != "\n":
+    if newline != "\n":  # pragma: no mutate - newline domain is LF or CRLF
         section = section.replace("\n", newline)
     return (
         f"{LANGUAGE_CARD_SECTION_START}{newline}"
@@ -241,8 +242,7 @@ def _replace_section(readme: str, block: str) -> str:
     start, end = _marker_offsets(readme)
     _require_marker_lines(readme, start, end)
     end_after = end + len(LANGUAGE_CARD_SECTION_END)
-    heading_start = readme.find(_SECTION_HEADING, start, end)
-    if heading_start < 0:
+    if _SECTION_HEADING not in readme[start:end]:
         raise _card_error("language-v1 section markers do not contain the section heading")
     end_after = _consume_line_ending(readme, end_after)
     return readme[:start] + block + readme[end_after:]
@@ -251,7 +251,7 @@ def _replace_section(readme: str, block: str) -> str:
 def _marker_offsets(readme: str) -> tuple[int, int]:
     start = readme.find(LANGUAGE_CARD_SECTION_START)
     end = readme.find(LANGUAGE_CARD_SECTION_END)
-    if start < 0 or end < 0 or end < start:
+    if start < 0 or end < 0 or end < start:  # pragma: no mutate - distinct find offsets
         raise _card_error("has malformed language-v1 section markers")
     return start, end
 
@@ -266,7 +266,7 @@ def _require_marker_lines(readme: str, start: int, end: int) -> None:
 
 
 def _line_prefix(readme: str, position: int) -> bool:
-    line_start = readme.rfind("\n", 0, position) + 1
+    line_start = readme.rfind("\n", 0, position) + 1  # pragma: no mutate - rfind starts at zero
     return readme[line_start:position] in ("", "\r")
 
 

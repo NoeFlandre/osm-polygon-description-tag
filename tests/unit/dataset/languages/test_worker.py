@@ -43,6 +43,7 @@ from osm_polygon_description_tag.dataset.languages.worker import (
 )
 from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
+from tests.helpers.messages import exactly
 
 SHARD = "region.parquet"
 
@@ -403,7 +404,9 @@ def test_a_checkpoint_from_another_run_is_rejected(tmp_path: Path) -> None:
     other_paths.checkpoint.parent.mkdir(parents=True, exist_ok=True)
     other_paths.checkpoint.write_bytes(paths.checkpoint.read_bytes())
 
-    with pytest.raises(CheckpointError, match="different input snapshot"):
+    with pytest.raises(
+        CheckpointError, match=exactly("checkpoint belongs to a different input snapshot")
+    ):
         _process(other_run, other_source, other)
 
 
@@ -463,7 +466,9 @@ def test_a_misaligned_resume_cursor_is_rejected(tmp_path: Path) -> None:
     )
     paths.checkpoint.write_text(payload, encoding="utf-8")
 
-    with pytest.raises(CheckpointError, match="not on a batch boundary"):
+    with pytest.raises(
+        CheckpointError, match=exactly("checkpoint input cursor is not on a batch boundary")
+    ):
         _process(run, source, snapshot)
 
 
@@ -535,7 +540,7 @@ def test_the_budget_is_monotonic_and_validated() -> None:
 
     with pytest.raises(ValueError, match="must be positive"):
         ProcessingBudget(0)
-    with pytest.raises(TypeError, match="real number"):
+    with pytest.raises(TypeError, match=exactly("budget seconds must be a real number")):
         ProcessingBudget("10")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="finite"):
         ProcessingBudget(float("nan"))
@@ -581,7 +586,7 @@ def test_detector_errors_are_not_converted_into_completed_results(tmp_path: Path
 def test_an_invalid_batch_size_is_rejected(tmp_path: Path) -> None:
     source, run, snapshot = _prepare(tmp_path)
 
-    with pytest.raises(ValueError, match="batch_size must be a positive integer"):
+    with pytest.raises(ValueError, match=exactly("batch_size must be a positive integer")):
         _process(run, source, snapshot, batch_size=0)
 
     with pytest.raises(ValueError, match="batch_size must not exceed"):
@@ -629,7 +634,7 @@ def test_a_checkpoint_recorded_against_another_shard_is_rejected(tmp_path: Path)
     _process(run, source, snapshot, budget=_StepBudget(1))
     _tamper_checkpoint(run, shard="other.parquet")
 
-    with pytest.raises(CheckpointError, match="belongs to a different shard"):
+    with pytest.raises(CheckpointError, match=exactly("checkpoint belongs to a different shard")):
         _process(run, source, snapshot)
 
 
@@ -720,7 +725,10 @@ def test_a_checkpoint_whose_total_disagrees_with_its_parts_is_rejected(tmp_path:
     _process(run, source, snapshot, budget=_StepBudget(1))
     _tamper_checkpoint(run, annotation_count=999)
 
-    with pytest.raises(CheckpointError, match="do not account for the recorded annotations"):
+    with pytest.raises(
+        CheckpointError,
+        match=exactly("committed parts do not account for the recorded annotations"),
+    ):
         _process(run, source, snapshot)
 
 

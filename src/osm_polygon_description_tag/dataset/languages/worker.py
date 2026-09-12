@@ -24,7 +24,7 @@ from osm_polygon_description_tag.dataset.languages.annotations import (
     AnnotationError,
     annotation_table,
     read_annotation_part,
-    validate_annotation_table,
+    validate_annotation_table_without_reserving,
     write_annotation_part,
 )
 from osm_polygon_description_tag.dataset.languages.checkpoint import (
@@ -253,12 +253,11 @@ def _verify_part_is_readable(
 ) -> None:
     try:
         table = read_annotation_part(part_path)
-        identities = validate_annotation_table(
+        identities = validate_annotation_table_without_reserving(
             table,
             snapshot_id=receipt.snapshot_id,
             model_config_fingerprint=receipt.model_config_fingerprint,
             seen_identities=seen_identities,
-            merge_seen=False,
         )
     except AnnotationError as error:
         raise CheckpointError(f"committed part is unreadable: {part_path.name}: {error}") from error
@@ -319,8 +318,11 @@ def _starting_row_groups(
     stream that started at row zero.
     """
     offset = 0
-    aligned_index = 0
-    aligned_offset = 0
+    # ``offset`` is zero on the first iteration and ``0 % batch_size`` is zero, so both
+    # values below are reassigned before anything reads them; with no row groups the
+    # loop never runs and the early ``return`` uses neither.
+    aligned_index = 0  # pragma: no mutate - reassigned before its first read
+    aligned_offset = 0  # pragma: no mutate - reassigned before its first read
     for index in range(metadata.num_row_groups):
         if offset % batch_size == 0:
             aligned_index = index
@@ -408,12 +410,11 @@ def _commit_batch(
         snapshot_id=snapshot.snapshot_id,
         model_config_fingerprint=snapshot.model_config_fingerprint,
     )
-    identities = validate_annotation_table(
+    identities = validate_annotation_table_without_reserving(
         table,
         snapshot_id=snapshot.snapshot_id,
         model_config_fingerprint=snapshot.model_config_fingerprint,
         seen_identities=seen_identities,
-        merge_seen=False,
     )
     part_sha256 = write_annotation_part(context.paths.part(part_name), table)
     receipt = PartReceipt(
@@ -487,17 +488,8 @@ def process_shard(
     paths = shard_paths(run_dir, shard)
     resume = _resume_state(paths, snapshot, shard, batch_size, expected)
     context = _CommitContext(paths, snapshot, shard, batch_size, expected)
-    checkpoint = resume.checkpoint or _checkpoint_for(
-        snapshot,
-        shard,
-        batch_size,
-        expected,
-        cursor=resume.cursor,
-        annotation_count=resume.annotation_count,
-        completed_parts=resume.completed_parts,
-    )
-    if resume.checkpoint is not None and checkpoint.is_complete:
-        return _outcome(shard, checkpoint, resume.cursor)
+    if resume.checkpoint is not None and resume.checkpoint.is_complete:
+        return _outcome(shard, resume.checkpoint, resume.cursor)
     return _run_batches(
         context,
         detector=detector,

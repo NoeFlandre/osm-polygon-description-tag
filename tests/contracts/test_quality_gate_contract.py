@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tomllib
+from collections import defaultdict
 from pathlib import Path
 
 from packaging.requirements import Requirement
@@ -14,8 +16,12 @@ from scripts.coverage_associations import (
     module_name_for,
 )
 from scripts.run_mutation_gate import (
+    bounded_pytest_runner,
+    clean_test_selection,
     complete_associations,
+    coverage_selection,
     escalation_stages,
+    mutation_batches,
     recorded_associations,
     trim_associations,
 )
@@ -376,6 +382,23 @@ def test_mutation_associations_run_the_likeliest_and_cheapest_tests_first() -> N
     }
 
 
+def test_coverage_selection_keeps_tests_added_since_the_cached_mutation_run(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A fresh coverage pass is authoritative even when mutmut lacks its duration."""
+    import scripts.coverage_associations as coverage_module
+
+    monkeypatch.setattr(
+        coverage_module,
+        "build_associations",
+        lambda _coverage_file, _source_root: {"pkg.mod.x_function": ("tests/new_test",)},
+    )
+    coverage_file = tmp_path / ".coverage"
+    coverage_file.write_bytes(b"coverage")
+
+    assert coverage_selection(coverage_file, {}) == {"pkg.mod.x_function": ("tests/new_test",)}
+
+
 def test_mutation_recording_survives_an_interrupted_narrow_pass(tmp_path: Path) -> None:
     stats = {
         "function_hashes": {"pkg.alpha.x_direct": "hash"},
@@ -398,9 +421,7 @@ def test_mutation_recording_survives_an_interrupted_narrow_pass(tmp_path: Path) 
 def test_mutation_escalation_grows_the_selection_before_the_exact_pass() -> None:
     stages = escalation_stages(5)
 
-    assert stages[0] == 5
-    assert stages[-1] is None
-    assert list(stages[:-1]) == sorted(stages[:-1])
+    assert stages == (5, 40, None)
     assert len(set(stages)) == len(stages)
 
 
@@ -428,6 +449,23 @@ class Holder:
     }
     start, end = spans["pkg.mod.x_top_level"]
     assert start <= end
+
+
+def test_coverage_associations_ignore_function_definition_lines(tmp_path: Path) -> None:
+    """Import-time execution of a ``def`` line cannot kill a body mutation."""
+    module = tmp_path / "mod.py"
+    module.write_text(
+        "def first():\n    return 1\n",
+        encoding="utf-8",
+    )
+
+    associations = associations_for_file(
+        module,
+        "pkg.mod",
+        {1: ["tests/test_import.py::test_import|run"]},
+    )
+
+    assert associations["pkg.mod.x_first"] == ()
 
 
 def test_coverage_associations_keep_only_tests_that_execute_the_function(
@@ -494,6 +532,26 @@ def test_coverage_association_module_names_match_the_installed_package() -> None
     assert name == "osm_polygon_description_tag.workflow.grid_policy"
 
 
+def test_static_cast_pragmas_are_attached_to_mutatable_statement_lines() -> None:
+    """Every documented static cast must be excluded by mutmut itself.
+
+    A pragma on a multiline call argument is not attached to a statement node
+    in LibCST, so it does not suppress the equivalent mutation. Keep these
+    narrowing-only casts on standalone statements with line-scoped pragmas.
+    """
+    from libcst import MetadataWrapper, parse_module
+    from mutmut.mutation.pragma_handling import get_ignored_lines
+
+    for path in sorted((PROJECT_ROOT / "src").rglob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        ignored = get_ignored_lines(
+            str(path), source, MetadataWrapper(parse_module(source))
+        ).no_mutate_lines
+        for line_number, line in enumerate(source.splitlines(), 1):
+            if "cast(" in line and "# pragma: no mutate" in line:
+                assert line_number in ignored, f"unrecognized cast pragma: {path}:{line_number}"
+
+
 def test_quality_recipes_and_required_mutation_gate_are_publicly_wired() -> None:
     project = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     justfile = (PROJECT_ROOT / "justfile").read_text(encoding="utf-8")
@@ -514,3 +572,145 @@ def test_quality_recipes_and_required_mutation_gate_are_publicly_wired() -> None
     assert "reports/crap.json" in workflow
     assert "actions/upload-artifact" in workflow
     assert project["tool"]["mutmut"]["pytest_add_cli_args_test_selection"] == ["tests"]
+
+
+def test_mutation_gate_resets_state_before_first_escalation(monkeypatch) -> None:
+    import mutmut
+    import mutmut.__main__ as mutmut_main
+
+    import scripts.run_mutation_gate as gate
+
+    events: list[str] = []
+
+    class FakeRunner:
+        def run_tests(self, *, mutant_name, tests) -> int:
+            assert mutant_name is None
+            assert tests == ("tests/test_one.py::test_one",)
+            events.append("clean")
+            return 0
+
+    stats = {
+        "duration_by_test": {"tests/test_one.py::test_one": 0.1},
+        "function_hashes": {"pkg.mod.x_function": "hash"},
+    }
+    monkeypatch.setattr(gate, "_prepare_mutmut", lambda _max_children: FakeRunner())
+    monkeypatch.setattr(gate, "_verify_mutmut_can_fail", lambda _runner: None)
+    monkeypatch.setattr(
+        gate,
+        "recorded_associations",
+        lambda _stats, _path: {"pkg.mod.x_function": ("tests/test_one.py::test_one",)},
+    )
+    monkeypatch.setattr(gate, "coverage_selection", lambda _path, _durations: {})
+    monkeypatch.setattr(gate, "escalation_stages", lambda _budget: (1,))
+    monkeypatch.setattr(gate, "_read_stats", lambda: stats)
+    monkeypatch.setattr(gate, "_write_stats", lambda _stats: events.append("write"))
+    monkeypatch.setattr(gate, "unresolved_mutants", lambda _root: ["mutant"])
+    monkeypatch.setattr(mutmut, "_reset_globals", lambda: events.append("reset"))
+    monkeypatch.setattr(
+        mutmut, "tests_by_mangled_function_name", {"stale": {"tests/old.py::test_old"}}
+    )
+    monkeypatch.setattr(
+        mutmut, "duration_by_test", defaultdict(float, {"tests/old.py::test_old": 9.0})
+    )
+
+    def run_stage(_names, _children) -> None:
+        events.append("run")
+        assert dict(mutmut.tests_by_mangled_function_name) == {
+            "pkg.mod.x_function": {"tests/test_one.py::test_one"}
+        }
+        assert mutmut.duration_by_test == {"tests/test_one.py::test_one": 0.1}
+
+    monkeypatch.setattr(mutmut_main, "_run", run_stage)
+
+    gate.run_gate(max_children=1, fast_tests_per_function=1)
+
+    assert events == ["clean", "write", "reset", "run"]
+
+
+def test_mutation_gate_defaults_to_single_test_triage() -> None:
+    from scripts.run_mutation_gate import escalation_stages
+
+    assert escalation_stages() == (1, 8, None)
+
+
+def test_mutation_batches_are_bounded_and_lossless() -> None:
+    mutants = ("first__mutmut_1", "second__mutmut_2", "third__mutmut_3")
+
+    assert mutation_batches(mutants, batch_size=2) == (
+        ("first__mutmut_1", "second__mutmut_2"),
+        ("third__mutmut_3",),
+    )
+
+    assert max(map(len, mutation_batches(range(9)))) == 4
+
+
+def test_clean_test_selection_is_the_sorted_union_of_associations() -> None:
+    assert clean_test_selection(
+        {
+            "pkg.first": ("tests/test_b", "tests/test_a"),
+            "pkg.second": ("tests/test_a", "tests/test_c"),
+        }
+    ) == ("tests/test_a", "tests/test_b", "tests/test_c")
+
+
+def test_bounded_mutation_runner_cleans_worker_scratch_after_success(tmp_path: Path) -> None:
+    """A worker gets one isolated temp root which is removed after its run."""
+
+    class FakeRunner:
+        def __init__(self) -> None:
+            self._pytest_add_cli_args: list[str] = []
+
+        def run_tests(self, *, mutant_name: str | None, tests: object) -> int:
+            assert mutant_name == "mutant"
+            assert tests == ()
+            worker_root = Path(os.environ["TMPDIR"])
+            assert worker_root.is_dir()
+            assert f"--basetemp={worker_root}" in self._pytest_add_cli_args
+            (worker_root / "created-by-test").write_text("x", encoding="utf-8")
+            return 0
+
+    runner = bounded_pytest_runner(FakeRunner, tmp_path)
+    assert runner().run_tests(mutant_name="mutant", tests=()) == 0
+
+    assert not (tmp_path / str(os.getpid())).exists()
+
+
+def test_bounded_mutation_runner_restores_environment_after_failure(tmp_path: Path) -> None:
+    """A failed worker cannot leak its temp root or its parent's TMPDIR."""
+
+    original_tmpdir = os.environ.get("TMPDIR")
+
+    class FakeRunner:
+        def __init__(self) -> None:
+            self._pytest_add_cli_args: list[str] = []
+
+        def run_tests(self, *, mutant_name: str | None, tests: object) -> int:
+            assert mutant_name == "mutant"
+            raise RuntimeError("test failure")
+
+    runner = bounded_pytest_runner(FakeRunner, tmp_path)()
+    try:
+        runner.run_tests(mutant_name="mutant", tests=())
+    except RuntimeError as error:
+        assert str(error) == "test failure"
+    else:
+        raise AssertionError("the fake runner must fail")
+
+    assert os.environ.get("TMPDIR") == original_tmpdir
+    assert runner._pytest_add_cli_args == []
+    assert not (tmp_path / str(os.getpid())).exists()
+
+
+def test_bounded_mutation_runner_can_skip_repeated_clean_runs(tmp_path: Path) -> None:
+    """A successful gate preflight makes mutmut's per-batch clean run redundant."""
+
+    class FakeRunner:
+        def __init__(self) -> None:
+            self._pytest_add_cli_args: list[str] = []
+
+        def run_tests(self, *, mutant_name: str | None, tests: object) -> int:
+            raise AssertionError(f"clean run was not skipped: {mutant_name=}, {tests=}")
+
+    runner = bounded_pytest_runner(FakeRunner, tmp_path, skip_clean_tests=True)
+
+    assert runner().run_tests(mutant_name=None, tests=()) == 0

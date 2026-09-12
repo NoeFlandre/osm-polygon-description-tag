@@ -108,6 +108,9 @@ def test_an_unprocessed_shard_is_reported_as_missing(tmp_path: Path) -> None:
     assert report.complete_shard_count == 1
     assert other.status == "missing"
     assert other.input_row_count == 8
+    assert other.input_cursor == 0
+    assert other.annotation_count == 0
+    assert other.part_count == 0
     assert other.issues == ("no checkpoint has been written for this shard",)
 
 

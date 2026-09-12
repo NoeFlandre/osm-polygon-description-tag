@@ -24,6 +24,7 @@ from osm_polygon_description_tag.publication import (
 )
 from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
+from tests.helpers.messages import exactly
 
 
 def _setup_dataset(data_root: Path) -> None:
@@ -114,7 +115,10 @@ def test_execute_upload_rejects_missing_confirmation(tmp_path: Path) -> None:
     _setup_dataset(data_root)
     plan = create_upload_plan(data_root)
 
-    with pytest.raises(PublicationError, match="confirmation required"):
+    with pytest.raises(
+        PublicationError,
+        match=exactly("confirmation required (must match freshly computed plan identity)"),
+    ):
         execute_upload(plan, confirmation=None, runner=lambda _: None)
 
 

@@ -284,6 +284,52 @@ OAR and quota tools. Check these prerequisites before an authorised run.
     satisfies, and check it with a harmless
     `osm-polygon-description-tag --help` before staging anything.
 
+    The cause is measurable rather than mysterious: `fnancy` reports a
+    `Common KVM processor` whose `/proc/cpuinfo` flags contain `pni` and
+    `cx16` but neither `sse4_2` nor `popcnt`, so it is an x86-64 baseline
+    machine with SSE3. NumPy 2 wheels require x86-64-v2 and abort on import;
+    NumPy 1.26 wheels have an SSE3 baseline and run. Pinning the *operator*
+    environment to `numpy==1.26.4` is therefore enough, and it does not touch
+    model semantics: the job script runs `uv sync --frozen --no-dev --extra
+    language` on the allocated compute node, so inference always uses the
+    locked environment. Verify the split holds before relying on it:
+
+    ```bash
+    ssh nancy 'grep -m1 flags /proc/cpuinfo | tr " " "\n" | grep -cE "^(sse4_2|popcnt)$"'
+    # must print 0, which is why NumPy 2 cannot be used on the frontend
+    ```
+
+### Driving all 386 shards
+
+`scripts/run_language_grid.py` sequences the per-shard protocol below; it adds
+no policy of its own. It stages and transfers one shard, submits it through the
+CLI's own apply gate, polls until the scheduler reports a terminal state, then
+collects and acknowledges before touching the next shard. Anything reported as
+ambiguous, active, or unresolved stops the run for an operator to reconcile,
+and `--allow-daytime` is forwarded only when it is passed explicitly.
+
+The driver exists because `grid stage --apply` emits a *filesystem* rsync argv:
+it cannot reach the site from a workstation. The driver performs that transfer
+over SSH instead, which is the separately arranged authorised transfer this
+runbook requires.
+
+```bash
+uv run python -m scripts.run_language_grid \
+  --run-dir data-root/language-run-lingua-glotlid-v3-full \
+  --source-root data-root/data --project-root . \
+  --retrieval-dir data-root/language-retrieval \
+  --ssh-host nancy --site nancy \
+  --remote-bundle-root /home/nflandre/osm-language-grid-v3 \
+  --remote-glotlid-model-path /home/nflandre/models/glotlid-v3/model_v3.bin \
+  --remote-operator-dir /home/nflandre/osm-language-grid \
+  --remote-cli /home/nflandre/osm-language-grid/.portable-grid-probe/bin/osm-polygon-description-tag \
+  --max-shards 1
+```
+
+Start with `--max-shards 1` and read the emitted JSON before widening it. The
+driver is resumable: a shard whose checkpoint already validates as complete is
+skipped, so re-running continues rather than repeating work.
+
 ### Stage the pinned GlotLID model once
 
 The cascade needs the pinned fallback model on storage the compute node can

@@ -1,3 +1,4 @@
+import tomllib
 from pathlib import Path
 
 import osm_polygon_description_tag
@@ -73,3 +74,19 @@ def test_active_docs_name_the_complete_toolchain() -> None:
         assert name in text
     assert "uv run mypy" not in text
     assert "argparse" not in text
+
+
+def test_source_distribution_excludes_runtime_artifacts() -> None:
+    project_root = Path(osm_polygon_description_tag.__file__).parents[2]
+    project = tomllib.loads((project_root / "pyproject.toml").read_text(encoding="utf-8"))
+    target = project["tool"]["hatch"]["build"]["targets"]["sdist"]
+    excluded = set(target["exclude"])
+
+    assert {
+        ".venv/",
+        "data-root/",
+        "dist/",
+        "mutants/",
+        "reports/",
+    } <= excluded
+    assert target["skip-excluded-dirs"] is True

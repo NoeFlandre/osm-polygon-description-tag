@@ -44,6 +44,63 @@ contract tests, remains a separate required gate.
 Mutmut's `mutants/` cache is ignored and may be reused locally; CI runs both
 repository-wide gates as required jobs.
 
+### Running the mutation gate somewhere fast
+
+The gate is I/O bound, not CPU bound. On the external `Seagate M3` volume that
+holds this checkout, reading 400 small source files cold takes about 12 seconds
+--- roughly 30 ms each --- and the gate re-reads the source tree for every
+mutant. Measured on the same machine, one full suite run took over 40 minutes
+from the volume and 152 seconds from the internal disk.
+
+So run the gate from a scratch copy on a fast local disk and keep the volume as
+the source of truth:
+
+1. copy `src/`, `tests/`, `scripts/`, `pyproject.toml` and `uv.lock` to a
+   scratch directory, and `uv sync --frozen --all-extras` there;
+2. copy `mutants/**/*.py.meta`, `mutants/mutmut-stats.json` and
+   `mutants/mutmut-recorded-tests.json` across so the run resumes instead of
+   starting from zero --- mutmut regenerates the mutant sources itself;
+3. run `just mutation-contexts` and the gate there;
+4. copy the `.py.meta` files back, and delete the scratch copy.
+
+Keep `TMPDIR` outside the copied tree: several tests walk up from a temporary
+path looking for `pyproject.toml`, and a `TMPDIR` inside the project makes them
+find the wrong one. Give the gate a `TMPDIR` nothing else uses, too: sharing one
+with an ad-hoc `pytest` run deletes the numbered directory underneath it, and
+the gate's stats collection then dies with `FileNotFoundError`.
+
+### Refresh the gate's test selection after adding tests
+
+Per-test coverage contexts override mutmut's recorded association, so a stale
+context file hides newly added tests from selection: they never run, and the
+mutants they kill keep reporting as survivors. After adding or renaming tests,
+re-record `just mutation-contexts` and delete `mutants/mutmut-stats.json` and
+`mutants/mutmut-recorded-tests.json` before running the gate. Renaming a
+parametrised case matters most --- the stale recording still names the old test
+ids, and the run aborts in its clean preflight with `not found:`.
+
+### A pragma only works on a single-line statement
+
+Mutmut records a trailing `# pragma: no mutate` against the line the *statement*
+starts on, so a pragma written against one argument of a multi-line call is
+silently ignored. `ruff format` compounds this by moving a trailing comment onto
+a closing bracket. Use the `# pragma: no mutate start` / `end` block form for a
+multi-line statement, remembering that it suppresses every mutation in the
+block, and confirm any new pragma by checking that the mutant it targets stops
+being generated.
+
+### Timeouts are unresolved verdicts, not kills
+
+A timeout is not a killed mutant for this gate, and mutmut's limit is wall
+clock: `(estimated_test_time + timeout_constant) * timeout_multiplier`, where
+the estimate comes from an unloaded baseline run. On a shared machine that
+estimate is optimistic, so contention alone turns killable mutants into
+timeouts --- one contended sweep here reported 389 of them. `timeout_constant`
+and `timeout_multiplier` in `pyproject.toml` are therefore set well above the
+slowest honest run. Changing either value makes mutmut discard its cached
+timeout verdicts and re-run them, which is what you want after the machine
+quietens down.
+
 ## Docker reproducibility
 
 The checked-in `Dockerfile` copies the version-pinned uv binary from

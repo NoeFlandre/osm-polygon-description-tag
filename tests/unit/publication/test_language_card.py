@@ -19,6 +19,7 @@ from osm_polygon_description_tag.publication.language_card import (
     LANGUAGE_CARD_SECTION_START,
     install_language_card,
 )
+from tests.helpers.messages import exactly
 
 
 @pytest.fixture
@@ -247,7 +248,10 @@ def test_install_refuses_duplicate_configuration_names(export: LanguageExport) -
 def test_install_rejects_an_export_with_a_different_configuration(
     export: LanguageExport,
 ) -> None:
-    with pytest.raises(LanguagePublicationError, match="different configuration"):
+    with pytest.raises(
+        LanguagePublicationError,
+        match=exactly("language export declares a different configuration name"),
+    ):
         install_language_card(_card(), replace(export, config_name="other"))
 
 
@@ -362,5 +366,8 @@ def test_install_refuses_a_marker_with_prefix_text(export: LanguageExport) -> No
         + f"{LANGUAGE_CARD_SECTION_END}\n"
     )
 
-    with pytest.raises(LanguagePublicationError, match="complete lines"):
+    with pytest.raises(
+        LanguagePublicationError,
+        match=exactly("dataset card language-v1 section markers must occupy complete lines"),
+    ):
         install_language_card(card, export)

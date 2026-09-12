@@ -21,12 +21,15 @@ from osm_polygon_description_tag.publication.language_hub import (
     MAX_INLINE_HASH_BYTES,
     DatasetViewerSplit,
     HuggingFaceLanguageHub,
+    _raise_for_viewer_status,
+    _readme_text,
     build_language_hub,
 )
 from osm_polygon_description_tag.publication.language_upload import (
     verify_language_publication,
 )
 from osm_polygon_description_tag.publication.models import UploadItem, UploadPlan
+from tests.helpers.messages import exactly
 
 REPO = "NoeFlandre/osm-polygon-description-tag"
 DATA_PATH = "language-v1/data/region.parquet"
@@ -56,8 +59,10 @@ class _FakeApi:
         self.commits: list[dict[str, Any]] = []
         self.downloads: list[str] = []
         self.download_calls: list[dict[str, Any]] = []
+        self.repo_info_calls: list[tuple[str, str]] = []
 
     def repo_info(self, repo_id: str, repo_type: str) -> Any:
+        self.repo_info_calls.append((repo_id, repo_type))
         if self._repo_error is not None:
             raise self._repo_error
         return SimpleNamespace(sha=self._sha)
@@ -200,9 +205,21 @@ def _entry(path: str, size: int, *, lfs_sha: str | None = None) -> Any:
 
 
 def test_the_current_revision_is_reported() -> None:
-    hub = HuggingFaceLanguageHub(_FakeApi(sha="abc123"))
+    api = _FakeApi(sha="abc123")
 
-    assert hub.repo_revision(REPO) == "abc123"
+    assert HuggingFaceLanguageHub(api).repo_revision(REPO) == "abc123"
+    assert api.repo_info_calls == [(REPO, "dataset")]
+
+
+def test_a_missing_revision_attribute_is_rejected_as_an_empty_revision() -> None:
+    class MissingShaApi(_FakeApi):
+        def repo_info(self, repo_id: str, repo_type: str) -> Any:
+            return SimpleNamespace()
+
+    with pytest.raises(LanguagePublicationError) as caught:
+        HuggingFaceLanguageHub(MissingShaApi()).repo_revision(REPO)
+
+    assert str(caught.value) == f"Hub repository {REPO} returned an empty revision"
 
 
 def test_an_inaccessible_repository_is_reported() -> None:
@@ -261,8 +278,15 @@ def test_upload_uses_one_atomic_commit_for_exact_files_and_readme(
     ]
     assert api.commits[0]["parent_commit"] == "rev-1"
     assert api.commits[0]["commit_message"] == COMMIT_MESSAGE
-    assert api.download_calls[0]["revision"] == "rev-1"
-    assert api.download_calls[0]["cache_dir"] == str(cache_dir)
+    assert api.download_calls[0] == {
+        "repo_id": REPO,
+        "filename": "README.md",
+        "repo_type": "dataset",
+        "revision": "rev-1",
+        "cache_dir": str(cache_dir),
+    }
+    assert api.commits[0]["repo_id"] == REPO
+    assert api.commits[0]["repo_type"] == "dataset"
     assert "delete_operations" not in api.commits[0]
 
 
@@ -289,6 +313,18 @@ def test_upload_binds_the_commit_to_the_preflight_revision(
 
     assert api.commits[0]["parent_commit"] == "approved-revision"
     assert api.download_calls[0]["revision"] == "approved-revision"
+
+
+def test_upload_resolves_the_plan_repository_when_no_parent_is_given(tmp_path: Path) -> None:
+    root = tmp_path / "export"
+    plan = _valid_plan(root)
+    readme = tmp_path / "README.md"
+    readme.write_text("---\nconfigs:\n- config_name: default\n---\n", encoding="utf-8")
+    api = _FakeApi(download=readme)
+
+    HuggingFaceLanguageHub(api).upload(plan)
+
+    assert api.repo_info_calls == [(REPO, "dataset")]
 
 
 def test_upload_reports_a_readme_download_failure(tmp_path: Path) -> None:
@@ -384,6 +420,12 @@ def test_paths_info_refuses_globs_and_unsafe_exact_paths(path: str) -> None:
         hub.paths_info(REPO, "rev-1", [path])
 
 
+def test_paths_info_accepts_spaces_and_letter_x_in_an_exact_path() -> None:
+    hub = HuggingFaceLanguageHub(_FakeApi())
+
+    assert hub.paths_info(REPO, "rev-1", ["language-v1/data/X file.parquet"]) == ()
+
+
 def test_paths_info_refuses_duplicate_paths() -> None:
     hub = HuggingFaceLanguageHub(_FakeApi())
 
@@ -399,9 +441,10 @@ def test_upload_refuses_a_plan_that_does_not_match_the_validated_export(
     mismatched = _local_plan(root, (DATA_PATH, STATS_PATH))
     api = _FakeApi()
 
-    with pytest.raises(LanguagePublicationError, match="exactly match"):
+    with pytest.raises(LanguagePublicationError) as caught:
         HuggingFaceLanguageHub(api).upload(mismatched)
 
+    assert str(caught.value) == "upload plan does not exactly match the validated language export"
     assert api.commits == []
     assert api.downloads == []
 
@@ -446,6 +489,7 @@ def test_a_small_non_lfs_file_is_downloaded_and_hashed(tmp_path: Path) -> None:
 
     remote = hub.paths_info(REPO, "rev-1", [STATS_PATH])
 
+    assert (remote[0].relative_path, remote[0].size_bytes) == (STATS_PATH, blob.stat().st_size)
     assert remote[0].sha256 == hashlib.sha256(blob.read_bytes()).hexdigest()
     assert api.downloads == [STATS_PATH]
 
@@ -590,12 +634,53 @@ def test_dataset_configs_returns_empty_while_viewer_indexing_is_pending_or_faile
     assert len(http.calls) == 1
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "splits": [{"dataset": REPO, "config": "language-v1", "split": "train"}],
+            "pending": [{"dataset": REPO}],
+            "failed": [],
+        },
+        {
+            "splits": [{"dataset": REPO, "config": "language-v1", "split": "train"}],
+            "pending": [],
+            "failed": [{"dataset": REPO}],
+        },
+    ],
+)
+def test_dataset_configs_returns_empty_for_either_pending_or_failed_viewer_state(
+    payload: dict[str, object],
+) -> None:
+    http = _FakeHttp(_FakeResponse(payload))
+    hub = HuggingFaceLanguageHub(_FakeApi(sha="rev-1"), http_session=http)
+
+    assert hub.dataset_configs(REPO, "rev-1") == ()
+
+
 def test_dataset_configs_refuses_a_revision_when_the_head_has_drifted() -> None:
     http = _FakeHttp(_FakeResponse({"splits": [], "pending": [], "failed": []}))
     hub = HuggingFaceLanguageHub(_FakeApi(sha="head-2"), http_session=http)
 
     assert hub.dataset_configs(REPO, "head-1") == ()
     assert http.calls == []
+
+
+def test_dataset_configs_checks_the_requested_repository_revision() -> None:
+    class RecordingApi(_FakeApi):
+        def __init__(self) -> None:
+            super().__init__(sha="rev-1")
+            self.revisions: list[str] = []
+
+        def repo_info(self, repo_id: str, repo_type: str) -> Any:
+            self.revisions.append(repo_id)
+            return super().repo_info(repo_id, repo_type)
+
+    api = RecordingApi()
+    http = _FakeHttp(_FakeResponse({"splits": [], "pending": [], "failed": []}))
+
+    assert HuggingFaceLanguageHub(api, http_session=http).dataset_configs(REPO, "rev-1") == ()
+    assert api.revisions == [REPO]
 
 
 def test_dataset_configs_returns_empty_for_a_malformed_viewer_response() -> None:
@@ -662,6 +747,34 @@ def test_dataset_viewer_rejects_a_status_only_http_error() -> None:
         hub.dataset_viewer_splits(REPO)
 
 
+def test_raise_for_viewer_status_prefers_the_response_method() -> None:
+    called: list[str] = []
+
+    class Response:
+        status_code = 503
+
+        def raise_for_status(self) -> None:
+            called.append("called")
+
+    _raise_for_viewer_status(Response())
+
+    assert called == ["called"]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [SimpleNamespace(status_code=300), SimpleNamespace()],
+)
+def test_raise_for_viewer_status_rejects_non_success_statuses_exactly(
+    response: object,
+) -> None:
+    with pytest.raises(RuntimeError) as caught:
+        _raise_for_viewer_status(response)
+
+    status_code = getattr(response, "status_code", None)
+    assert str(caught.value) == f"HTTP status {status_code}"
+
+
 def test_dataset_viewer_uses_the_lazy_http_session_factory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -689,20 +802,67 @@ def test_dataset_viewer_reports_a_session_factory_failure(
         HuggingFaceLanguageHub(_FakeApi()).dataset_viewer_splits(REPO)
 
 
-@pytest.mark.parametrize("timeout", [0, 61, float("inf"), True, "2"])
-def test_dataset_viewer_timeout_is_bounded(timeout: object) -> None:
-    with pytest.raises(LanguagePublicationError, match="Dataset Viewer timeout"):
+def test_dataset_viewer_session_factory_failure_keeps_its_exact_cause(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail() -> Any:
+        raise RuntimeError("session unavailable")
+
+    monkeypatch.setattr(language_hub_module._huggingface_hub, "get_session", fail, raising=False)
+
+    with pytest.raises(LanguagePublicationError) as caught:
+        HuggingFaceLanguageHub(_FakeApi())._viewer_http_session()
+
+    assert str(caught.value) == "cannot initialize Dataset Viewer HTTP session: session unavailable"
+
+
+@pytest.mark.parametrize(
+    ("timeout", "message"),
+    [
+        (0, "Dataset Viewer timeout must be between 0 and 60 seconds"),
+        (61, "Dataset Viewer timeout must be between 0 and 60 seconds"),
+        (float("inf"), "Dataset Viewer timeout must be between 0 and 60 seconds"),
+        (True, "Dataset Viewer timeout must be a finite positive number"),
+        ("2", "Dataset Viewer timeout must be a finite positive number"),
+    ],
+)
+def test_dataset_viewer_timeout_is_bounded(timeout: object, message: str) -> None:
+    """A non-number and an out-of-range number are refused for different reasons."""
+    with pytest.raises(LanguagePublicationError, match=exactly(message)):
         HuggingFaceLanguageHub(_FakeApi(), viewer_timeout=timeout)  # type: ignore[arg-type]
 
 
+def test_a_fractional_positive_viewer_timeout_is_accepted() -> None:
+    hub = HuggingFaceLanguageHub(_FakeApi(), viewer_timeout=0.5)
+
+    assert hub._viewer_timeout == 0.5
+
+
 def test_dataset_viewer_rejects_an_empty_repository_id() -> None:
-    with pytest.raises(LanguagePublicationError, match="repository id"):
-        HuggingFaceLanguageHub(_FakeApi()).dataset_viewer_splits("")
+    with pytest.raises(
+        LanguagePublicationError, match=exactly("Dataset Viewer repository id must not be empty")
+    ):
+        HuggingFaceLanguageHub(
+            _FakeApi(),
+            http_session=_FakeHttp(_FakeResponse({"splits": [], "pending": [], "failed": []})),
+        ).dataset_viewer_splits("")
 
 
 def test_dataset_configs_rejects_an_empty_revision() -> None:
-    with pytest.raises(LanguagePublicationError, match="revision"):
+    with pytest.raises(LanguagePublicationError) as caught:
         HuggingFaceLanguageHub(_FakeApi()).dataset_configs(REPO, "")
+
+    assert str(caught.value) == "repository revision must be a non-empty string"
+
+
+def test_readme_text_reports_the_exact_non_file_cause(tmp_path: Path) -> None:
+    directory = tmp_path / "README-directory"
+    directory.mkdir()
+
+    with pytest.raises(OSError) as caught:
+        _readme_text(str(directory))
+
+    assert str(caught.value) == "downloaded README is not a regular file"
 
 
 def test_the_api_is_resolved_lazily(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -721,3 +881,11 @@ def test_the_api_is_resolved_lazily(monkeypatch: pytest.MonkeyPatch) -> None:
     assert isinstance(hub.api, _Api)
     assert hub.api is hub.api
     assert created == ["built"]
+
+
+def test_build_language_hub_preserves_the_requested_cache_directory(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "hf-cache"
+
+    hub = build_language_hub(cache_dir=cache_dir)
+
+    assert hub._cache_dir == cache_dir

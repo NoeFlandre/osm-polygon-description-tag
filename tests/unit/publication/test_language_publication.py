@@ -4,6 +4,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pyarrow.parquet as pq
 import pytest
@@ -20,14 +21,17 @@ from osm_polygon_description_tag.dataset.languages.models import (
     CASCADE_DETECTOR_NAME,
     GLOTLID_MODEL_REPOSITORY,
     GLOTLID_MODEL_REVISION,
+    LanguagePolicy,
     LanguageResult,
     LanguageStatus,
+    cascade_model_identity,
 )
 from osm_polygon_description_tag.dataset.languages.snapshot import (
     SnapshotManifest,
     prepare_snapshot,
 )
 from osm_polygon_description_tag.dataset.languages.worker import process_shard
+from osm_polygon_description_tag.publication import language as language_module
 from osm_polygon_description_tag.publication.language import (
     LANGUAGE_CONFIG_NAME,
     LANGUAGE_DATA_PREFIX,
@@ -35,6 +39,7 @@ from osm_polygon_description_tag.publication.language import (
     LANGUAGE_STATS_PATH,
     LanguageExport,
     LanguagePublicationError,
+    _export_name,
     build_language_upload_plan,
     export_language_annotations,
     language_config_yaml,
@@ -53,6 +58,7 @@ from osm_polygon_description_tag.publication.language_upload import (
 from osm_polygon_description_tag.publication.models import UploadPlan
 from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
+from tests.helpers.messages import exactly
 
 REPO = "NoeFlandre/osm-polygon-description-tag"
 SHARD = "region.parquet"
@@ -217,7 +223,10 @@ def test_a_stale_upload_plan_is_rejected_before_network_writes(export: LanguageE
     path.write_bytes(path.read_bytes() + b"changed")
     hub = _FakeHub()
 
-    with pytest.raises(LanguagePublicationError, match="changed"):
+    with pytest.raises(
+        LanguagePublicationError,
+        match=exactly("export files changed after the completed export manifest"),
+    ):
         publish_language_export(plan, hub, baseline_revision="rev-1", apply=True)
 
     assert hub.uploads == []
@@ -230,6 +239,79 @@ def test_export_refuses_an_incomplete_run(
 
     with pytest.raises(LanguagePublicationError, match="run is not publishable"):
         export_language_annotations(run, tmp_path / "export")
+
+
+def test_incomplete_run_reports_the_first_shard_problem_exactly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report = SimpleNamespace(
+        is_complete=False,
+        issues=(),
+        shards=(SimpleNamespace(issues=("missing committed part",)),),
+    )
+    monkeypatch.setattr(language_module, "validate_run", lambda _run: report)
+
+    with pytest.raises(
+        LanguagePublicationError,
+        match=exactly("run is not publishable: missing committed part"),
+    ):
+        language_module._require_complete_run(tmp_path / "run")
+
+
+def test_incomplete_run_without_details_uses_the_stable_fallback_exactly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report = SimpleNamespace(is_complete=False, issues=(), shards=())
+    monkeypatch.setattr(language_module, "validate_run", lambda _run: report)
+
+    with pytest.raises(
+        LanguagePublicationError,
+        match=exactly("run is not publishable: not every shard is complete"),
+    ):
+        language_module._require_complete_run(tmp_path / "run")
+
+
+def test_export_records_its_in_progress_manifest_before_writing_a_shard(
+    run_dir: tuple[Path, Path, SnapshotManifest],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, run, snapshot = run_dir
+    _process(source, run, snapshot)
+    export_root = tmp_path / "export"
+
+    def stop_before_the_first_shard(*_args: object, **_kwargs: object) -> None:
+        raise OSError("stop after manifest")
+
+    monkeypatch.setattr(language_module, "_write_shard_export", stop_before_the_first_shard)
+
+    with pytest.raises(OSError, match=exactly("stop after manifest")):
+        export_language_annotations(run, export_root)
+
+    assert json.loads((export_root / LANGUAGE_MANIFEST_PATH).read_text()) == {
+        "schema_version": 1,
+        "status": "in_progress",
+        "snapshot_id": snapshot.snapshot_id,
+    }
+
+
+def test_export_preserves_a_non_default_detector_identity(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    _write_shard(source / SHARD, 2)
+    run = tmp_path / "run"
+    snapshot = prepare_snapshot(
+        source,
+        run,
+        code_fingerprint="a" * 64,
+        lock_fingerprint="b" * 64,
+        model_identity=cascade_model_identity(LanguagePolicy()),
+    )
+    _process(source, run, snapshot)
+
+    export = export_language_annotations(run, tmp_path / "export")
+
+    assert export.detector_name == CASCADE_DETECTOR_NAME
+    assert read_language_export(export.export_root).detector_name == CASCADE_DETECTOR_NAME
 
 
 def test_export_refuses_a_run_with_a_corrupt_part(
@@ -344,6 +426,25 @@ def test_export_stats_are_written_as_json(export: LanguageExport) -> None:
     assert payload["snapshot_id"] == export.snapshot_id
 
 
+def test_missing_completed_manifest_error_is_not_silenced(export: LanguageExport) -> None:
+    (export.export_root / LANGUAGE_MANIFEST_PATH).unlink()
+
+    with pytest.raises(LanguagePublicationError) as caught:
+        language_module._validate_export_seal(export)
+
+    assert str(caught.value).startswith("cannot read completed export manifest:")
+
+
+def test_export_seal_rejection_message_is_exact(export: LanguageExport) -> None:
+    path = export.export_root / LANGUAGE_STATS_PATH
+    path.write_bytes(path.read_bytes() + b"\n")
+
+    with pytest.raises(LanguagePublicationError) as caught:
+        language_module._validate_export_seal(export)
+
+    assert str(caught.value) == "export files changed after the completed export manifest"
+
+
 def test_export_covers_every_shard(tmp_path: Path) -> None:
     source = tmp_path / "source"
     _write_shard(source / SHARD, 6)
@@ -380,6 +481,29 @@ def test_the_plan_contains_only_additive_paths(export: LanguageExport) -> None:
     assert len(plan.identity_sha256) == 64
 
 
+def test_export_name_does_not_strip_valid_letter_characters() -> None:
+    assert _export_name("X-region-X.parquet") == "x-region-x.parquet"
+
+
+def test_language_attribution_is_exact_for_the_pinned_library(export: LanguageExport) -> None:
+    assert language_module._language_attribution(export) == (
+        "Language labels are derived annotations produced with `lingua-language-detector`, "
+        "which is distributed under the Apache License 2.0."
+    )
+
+
+def test_language_attribution_identifies_the_cascade_fallback_exactly(
+    export: LanguageExport,
+) -> None:
+    cascade = replace(export, detector_name=CASCADE_DETECTOR_NAME)
+
+    assert language_module._language_attribution(cascade) == (
+        "Language labels are derived annotations produced with `lingua-language-detector`, "
+        "which is distributed under the Apache License 2.0. Unresolved values additionally "
+        "use GlotLID v3."
+    )
+
+
 def test_completed_reexport_changes_identity_and_invalidates_the_prior_plan(
     export: LanguageExport, tmp_path: Path
 ) -> None:
@@ -394,7 +518,10 @@ def test_completed_reexport_changes_identity_and_invalidates_the_prior_plan(
 
     assert first.identity_sha256 != second.identity_sha256
     hub = _FakeHub()
-    with pytest.raises(LanguagePublicationError, match="changed after the upload plan"):
+    with pytest.raises(
+        LanguagePublicationError,
+        match=exactly("export changed after the upload plan was created"),
+    ):
         publish_language_export(first, hub, baseline_revision="rev-1", apply=True)
     assert hub.uploads == []
 
@@ -738,7 +865,10 @@ def test_unresolved_other_plan_cannot_be_overwritten(
     state.write_text(original, encoding="utf-8")
     hub = _FakeHub()
 
-    with pytest.raises(LanguagePublicationError, match="unresolved publication"):
+    with pytest.raises(
+        LanguagePublicationError,
+        match=exactly("an unresolved publication belongs to another plan"),
+    ):
         publish_language_export(plan, hub, baseline_revision="rev-1", apply=True, state_path=state)
 
     assert hub.uploads == []
@@ -803,7 +933,10 @@ def test_an_export_with_a_stale_annotation_schema_is_rejected(export: LanguageEx
         export, lambda payload: payload["stats"].__setitem__("annotation_schema_version", 9)
     )
 
-    with pytest.raises(LanguagePublicationError, match="unsupported annotation schema version"):
+    with pytest.raises(
+        LanguagePublicationError,
+        match=exactly("unsupported annotation schema version in export stats"),
+    ):
         read_language_export(export.export_root)
 
 

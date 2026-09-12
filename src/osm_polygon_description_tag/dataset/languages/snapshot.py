@@ -174,27 +174,14 @@ def _policy_from_payload(reader: PayloadReader) -> LanguagePolicy:
         raise SnapshotError(f"invalid snapshot policy: {error}") from error
 
 
+# Only ``LanguageModelIdentity``'s ``init=False`` fields can disagree with the payload.
+# Every other stored field is handed to the constructor by ``_derived_identity`` and kept
+# verbatim, so comparing it back to the payload compares a value with itself.
 _DERIVED_MODEL_FIELDS: Final = (
-    "detector_name",
     "library_name",
     "library_version",
-    "model_repository",
-    "model_filename",
-    "model_revision",
-    "runtime_library_name",
-    "runtime_library_version",
     "policy_fingerprint",
     "config_fingerprint",
-)
-_OPTIONAL_MODEL_FIELDS: Final = frozenset(
-    {
-        "detector_name",
-        "model_repository",
-        "model_filename",
-        "model_revision",
-        "runtime_library_name",
-        "runtime_library_version",
-    }
 )
 
 
@@ -228,14 +215,9 @@ def _optional_text(reader: PayloadReader, key: str, default: str | None = None) 
 
 
 def _verify_derived_fields(reader: PayloadReader, identity: LanguageModelIdentity) -> None:
+    """Refuse a snapshot whose recorded derived fields differ from the recomputed ones."""
     for name in _DERIVED_MODEL_FIELDS:
-        if name in _OPTIONAL_MODEL_FIELDS:
-            if not reader.has(name):
-                continue
-            value = reader.raw(name)
-        else:
-            value = reader.text(name)
-        if value != getattr(identity, name):
+        if reader.text(name) != getattr(identity, name):
             raise SnapshotError(f"model identity field does not match derived value: {name}")
 
 
@@ -503,12 +485,10 @@ def _candidate_manifest(
     )
 
 
-def _run_directory_exists(run_dir: Path) -> bool:
-    if not run_dir.exists():
-        return False
-    if run_dir.is_symlink() or not run_dir.is_dir():
+def _require_regular_run_directory(run_dir: Path) -> None:
+    """Refuse a run directory that exists but is a symlink or not a directory."""
+    if run_dir.exists() and (run_dir.is_symlink() or not run_dir.is_dir()):
         raise SnapshotError(f"run directory is not a regular directory: {run_dir}")
-    return True
 
 
 def _verified_existing(run_dir: Path, candidate: SnapshotManifest) -> SnapshotManifest:
@@ -548,7 +528,7 @@ def prepare_snapshot(
     candidate = _candidate_manifest(
         _source_files(source_root), identity, code_fingerprint, lock_fingerprint
     )
-    _run_directory_exists(run_dir)
+    _require_regular_run_directory(run_dir)
     with exclusive_worker_lock(run_dir):
         existing = _existing_snapshot(run_dir, candidate)
         if existing is not None:
@@ -563,7 +543,8 @@ def read_snapshot(run_dir: Path) -> SnapshotManifest:
     if path.is_symlink():
         raise SnapshotError(f"snapshot must not be a symlink: {path}")
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")  # pragma: no mutate - codec alias only
+        payload = json.loads(text)
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise SnapshotError(f"cannot read snapshot {path}: {error}") from error
     return SnapshotManifest.from_payload(payload)

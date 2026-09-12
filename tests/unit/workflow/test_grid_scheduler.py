@@ -26,6 +26,7 @@ from osm_polygon_description_tag.workflow.grid_scheduler import (
     run_command,
     submit,
 )
+from tests.helpers.messages import exactly
 
 
 @pytest.fixture
@@ -264,7 +265,12 @@ def test_account_job_name_resolution_requires_one_exact_match() -> None:
 
     duplicate = '{"123":{"name":"lang-target","state":"Running"},'
     duplicate += '"124":{"name":"lang-target","state":"Terminated"}}'
-    with pytest.raises(SchedulerError, match="multiple"):
+    with pytest.raises(
+        SchedulerError,
+        match=exactly(
+            "account-wide oarstat has multiple jobs named 'lang-target'; do not resubmit"
+        ),
+    ):
         resolve_account_job_name(duplicate, "lang-target")
 
 
@@ -414,7 +420,7 @@ def test_an_unreachable_scheduler_leaves_the_state_unknown() -> None:
 
 @pytest.mark.parametrize("job_id", [0, -1, "5", True])
 def test_an_invalid_job_id_is_rejected(job_id: object) -> None:
-    with pytest.raises(SchedulerError, match="job id must be a positive integer"):
+    with pytest.raises(SchedulerError, match=exactly("job id must be a positive integer")):
         job_state(job_id)  # type: ignore[arg-type]
 
 

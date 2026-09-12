@@ -16,6 +16,7 @@ from osm_polygon_description_tag.dataset.storage import (
     write_geoparquet,
 )
 from tests.conftest import make_record_dict
+from tests.helpers.messages import exactly
 
 _POLYGON_WKB = to_wkb(Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]), output_dimension=2)
 
@@ -212,7 +213,7 @@ def test_validate_detects_unordered_bbox(tmp_path: Path) -> None:
     }
     _write_raw(target, [row])
 
-    with pytest.raises(StorageError, match="bbox min"):
+    with pytest.raises(StorageError, match=exactly("bbox min coordinate exceeds max")):
         validate_geoparquet(target)
 
 
@@ -414,7 +415,7 @@ def test_validate_rejects_missing_geo_metadata(tmp_path: Path) -> None:
     with pq.ParquetWriter(target, SCHEMA, compression="zstd") as writer:
         writer.write_table(table)
 
-    with pytest.raises(StorageError, match="missing GeoParquet"):
+    with pytest.raises(StorageError, match=exactly("missing GeoParquet 'geo' metadata")):
         validate_geoparquet(target)
 
 
@@ -473,5 +474,5 @@ def test_validate_rejects_wrong_encoding(tmp_path: Path) -> None:
     with pq.ParquetWriter(target, schema_meta, compression="zstd") as writer:
         writer.write_table(table)
 
-    with pytest.raises(StorageError, match="WKB"):
+    with pytest.raises(StorageError, match=exactly("geometry encoding must be WKB")):
         validate_geoparquet(target)

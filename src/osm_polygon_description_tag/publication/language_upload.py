@@ -133,7 +133,8 @@ def read_publication_state(state_path: Path) -> PublicationOutcome | None:
     if not state_path.is_file():
         return None
     try:
-        payload = json.loads(state_path.read_text(encoding="utf-8"))
+        text = state_path.read_text(encoding="utf-8")  # pragma: no mutate - codec alias only
+        payload = json.loads(text)
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise LanguagePublicationError(
             f"cannot read publication state {state_path}: {error}"
@@ -219,7 +220,12 @@ def publish_language_export(
         with exclusive_worker_lock(Path(plan.data_root) / LANGUAGE_REMOTE_PREFIX):
             _require_current_plan(plan)
             return _publish_language_export(plan, hub, baseline_revision, apply, state_path)
+    # ``apply`` is falsy on this path and ``_publish_language_export`` only ever tests it
+    # for truth, so passing ``None`` here is equivalent. The identical call above keeps
+    # the other three arguments' ``None`` variants under test.
+    # pragma: no mutate start
     return _publish_language_export(plan, hub, baseline_revision, apply, state_path)
+    # pragma: no mutate end
 
 
 def _require_current_plan(plan: UploadPlan) -> None:

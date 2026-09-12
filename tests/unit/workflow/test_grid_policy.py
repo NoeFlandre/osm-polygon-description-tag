@@ -18,6 +18,7 @@ from osm_polygon_description_tag.workflow.grid_policy import (
     parse_usage_policy_json,
     policy_evidence_is_fresh,
 )
+from tests.helpers.messages import exactly
 
 OBSERVED_POLICY = json.dumps(
     {"start_time": 0, "stop_time": 0, "jobs": [], "total_jobs": 0, "limits": {}}
@@ -95,7 +96,7 @@ def test_daytime_is_evaluated_in_paris_not_in_the_input_zone() -> None:
 
 
 def test_a_naive_time_is_rejected() -> None:
-    with pytest.raises(GridPolicyError, match="timezone aware"):
+    with pytest.raises(GridPolicyError, match=exactly("policy time must be timezone aware")):
         is_weekday_daytime(datetime(2026, 9, 7, 12, 0))
 
 
@@ -204,7 +205,10 @@ def test_missing_account_wide_oarstat_evidence_is_unknown() -> None:
 
 @pytest.mark.parametrize("value", [True, -1, 1.5, "0"])
 def test_injected_account_job_count_is_strictly_typed(value: object) -> None:
-    with pytest.raises(GridPolicyError, match="account-wide active job count"):
+    with pytest.raises(
+        GridPolicyError,
+        match=exactly("account-wide active job count must be a non-negative integer or null"),
+    ):
         _evaluate(account_job_count=value)
 
 

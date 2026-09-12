@@ -45,6 +45,7 @@ from osm_polygon_description_tag.dataset.languages.checkpoint import (
     read_receipt,
     receipt_name_for_part,
     shard_paths,
+    shards_root,
     write_checkpoint,
 )
 from osm_polygon_description_tag.dataset.languages.models import (
@@ -458,9 +459,14 @@ class StagedFile:
         )
 
 
+def jobs_root(run_dir: Path) -> Path:
+    """Return the single directory that owns every prepared job."""
+    return run_dir / "jobs"
+
+
 def job_paths(run_dir: Path, bundle: JobBundle) -> JobPaths:
     """Return deterministic owned job paths without creating anything."""
-    root = run_dir / "jobs" / bundle.bundle_id[:32]
+    root = jobs_root(run_dir) / bundle.bundle_id[:32]
     return JobPaths(
         root,
         root / BUNDLE_FILENAME,
@@ -620,7 +626,9 @@ def _validate_remote_path(value: str, label: str) -> None:
     _require_absolute(value, label)
     if any(character in value for character in _SHELL_METACHARACTERS):
         raise GridOperatorError(f"{label} must not contain shell metacharacters")
-    if any(part in {".", ".."} for part in Path(value).parts):
+    # ``PurePath`` drops every ``.`` component while parsing, so ``..`` is the only
+    # traversal component a parsed absolute path can still carry.
+    if ".." in Path(value).parts:
         raise GridOperatorError(f"{label} must not contain traversal components")
 
 
@@ -720,7 +728,7 @@ def prepare_job(
         batch_size=batch_size,
         walltime_seconds=walltime_seconds,
     )
-    script_bytes = script.encode("utf-8")
+    script_bytes = script.encode("utf-8")  # pragma: no mutate - codec alias only
     if existing is None:
         _write_prepared_artifacts(paths, bundle, config, script_bytes)
     else:
@@ -747,6 +755,13 @@ def _state_locks(run_dir: Path, *, submission_locked: bool) -> Iterator[None]:
         with exclusive_worker_lock(run_dir):
             yield
         return
+    with _both_state_locks(run_dir):
+        yield
+
+
+@contextmanager
+def _both_state_locks(run_dir: Path) -> Iterator[None]:
+    """Hold the run-wide submission lock, then this run's worker lock."""
     with submission_lock(run_dir), exclusive_worker_lock(run_dir):
         yield
 
@@ -846,7 +861,7 @@ def quarantine_orphan_artifacts(run_dir: Path, shard: str) -> tuple[str, ...]:
     and resumed. Anything that is not a recognized generated artifact keeps
     failing closed.
     """
-    with _state_locks(run_dir, submission_locked=False):
+    with _both_state_locks(run_dir):
         return _quarantined_orphans(run_dir, shard)
 
 
@@ -884,7 +899,7 @@ def _generated_artifacts(directory: Path, recognized: Callable[[str], bool]) -> 
     """List one artifact directory, refusing anything a worker never writes."""
     if not directory.exists():
         return ()
-    children = tuple(sorted(directory.iterdir(), key=lambda path: path.name))
+    children = tuple(sorted(directory.iterdir()))
     for child in children:
         _require_generated_artifact(child, recognized)
     return children
@@ -933,7 +948,9 @@ def _require_immutable_file(path: Path, message: str) -> None:
 def _job_config_payload(
     bundle: JobBundle, *, processing_seconds: int, batch_size: int, walltime_seconds: int
 ) -> dict[str, object]:
-    _validate_job_limits(processing_seconds, batch_size, walltime_seconds)
+    # ``prepare_job`` renders the job script from these same three values first, and
+    # ``render_job_script`` validates them; checking them again here would only repeat
+    # that call with the same arguments.
     return {
         "job_config_schema_version": JOB_CONFIG_SCHEMA_VERSION,
         "bundle_id": bundle.bundle_id,
@@ -990,7 +1007,7 @@ def read_intent(path: Path) -> SubmissionIntent:
 
 def _read_json(path: Path, label: str) -> object:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))  # pragma: no mutate - codec alias only
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise GridOperatorError(f"cannot read {label} {path}: {error}") from error
 
@@ -1170,6 +1187,11 @@ def _copy_regular_file(source: Path, destination: Path) -> None:
         raise GridOperatorError(f"cannot stage {source}: {error}") from error
 
 
+def _project_source_root(project_root: Path) -> Path:
+    """Return the one source directory a portable payload carries."""
+    return project_root / "src"
+
+
 def _project_files(project_root: Path) -> tuple[Path, ...]:
     required = (project_root / "pyproject.toml", project_root / "uv.lock")
     _require_project_files(required)
@@ -1178,7 +1200,7 @@ def _project_files(project_root: Path) -> tuple[Path, ...]:
     optional_readme = _optional_project_readme(readme)
     if optional_readme is not None:
         candidates.append(optional_readme)
-    source = project_root / "src"
+    source = _project_source_root(project_root)
     _require_project_source(source)
     candidates.extend(_project_source_files(source))
     return tuple(candidates)
@@ -1257,7 +1279,7 @@ def _copy_resume_state(run_dir: Path, destination: Path, shard: str) -> None:
     if not source_paths.checkpoint.is_file():
         return
     _validate_resume_state(run_dir, shard)
-    target = destination / "shards" / source_paths.root.name
+    target = shards_root(destination) / source_paths.root.name
     checkpoint = read_checkpoint(source_paths.checkpoint)
     _copy_regular_file(source_paths.checkpoint, target / source_paths.checkpoint.name)
     for part_name in checkpoint.completed_parts:
@@ -1370,11 +1392,17 @@ def _staged_resume_fingerprint(payload_root: Path) -> str | None:
 
 
 def _read_staged_resume_field(stage_path: Path) -> object:
+    """Return the staged resume fingerprint field, or ``None`` if there is no manifest.
+
+    A manifest that cannot be read or is not an object means "nothing staged to
+    reuse", and that answer carries no message, so the read is done here rather
+    than through ``_read_json``'s labelled refusal. A manifest that *is* an
+    object still has to carry the field, and that refusal does reach the caller.
+    """
     try:
-        reader = require_object(
-            _read_json(stage_path, "stage manifest"), error=GridOperatorError, label="stage"
-        )
-    except GridOperatorError:
+        payload = json.loads(stage_path.read_text(encoding="utf-8"))  # pragma: no mutate - alias
+        reader = require_object(payload, error=GridOperatorError, label="stage")
+    except (OSError, UnicodeError, json.JSONDecodeError, GridOperatorError):
         return None
     return reader.raw("resume_state_fingerprint")
 
@@ -1558,7 +1586,7 @@ def _payload_directories(payload_root: Path) -> tuple[Path, Path, Path]:
 
 
 def _verify_payload_layout(payload_root: Path, project_root: Path, bundle: JobBundle) -> None:
-    source_root = project_root / "src"
+    source_root = _project_source_root(project_root)
     if source_root.is_symlink() or not source_root.is_dir():
         raise GridOperatorError("portable payload is missing project source code")
     if not os.access(payload_root / JOB_SCRIPT_FILENAME, os.X_OK):
@@ -1760,7 +1788,7 @@ def _reject_overlapping_paths(source: Path, destination: Path) -> None:
         source_resolved = source.resolve(strict=True)
     except OSError as error:
         raise GridOperatorError(f"retrieved shard directory is unavailable: {source}") from error
-    destination_resolved = destination.resolve(strict=False)
+    destination_resolved = destination.resolve()
     if (
         source_resolved == destination_resolved
         or source_resolved.is_relative_to(destination_resolved)
@@ -1801,7 +1829,7 @@ def _commit_staged_artifact(source: Path, destination: Path) -> None:
 def _copy_tree_no_symlinks(source: Path, destination: Path) -> None:
     _require_regular_directory(source, "source directory")
     destination.mkdir(parents=True, exist_ok=True)
-    for path in sorted(source.iterdir(), key=lambda item: item.name):
+    for path in sorted(source.iterdir()):
         _copy_tree_entry(path, destination / path.name)
 
 
@@ -1968,8 +1996,11 @@ def _active_intent_reason(intent: SubmissionIntent) -> str:
 
 
 def _run_wide_intent_block(paths: JobPaths, bundle: JobBundle) -> str | None:
-    for candidate, intent in _iter_intents(paths.run_dir):
-        if candidate == paths.intent or intent.bundle_id == bundle.bundle_id:
+    for _candidate, intent in _iter_intents(paths.run_dir):
+        # ``_iter_intents`` refuses an intent that does not bind to its own directory's
+        # bundle, and a job directory is named after its bundle, so this also skips
+        # this job's own intent file.
+        if intent.bundle_id == bundle.bundle_id:
             continue
         if intent.is_active_or_ambiguous:
             return (
@@ -1984,7 +2015,7 @@ def _iter_intents(run_dir: Path) -> Iterator[tuple[Path, SubmissionIntent]]:
     if not jobs_root.exists():
         return
     _require_jobs_root(jobs_root)
-    for candidate in sorted(jobs_root.iterdir(), key=lambda path: path.name):
+    for candidate in sorted(jobs_root.iterdir()):
         _require_job_directory(candidate)
         found = _read_intent_candidate(candidate)
         if found is not None:

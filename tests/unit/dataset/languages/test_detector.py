@@ -19,6 +19,7 @@ from osm_polygon_description_tag.dataset.languages import (
     detect_description_entries,
     language_model_identity,
 )
+from tests.helpers.messages import exactly
 
 
 def _detector(
@@ -132,7 +133,9 @@ def test_detector_constructor_validates_dependency_contracts() -> None:
 
 def test_language_result_rejects_non_lowercase_iso639_3_codes() -> None:
     for code in ("EN", "ENG"):
-        with pytest.raises(ValueError, match="lowercase ISO 639-3"):
+        with pytest.raises(
+            ValueError, match=exactly("language_code must be a lowercase ISO 639-3 code")
+        ):
             LanguageResult(code, 0.9, None, None, LanguageStatus.DETECTED, "detected")
 
 
@@ -531,5 +534,5 @@ def test_lingua_builder_rejects_invalid_language_scope_inputs() -> None:
         detector_module.build_lingua_detector(language_codes="eng")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="empty"):
         detector_module.build_lingua_detector(language_codes=())
-    with pytest.raises(ValueError, match="duplicates"):
+    with pytest.raises(ValueError, match=exactly("language_codes must not contain duplicates")):
         detector_module.build_lingua_detector(language_codes=("eng", "eng"))

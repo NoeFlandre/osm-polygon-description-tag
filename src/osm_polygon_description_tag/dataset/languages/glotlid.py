@@ -51,13 +51,9 @@ def _predictions(result: tuple[object, object]) -> tuple[tuple[object, object], 
     if isinstance(labels, str) or isinstance(scores, str):
         raise GlotLIDLabelError("GlotLID predictions must be sequences")
     try:
-        pairs = tuple(
-            zip(
-                cast(Iterable[object], labels),
-                cast(Iterable[object], scores),
-                strict=True,
-            )
-        )
+        typed_labels = cast(Iterable[object], labels)  # pragma: no mutate - static cast
+        typed_scores = cast(Iterable[object], scores)  # pragma: no mutate - static cast
+        pairs = tuple(zip(typed_labels, typed_scores, strict=True))
     except (TypeError, ValueError) as error:
         raise GlotLIDLabelError("GlotLID predictions must be equal-length sequences") from error
     return pairs
@@ -129,9 +125,12 @@ def _download_model() -> Path:
 
 
 def _file_sha256(path: Path) -> str:
+    # ``hashlib`` resolves digest names case-insensitively, so an upper-case spelling
+    # selects the same algorithm and cannot change the digest this returns.
+    digest_name = "sha256"  # pragma: no mutate - digest names are case-insensitive
     try:
         with path.open("rb") as handle:
-            return hashlib.file_digest(handle, "sha256").hexdigest()
+            return hashlib.file_digest(handle, digest_name).hexdigest()
     except OSError as error:
         raise LanguageDetectionError(f"could not hash the GlotLID model: {path}") from error
 
@@ -157,7 +156,7 @@ def _load_fasttext_model(path: Path) -> _Predictor:
         model = loader(str(path))
     except (OSError, RuntimeError, ValueError) as error:
         raise LanguageDetectionError("could not load the pinned GlotLID v3 model") from error
-    return cast(_Predictor, model)
+    return cast(_Predictor, model)  # pragma: no mutate - static cast
 
 
 def build_glotlid_detector(

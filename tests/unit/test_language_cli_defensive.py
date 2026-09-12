@@ -14,6 +14,7 @@ import pytest
 from osm_polygon_description_tag import language_cli
 from osm_polygon_description_tag.workflow.grid_operator import GridOperatorError
 from osm_polygon_description_tag.workflow.grid_scheduler import SchedulerError
+from tests.helpers.messages import exactly
 
 SHARD = "region.parquet"
 
@@ -76,7 +77,12 @@ def test_an_absent_job_directory_is_reported_as_missing(tmp_path: Path) -> None:
 
 
 def test_non_sibling_remote_paths_cannot_infer_a_portable_root() -> None:
-    with pytest.raises(GridOperatorError, match="sibling remote project/source/run paths"):
+    with pytest.raises(
+        GridOperatorError,
+        match=exactly(
+            "staged portable submission requires sibling remote project/source/run paths"
+        ),
+    ):
         language_cli._infer_remote_bundle_dir(
             "/scratch/bundle/project", "/other/place/source", "/scratch/bundle/run"
         )
@@ -122,7 +128,10 @@ def test_seeding_keeps_an_existing_retrieved_snapshot(tmp_path: Path) -> None:
 
 
 def test_remote_collection_requires_a_local_staging_directory(tmp_path: Path) -> None:
-    with pytest.raises(GridOperatorError, match="requires --retrieved-run-dir"):
+    with pytest.raises(
+        GridOperatorError,
+        match=exactly("remote collection requires --retrieved-run-dir for its local staging area"),
+    ):
         language_cli.handle_grid_collect(
             tmp_path / "run", SHARD, remote_bundle_dir="/scratch/bundle"
         )

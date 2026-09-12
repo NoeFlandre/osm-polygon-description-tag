@@ -41,6 +41,7 @@ def _intent(**changes: object) -> dict[str, object]:
         ({"attempt": "2"}, "intent field attempt must be an integer >= 1"),
         ({"result_acknowledged": 1}, "intent field result_acknowledged must be a boolean"),
         ({"result_complete": "false"}, "intent field result_complete must be a boolean"),
+        ({"terminal_state": 3}, "intent field terminal_state must be a string or null"),
         ({"reconciled_at": 3}, "intent field reconciled_at must be a string or null"),
         ({"collected_at": []}, "intent field collected_at must be a string or null"),
         ({"outcome": "success"}, "unsupported submission outcome: 'success'"),

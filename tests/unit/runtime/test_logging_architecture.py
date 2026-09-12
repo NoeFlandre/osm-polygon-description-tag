@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 
 import osm_polygon_description_tag.runtime.logging as logging_module
+from tests.helpers.messages import exactly
 
 
 @pytest.fixture
@@ -392,9 +393,9 @@ def test_run_logger_reconfigure_rotation_rejects_invalid_values(
         run_id="test-run-11",
         clock=lambda: "2026-07-28T00:00:00+00:00",
     )
-    with pytest.raises(ValueError, match="max_bytes"):
+    with pytest.raises(ValueError, match=exactly("max_bytes must be positive")):
         logger.configure_rotation(max_bytes=0, backups=2)
-    with pytest.raises(ValueError, match="backups"):
+    with pytest.raises(ValueError, match=exactly("backups must be non-negative")):
         logger.configure_rotation(max_bytes=1024, backups=-1)
 
 

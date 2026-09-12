@@ -156,10 +156,10 @@ def format_walltime(seconds: int) -> str:
 
 def contained_script(script: Path, allowed_root: Path) -> Path:
     """Return ``script`` resolved inside ``allowed_root``, rejecting escapes."""
-    root = allowed_root.resolve(strict=False)
+    root = allowed_root.resolve()
     if script.is_symlink():
         raise SchedulerError(f"job script must not be a symlink: {script}")
-    resolved = script.resolve(strict=False)
+    resolved = script.resolve()
     if not resolved.is_relative_to(root):
         raise SchedulerError(f"job script escapes its allowed root: {script}")
     if not resolved.is_file():
@@ -270,7 +270,7 @@ def _account_job_record(raw_job_id: str, raw_record: object) -> tuple[int, dict[
     job_id = _parse_account_job_id(raw_job_id)
     if not isinstance(raw_record, dict):
         raise SchedulerError("account-wide oarstat job record must be a JSON object")
-    record = cast(dict[str, object], raw_record)
+    record = cast(dict[str, object], raw_record)  # pragma: no mutate - static cast
     _validate_record_job_id(record, job_id)
     return job_id, record
 
@@ -342,7 +342,8 @@ def run_command(argv: Sequence[str], timeout: float) -> CommandResult:
             capture_output=True,
             text=True,
             timeout=timeout,
-            check=False,
+            # ``check`` is left at its default of False: the return code is inspected
+            # below, and raising here would discard it.
         )
     except subprocess.TimeoutExpired:
         return CommandResult(tuple(argv), returncode=-1, stdout="", stderr="", timed_out=True)

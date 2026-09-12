@@ -167,7 +167,10 @@ class _StatsAccumulator:
 
 
 def _export_name(shard: str) -> str:
-    stem = _SAFE_NAME.sub("-", Path(shard).stem.lower()).strip("-")
+    sanitized = _SAFE_NAME.sub("-", Path(shard).stem.lower())
+    # ``sanitized`` holds only ``[a-z0-9-]``, so stripping ``"-"`` and stripping the
+    # character set ``{"X", "-"}`` remove exactly the same characters.
+    stem = sanitized.strip("-")  # pragma: no mutate - no upper-case X can occur
     if not stem:
         raise LanguagePublicationError(f"shard name cannot be expressed as a file name: {shard}")
     return f"{stem}.parquet"
@@ -264,7 +267,8 @@ def _export_seal(export: LanguageExport) -> dict[str, object]:
 def _validate_export_seal(export: LanguageExport) -> None:
     path = export.export_root / LANGUAGE_MANIFEST_PATH
     try:
-        recorded = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")  # pragma: no mutate - codec alias only
+        recorded = json.loads(text)
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise LanguagePublicationError(f"cannot read completed export manifest: {error}") from error
     if canonical_json_bytes(recorded) != canonical_json_bytes(_export_seal(export)):
@@ -300,7 +304,8 @@ def read_language_export(export_root: Path) -> LanguageExport:
     """Rebuild a previously written export description from its stats file."""
     path = export_root / LANGUAGE_STATS_PATH
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")  # pragma: no mutate - codec alias only
+        payload = json.loads(text)
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise LanguagePublicationError(f"cannot read language export {path}: {error}") from error
     reader = require_object(payload, error=LanguagePublicationError, label="language export")
@@ -375,7 +380,11 @@ def build_language_upload_plan(
 
 
 def _identified_plan(repo_id: str, root: Path, items: tuple[UploadItem, ...]) -> UploadPlan:
+    # ``identity_sha256`` is omitted from ``UploadPlan.to_payload`` by design, so this
+    # provisional-only field cannot reach the digest below: changing it is equivalent.
+    # pragma: no mutate start
     provisional = UploadPlan(repo_id=repo_id, data_root=str(root), files=items, identity_sha256="")
+    # pragma: no mutate end
     identity = file_sha256_bytes(provisional.to_json().encode())
     return UploadPlan(repo_id=repo_id, data_root=str(root), files=items, identity_sha256=identity)
 

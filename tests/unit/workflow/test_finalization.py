@@ -39,6 +39,7 @@ from osm_polygon_description_tag.workflow.finalization import (
     upload_final_metadata,
     verify_final_completeness,
 )
+from tests.helpers.messages import exactly
 
 
 def _paths(tmp_path: Path) -> Paths:
@@ -230,7 +231,9 @@ def test_write_metadata_state_wrapper_forwards_all_fields(
 
 def test_metadata_state_wrapper_translates_unsupported_schema(tmp_path: Path) -> None:
     (tmp_path / "publication-state.json").write_text('{"schema_version": 999}', encoding="utf-8")
-    with pytest.raises(OrchestratorError, match="unsupported publication state schema"):
+    with pytest.raises(
+        OrchestratorError, match=exactly("unsupported publication state schema: 999")
+    ):
         _write_metadata_state(
             tmp_path,
             identity_sha256="id",

@@ -753,5 +753,5 @@ def test_default_verifier_fails_closed_on_download_error(
 
     from osm_polygon_description_tag.orchestrator import HubVerificationError
 
-    with pytest.raises(HubVerificationError, match="could not download"):
+    with pytest.raises(HubVerificationError, match="download failed"):
         factory(REPO_ID, items)

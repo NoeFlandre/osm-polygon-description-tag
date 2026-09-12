@@ -63,8 +63,9 @@ def mangled_names(source: str, module: str) -> dict[str, tuple[int, int]]:
                     if class_name is not None
                     else f"{module}.x_{child.name}"
                 )
+                start = child.body[0].lineno
                 end = child.end_lineno or child.lineno
-                spans[mangled] = (child.lineno, end)
+                spans[mangled] = (start, end)
                 visit(child, class_name)
                 continue
             visit(child, class_name)

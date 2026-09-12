@@ -106,11 +106,10 @@ def write_annotation_part(path: Path, table: pa.Table) -> str:
     if table.schema != ANNOTATION_SCHEMA:
         raise AnnotationError("annotation table does not match the annotation schema")
     if table.num_rows:
-        first = table.slice(0, 1).to_pylist()[0]
         validate_annotation_table(
             table,
-            snapshot_id=first["snapshot_id"],
-            model_config_fingerprint=first["model_config_fingerprint"],
+            snapshot_id=table.column("snapshot_id")[0].as_py(),
+            model_config_fingerprint=table.column("model_config_fingerprint")[0].as_py(),
         )
     atomic_write_via(path, lambda temp: _write_parquet(temp, table))
     return file_sha256(path)
@@ -159,13 +158,53 @@ def validate_annotation_table(
 
     Identity membership is checked against ``seen_identities`` without copying
     its history. When ``merge_seen`` is true, the caller's set is updated only
-    after the complete table validates; callers that need a later count or
-    commit check can merge the returned identities themselves.
+    after the complete table validates. Callers that must reserve later --- once
+    their own commit or count has succeeded --- use
+    :func:`validate_annotation_table_without_reserving` instead.
 
     The local work is bounded by this annotation part. The caller's identity
     set remains proportional to the validation scope: one shard for the
     worker, or all selected shards for run validation.
     """
+    identities = _validated_identities(
+        table,
+        snapshot_id=snapshot_id,
+        model_config_fingerprint=model_config_fingerprint,
+        seen_identities=seen_identities,
+    )
+    if seen_identities is not None and merge_seen:
+        seen_identities.update(identities)
+    return identities
+
+
+def validate_annotation_table_without_reserving(
+    table: pa.Table,
+    *,
+    snapshot_id: str,
+    model_config_fingerprint: str,
+    seen_identities: set[str] | None = None,
+) -> tuple[str, ...]:
+    """Validate one annotation table without reserving its identities.
+
+    The caller reserves the returned identities itself, after its own commit or
+    count has succeeded, so a part that is written but not committed --- or one
+    that is refused for its row count --- leaves the caller's set untouched.
+    """
+    return _validated_identities(
+        table,
+        snapshot_id=snapshot_id,
+        model_config_fingerprint=model_config_fingerprint,
+        seen_identities=seen_identities,
+    )
+
+
+def _validated_identities(
+    table: pa.Table,
+    *,
+    snapshot_id: str,
+    model_config_fingerprint: str,
+    seen_identities: set[str] | None,
+) -> tuple[str, ...]:
     validate_annotation_schema(table.schema, Path("<in-memory annotation table>"))
     local_identities: set[str] = set()
     identities: list[str] = []
@@ -179,8 +218,6 @@ def validate_annotation_table(
         _validate_new_identity(identity, index, local_identities, seen_identities)
         local_identities.add(identity)
         identities.append(identity)
-    if seen_identities is not None and merge_seen:
-        seen_identities.update(identities)
     return tuple(identities)
 
 
@@ -218,13 +255,12 @@ def _validate_annotation_row(
 
 def _entry_from_annotation_row(row: Mapping[str, object], index: int) -> DescriptionEntry:
     try:
-        return DescriptionEntry(
-            cast(str, row["source_pbf"]),
-            cast(str, row["osm_type"]),
-            cast(int, row["osm_id"]),
-            cast(str, row["tag_key"]),
-            cast(str, row["original_text"]),
-        )
+        source_pbf = cast(str, row["source_pbf"])  # pragma: no mutate - static cast
+        osm_type = cast(str, row["osm_type"])  # pragma: no mutate - static cast
+        osm_id = cast(int, row["osm_id"])  # pragma: no mutate - static cast
+        tag_key = cast(str, row["tag_key"])  # pragma: no mutate - static cast
+        original_text = cast(str, row["original_text"])  # pragma: no mutate - static cast
+        return DescriptionEntry(source_pbf, osm_type, osm_id, tag_key, original_text)
     except (TypeError, ValueError) as error:
         raise AnnotationError(
             f"annotation row {index} has invalid entry fields: {error}"
@@ -233,14 +269,15 @@ def _entry_from_annotation_row(row: Mapping[str, object], index: int) -> Descrip
 
 def _result_from_annotation_row(row: Mapping[str, object], index: int) -> LanguageResult:
     try:
-        return LanguageResult(
-            cast(str | None, row["language_code"]),
-            cast(int | float | None, row["top_score"]),
-            cast(int | float | None, row["runner_up_score"]),
-            cast(int | float | None, row["margin"]),
-            cast(LanguageStatus, row["status"]),
-            cast(str, row["reason"]),
-        )
+        language_code = cast(str | None, row["language_code"])  # pragma: no mutate - static cast
+        top_score = cast(int | float | None, row["top_score"])  # pragma: no mutate - static cast
+        runner_up_score = cast(
+            int | float | None, row["runner_up_score"]
+        )  # pragma: no mutate - static cast
+        margin = cast(int | float | None, row["margin"])  # pragma: no mutate - static cast
+        status = cast(LanguageStatus, row["status"])  # pragma: no mutate - static cast
+        reason = cast(str, row["reason"])  # pragma: no mutate - static cast
+        return LanguageResult(language_code, top_score, runner_up_score, margin, status, reason)
     except (TypeError, ValueError) as error:
         raise AnnotationError(
             f"annotation row {index} has invalid detection result: {error}"
@@ -263,5 +300,6 @@ __all__ = [
     "read_annotation_part",
     "validate_annotation_schema",
     "validate_annotation_table",
+    "validate_annotation_table_without_reserving",
     "write_annotation_part",
 ]

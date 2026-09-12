@@ -118,7 +118,8 @@ def policy_evidence_is_fresh(
     _validate_aware_time(captured_at, "policy evidence time")
     if type(max_age_seconds) is not int or max_age_seconds < 1:
         raise GridPolicyError("maximum evidence age must be a positive integer")
-    age = (moment.astimezone(UTC) - captured_at.astimezone(UTC)).total_seconds()
+    # Subtracting two aware datetimes is already absolute, whatever zone each carries.
+    age = (moment - captured_at).total_seconds()
     return 0 <= age <= max_age_seconds
 
 
@@ -241,7 +242,7 @@ def parse_home_quota(text: str) -> tuple[bool | None, tuple[str, ...]]:
 
 
 def _is_home_filesystem(filesystem: str) -> bool:
-    return "home" in PurePosixPath(filesystem.rsplit(":", 1)[-1]).parts
+    return "home" in PurePosixPath(filesystem.rsplit(":")[-1]).parts
 
 
 def _soft_limit_notes(exceeded: bool) -> tuple[str, ...]:
@@ -408,7 +409,13 @@ def _walltime_reasons(walltime_seconds: int, moment: datetime) -> list[str]:
         return ["walltime must be a positive number of seconds"]
     if walltime_seconds > MAX_WALLTIME_SECONDS:
         return [f"walltime {walltime_seconds}s exceeds the {MAX_WALLTIME_SECONDS}s limit"]
-    last_instant = moment.astimezone(UTC) + timedelta(seconds=walltime_seconds, microseconds=-1)
+    # The walltime's last instant, so a job ending exactly at a boundary does not
+    # count as crossing it.
+    window = timedelta(seconds=walltime_seconds, microseconds=-1)
+    # ``astimezone`` makes the offset fixed so the addition is absolute rather than
+    # wall-clock; any fixed-offset zone gives the same instant, and the result is only
+    # ever read back through ``is_weekday_daytime``.
+    last_instant = moment.astimezone(UTC) + window  # pragma: no mutate - any fixed offset
     if is_weekday_daytime(moment) != is_weekday_daytime(last_instant):
         return ["job walltime crosses a Europe/Paris day/night boundary"]
     return []

@@ -37,6 +37,7 @@ from osm_polygon_description_tag.workflow.grid_operator import (
     verify_prepared_bundle,
 )
 from tests.conftest import make_record_dict
+from tests.helpers.messages import exactly
 
 SHARD = "region.parquet"
 REMOTE_BUNDLE = "/scratch/lang-bundle"
@@ -313,7 +314,7 @@ def test_a_symlinked_resume_checkpoint_is_refused_while_copying(
     state.root.mkdir(parents=True)
     state.checkpoint.symlink_to(tmp_path / "missing.json")
 
-    with pytest.raises(GridOperatorError, match="resume checkpoint must not be a symlink"):
+    with pytest.raises(GridOperatorError, match=exactly("resume checkpoint must not be a symlink")):
         grid_operator._copy_resume_state(run, tmp_path / "destination", SHARD)
 
 
@@ -337,7 +338,7 @@ def test_a_stage_manifest_with_duplicate_files_is_rejected(
     payload["files"].append(payload["files"][0])
     manifest.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(GridOperatorError, match="duplicate files"):
+    with pytest.raises(GridOperatorError, match=exactly("stage manifest contains duplicate files")):
         verify_prepared_bundle(prepared.payload_root)  # type: ignore[attr-defined]
 
 
@@ -352,7 +353,9 @@ def test_a_stage_manifest_missing_a_payload_file_is_rejected(
     ]
     manifest.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(GridOperatorError, match="does not account for every payload file"):
+    with pytest.raises(
+        GridOperatorError, match=exactly("stage manifest does not account for every payload file")
+    ):
         verify_prepared_bundle(prepared.payload_root)  # type: ignore[attr-defined]
 
 
@@ -418,7 +421,9 @@ def test_resume_state_that_fails_collection_validation_is_rejected(
     state = shard_paths(run, SHARD)
     next(state.parts.iterdir()).write_bytes(b"not parquet")
 
-    with pytest.raises(GridOperatorError, match="resume state failed collection validation"):
+    with pytest.raises(
+        GridOperatorError, match=exactly("resume state failed collection validation")
+    ):
         grid_operator._validate_resume_state(run, SHARD)
 
 
@@ -502,7 +507,9 @@ def test_a_payload_without_project_source_code_is_rejected(
     root = prepared.payload_root  # type: ignore[attr-defined]
     shutil.rmtree(root / "project" / "src")
 
-    with pytest.raises(GridOperatorError, match="missing project source code"):
+    with pytest.raises(
+        GridOperatorError, match=exactly("portable payload is missing project source code")
+    ):
         grid_operator._verify_payload_layout(root, root / "project", prepared.bundle)  # type: ignore[attr-defined]
 
 
@@ -513,7 +520,7 @@ def test_a_non_executable_payload_job_script_is_rejected(
     root = prepared.payload_root  # type: ignore[attr-defined]
     (root / "job.sh").chmod(0o400)
 
-    with pytest.raises(GridOperatorError, match="not executable"):
+    with pytest.raises(GridOperatorError, match=exactly("portable job script is not executable")):
         grid_operator._verify_payload_layout(root, root / "project", prepared.bundle)  # type: ignore[attr-defined]
 
 
@@ -546,7 +553,7 @@ def test_a_staged_snapshot_with_foreign_fingerprints_is_rejected(
     _, _, _, snapshot = inputs
     foreign = replace(bundle_for_shard(snapshot, SHARD), **{field: "c" * 64})
 
-    with pytest.raises(GridOperatorError, match=message):
+    with pytest.raises(GridOperatorError, match=exactly(message)):
         grid_operator._validate_staged_snapshot(snapshot, foreign)
 
 
@@ -563,7 +570,7 @@ def test_a_staged_project_that_drifted_from_the_bundle_is_rejected(
         (project_root / "uv.lock").write_text("version = 2\n", encoding="utf-8")
         message = "staged lockfile does not match bundle"
 
-    with pytest.raises(GridOperatorError, match=message):
+    with pytest.raises(GridOperatorError, match=exactly(message)):
         grid_operator._validate_staged_project(project_root, prepared.bundle)  # type: ignore[attr-defined]
 
 
@@ -574,7 +581,9 @@ def test_a_payload_with_more_than_one_input_shard_is_rejected(
     source_root = prepared.source_root  # type: ignore[attr-defined]
     (source_root / "extra.parquet").write_bytes(b"extra")
 
-    with pytest.raises(GridOperatorError, match="exactly one input shard"):
+    with pytest.raises(
+        GridOperatorError, match=exactly("portable payload must contain exactly one input shard")
+    ):
         grid_operator._verify_one_staged_input(source_root, prepared.bundle)  # type: ignore[attr-defined]
 
 
@@ -593,7 +602,9 @@ def test_retrieved_results_from_another_snapshot_are_rejected(
     other = tmp_path / "other-run"
     prepare_snapshot(source, other, code_fingerprint="d" * 64, lock_fingerprint="e" * 64)
 
-    with pytest.raises(GridOperatorError, match="belong to a different snapshot"):
+    with pytest.raises(
+        GridOperatorError, match=exactly("retrieved results belong to a different snapshot")
+    ):
         grid_operator._require_matching_snapshots(run, other)
 
 
@@ -721,7 +732,9 @@ def test_collected_results_for_another_shard_are_rejected(
     selected = _shard_report(shard="other.parquet")
     report = _run_report(selected, snapshot_id=bundle.snapshot_id)
 
-    with pytest.raises(GridOperatorError, match="do not match the submitted bundle"):
+    with pytest.raises(
+        GridOperatorError, match=exactly("collected results do not match the submitted bundle")
+    ):
         grid_operator._validate_ack_identity(report, selected, bundle)  # type: ignore[arg-type]
 
 
@@ -738,7 +751,9 @@ def test_a_shard_without_a_terminal_checkpoint_cannot_be_acknowledged() -> None:
         terminal_state="terminated",
     )
 
-    with pytest.raises(GridOperatorError, match="do not have a terminal checkpoint"):
+    with pytest.raises(
+        GridOperatorError, match=exactly("collected results do not have a terminal checkpoint")
+    ):
         grid_operator._validate_ack_terminal(_shard_report(status="missing"), intent)  # type: ignore[arg-type]
 
 
@@ -763,7 +778,9 @@ def test_complete_results_cannot_be_downgraded_to_paused(
     selected = _shard_report()
     report = _run_report(selected, snapshot_id=bundle.snapshot_id)
 
-    with pytest.raises(GridOperatorError, match="cannot be downgraded"):
+    with pytest.raises(
+        GridOperatorError, match=exactly("complete results cannot be downgraded to paused results")
+    ):
         grid_operator._validate_acknowledgment(report, selected, intent, bundle)  # type: ignore[arg-type]
 
 
@@ -808,7 +825,9 @@ def test_planning_rejects_a_bundle_that_is_not_the_prepared_one(
     _, _, run, snapshot = inputs
     bundle, paths = prepare_job(run, snapshot, SHARD, **REMOTE)
 
-    with pytest.raises(GridOperatorError, match="does not match the requested submission"):
+    with pytest.raises(
+        GridOperatorError, match=exactly("prepared bundle does not match the requested submission")
+    ):
         grid_operator._validate_prepared_submission(
             paths, replace(bundle, source_sha256="c" * 64), 1800
         )

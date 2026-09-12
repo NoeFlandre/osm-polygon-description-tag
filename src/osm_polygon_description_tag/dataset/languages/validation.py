@@ -13,7 +13,7 @@ from pathlib import Path
 from osm_polygon_description_tag.dataset.languages.annotations import (
     AnnotationError,
     read_annotation_part,
-    validate_annotation_table,
+    validate_annotation_table_without_reserving,
 )
 from osm_polygon_description_tag.dataset.languages.checkpoint import (
     CheckpointError,
@@ -25,6 +25,7 @@ from osm_polygon_description_tag.dataset.languages.checkpoint import (
     read_receipt,
     receipt_name_for_part,
     shard_paths,
+    shards_root,
     validate_receipt_chain,
 )
 from osm_polygon_description_tag.dataset.languages.snapshot import (
@@ -256,12 +257,11 @@ def _counted_rows(
 ) -> tuple[int, list[str]]:
     try:
         table = read_annotation_part(part_path)
-        identities = validate_annotation_table(
+        identities = validate_annotation_table_without_reserving(
             table,
             snapshot_id=receipt.snapshot_id,
             model_config_fingerprint=receipt.model_config_fingerprint,
             seen_identities=seen_identities,
-            merge_seen=False,
         )
     except AnnotationError as error:
         return 0, [f"committed part is unreadable: {part_name}: {error}"]
@@ -352,13 +352,13 @@ def _is_unexpected_directory(path: Path, expected: set[str]) -> bool:
 
 
 def _run_issues(run_dir: Path, snapshot: SnapshotManifest) -> list[str]:
-    shards_root = run_dir / "shards"
-    if not shards_root.is_dir():
+    root = shards_root(run_dir)
+    if not root.is_dir():
         return []
     expected = _expected_shard_directories(run_dir, snapshot)
     return [
         f"unexpected shard directory not described by the snapshot: {path.name}"
-        for path in sorted(shards_root.iterdir())
+        for path in sorted(root.iterdir())
         if _is_unexpected_directory(path, expected)
     ]
 

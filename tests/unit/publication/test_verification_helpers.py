@@ -11,6 +11,7 @@ import pytest
 
 import osm_polygon_description_tag.publication.verification as verification
 from osm_polygon_description_tag.publication.models import REPO_ID, UploadItem
+from tests.helpers.messages import exactly
 
 
 def _item(path: str, content: bytes) -> UploadItem:
@@ -189,7 +190,12 @@ def test_default_verifier_rejects_missing_revision(
     _install_hub(monkeypatch, MissingRevision())
     verifier = verification.default_hub_verifier_factory()
 
-    with pytest.raises(verification.HubVerificationError, match="empty revision"):
+    with pytest.raises(
+        verification.HubVerificationError,
+        match=exactly(
+            "Hub repository NoeFlandre/osm-polygon-description-tag returned an empty revision"
+        ),
+    ):
         verifier(REPO_ID, ())
 
 

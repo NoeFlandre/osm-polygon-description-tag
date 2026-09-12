@@ -74,6 +74,7 @@ from osm_polygon_description_tag.workflow.grid_operator import (
     gather_policy_evidence,
     import_retrieved_results,
     job_paths,
+    jobs_root,
     prepare_job,
     prepare_portable_job,
     quarantine_orphan_artifacts,
@@ -582,7 +583,7 @@ def _reuse_verified_staged_job(
     glotlid_model_path: str | None = None,
 ) -> tuple[JobBundle, JobPaths] | None:
     """Re-prepare a staged job so every requested setting remains immutable."""
-    if not (run_dir / "jobs").exists():
+    if not jobs_root(run_dir).exists():
         return None
     bundle = bundle_for_shard(snapshot, shard)
     paths = job_paths(run_dir, bundle)
@@ -614,7 +615,7 @@ def _portable_payload_candidates(paths: JobPaths) -> tuple[Path, ...]:
         return ()
     return tuple(
         candidate
-        for candidate in sorted(root.iterdir(), key=lambda path: path.name)
+        for candidate in sorted(root.iterdir())
         if _is_portable_payload(candidate.name, paths.payload_root.name)
     )
 
@@ -632,7 +633,9 @@ def _infer_remote_bundle_dir(
         ("source", Path(remote_source_dir)),
         ("run", Path(remote_run_dir)),
     )
-    parent = siblings[0][1].parent
+    # Any sibling's parent works: when the three disagree the check below refuses
+    # whichever parent was chosen, and when they agree all three parents are equal.
+    parent = siblings[0][1].parent  # pragma: no mutate - equal or refused either way
     if any(path.parent != parent or path.name != name for name, path in siblings):
         raise GridOperatorError(
             "staged portable submission requires sibling remote project/source/run paths"
@@ -1014,7 +1017,8 @@ def handle_export(run_dir: Path, export_dir: Path, card_section: Path | None) ->
     export = export_language_annotations(run_dir, export_dir)
     if card_section is not None:
         card_section.parent.mkdir(parents=True, exist_ok=True)
-        card_section.write_text(render_language_card_section(export), encoding="utf-8")
+        section = render_language_card_section(export)
+        card_section.write_text(section, encoding="utf-8")  # pragma: no mutate - codec alias only
     print_json(
         {
             "export_dir": str(export_dir),

@@ -20,6 +20,7 @@ from osm_polygon_description_tag.dataset.languages.annotations import (
 )
 from osm_polygon_description_tag.dataset.languages.models import LanguageResult, LanguageStatus
 from osm_polygon_description_tag.dataset.languages.records import DescriptionEntry
+from tests.helpers.messages import exactly
 
 SNAPSHOT = "a" * 64
 FINGERPRINT = "b" * 64
@@ -109,7 +110,9 @@ def test_a_part_round_trips_and_reports_its_checksum(tmp_path: Path) -> None:
 def test_writing_a_foreign_table_is_refused(tmp_path: Path) -> None:
     foreign = pa.table({"description_identity": ["x"]})
 
-    with pytest.raises(AnnotationError, match="does not match the annotation schema"):
+    with pytest.raises(
+        AnnotationError, match=exactly("annotation table does not match the annotation schema")
+    ):
         write_annotation_part(tmp_path / "part.parquet", foreign)
     assert not (tmp_path / "part.parquet").exists()
 

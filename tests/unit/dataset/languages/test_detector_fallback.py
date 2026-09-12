@@ -28,6 +28,7 @@ from osm_polygon_description_tag.dataset.languages.models import (
     cascade_model_identity,
     language_model_identity,
 )
+from tests.helpers.messages import exactly
 
 
 def _result(
@@ -289,13 +290,17 @@ def test_download_failure_is_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
     module.hf_hub_download = fail  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "huggingface_hub", module)
 
-    with pytest.raises(LanguageDetectionError, match="could not download"):
+    with pytest.raises(
+        LanguageDetectionError, match=exactly("could not download the pinned GlotLID v3 model")
+    ):
         glotlid_module._download_model()
 
 
 def test_missing_huggingface_hub_is_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "huggingface_hub", None)
-    with pytest.raises(LanguageDetectionError, match="could not import huggingface_hub"):
+    with pytest.raises(
+        LanguageDetectionError, match=exactly("could not import huggingface_hub for GlotLID")
+    ):
         glotlid_module._download_model()
 
 
@@ -351,19 +356,23 @@ def test_fasttext_loader_reports_import_shape_and_load_errors(
         "import_module",
         lambda _name: (_ for _ in ()).throw(ImportError("missing")),
     )
-    with pytest.raises(LanguageDetectionError, match="could not import"):
+    with pytest.raises(
+        LanguageDetectionError, match=exactly("could not import the pinned fastText runtime")
+    ):
         glotlid_module._load_fasttext_model(tmp_path / "model.bin")
 
     module = ModuleType("fasttext")
     monkeypatch.setattr(glotlid_module.importlib, "import_module", lambda _name: module)
-    with pytest.raises(LanguageDetectionError, match="lacks load_model"):
+    with pytest.raises(LanguageDetectionError, match=exactly("fastText runtime lacks load_model")):
         glotlid_module._load_fasttext_model(tmp_path / "model.bin")
 
     def fail(_path: str) -> object:
         raise OSError("bad model")
 
     module.load_model = fail  # type: ignore[attr-defined]
-    with pytest.raises(LanguageDetectionError, match="could not load"):
+    with pytest.raises(
+        LanguageDetectionError, match=exactly("could not load the pinned GlotLID v3 model")
+    ):
         glotlid_module._load_fasttext_model(tmp_path / "model.bin")
 
     expected = object()
@@ -387,7 +396,10 @@ def test_builder_rejects_an_identity_that_changes_runtime_version(
         ),
     )
 
-    with pytest.raises(LanguageDetectionError, match="changed during construction"):
+    with pytest.raises(
+        LanguageDetectionError,
+        match=exactly("fastText identity version changed during construction"),
+    ):
         build_glotlid_detector(model_path=model)
 
 

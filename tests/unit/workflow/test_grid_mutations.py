@@ -15,6 +15,7 @@ from osm_polygon_description_tag.workflow.grid_scheduler import (
     SchedulerError,
     parse_account_job_states,
 )
+from tests.helpers.messages import exactly
 
 
 def _scripted_runner(
@@ -89,5 +90,10 @@ def test_job_name_resolver_treats_successful_empty_account_output_as_no_match() 
 def test_job_name_resolver_keeps_successful_whitespace_output_strict() -> None:
     runner, _ = _scripted_runner([CommandResult((), 0, " \n", "")])
 
-    with pytest.raises(GridOperatorError, match="valid JSON"):
+    with pytest.raises(
+        GridOperatorError,
+        match=exactly(
+            "cannot resolve account job by name: account-wide oarstat output must be valid JSON"
+        ),
+    ):
         resolve_job_name("lang-target", runner=runner)

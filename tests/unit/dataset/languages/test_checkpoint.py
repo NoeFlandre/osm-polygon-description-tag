@@ -25,6 +25,7 @@ from osm_polygon_description_tag.dataset.languages.checkpoint import (
     write_checkpoint,
     write_receipt,
 )
+from tests.helpers.messages import exactly
 
 _PART = "part-00000000000000000004.parquet"
 
@@ -306,9 +307,12 @@ def test_part_names_are_fixed_width_and_bounded() -> None:
 
     with pytest.raises(CheckpointError, match="too large for a part name"):
         part_name_for_offset(10**20)
-    with pytest.raises(CheckpointError, match="must be a non-negative integer"):
+    with pytest.raises(
+        CheckpointError,
+        match=exactly("input_row_offset must be a non-negative integer"),
+    ):
         part_name_for_offset(-1)
-    with pytest.raises(CheckpointError, match="part name must be a relative part name"):
+    with pytest.raises(CheckpointError, match=exactly("part name must be a relative part name")):
         receipt_name_for_part("part-4.parquet")
 
 
