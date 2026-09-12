@@ -59,6 +59,7 @@ from osm_polygon_description_tag.publication.models import UploadPlan
 from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
 from tests.helpers.messages import exactly
+from tests.helpers.sentences import fake_splitter
 
 REPO = "NoeFlandre/osm-polygon-description-tag"
 SHARD = "region.parquet"
@@ -101,7 +102,15 @@ def run_dir(tmp_path: Path) -> tuple[Path, Path, SnapshotManifest]:
 
 
 def _process(source: Path, run: Path, snapshot: SnapshotManifest, shard: str = SHARD) -> None:
-    process_shard(run, source, shard, detector=_detector, snapshot=snapshot, batch_size=3)
+    process_shard(
+        run,
+        source,
+        shard,
+        detector=_detector,
+        splitter=fake_splitter(),
+        snapshot=snapshot,
+        batch_size=3,
+    )
 
 
 @pytest.fixture

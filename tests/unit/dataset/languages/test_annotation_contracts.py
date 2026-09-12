@@ -23,6 +23,7 @@ from osm_polygon_description_tag.dataset.languages.annotations import (
 )
 from osm_polygon_description_tag.dataset.languages.models import LanguageResult, LanguageStatus
 from osm_polygon_description_tag.dataset.languages.records import DescriptionEntry
+from tests.helpers.sentences import annotation_for
 
 _SNAPSHOT = "a" * 64
 _FINGERPRINT = "b" * 64
@@ -38,7 +39,7 @@ def _detected() -> LanguageResult:
 
 def _table(count: int = 1) -> pa.Table:
     return annotation_table(
-        [(_entry(osm_id=index + 1), _detected()) for index in range(count)],
+        [annotation_for(_entry(osm_id=index + 1), _detected()) for index in range(count)],
         snapshot_id=_SNAPSHOT,
         model_config_fingerprint=_FINGERPRINT,
     )
@@ -100,7 +101,7 @@ def test_a_part_whose_rows_disagree_on_the_run_identity_is_refused(
 ) -> None:
     """Row zero supplies the binding, so a later divergent row must be caught."""
     other = annotation_table(
-        [(_entry(osm_id=99), _detected())],
+        [annotation_for(_entry(osm_id=99), _detected())],
         snapshot_id="c" * 64,
         model_config_fingerprint=_FINGERPRINT,
     )
@@ -128,7 +129,7 @@ def test_validating_without_reserving_leaves_the_callers_identity_set_untouched(
 
     identities = validate_annotation_table_without_reserving(
         annotation_table(
-            [(entry, _detected())],
+            [annotation_for(entry, _detected())],
             snapshot_id=_SNAPSHOT,
             model_config_fingerprint=_FINGERPRINT,
         ),
@@ -149,7 +150,7 @@ def test_validating_without_reserving_still_refuses_an_identity_already_seen() -
     with pytest.raises(AnnotationError) as caught:
         validate_annotation_table_without_reserving(
             annotation_table(
-                [(entry, _detected())],
+                [annotation_for(entry, _detected())],
                 snapshot_id=_SNAPSHOT,
                 model_config_fingerprint=_FINGERPRINT,
             ),
@@ -168,7 +169,7 @@ def test_an_explicit_no_merge_request_also_leaves_the_identity_set_untouched() -
 
     validate_annotation_table(
         annotation_table(
-            [(entry, _detected())],
+            [annotation_for(entry, _detected())],
             snapshot_id=_SNAPSHOT,
             model_config_fingerprint=_FINGERPRINT,
         ),

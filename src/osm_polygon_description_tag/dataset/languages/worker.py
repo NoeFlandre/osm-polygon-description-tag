@@ -22,6 +22,8 @@ import pyarrow.parquet as pq
 
 from osm_polygon_description_tag.dataset.languages.annotations import (
     AnnotationError,
+    DescriptionAnnotation,
+    TextAnalysis,
     annotation_table,
     read_annotation_part,
     validate_annotation_table_without_reserving,
@@ -43,9 +45,7 @@ from osm_polygon_description_tag.dataset.languages.checkpoint import (
     write_receipt,
 )
 from osm_polygon_description_tag.dataset.languages.detector import LanguageDetectionCallable
-from osm_polygon_description_tag.dataset.languages.models import LanguageResult
 from osm_polygon_description_tag.dataset.languages.records import (
-    DescriptionEntry,
     extract_description_entries,
 )
 from osm_polygon_description_tag.dataset.languages.snapshot import (
@@ -54,6 +54,10 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
     verify_source_file,
 )
 from osm_polygon_description_tag.dataset.manifest import file_sha256
+from osm_polygon_description_tag.dataset.sentences.splitter import (
+    GatedSentenceSplitter,
+    SentenceSplitter,
+)
 
 INPUT_COLUMNS: Final = ("source_pbf", "osm_type", "osm_id", "tags")
 DEFAULT_BATCH_SIZE: Final = 512
@@ -108,7 +112,8 @@ class BoundedTextCache:
     """Reuse inference for identical text without growing without bound.
 
     Distinct objects sharing the same description text still receive their own
-    annotation row; only the detector call is shared.
+    annotation row; what is shared is the inference --- detection and splitting
+    alike --- because both are pure functions of the text.
     """
 
     __slots__ = ("_entries", "_max_entries")
@@ -117,18 +122,18 @@ class BoundedTextCache:
         if type(max_entries) is not int or max_entries < 1:
             raise ValueError("cache max_entries must be a positive integer")
         self._max_entries = max_entries
-        self._entries: OrderedDict[str, LanguageResult] = OrderedDict()
+        self._entries: OrderedDict[str, TextAnalysis] = OrderedDict()
 
     def __len__(self) -> int:
         return len(self._entries)
 
-    def result_for(self, text: str, detector: LanguageDetectionCallable) -> LanguageResult:
-        """Return the detection result for ``text``, reusing a cached one."""
+    def analysis_for(self, text: str, analyse: Callable[[str], TextAnalysis]) -> TextAnalysis:
+        """Return the analysis of ``text``, reusing a cached one."""
         cached = self._entries.get(text)
         if cached is not None:
             self._entries.move_to_end(text)
             return cached
-        result = detector(text)
+        result = analyse(text)
         self._entries[text] = result
         if len(self._entries) > self._max_entries:
             self._entries.popitem(last=False)  # pragma: no mutate - last=None is equivalent
@@ -359,16 +364,30 @@ def _iter_input_batches(
         offset += batch.num_rows
 
 
-def _batch_pairs(
+def _batch_annotations(
     batch: pa.RecordBatch,
-    detector: LanguageDetectionCallable,
+    analyse: Callable[[str], TextAnalysis],
     cache: BoundedTextCache,
-) -> list[tuple[DescriptionEntry, LanguageResult]]:
-    pairs: list[tuple[DescriptionEntry, LanguageResult]] = []
+) -> list[DescriptionAnnotation]:
+    annotations: list[DescriptionAnnotation] = []
     for row in batch.to_pylist():
         for entry in extract_description_entries(row):
-            pairs.append((entry, cache.result_for(entry.original_text, detector)))
-    return pairs
+            analysis = cache.analysis_for(entry.original_text, analyse)
+            annotations.append(DescriptionAnnotation.from_analysis(entry, analysis))
+    return annotations
+
+
+def _text_analyser(
+    detector: LanguageDetectionCallable, splitter: SentenceSplitter
+) -> Callable[[str], TextAnalysis]:
+    """Compose detection and gated splitting into one pass over a text."""
+    gate = GatedSentenceSplitter(splitter)
+
+    def analyse(text: str) -> TextAnalysis:
+        detection = detector(text)
+        return TextAnalysis(detection, gate.split_for(text, detection))
+
+    return analyse
 
 
 def _start_budget(budget: ProcessingBudget | None) -> None:
@@ -395,7 +414,7 @@ class _CommitContext:
 
 def _commit_batch(
     context: _CommitContext,
-    pairs: list[tuple[DescriptionEntry, LanguageResult]],
+    annotations: list[DescriptionAnnotation],
     *,
     row_start: int,
     row_end: int,
@@ -406,7 +425,7 @@ def _commit_batch(
     snapshot = context.snapshot
     part_name = part_name_for_offset(row_start)
     table = annotation_table(
-        pairs,
+        annotations,
         snapshot_id=snapshot.snapshot_id,
         model_config_fingerprint=snapshot.model_config_fingerprint,
     )
@@ -470,6 +489,7 @@ def process_shard(
     shard: str,
     *,
     detector: LanguageDetectionCallable,
+    splitter: SentenceSplitter,
     snapshot: SnapshotManifest,
     batch_size: int = DEFAULT_BATCH_SIZE,
     budget: ProcessingBudget | None = None,
@@ -492,7 +512,7 @@ def process_shard(
         return _outcome(shard, resume.checkpoint, resume.cursor)
     return _run_batches(
         context,
-        detector=detector,
+        analyse=_text_analyser(detector, splitter),
         source_path=source_dir / source_path,
         resume=resume,
         budget=budget,
@@ -503,7 +523,7 @@ def process_shard(
 def _run_batches(
     context: _CommitContext,
     *,
-    detector: LanguageDetectionCallable,
+    analyse: Callable[[str], TextAnalysis],
     source_path: Path,
     resume: _ResumeState,
     budget: ProcessingBudget | None,
@@ -518,12 +538,12 @@ def _run_batches(
     for row_start, batch in _iter_input_batches(parquet, context.batch_size, cursor):
         if _budget_is_exhausted(budget):
             break
-        pairs = _batch_pairs(batch, detector, cache)
+        annotations = _batch_annotations(batch, analyse, cache)
         if not _batch_budget_allows_commit(budget):
             break
         annotation_count, completed_parts = _commit_batch(
             context,
-            pairs,
+            annotations,
             row_start=row_start,
             row_end=row_start + batch.num_rows,
             annotation_count=annotation_count,

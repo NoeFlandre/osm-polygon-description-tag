@@ -20,6 +20,7 @@ _REMOTE = {
     "remote_project_dir": "/home/user/bundle/project",
     "remote_source_dir": "/home/user/bundle/source",
     "remote_run_dir": "/home/user/bundle/run",
+    "sat_model_path": "/home/user/models/sat-3l-sm/model.safetensors",
 }
 
 
@@ -62,7 +63,8 @@ def test_a_lingua_job_appends_no_glotlid_option_at_all() -> None:
     assert script.endswith(
         "  --shard region.parquet \\\n"
         "  --batch-size 512 \\\n"
-        "  --budget-seconds 900\n"
+        "  --budget-seconds 900 \\\n"
+        "  --sat-model-path /home/user/models/sat-3l-sm/model.safetensors\n"
         "\n"
         "uv run --no-sync osm-polygon-description-tag language validate \\\n"
         "  --run-dir /home/user/bundle/run \\\n"
@@ -84,6 +86,7 @@ def test_a_cascade_job_appends_the_model_path_on_its_own_continued_line() -> Non
         "  --shard region.parquet \\\n"
         "  --batch-size 512 \\\n"
         "  --budget-seconds 900 \\\n"
+        "  --sat-model-path /home/user/models/sat-3l-sm/model.safetensors \\\n"
         "  --glotlid-model-path /home/user/models/model_v3.bin\n"
         "\n"
         "uv run --no-sync osm-polygon-description-tag language validate \\\n"
@@ -97,3 +100,36 @@ def test_the_requested_batch_size_reaches_the_script_verbatim(batch_size: int) -
     script = render_job_script(_bundle(), batch_size=batch_size, **_REMOTE)
 
     assert f"  --batch-size {batch_size} \\\n" in script
+
+
+def test_the_job_script_names_the_pinned_sentence_splitter_weights() -> None:
+    """Splitting runs in the same job, so the node needs the staged SaT artifact."""
+    script = render_job_script(
+        _bundle(),
+        processing_seconds=900,
+        **_REMOTE,
+    )
+
+    assert script.endswith(
+        "  --shard region.parquet \\\n"
+        "  --batch-size 512 \\\n"
+        "  --budget-seconds 900 \\\n"
+        "  --sat-model-path /home/user/models/sat-3l-sm/model.safetensors\n"
+        "\n"
+        "uv run --no-sync osm-polygon-description-tag language validate \\\n"
+        "  --run-dir /home/user/bundle/run \\\n"
+        "  --shard region.parquet\n"
+    )
+
+
+def test_a_sat_model_path_that_is_not_a_safe_remote_path_is_refused() -> None:
+    """OAR evaluates the stored command through a shell, so the path is validated."""
+    from osm_polygon_description_tag.workflow.grid_operator import GridOperatorError
+
+    with pytest.raises(GridOperatorError) as caught:
+        render_job_script(
+            _bundle(),
+            **{**_REMOTE, "sat_model_path": "/models/../escape/model.safetensors"},
+        )
+
+    assert str(caught.value) == ("remote SaT model path must not contain traversal components")

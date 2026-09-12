@@ -25,6 +25,8 @@ def _batch(rows: list[dict[str, object]]) -> pa.RecordBatch:
             pa.field("tag_key", pa.string()),
             pa.field("osm_type", pa.string()),
             pa.field("osm_id", pa.int64()),
+            pa.field("split_status", pa.string()),
+            pa.field("sentence_count", pa.int32()),
         ]
     )
     columns = {name: [row.get(name) for row in rows] for name in schema.names}
@@ -38,6 +40,8 @@ def _row(**overrides: object) -> dict[str, object]:
         "tag_key": "description",
         "osm_type": "way",
         "osm_id": 1,
+        "split_status": "split",
+        "sentence_count": 0,
         **overrides,
     }
 

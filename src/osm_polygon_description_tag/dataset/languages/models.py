@@ -7,6 +7,11 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Final
 
+from osm_polygon_description_tag.dataset.sentences import sat
+from osm_polygon_description_tag.dataset.sentences.languages import (
+    supported_languages_fingerprint,
+)
+
 LINGUA_LIBRARY_NAME: Final = "lingua-language-detector"
 PINNED_LINGUA_VERSION: Final = "2.2.0"
 DEFAULT_LANGUAGE_SCOPE: Final = ("all_supported",)
@@ -171,6 +176,24 @@ def _validate_margin(result: LanguageResult) -> None:
         raise ValueError("margin must equal top score minus runner-up score")
 
 
+def _splitter_payload() -> dict[str, object]:
+    """Return the pinned splitter's contribution to a run's identity.
+
+    Splitting happens in the same pass as detection and changes what a run
+    publishes, so the splitter artifact and the exact set of languages it is
+    allowed to split are part of the run's identity, not metadata beside it.
+    """
+    return {
+        "splitter_name": sat.SPLITTER_NAME,
+        "splitter_repository": sat.SAT_MODEL_REPOSITORY,
+        "splitter_revision": sat.SAT_MODEL_REVISION,
+        "splitter_artifact_hash": sat.SAT_MODEL_SHA256,
+        "splitter_runtime_library_name": sat.SAT_RUNTIME_LIBRARY_NAME,
+        "splitter_runtime_library_version": sat.SAT_RUNTIME_LIBRARY_VERSION,
+        "splitter_languages_fingerprint": supported_languages_fingerprint(),
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class LanguageModelIdentity:
     """Pinned detector metadata, separate from each text result.
@@ -193,6 +216,9 @@ class LanguageModelIdentity:
     policy_fingerprint: str = field(init=False)
     config_fingerprint: str = field(init=False)
     binary_artifact_hash: str | None = field(init=False)
+    splitter_name: str = field(init=False)
+    splitter_revision: str = field(init=False)
+    splitter_languages_fingerprint: str = field(init=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.policy, LanguagePolicy):
@@ -201,6 +227,11 @@ class LanguageModelIdentity:
         policy_payload = _policy_payload(self.policy)
         object.__setattr__(self, "language_scope", scope)
         object.__setattr__(self, "policy_fingerprint", _sha256_json(policy_payload))
+        object.__setattr__(self, "splitter_name", sat.SPLITTER_NAME)
+        object.__setattr__(self, "splitter_revision", sat.SAT_MODEL_REVISION)
+        object.__setattr__(
+            self, "splitter_languages_fingerprint", supported_languages_fingerprint()
+        )
         if self.detector_name == LINGUA_DETECTOR_NAME:
             _set_lingua_identity(self, scope, policy_payload)
         elif self.detector_name == GLOTLID_DETECTOR_NAME:
@@ -257,6 +288,7 @@ def _set_lingua_identity(
                 "accuracy_mode": "high_accuracy",
                 "language_scope": scope,
                 "policy": policy_payload,
+                **_splitter_payload(),
             }
         ),
     )
@@ -300,6 +332,7 @@ def _glotlid_fingerprint(scope: tuple[str, ...], policy: dict[str, object]) -> s
             "binary_artifact_hash": GLOTLID_MODEL_SHA256,
             "language_scope": scope,
             "policy": policy,
+            **_splitter_payload(),
         }
     )
 
@@ -323,6 +356,7 @@ def _cascade_fingerprint(scope: tuple[str, ...], policy: dict[str, object]) -> s
             "accuracy_mode": "high_accuracy",
             "language_scope": scope,
             "policy": policy,
+            **_splitter_payload(),
         }
     )
 

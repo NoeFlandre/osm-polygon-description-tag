@@ -40,6 +40,7 @@ from osm_polygon_description_tag.workflow.grid_operator import (
 )
 from tests.conftest import make_record_dict
 from tests.helpers.messages import exactly
+from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH
 
 SHARD = "region.parquet"
 REMOTE_BUNDLE = "/scratch/lang-bundle"
@@ -83,7 +84,13 @@ def _stage(
 ) -> PreparedJob:
     project, source, run, snapshot = inputs
     return prepare_portable_job(
-        run, project, source, snapshot, SHARD, remote_bundle_dir=remote_bundle_dir
+        run,
+        project,
+        source,
+        snapshot,
+        SHARD,
+        remote_bundle_dir=remote_bundle_dir,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
 
 
@@ -146,7 +153,9 @@ def test_prepare_portable_job_rejects_invalid_remote_and_config_inputs(
     project, source, run, snapshot = portable_inputs
 
     with pytest.raises(GridOperatorError, match=message):
-        prepare_portable_job(run, project, source, snapshot, SHARD, **kwargs)  # type: ignore[arg-type]
+        prepare_portable_job(
+            run, project, source, snapshot, SHARD, **kwargs, sat_model_path=REMOTE_SAT_MODEL_PATH
+        )  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -314,7 +323,13 @@ def test_prepare_portable_job_rejects_resume_state_with_unexpected_run_artifacts
         GridOperatorError, match=exactly("resume state failed collection validation")
     ):
         prepare_portable_job(
-            run, project, portable_inputs[1], snapshot, SHARD, remote_bundle_dir=REMOTE_BUNDLE
+            run,
+            project,
+            portable_inputs[1],
+            snapshot,
+            SHARD,
+            remote_bundle_dir=REMOTE_BUNDLE,
+            sat_model_path=REMOTE_SAT_MODEL_PATH,
         )
 
 
@@ -329,7 +344,13 @@ def test_prepare_portable_job_rejects_resume_checkpoint_with_foreign_identity(
         match=exactly("existing shard checkpoint is not bound to this job bundle"),
     ):
         prepare_portable_job(
-            run, project, portable_inputs[1], snapshot, SHARD, remote_bundle_dir=REMOTE_BUNDLE
+            run,
+            project,
+            portable_inputs[1],
+            snapshot,
+            SHARD,
+            remote_bundle_dir=REMOTE_BUNDLE,
+            sat_model_path=REMOTE_SAT_MODEL_PATH,
         )
 
 
@@ -340,7 +361,13 @@ def test_prepare_portable_job_stages_a_valid_paused_checkpoint(
     _write_paused_checkpoint(run, snapshot)
 
     prepared = prepare_portable_job(
-        run, project, source, snapshot, SHARD, remote_bundle_dir=REMOTE_BUNDLE
+        run,
+        project,
+        source,
+        snapshot,
+        SHARD,
+        remote_bundle_dir=REMOTE_BUNDLE,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
 
     staged_checkpoint = shard_paths(prepared.run_root, SHARD).checkpoint
@@ -381,7 +408,15 @@ def test_prepare_portable_job_cleans_temporary_payload_after_copy_failure(
     bundle = bundle_for_shard(snapshot, SHARD)
     paths = job_paths(run, bundle)
     with pytest.raises(GridOperatorError, match="cannot stage"):
-        prepare_portable_job(run, project, source, snapshot, SHARD, remote_bundle_dir=REMOTE_BUNDLE)
+        prepare_portable_job(
+            run,
+            project,
+            source,
+            snapshot,
+            SHARD,
+            remote_bundle_dir=REMOTE_BUNDLE,
+            sat_model_path=REMOTE_SAT_MODEL_PATH,
+        )
 
     assert not tuple(paths.root.glob(".payload-*"))
 
@@ -402,7 +437,15 @@ def test_prepare_portable_job_cleans_temporary_payload_after_rename_failure(
 
     monkeypatch.setattr(grid_operator.os, "replace", fail_payload_replace)
     with pytest.raises(OSError, match="payload rename failure"):
-        prepare_portable_job(run, project, source, snapshot, SHARD, remote_bundle_dir=REMOTE_BUNDLE)
+        prepare_portable_job(
+            run,
+            project,
+            source,
+            snapshot,
+            SHARD,
+            remote_bundle_dir=REMOTE_BUNDLE,
+            sat_model_path=REMOTE_SAT_MODEL_PATH,
+        )
 
     assert not tuple(paths.root.glob(".payload-*"))
 

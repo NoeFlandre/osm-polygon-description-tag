@@ -27,6 +27,7 @@ from osm_polygon_description_tag.dataset.languages.validation import validate_ru
 from osm_polygon_description_tag.dataset.languages.worker import process_shard
 from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
+from tests.helpers.sentences import fake_splitter
 
 SHARD = "region.parquet"
 _ROWS = 8
@@ -52,7 +53,15 @@ def _prepared(tmp_path: Path) -> tuple[Path, Path, SnapshotManifest]:
     write_geoparquet(records, path, batch_size=_BATCH)
     run = tmp_path / "run"
     snapshot = prepare_snapshot(source, run, code_fingerprint="a" * 64, lock_fingerprint="b" * 64)
-    process_shard(run, source, SHARD, detector=_detector, snapshot=snapshot, batch_size=_BATCH)
+    process_shard(
+        run,
+        source,
+        SHARD,
+        detector=_detector,
+        splitter=fake_splitter(),
+        snapshot=snapshot,
+        batch_size=_BATCH,
+    )
     return source, run, snapshot
 
 

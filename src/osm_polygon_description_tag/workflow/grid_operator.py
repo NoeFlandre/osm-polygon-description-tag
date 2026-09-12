@@ -483,6 +483,7 @@ def _validated_script_inputs(
     batch_size: int,
     walltime_seconds: int,
     remote_bundle_dir: str | None,
+    sat_model_path: str,
     glotlid_model_path: str | None,
 ) -> str:
     for path, label in (
@@ -494,6 +495,7 @@ def _validated_script_inputs(
     bundle_dir = remote_bundle_dir or str(Path(remote_project_dir).parent)
     _validate_remote_path(bundle_dir, "remote bundle directory")
     _validate_job_limits(processing_seconds, batch_size, walltime_seconds)
+    _validate_remote_path(sat_model_path, "remote SaT model path")
     if glotlid_model_path is not None:
         _validate_remote_path(glotlid_model_path, "remote GlotLID model path")
     return bundle_dir
@@ -509,6 +511,7 @@ def render_job_script(
     batch_size: int = 512,
     walltime_seconds: int = MAX_WALLTIME_SECONDS,
     remote_bundle_dir: str | None = None,
+    sat_model_path: str,
     glotlid_model_path: str | None = None,
 ) -> str:
     """Render the script the job runs on its allocated compute node.
@@ -524,6 +527,7 @@ def render_job_script(
         batch_size,
         walltime_seconds,
         remote_bundle_dir,
+        sat_model_path,
         glotlid_model_path,
     )
     exports = "\n".join(f"export {name}=1" for name in _THREAD_LIMIT_VARIABLES)
@@ -531,9 +535,10 @@ def render_job_script(
     quoted_source = shlex.quote(remote_source_dir)
     quoted_run = shlex.quote(remote_run_dir)
     quoted_shard = shlex.quote(bundle.shard)
+    line_continuation = "\\" + "\n"
+    sat_option = f" {line_continuation}  --sat-model-path {shlex.quote(sat_model_path)}"
     glotlid_option = ""
     if glotlid_model_path is not None:
-        line_continuation = "\\" + "\n"
         glotlid_option = (
             f" {line_continuation}  --glotlid-model-path {shlex.quote(glotlid_model_path)}"
         )
@@ -578,7 +583,7 @@ uv run --no-sync osm-polygon-description-tag language run \\
   --run-dir {quoted_run} \\
   --shard {quoted_shard} \\
   --batch-size {batch_size} \\
-  --budget-seconds {processing_seconds}{glotlid_option}
+  --budget-seconds {processing_seconds}{sat_option}{glotlid_option}
 
 uv run --no-sync osm-polygon-description-tag language validate \\
   --run-dir {quoted_run} \\
@@ -697,6 +702,7 @@ def prepare_job(
     batch_size: int = 512,
     walltime_seconds: int = MAX_WALLTIME_SECONDS,
     remote_bundle_dir: str | None = None,
+    sat_model_path: str,
     glotlid_model_path: str | None = None,
     submission_locked: bool = False,
 ) -> tuple[JobBundle, JobPaths]:
@@ -720,6 +726,7 @@ def prepare_job(
         batch_size=batch_size,
         walltime_seconds=walltime_seconds,
         remote_bundle_dir=remote_bundle_dir,
+        sat_model_path=sat_model_path,
         glotlid_model_path=remote_model_path,
     )
     config = _job_config_payload(
@@ -1020,6 +1027,7 @@ def prepare_portable_job(
     shard: str,
     *,
     remote_bundle_dir: str,
+    sat_model_path: str,
     processing_seconds: int = MAX_PROCESSING_SECONDS,
     batch_size: int = 512,
     walltime_seconds: int = MAX_WALLTIME_SECONDS,
@@ -1048,6 +1056,7 @@ def prepare_portable_job(
             batch_size=batch_size,
             walltime_seconds=walltime_seconds,
             remote_bundle_dir=base,
+            sat_model_path=sat_model_path,
             glotlid_model_path=glotlid_model_path,
             submission_locked=True,
         )

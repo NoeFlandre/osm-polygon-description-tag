@@ -60,13 +60,13 @@ def test_a_single_entry_cache_is_accepted_and_stays_bounded() -> None:
     cache = BoundedTextCache(1)
     calls: list[str] = []
 
-    def detector(text: str) -> object:
+    def analyse(text: str) -> object:
         calls.append(text)
         return text
 
-    cache.result_for("first", detector)  # type: ignore[arg-type]
-    cache.result_for("second", detector)  # type: ignore[arg-type]
-    cache.result_for("first", detector)  # type: ignore[arg-type]
+    cache.analysis_for("first", analyse)  # type: ignore[arg-type]
+    cache.analysis_for("second", analyse)  # type: ignore[arg-type]
+    cache.analysis_for("first", analyse)  # type: ignore[arg-type]
 
     assert len(cache) == 1
     assert calls == ["first", "second", "first"]
@@ -76,12 +76,12 @@ def test_a_repeated_text_is_detected_once_within_the_bound() -> None:
     cache = BoundedTextCache(4)
     calls: list[str] = []
 
-    def detector(text: str) -> object:
+    def analyse(text: str) -> object:
         calls.append(text)
         return text
 
-    cache.result_for("same", detector)  # type: ignore[arg-type]
-    cache.result_for("same", detector)  # type: ignore[arg-type]
+    cache.analysis_for("same", analyse)  # type: ignore[arg-type]
+    cache.analysis_for("same", analyse)  # type: ignore[arg-type]
 
     assert calls == ["same"]
     assert len(cache) == 1

@@ -42,6 +42,10 @@ def export(tmp_path: Path) -> LanguageExport:
             non_linguistic_count=2,
             distinct_language_count=2,
             top_languages=(("eng", 6), ("fra", 1)),
+            split_count=0,
+            unsupported_language_count=0,
+            not_detected_count=0,
+            sentence_count=0,
         ),
     )
 

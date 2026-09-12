@@ -25,7 +25,12 @@ from scripts.run_language_grid import (
 
 
 def _remote() -> Remote:
-    return Remote("nancy", "/home/op/bundles", "/home/op/models/glotlid-v3/model_v3.bin")
+    return Remote(
+        "nancy",
+        "/home/op/bundles",
+        "/home/op/models/glotlid-v3/model_v3.bin",
+        "/home/op/models/sat-3l-sm/model.safetensors",
+    )
 
 
 def _args(**overrides: Any) -> Any:
@@ -40,6 +45,8 @@ def _args(**overrides: Any) -> Any:
         "/home/op/bundles",
         "--remote-glotlid-model-path",
         "/home/op/models/glotlid-v3/model_v3.bin",
+        "--remote-sat-model-path",
+        "/home/op/models/sat-3l-sm/model.safetensors",
         "--remote-operator-dir",
         "/home/op/project",
         "--remote-cli",
@@ -149,3 +156,18 @@ def test_a_remote_directory_name_cannot_carry_shell_metacharacters(shard: str, s
 
     assert result == slug
     assert all(character.isalnum() or character == "-" for character in result)
+
+
+def test_the_driver_stages_and_forwards_the_pinned_sat_model_path() -> None:
+    """Splitting runs in the same job, so the driver must name the SaT weights."""
+    remote = _remote()
+
+    assert remote.sat_model_path == "/home/op/models/sat-3l-sm/model.safetensors"
+
+
+def test_every_remote_model_path_is_required_by_the_driver() -> None:
+    """A run that forgets either artifact must fail on the frontend, not the node."""
+    args = _args()
+
+    assert args.remote_sat_model_path == "/home/op/models/sat-3l-sm/model.safetensors"
+    assert args.remote_glotlid_model_path == "/home/op/models/glotlid-v3/model_v3.bin"

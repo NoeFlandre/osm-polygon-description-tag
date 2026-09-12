@@ -58,12 +58,14 @@ from osm_polygon_description_tag.workflow.grid_policy import (
 )
 from osm_polygon_description_tag.workflow.grid_scheduler import CommandResult, JobState
 from tests.conftest import make_record_dict
+from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH, fake_splitter
 
 SHARD = "region.parquet"
 REMOTE = {
     "remote_project_dir": "/home/user/project",
     "remote_source_dir": "/scratch/staging/source",
     "remote_run_dir": "/scratch/staging/run",
+    "sat_model_path": "/home/user/models/sat-3l-sm/model.safetensors",
 }
 DETECTOR = lambda text: LanguageResult(  # noqa: E731
     "eng", 0.9, 0.1, 0.8, LanguageStatus.DETECTED, "detected"
@@ -179,7 +181,15 @@ def test_repeated_preparation_preserves_committed_progress(
 ) -> None:
     source, run, snapshot = prepared
     prepare_job(run, snapshot, SHARD, batch_size=2, **REMOTE)
-    process_shard(run, source, SHARD, detector=DETECTOR, snapshot=snapshot, batch_size=2)
+    process_shard(
+        run,
+        source,
+        SHARD,
+        detector=DETECTOR,
+        splitter=fake_splitter(),
+        snapshot=snapshot,
+        batch_size=2,
+    )
     committed = shard_paths(run, SHARD).checkpoint.read_bytes()
 
     prepare_job(run, snapshot, SHARD, batch_size=2, **REMOTE)
@@ -307,6 +317,7 @@ def test_a_crash_before_the_checkpoint_is_quarantined_and_restageable(
         SHARD,
         batch_size=2,
         remote_bundle_dir="/scratch/lang-bundle",
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
     state = shard_paths(run, SHARD)
     orphan_part = part_name_for_offset(0)
@@ -334,6 +345,7 @@ def test_a_crash_before_the_checkpoint_is_quarantined_and_restageable(
         SHARD,
         batch_size=2,
         remote_bundle_dir="/scratch/lang-bundle",
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
     staged_root = shard_paths(restaged.run_root, SHARD).root
     assert (staged_root / "checkpoint.json").is_file()
@@ -345,7 +357,15 @@ def test_quarantine_preserves_committed_history_and_is_idempotent(
 ) -> None:
     source, run, snapshot = prepared
     prepare_job(run, snapshot, SHARD, batch_size=2, **REMOTE)
-    process_shard(run, source, SHARD, detector=DETECTOR, snapshot=snapshot, batch_size=2)
+    process_shard(
+        run,
+        source,
+        SHARD,
+        detector=DETECTOR,
+        splitter=fake_splitter(),
+        snapshot=snapshot,
+        batch_size=2,
+    )
     state = shard_paths(run, SHARD)
     committed = {path.name: path.read_bytes() for path in state.parts.iterdir()}
 
@@ -528,6 +548,7 @@ def test_resumed_output_is_byte_identical_to_an_uninterrupted_run(tmp_path: Path
         source,
         SHARD,
         detector=DETECTOR,
+        splitter=fake_splitter(),
         snapshot=straight,
         batch_size=2,
     )
@@ -538,6 +559,7 @@ def test_resumed_output_is_byte_identical_to_an_uninterrupted_run(tmp_path: Path
             source,
             SHARD,
             detector=DETECTOR,
+            splitter=fake_splitter(),
             snapshot=resumed,
             batch_size=2,
             budget=ProcessingBudget(1, clock=iter([0.0, 0.0, 0.0, 3.0]).__next__),

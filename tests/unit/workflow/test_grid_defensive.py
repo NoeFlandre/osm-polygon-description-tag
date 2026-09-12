@@ -38,6 +38,7 @@ from osm_polygon_description_tag.workflow.grid_operator import (
 )
 from tests.conftest import make_record_dict
 from tests.helpers.messages import exactly
+from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH, fake_splitter
 
 SHARD = "region.parquet"
 REMOTE_BUNDLE = "/scratch/lang-bundle"
@@ -45,6 +46,7 @@ REMOTE = {
     "remote_project_dir": "/home/user/project",
     "remote_source_dir": "/scratch/staging/source",
     "remote_run_dir": "/scratch/staging/run",
+    "sat_model_path": "/home/user/models/sat-3l-sm/model.safetensors",
 }
 
 
@@ -88,7 +90,13 @@ def inputs(tmp_path: Path) -> tuple[Path, Path, Path, SnapshotManifest]:
 def _stage(inputs: tuple[Path, Path, Path, SnapshotManifest]) -> object:
     project, source, run, snapshot = inputs
     return prepare_portable_job(
-        run, project, source, snapshot, SHARD, remote_bundle_dir=REMOTE_BUNDLE
+        run,
+        project,
+        source,
+        snapshot,
+        SHARD,
+        remote_bundle_dir=REMOTE_BUNDLE,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
 
 
@@ -210,7 +218,13 @@ def test_an_optional_project_readme_is_staged(tmp_path: Path) -> None:
     )
 
     prepared = prepare_portable_job(
-        run, project, source, snapshot, SHARD, remote_bundle_dir=REMOTE_BUNDLE
+        run,
+        project,
+        source,
+        snapshot,
+        SHARD,
+        remote_bundle_dir=REMOTE_BUNDLE,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
 
     assert (prepared.project_root / "README.md").read_text(encoding="utf-8") == "# synthetic\n"
@@ -262,7 +276,15 @@ def test_staging_rejects_a_source_file_that_drifted_from_the_snapshot(
     )
 
     with pytest.raises(GridOperatorError, match="does not match snapshot"):
-        prepare_portable_job(run, project, source, snapshot, SHARD, remote_bundle_dir=REMOTE_BUNDLE)
+        prepare_portable_job(
+            run,
+            project,
+            source,
+            snapshot,
+            SHARD,
+            remote_bundle_dir=REMOTE_BUNDLE,
+            sat_model_path=REMOTE_SAT_MODEL_PATH,
+        )
 
 
 def test_fsync_of_a_missing_directory_is_reported(tmp_path: Path) -> None:
@@ -377,6 +399,7 @@ def _committed_run(
         detector=lambda text: LanguageResult(
             "eng", 0.9, 0.1, 0.8, LanguageStatus.DETECTED, "detected"
         ),
+        splitter=fake_splitter(),
         snapshot=snapshot,
         batch_size=1,
     )

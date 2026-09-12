@@ -51,6 +51,7 @@ from osm_polygon_description_tag.dataset.languages.payloads import PayloadReader
 from osm_polygon_description_tag.dataset.languages.snapshot import SnapshotManifest, read_snapshot
 from osm_polygon_description_tag.dataset.languages.validation import validate_run
 from osm_polygon_description_tag.dataset.manifest import file_sha256
+from osm_polygon_description_tag.dataset.sentences.models import SentenceSplitStatus
 from osm_polygon_description_tag.publication.models import PublicationError, UploadItem, UploadPlan
 from osm_polygon_description_tag.publication.planning import file_sha256_bytes
 
@@ -80,6 +81,10 @@ class LanguageStats:
     non_linguistic_count: int
     distinct_language_count: int
     top_languages: tuple[tuple[str, int], ...]
+    split_count: int
+    unsupported_language_count: int
+    not_detected_count: int
+    sentence_count: int
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -92,6 +97,10 @@ class LanguageStats:
             "uncertain_count": self.uncertain_count,
             "non_linguistic_count": self.non_linguistic_count,
             "distinct_language_count": self.distinct_language_count,
+            "split_count": self.split_count,
+            "unsupported_language_count": self.unsupported_language_count,
+            "not_detected_count": self.not_detected_count,
+            "sentence_count": self.sentence_count,
             "top_languages": [
                 {"language_code": code, "annotation_count": count}
                 for code, count in self.top_languages
@@ -129,12 +138,22 @@ class LanguageExport:
 class _StatsAccumulator:
     """Accumulate exported-row statistics without holding the rows."""
 
-    __slots__ = ("_languages", "_objects", "_statuses", "_tag_keys", "_total")
+    __slots__ = (
+        "_languages",
+        "_objects",
+        "_sentences",
+        "_split_statuses",
+        "_statuses",
+        "_tag_keys",
+        "_total",
+    )
 
     def __init__(self) -> None:
         self._total = 0
         self._objects: set[tuple[str, int]] = set()
         self._statuses: Counter[str] = Counter()
+        self._split_statuses: Counter[str] = Counter()
+        self._sentences = 0
         self._tag_keys: Counter[str] = Counter()
         self._languages: Counter[str] = Counter()
 
@@ -148,6 +167,8 @@ class _StatsAccumulator:
             "base" if key == "description" else "localized" for key in columns["tag_key"]
         )
         self._objects.update(zip(columns["osm_type"], columns["osm_id"], strict=True))
+        self._split_statuses.update(columns["split_status"])
+        self._sentences += sum(columns["sentence_count"])
 
     def result(self) -> LanguageStats:
         """Return the accumulated statistics."""
@@ -163,6 +184,12 @@ class _StatsAccumulator:
             top_languages=tuple(
                 sorted(self._languages.items(), key=lambda item: (-item[1], item[0]))[:20]
             ),
+            split_count=self._split_statuses[str(SentenceSplitStatus.SPLIT)],
+            unsupported_language_count=self._split_statuses[
+                str(SentenceSplitStatus.UNSUPPORTED_LANGUAGE)
+            ],
+            not_detected_count=self._split_statuses[str(SentenceSplitStatus.NOT_DETECTED)],
+            sentence_count=self._sentences,
         )
 
 
@@ -289,6 +316,10 @@ def _stats_from_payload(reader: PayloadReader) -> LanguageStats:
         non_linguistic_count=values.integer("non_linguistic_count"),
         distinct_language_count=values.integer("distinct_language_count"),
         top_languages=_top_languages(values),
+        split_count=values.integer("split_count"),
+        unsupported_language_count=values.integer("unsupported_language_count"),
+        not_detected_count=values.integer("not_detected_count"),
+        sentence_count=values.integer("sentence_count"),
     )
 
 
@@ -447,6 +478,10 @@ three rows.
 | Uncertain | {stats.uncertain_count} |
 | Non-linguistic | {stats.non_linguistic_count} |
 | Distinct languages assigned | {stats.distinct_language_count} |
+| Split into sentences | {stats.split_count} |
+| Skipped, language unsupported by the splitter | {stats.unsupported_language_count} |
+| Skipped, no language detected | {stats.not_detected_count} |
+| Sentences | {stats.sentence_count} |
 
 **Provenance.** {_language_provenance(export)}
 

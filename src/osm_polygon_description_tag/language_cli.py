@@ -47,6 +47,7 @@ from osm_polygon_description_tag.dataset.languages.worker import (
     ProcessingBudget,
     process_shard,
 )
+from osm_polygon_description_tag.dataset.sentences.sat import build_sat_splitter
 from osm_polygon_description_tag.publication.language import (
     LanguagePublicationError,
     build_language_upload_plan,
@@ -135,6 +136,19 @@ GlotLIDModelPath = Annotated[
     Path | None, typer.Option("--glotlid-model-path", help="Pinned GlotLID v3 model file")
 ]
 
+SatModelPath = Annotated[
+    Path,
+    typer.Option(
+        "--sat-model-path",
+        help="Directory holding the pinned SaT-3l-sm weights, config, and tokenizer",
+    ),
+]
+
+RemoteSatModelPath = Annotated[
+    str,
+    typer.Option("--sat-model-path", help="Remote directory holding the pinned SaT-3l-sm model"),
+]
+
 _POLICY_PRESETS = {
     "v1": DEFAULT_LANGUAGE_POLICY,
     "v2": V2_LANGUAGE_POLICY,
@@ -219,6 +233,7 @@ def handle_run(
     budget_seconds: float,
     project_root: Path = Path(),
     *,
+    sat_model_path: Path,
     glotlid_model_path: Path | None = None,
 ) -> None:
     """Process one staged shard within a bounded monotonic budget.
@@ -240,6 +255,7 @@ def handle_run(
             source_root,
             shard,
             detector=detector,
+            splitter=build_sat_splitter(model_dir=sat_model_path),
             snapshot=snapshot,
             batch_size=batch_size,
             budget=ProcessingBudget(budget_seconds),
@@ -317,6 +333,8 @@ def run_command(
     shard: Shard,
     batch_size: BatchSize = DEFAULT_BATCH_SIZE,
     budget_seconds: BudgetSeconds = DEFAULT_BUDGET_SECONDS,
+    *,
+    sat_model_path: SatModelPath,
     project_root: ProjectRoot = Path(),
     glotlid_model_path: GlotLIDModelPath = None,
 ) -> None:
@@ -327,6 +345,7 @@ def run_command(
         batch_size,
         budget_seconds,
         project_root,
+        sat_model_path=sat_model_path,
         glotlid_model_path=glotlid_model_path,
     )
 
@@ -457,6 +476,7 @@ def handle_grid_prepare(
     remote_run_dir: str,
     processing_seconds: int,
     batch_size: int,
+    sat_model_path: str,
     glotlid_model_path: str | None = None,
 ) -> None:
     """Write the immutable bundle and job script for one shard."""
@@ -470,6 +490,7 @@ def handle_grid_prepare(
         remote_run_dir=remote_run_dir,
         processing_seconds=processing_seconds,
         batch_size=batch_size,
+        sat_model_path=sat_model_path,
         glotlid_model_path=glotlid_model_path,
     )
     print_json(
@@ -497,6 +518,7 @@ def handle_grid_submit(
     apply: bool,
     *,
     runner: CommandRunner | None = None,
+    sat_model_path: str,
     glotlid_model_path: str | None = None,
 ) -> None:
     """Plan a submission, and perform it only behind the apply gate."""
@@ -511,6 +533,7 @@ def handle_grid_submit(
         processing_seconds=processing_seconds,
         batch_size=batch_size,
         walltime_seconds=walltime_seconds,
+        sat_model_path=sat_model_path,
         glotlid_model_path=glotlid_model_path,
     )
     if prepared is None:
@@ -524,6 +547,7 @@ def handle_grid_submit(
             processing_seconds=processing_seconds,
             batch_size=batch_size,
             walltime_seconds=walltime_seconds,
+            sat_model_path=sat_model_path,
             glotlid_model_path=glotlid_model_path,
             remote_bundle_dir=None,
         )
@@ -580,6 +604,7 @@ def _reuse_verified_staged_job(
     processing_seconds: int,
     batch_size: int,
     walltime_seconds: int,
+    sat_model_path: str,
     glotlid_model_path: str | None = None,
 ) -> tuple[JobBundle, JobPaths] | None:
     """Re-prepare a staged job so every requested setting remains immutable."""
@@ -599,6 +624,7 @@ def _reuse_verified_staged_job(
             processing_seconds=processing_seconds,
             batch_size=batch_size,
             walltime_seconds=walltime_seconds,
+            sat_model_path=sat_model_path,
             glotlid_model_path=glotlid_model_path,
             remote_bundle_dir=_infer_remote_bundle_dir(
                 remote_project_dir, remote_source_dir, remote_run_dir
@@ -686,6 +712,7 @@ def handle_grid_stage(
     batch_size: int,
     walltime_seconds: int,
     apply: bool,
+    sat_model_path: str,
     glotlid_model_path: str | None = None,
     runner: CommandRunner | None = None,
 ) -> None:
@@ -702,6 +729,7 @@ def handle_grid_stage(
         processing_seconds=processing_seconds,
         batch_size=batch_size,
         walltime_seconds=walltime_seconds,
+        sat_model_path=sat_model_path,
         glotlid_model_path=glotlid_model_path,
     )
     transfer_argv = build_bundle_transfer_argv(prepared, remote_bundle_dir)
@@ -897,6 +925,8 @@ def grid_prepare_command(
     remote_project_dir: RemoteProject,
     remote_source_dir: RemoteSource,
     remote_run_dir: RemoteRun,
+    *,
+    sat_model_path: RemoteSatModelPath,
     processing_seconds: ProcessingSeconds = MAX_PROCESSING_SECONDS,
     batch_size: BatchSize = DEFAULT_BATCH_SIZE,
     glotlid_model_path: RemoteGlotLIDModelPath = None,
@@ -909,7 +939,8 @@ def grid_prepare_command(
         remote_run_dir,
         processing_seconds,
         batch_size,
-        glotlid_model_path,
+        sat_model_path=sat_model_path,
+        glotlid_model_path=glotlid_model_path,
     )
 
 
@@ -925,6 +956,8 @@ def grid_stage_command(
     walltime_seconds: Walltime = MAX_WALLTIME_SECONDS,
     glotlid_model_path: RemoteGlotLIDModelPath = None,
     apply: Apply = False,
+    *,
+    sat_model_path: RemoteSatModelPath,
 ) -> None:
     handle_grid_stage(
         run_dir=run_dir,
@@ -935,6 +968,7 @@ def grid_stage_command(
         processing_seconds=processing_seconds,
         batch_size=batch_size,
         walltime_seconds=walltime_seconds,
+        sat_model_path=sat_model_path,
         glotlid_model_path=glotlid_model_path,
         apply=apply,
     )
@@ -954,6 +988,8 @@ def grid_submit_command(
     allow_daytime: AllowDaytime = False,
     apply: Apply = False,
     glotlid_model_path: RemoteGlotLIDModelPath = None,
+    *,
+    sat_model_path: RemoteSatModelPath,
 ) -> None:
     handle_grid_submit(
         run_dir,
@@ -967,6 +1003,7 @@ def grid_submit_command(
         batch_size,
         allow_daytime,
         apply,
+        sat_model_path=sat_model_path,
         glotlid_model_path=glotlid_model_path,
     )
 

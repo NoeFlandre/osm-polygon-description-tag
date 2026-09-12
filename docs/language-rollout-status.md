@@ -11,13 +11,51 @@ work it describes.
 | Stage | State |
 | --- | --- |
 | Cascade implementation (Lingua primary, GlotLID v3 fallback) | **Done** |
+| Sentence splitting (SaT-3l-sm, gated on the languages it was trained on) | **Done** |
 | Local quality gates | **Done** |
-| Mutation gate at 100 % | **Done** — 17 726 / 17 726 killed |
+| Mutation gate at 100 % | **Done** — 18 036 / 18 036 killed |
 | Grid'5000 operator environment | **Done** — the NumPy baseline blocker is resolved |
 | Grid'5000 full-dataset run | **Not done** — unblocked, not yet executed |
 | Hugging Face publication | **Not done** — blocked on the run above |
 
 ## Done
+
+### Sentence splitting
+
+Descriptions are split into sentences in the **same pass** as detection. Cold
+start dominates a Grid run --- 386 one-shard jobs pay about 6.4 hours of
+repeated model loading against roughly 49 minutes of warm inference --- so a
+second sweep would nearly double the cost to recompute something already in
+memory: splitting is a pure function of the text and the detection result.
+
+A description is split only when detection settled on a language *and* the
+splitter was trained on it. SaT-3l-sm takes no language at inference --- it is
+language-agnostic, and `lang_code` in `wtpsplit` selects a style adapter this
+configuration does not use --- so the 85 languages of its supervised mixture are
+where it is *known competent*, and that list is the gate. Everything else is
+published unsplit with the reason recorded: `unsupported_language_<iso 639-3>`
+when the language is known but outside the 85, `not_detected_<status>` when
+detection never settled. Croatian is the clearest case: Lingua detects it
+confidently and SaT was never trained on it.
+
+The supported set is pinned in source rather than read from the installed
+library, and both it and the pinned artifact are folded into
+`model_config_fingerprint`, so changing either changes the run identity rather
+than quietly changing the dataset. Detection reports ISO 639-3 and SaT names its
+languages in ISO 639-1, so the two are joined by an explicit table that also
+covers the macrolanguage members a pinned detector emits (`nob`/`nno` to `no`,
+`arb` to `ar`, `cmn` to `zh`). An unmapped code is unsupported; nothing is
+guessed. See [the runbook](language-detection.md#sentence-splitting).
+
+Two things about `wtpsplit` are worth recording, because both would have failed
+only once a job was already running on a node:
+
+- `SaT` loads a **directory**, the way `transformers` does, not a weights file.
+  `--sat-model-path` is therefore a directory holding `config.json` beside
+  `model.safetensors`, and the pinned SHA-256 is checked on the weights inside it.
+- its tokenizer argument defaults to fetching `xlm-roberta-base` from the Hub.
+  A compute node has no reason to have network access, so the tokenizer is
+  staged into that same directory and named explicitly.
 
 ### Detector cascade
 
@@ -72,7 +110,7 @@ fingerprint guard will keep refusing.
 
 ### Quality gates
 
-3 172 passed / 1 skipped, 99.50 % branch coverage, CRAP max 5.022, Radon max
+3 261 passed / 1 skipped, 99.51 % branch coverage, CRAP max 5.01, Radon max
 complexity 5, ruff format and lint, `ty`, pre-commit, `uv lock --check`,
 `uv build`, wheel contents, strict MkDocs.
 
@@ -84,7 +122,7 @@ job-script tests skip as well; see the note at the end of this document.
 
 `python scripts/check_mutation_score.py --mutants-root mutants --output
 reports/mutation-summary.json --minimum-score 100` reports **100.00 %
-(17 726 / 17 726)** with every unresolved bucket at zero: no survivor, timeout,
+(18 036 / 18 036)** with every unresolved bucket at zero: no survivor, timeout,
 `no_tests`, skipped, suspicious, segfault, or interrupted mutant.
 
 Reaching it from 624 survivors took three kinds of change, in this order of

@@ -28,6 +28,7 @@ from osm_polygon_description_tag.dataset.languages.validation import validate_ru
 from osm_polygon_description_tag.dataset.languages.worker import process_shard
 from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
+from tests.helpers.sentences import fake_splitter
 
 SHARD = "region.parquet"
 OTHER = "other.parquet"
@@ -62,7 +63,15 @@ def _prepare(
 
 
 def _process(run: Path, source: Path, snapshot: SnapshotManifest, shard: str = SHARD) -> None:
-    process_shard(run, source, shard, detector=_detector, snapshot=snapshot, batch_size=4)
+    process_shard(
+        run,
+        source,
+        shard,
+        detector=_detector,
+        splitter=fake_splitter(),
+        snapshot=snapshot,
+        batch_size=4,
+    )
 
 
 def _listing(root: Path) -> list[str]:

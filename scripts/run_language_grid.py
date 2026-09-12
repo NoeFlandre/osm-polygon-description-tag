@@ -58,6 +58,7 @@ class Remote:
     ssh_host: str
     bundle_root: str
     glotlid_model_path: str
+    sat_model_path: str
 
     def bundle_dir(self, shard: str) -> str:
         return f"{self.bundle_root.rstrip('/')}/{_shard_slug(shard)}"
@@ -150,6 +151,8 @@ def stage(args: argparse.Namespace, remote: Remote, shard: str) -> dict[str, Any
             str(args.walltime_seconds),
             "--glotlid-model-path",
             remote.glotlid_model_path,
+            "--sat-model-path",
+            remote.sat_model_path,
         ],
         capture_json=True,
     )
@@ -191,6 +194,7 @@ def submit(args: argparse.Namespace, remote: Remote, shard: str, plan: dict[str,
             f"--processing-seconds {args.processing_seconds}",
             f"--batch-size {args.batch_size}",
             f"--glotlid-model-path {remote.glotlid_model_path}",
+            f"--sat-model-path {remote.sat_model_path}",
             "--allow-daytime" if args.allow_daytime else "",
             "--apply",
         ]
@@ -280,7 +284,12 @@ def process(args: argparse.Namespace, remote: Remote, shard: str) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
-    remote = Remote(args.ssh_host, args.remote_bundle_root, args.remote_glotlid_model_path)
+    remote = Remote(
+        args.ssh_host,
+        args.remote_bundle_root,
+        args.remote_glotlid_model_path,
+        args.remote_sat_model_path,
+    )
     shards = shards_of(args.run_dir)
     _log("run_start", shards=len(shards), rows=sum(rows for _, rows in shards))
 
@@ -313,6 +322,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--site", default=DEFAULT_SITE)
     parser.add_argument("--remote-bundle-root", required=True)
     parser.add_argument("--remote-glotlid-model-path", required=True)
+    parser.add_argument("--remote-sat-model-path", required=True)
     parser.add_argument("--remote-operator-dir", required=True)
     parser.add_argument("--remote-cli", required=True)
     parser.add_argument("--walltime-seconds", type=int, default=1800)

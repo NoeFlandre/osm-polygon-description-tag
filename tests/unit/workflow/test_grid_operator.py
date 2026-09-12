@@ -77,12 +77,14 @@ from osm_polygon_description_tag.workflow.grid_scheduler import (
 )
 from tests.conftest import make_record_dict
 from tests.helpers.messages import exactly
+from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH, fake_splitter
 
 SHARD = "region.parquet"
 REMOTE = {
     "remote_project_dir": "/home/user/project",
     "remote_source_dir": "/scratch/staging/source",
     "remote_run_dir": "/scratch/staging/run",
+    "sat_model_path": "/home/user/models/sat-3l-sm/model.safetensors",
 }
 
 
@@ -267,6 +269,7 @@ def test_bare_prepared_job_script_runs_without_a_portable_payload(
         remote_project_dir=str(tmp_path / "project"),
         remote_source_dir=str(tmp_path / "source"),
         remote_run_dir=str(tmp_path / "run-output"),
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
     for directory in (tmp_path / "project", tmp_path / "source", tmp_path / "run-output"):
         directory.mkdir(exist_ok=True)
@@ -333,6 +336,7 @@ def test_the_job_script_quotes_paths_and_requires_processing_inside_walltime(
         remote_run_dir="/scratch/run-safe",
         remote_bundle_dir="/scratch/bundle-safe",
         walltime_seconds=MAX_PROCESSING_SECONDS + 1,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
 
     assert "cd /scratch/project-safe" in script
@@ -366,6 +370,7 @@ def test_a_portable_job_contains_code_lock_input_and_resume_state(
         detector=lambda text: LanguageResult(
             "eng", 0.9, 0.1, 0.8, LanguageStatus.DETECTED, "detected"
         ),
+        splitter=fake_splitter(),
         snapshot=snapshot,
         batch_size=2,
     )
@@ -377,6 +382,7 @@ def test_a_portable_job_contains_code_lock_input_and_resume_state(
         snapshot,
         SHARD,
         remote_bundle_dir="/scratch/lang-bundle",
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
 
     root = prepared_bundle.payload_root
@@ -408,6 +414,7 @@ def test_generated_script_runs_verifier_after_external_fake_uv_environment(
         snapshot,
         SHARD,
         remote_bundle_dir=str(tmp_path / "remote-bundle"),
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
     remote_bundle = tmp_path / "remote-bundle"
     shutil.copytree(prepared.payload_root, remote_bundle)
@@ -491,6 +498,7 @@ def test_portable_payload_rebuilds_when_resume_state_advances(
         snapshot,
         SHARD,
         remote_bundle_dir="/scratch/lang-bundle",
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
     process_shard(
         run,
@@ -499,6 +507,7 @@ def test_portable_payload_rebuilds_when_resume_state_advances(
         detector=lambda text: LanguageResult(
             "eng", 0.9, 0.1, 0.8, LanguageStatus.DETECTED, "detected"
         ),
+        splitter=fake_splitter(),
         snapshot=snapshot,
         batch_size=2,
         budget=ProcessingBudget(1, clock=iter([0.0, 0.0, 0.0, 3.0]).__next__),
@@ -511,6 +520,7 @@ def test_portable_payload_rebuilds_when_resume_state_advances(
         snapshot,
         SHARD,
         remote_bundle_dir="/scratch/lang-bundle",
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
 
     assert first.payload_root != second.payload_root
@@ -536,6 +546,7 @@ def test_retrieved_results_are_validated_before_atomic_local_promotion(
         detector=lambda text: LanguageResult(
             "eng", 0.9, 0.1, 0.8, LanguageStatus.DETECTED, "detected"
         ),
+        splitter=fake_splitter(),
         snapshot=snapshot,
         batch_size=2,
     )
@@ -546,6 +557,7 @@ def test_retrieved_results_are_validated_before_atomic_local_promotion(
         snapshot,
         SHARD,
         remote_bundle_dir="/scratch/lang-bundle",
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
     local_run = tmp_path / "local-run"
     prepare_snapshot(
@@ -576,6 +588,7 @@ def _process_collection_fixture(
         detector=lambda text: LanguageResult(
             language, 0.9, 0.1, 0.8, LanguageStatus.DETECTED, "detected"
         ),
+        splitter=fake_splitter(),
         snapshot=snapshot,
         batch_size=2,
         budget=budget,
@@ -783,6 +796,7 @@ def test_staged_bytes_are_verified_before_a_job_can_run(
         snapshot,
         SHARD,
         remote_bundle_dir="/scratch/lang-bundle",
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
     staged_code = prepared_bundle.payload_root / "project" / "src" / "module.py"
     staged_code.write_text("VALUE = tampered\n", encoding="utf-8")
@@ -803,6 +817,7 @@ def test_transfer_and_retrieval_are_explicit_no_shell_argv_contracts(
         snapshot,
         SHARD,
         remote_bundle_dir="/scratch/lang-bundle",
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
 
     send = build_bundle_transfer_argv(prepared_bundle, "/scratch/remote/lang-bundle")
@@ -1008,7 +1023,13 @@ def test_bundle_transfer_binds_identity_label_and_exact_destination(
     """
     project, source, run, snapshot = portable_prepared
     prepared = prepare_portable_job(
-        run, project, source, snapshot, SHARD, remote_bundle_dir="/scratch/lang-bundle"
+        run,
+        project,
+        source,
+        snapshot,
+        SHARD,
+        remote_bundle_dir="/scratch/lang-bundle",
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
 
     with pytest.raises(GridOperatorError) as error:
@@ -1152,6 +1173,7 @@ def test_repreparing_a_bundle_rejects_changed_limits_or_remote_paths(
             remote_project_dir="/home/other-project",
             remote_source_dir=REMOTE["remote_source_dir"],
             remote_run_dir=REMOTE["remote_run_dir"],
+            sat_model_path=REMOTE_SAT_MODEL_PATH,
         )
 
     assert paths.config.read_bytes() == original_config
@@ -1463,6 +1485,7 @@ def test_only_a_terminal_reconciled_and_acknowledged_paused_shard_can_retry(
         detector=lambda text: LanguageResult(
             "eng", 0.9, 0.1, 0.8, LanguageStatus.DETECTED, "detected"
         ),
+        splitter=fake_splitter(),
         snapshot=snapshot,
         batch_size=2,
     )
@@ -1504,6 +1527,7 @@ def test_a_paused_result_acknowledgment_opens_one_bounded_same_shard_attempt(
         detector=lambda text: LanguageResult(
             "eng", 0.9, 0.1, 0.8, LanguageStatus.DETECTED, "detected"
         ),
+        splitter=fake_splitter(),
         snapshot=snapshot,
         batch_size=2,
         budget=ProcessingBudget(0.000001),
@@ -1569,6 +1593,7 @@ def test_collected_acknowledgment_requires_terminal_reconciliation(
         detector=lambda text: LanguageResult(
             "eng", 0.9, 0.1, 0.8, LanguageStatus.DETECTED, "detected"
         ),
+        splitter=fake_splitter(),
         snapshot=snapshot,
         batch_size=2,
         budget=ProcessingBudget(0.000001),
@@ -1974,6 +1999,7 @@ def test_collecting_results_validates_what_the_job_produced(
         detector=lambda text: LanguageResult(
             "eng", 0.9, 0.1, 0.8, LanguageStatus.DETECTED, "detected"
         ),
+        splitter=fake_splitter(),
         snapshot=snapshot,
         batch_size=2,
     )
@@ -2128,6 +2154,7 @@ def test_a_resume_payload_directory_is_named_by_sixteen_fingerprint_characters(
         snapshot,
         SHARD,
         remote_bundle_dir="/home/user/bundle",
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
 
     name = prepared_job.payload_root.name

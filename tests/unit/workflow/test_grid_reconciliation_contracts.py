@@ -22,6 +22,7 @@ from osm_polygon_description_tag.workflow.grid_operator import (
     SubmissionIntent,
 )
 from osm_polygon_description_tag.workflow.grid_scheduler import CommandResult
+from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH
 from tests.unit.workflow.test_grid_operator import REMOTE, SHARD
 from tests.unit.workflow.test_grid_operator import portable_prepared as portable_prepared
 from tests.unit.workflow.test_grid_operator import prepared as prepared
@@ -105,7 +106,10 @@ def test_a_skipped_intent_does_not_stop_the_run_wide_scan(
 ) -> None:
     """This job's own intent is skipped; stopping there would miss every later one."""
     _, (first_bundle, first_paths), (second_bundle, second_paths) = two_jobs
-    own = _intent(first_bundle.bundle_id, job_id=9, outcome="submitted")
+    own = replace(
+        _intent(first_bundle.bundle_id, job_id=9, outcome="submitted"),
+        shard=first_bundle.shard,
+    )
     first_paths.intent.write_text(json.dumps(own.to_payload()), encoding="utf-8")
     other = replace(
         _intent(second_bundle.bundle_id, job_id=11, outcome="submitted"),
@@ -202,7 +206,7 @@ def test_a_prepared_job_carries_the_documented_default_budget_and_batch_size(
 
     script = paths.script.read_text(encoding="utf-8")
     assert "  --batch-size 512 \\\n" in script
-    assert f"  --budget-seconds {operator.MAX_PROCESSING_SECONDS}\n" in script
+    assert f"  --budget-seconds {operator.MAX_PROCESSING_SECONDS} \\\n" in script
 
 
 def test_a_prepared_job_carries_the_requested_budget_and_batch_size(
@@ -223,7 +227,7 @@ def test_a_prepared_job_carries_the_requested_budget_and_batch_size(
 
     script = paths.script.read_text(encoding="utf-8")
     assert "  --batch-size 64 \\\n" in script
-    assert "  --budget-seconds 900\n" in script
+    assert "  --budget-seconds 900 \\\n" in script
     config = json.loads((paths.root / operator.JOB_CONFIG_FILENAME).read_text(encoding="utf-8"))
     assert config["processing_seconds"] == 900
     assert config["batch_size"] == 64
@@ -243,7 +247,13 @@ def test_a_failed_materialisation_reports_its_own_cause_not_its_cleanup(
 
     with pytest.raises(OSError, match="the volume went away"):
         operator.prepare_portable_job(
-            run, project, source, snapshot, SHARD, remote_bundle_dir="/scratch/lang-bundle"
+            run,
+            project,
+            source,
+            snapshot,
+            SHARD,
+            remote_bundle_dir="/scratch/lang-bundle",
+            sat_model_path=REMOTE_SAT_MODEL_PATH,
         )
 
 

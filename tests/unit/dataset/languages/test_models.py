@@ -255,19 +255,19 @@ def test_fallback_identity_fingerprints_are_pinned_exactly() -> None:
     cascade_v2 = cascade_model_identity(V2_LANGUAGE_POLICY)
 
     assert glotlid.config_fingerprint == (
-        "82793fadae76e47402c1d0840ba2ba396f76762ed5c585da3946a348ec4962b2"
+        "efe352b1d0ab1ad5980760f7bff5fb34f4f7e3885cb112e5f2c9e8895dcea8de"
     )
     assert glotlid_unicode.config_fingerprint == (
-        "e31d870af6da07a944a634fc5909d737de5c46fed87a2e0d96d922f52dd4e554"
+        "e7b6987f64941a620d2419e611204a6102c0c5c3be0933f07bae196be63059e4"
     )
     assert cascade.config_fingerprint == (
-        "1476b84d5c8081da7feefc7947bf41662d356b44ad69c2460c623909420461cf"
+        "5d87faafca790cf96bbd495caca50bd8dfe4bf2cf50be8c19ff65989e2581980"
     )
     assert cascade_unicode.config_fingerprint == (
-        "f7f36b0dd1185966b09d6b330a2a0693ab4e57dbb5a7bedd341674dab9843e3f"
+        "72974dcf5bb98cbbe0b86deecd98c2a95a21d79e3c936293d7e9a8c90a501453"
     )
     assert cascade_v2.config_fingerprint == (
-        "d44d60393cf58ab8a4c6d83c31346bf720f47a7a08cb62010123de54e6bb3170"
+        "da659d1a6fbbfaf3db75912a382805b9ecd46def7a1efb4abe1de933188320f2"
     )
     assert cascade_v2.policy_fingerprint == (
         "ee1bf70f81105efe95c0548328d5ec0adecd5c4533665c480450a51205e2527d"
@@ -282,8 +282,8 @@ def test_identity_fingerprints_use_canonical_and_unicode_safe_serialization() ->
         "747f558ab865b409ec3ae383f752331df39738a2235d6f7d6d8b587ea2a01451"
     )
     assert default.config_fingerprint == (
-        "f1985cdcb594bf033a5ad9184f01c9859cb501c4a3d15236e9ac4f65569f31c5"
+        "0ee39e8d6ad019a34530ef46df5b75f38f229dc7f598f977b4301542044f86ff"
     )
     assert unicode_scope.config_fingerprint == (
-        "25fe6841b5e6bd09261d0f98e0fca98924720deb16e945d67bdbcbd554bca8a2"
+        "b0cd693eba0cf4a40485ff48667caa66e52222f53e465bd179271319910187d0"
     )

@@ -21,6 +21,7 @@ from osm_polygon_description_tag.dataset.languages.annotations import (
 from osm_polygon_description_tag.dataset.languages.models import LanguageResult, LanguageStatus
 from osm_polygon_description_tag.dataset.languages.records import DescriptionEntry
 from tests.helpers.messages import exactly
+from tests.helpers.sentences import annotation_for
 
 SNAPSHOT = "a" * 64
 FINGERPRINT = "b" * 64
@@ -42,7 +43,9 @@ def test_a_row_carries_identity_provenance_text_and_result() -> None:
     entry = _entry()
 
     row = annotation_row(
-        entry, _detected(), snapshot_id=SNAPSHOT, model_config_fingerprint=FINGERPRINT
+        annotation_for(entry, _detected()),
+        snapshot_id=SNAPSHOT,
+        model_config_fingerprint=FINGERPRINT,
     )
 
     assert row["description_identity"] == entry.description_identity
@@ -60,7 +63,9 @@ def test_a_non_linguistic_result_leaves_every_score_null() -> None:
     result = LanguageResult(None, None, None, None, LanguageStatus.NON_LINGUISTIC, "no_letters")
 
     row = annotation_row(
-        _entry(text="123"), result, snapshot_id=SNAPSHOT, model_config_fingerprint=FINGERPRINT
+        annotation_for(_entry(text="123"), result),
+        snapshot_id=SNAPSHOT,
+        model_config_fingerprint=FINGERPRINT,
     )
 
     assert row["language_code"] is None
@@ -71,14 +76,19 @@ def test_a_non_linguistic_result_leaves_every_score_null() -> None:
 
 
 def test_a_table_matches_the_frozen_schema_and_row_order() -> None:
-    pairs = [(_entry(), _detected()), (_entry("description:fr", "Le mur"), _detected())]
+    annotations = [
+        annotation_for(_entry(), _detected()),
+        annotation_for(_entry("description:fr", "Le mur"), _detected()),
+    ]
 
-    table = _table(pairs)
+    table = _table(annotations)
 
     assert table.schema == ANNOTATION_SCHEMA
     assert table.num_rows == 2
     assert table.column("tag_key").to_pylist() == ["description", "description:fr"]
-    assert annotation_identities(table) == [entry.description_identity for entry, _ in pairs]
+    assert annotation_identities(table) == [
+        annotation.entry.description_identity for annotation in annotations
+    ]
 
 
 def test_an_empty_table_still_matches_the_schema() -> None:
@@ -90,7 +100,7 @@ def test_an_empty_table_still_matches_the_schema() -> None:
 
 
 def test_a_part_round_trips_and_reports_its_checksum(tmp_path: Path) -> None:
-    table = _table([(_entry(), _detected())])
+    table = _table([annotation_for(_entry(), _detected())])
     path = tmp_path / "part.parquet"
 
     digest = write_annotation_part(path, table)
@@ -102,7 +112,15 @@ def test_a_part_round_trips_and_reports_its_checksum(tmp_path: Path) -> None:
     assert all(column.compression == "ZSTD" for column in columns)
     assert [
         column.path_in_schema for column in columns if "RLE_DICTIONARY" in column.encodings
-    ] == ["osm_type", "tag_key", "language_code", "status", "reason"]
+    ] == [
+        "osm_type",
+        "tag_key",
+        "language_code",
+        "status",
+        "reason",
+        "split_status",
+        "split_reason",
+    ]
     assert [item.name for item in tmp_path.glob("*.parquet")] == ["part.parquet"]
     assert list(tmp_path.glob(".*.tmp")) == []
 
@@ -137,7 +155,7 @@ def test_a_part_with_unexpected_columns_is_rejected(tmp_path: Path) -> None:
 
 
 def test_a_part_with_a_changed_field_type_is_rejected(tmp_path: Path) -> None:
-    table = _table([(_entry(), _detected())])
+    table = _table([annotation_for(_entry(), _detected())])
     index = table.schema.get_field_index("osm_id")
     altered = table.set_column(index, "osm_id", table.column("osm_id").cast(pa.int32()))
     path = tmp_path / "part.parquet"
@@ -160,7 +178,7 @@ def test_a_nullability_change_is_rejected(tmp_path: Path) -> None:
 
 
 def test_a_row_with_a_forged_identity_is_rejected(tmp_path: Path) -> None:
-    table = _table([(_entry(), _detected())])
+    table = _table([annotation_for(_entry(), _detected())])
     altered = table.set_column(
         table.schema.get_field_index("description_identity"),
         table.schema.field("description_identity"),
@@ -173,7 +191,7 @@ def test_a_row_with_a_forged_identity_is_rejected(tmp_path: Path) -> None:
 
 def test_duplicate_description_identities_are_rejected() -> None:
     with pytest.raises(AnnotationError, match="duplicate description identity"):
-        _table([(_entry(), _detected()), (_entry(), _detected())])
+        _table([annotation_for(_entry(), _detected()), annotation_for(_entry(), _detected())])
 
 
 @pytest.mark.parametrize(
@@ -192,7 +210,7 @@ def test_duplicate_description_identities_are_rejected() -> None:
 def test_corrupt_cells_are_rejected_without_merging_identities(
     field: str, value: object, message: str
 ) -> None:
-    rows = _table([(_entry(), _detected())]).to_pylist()
+    rows = _table([annotation_for(_entry(), _detected())]).to_pylist()
     rows[0][field] = value
     corrupt = pa.Table.from_pylist(rows, schema=ANNOTATION_SCHEMA)
     seen = {"previous-identity"}
@@ -209,7 +227,10 @@ def test_corrupt_cells_are_rejected_without_merging_identities(
 
 def test_inconsistent_margin_rejects_the_batch_without_merging_valid_prefix() -> None:
     rows = _table(
-        [(_entry(), _detected()), (_entry("description:fr", "Le mur"), _detected())]
+        [
+            annotation_for(_entry(), _detected()),
+            annotation_for(_entry("description:fr", "Le mur"), _detected()),
+        ]
     ).to_pylist()
     rows[1]["margin"] = 0.1
     corrupt = pa.Table.from_pylist(rows, schema=ANNOTATION_SCHEMA)
@@ -230,7 +251,7 @@ def test_inconsistent_margin_rejects_the_batch_without_merging_valid_prefix() ->
 
 
 def test_external_part_with_repeated_rows_is_rejected_without_merging_history() -> None:
-    valid = _table([(_entry(), _detected())])
+    valid = _table([annotation_for(_entry(), _detected())])
     corrupt = pa.concat_tables([valid, valid])
     seen = {"previous-identity"}
 
@@ -262,7 +283,7 @@ def test_validation_checks_prior_identities_without_copying_the_history() -> Non
             raise AssertionError("duplicate validation must not merge a failed part")
 
     entry = _entry()
-    table = _table([(entry, _detected())])
+    table = _table([annotation_for(entry, _detected())])
     seen = _NonIterableSet({entry.description_identity})
 
     with pytest.raises(AnnotationError, match="duplicate description identity"):
@@ -279,7 +300,7 @@ def test_validation_merges_new_identities_after_a_valid_batch() -> None:
     seen: set[str] = set()
 
     identities = validate_annotation_table(
-        _table([(entry, _detected())]),
+        _table([annotation_for(entry, _detected())]),
         snapshot_id=SNAPSHOT,
         model_config_fingerprint=FINGERPRINT,
         seen_identities=seen,

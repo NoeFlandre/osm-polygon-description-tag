@@ -117,6 +117,10 @@ def _synthetic_export(root: Path) -> LanguageExport:
             non_linguistic_count=0,
             distinct_language_count=1,
             top_languages=(("eng", 1),),
+            split_count=0,
+            unsupported_language_count=0,
+            not_detected_count=0,
+            sentence_count=0,
         ),
     )
 

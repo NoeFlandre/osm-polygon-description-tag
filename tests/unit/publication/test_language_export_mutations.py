@@ -36,6 +36,7 @@ from osm_polygon_description_tag.publication.language_upload import (
 from osm_polygon_description_tag.publication.models import UploadItem, UploadPlan
 from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
+from tests.helpers.sentences import fake_splitter
 
 SHARD = "region.parquet"
 
@@ -63,6 +64,7 @@ def completed_export(tmp_path: Path) -> LanguageExport:
         detector=lambda _text: LanguageResult(
             "eng", 0.9, 0.1, 0.8, LanguageStatus.DETECTED, "detected"
         ),
+        splitter=fake_splitter(),
     )
     return export_language_annotations(run, tmp_path / "export-é")
 

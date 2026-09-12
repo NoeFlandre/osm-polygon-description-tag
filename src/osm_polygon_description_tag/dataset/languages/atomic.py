@@ -5,21 +5,13 @@ the destination, and only then fsyncs the containing directory, so a crash at
 any point leaves either the previous content or the complete new content.
 """
 
-import json
 import os
 import uuid
 from collections.abc import Callable
 from pathlib import Path
 
 from osm_polygon_description_tag.dataset.manifest import _fsync_dir
-
-
-def canonical_json_bytes(payload: object) -> bytes:
-    """Encode ``payload`` as deterministic UTF-8 JSON with a trailing newline."""
-    # pragma: no mutate start - ensure_ascii=None equals False; exact Unicode bytes are tested
-    text = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    # pragma: no mutate end
-    return (text + "\n").encode()
+from osm_polygon_description_tag.runtime.serialization import canonical_json_bytes
 
 
 def atomic_write_bytes(path: Path, content: bytes) -> None:

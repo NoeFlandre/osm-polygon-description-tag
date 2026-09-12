@@ -18,6 +18,7 @@ from osm_polygon_description_tag.dataset.languages.models import (
     language_model_identity,
 )
 from tests.helpers.messages import exactly
+from tests.helpers.sentences import fake_splitter
 
 
 def _payload(capsys: pytest.CaptureFixture[str]) -> dict[str, object]:
@@ -212,6 +213,7 @@ def test_handle_run_forwards_operator_configuration_and_emits_counts(
         received_shard: str,
         *,
         detector: LanguageDetector,
+        splitter: object,
         snapshot: object,
         batch_size: int,
         budget: FakeBudget,
@@ -223,6 +225,7 @@ def test_handle_run_forwards_operator_configuration_and_emits_counts(
             "source_root": received_source_root,
             "shard": received_shard,
             "detector": detector,
+            "splitter": splitter,
             "snapshot": snapshot,
             "batch_size": batch_size,
             "budget_seconds": budget.seconds,
@@ -235,9 +238,20 @@ def test_handle_run_forwards_operator_configuration_and_emits_counts(
     monkeypatch.setattr(language_cli, "ProcessingBudget", FakeBudget)
     monkeypatch.setattr(language_cli, "exclusive_worker_lock", lambda _: nullcontext())
     monkeypatch.setattr(language_cli, "process_shard", fake_process)
+    sat_splitter = fake_splitter()
+    sat_dirs: list[object] = []
 
-    language_cli.handle_run(source_root, run_dir, shard, 3, 12.5)
+    def fake_build_splitter(*, model_dir: object) -> object:
+        sat_dirs.append(model_dir)
+        return sat_splitter
 
+    monkeypatch.setattr(language_cli, "build_sat_splitter", fake_build_splitter)
+
+    language_cli.handle_run(
+        source_root, run_dir, shard, 3, 12.5, sat_model_path=Path("/models/sat.bin")
+    )
+
+    assert sat_dirs == [Path("/models/sat.bin")]
     assert received["detector_policy"] == policy
     assert received["language_codes"] is None
     assert seen_detector is not None
@@ -247,6 +261,7 @@ def test_handle_run_forwards_operator_configuration_and_emits_counts(
         "source_root": source_root,
         "shard": shard,
         "detector": seen_detector,
+        "splitter": sat_splitter,
         "snapshot": snapshot,
         "batch_size": 3,
         "budget_seconds": 12.5,
@@ -629,6 +644,7 @@ def test_handle_run_uses_the_cascade_builder_and_forwards_the_glotlid_path(
     monkeypatch.setattr(language_cli, "build_language_detector", fake_build)
     monkeypatch.setattr(language_cli, "exclusive_worker_lock", lambda _: nullcontext())
     monkeypatch.setattr(language_cli, "process_shard", fake_process)
+    monkeypatch.setattr(language_cli, "build_sat_splitter", lambda *, model_dir: fake_splitter())
 
     model_path = Path("/models/model_v3.bin")
     language_cli.handle_run(
@@ -637,6 +653,7 @@ def test_handle_run_uses_the_cascade_builder_and_forwards_the_glotlid_path(
         shard,
         3,
         12.5,
+        sat_model_path=Path("/models/sat.bin"),
         glotlid_model_path=model_path,
     )
 

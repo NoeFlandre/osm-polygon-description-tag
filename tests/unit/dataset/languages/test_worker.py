@@ -44,6 +44,7 @@ from osm_polygon_description_tag.dataset.languages.worker import (
 from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
 from tests.helpers.messages import exactly
+from tests.helpers.sentences import fake_splitter
 
 SHARD = "region.parquet"
 
@@ -140,7 +141,8 @@ def _process(
         run,
         source,
         SHARD,
-        detector=detector or _detector,  # type: ignore[arg-type]
+        detector=detector or _detector,
+        splitter=fake_splitter(),  # type: ignore[arg-type]
         snapshot=snapshot,
         batch_size=batch_size,
         budget=budget,
@@ -291,7 +293,15 @@ def test_resuming_a_complete_shard_does_no_further_work(tmp_path: Path) -> None:
     first = _process(run, source, snapshot)
 
     detector = _CountingDetector()
-    second = process_shard(run, source, SHARD, detector=detector, snapshot=snapshot, batch_size=4)
+    second = process_shard(
+        run,
+        source,
+        SHARD,
+        detector=detector,
+        splitter=fake_splitter(),
+        snapshot=snapshot,
+        batch_size=4,
+    )
 
     assert detector.calls == 0
     assert second.is_complete
@@ -422,7 +432,13 @@ def test_only_the_selected_shard_must_be_staged(tmp_path: Path) -> None:
     staged.joinpath(SHARD).write_bytes((source / SHARD).read_bytes())
 
     outcome = process_shard(
-        staged, staged, SHARD, detector=_detector, snapshot=snapshot, batch_size=4
+        staged,
+        staged,
+        SHARD,
+        detector=_detector,
+        splitter=fake_splitter(),
+        snapshot=snapshot,
+        batch_size=4,
     )
 
     assert outcome.is_complete
@@ -450,7 +466,15 @@ def test_resume_skips_row_groups_already_committed(tmp_path: Path) -> None:
     _process(run, source, snapshot, budget=_StepBudget(2))
 
     detector = _CountingDetector()
-    outcome = process_shard(run, source, SHARD, detector=detector, snapshot=snapshot, batch_size=4)
+    outcome = process_shard(
+        run,
+        source,
+        SHARD,
+        detector=detector,
+        splitter=fake_splitter(),
+        snapshot=snapshot,
+        batch_size=4,
+    )
 
     assert outcome.is_complete
     assert outcome.resumed_from == 8
@@ -488,7 +512,15 @@ def test_identical_text_reuses_inference_but_still_annotates_each_object(tmp_pat
     snapshot = prepare_snapshot(source, run, code_fingerprint="a" * 64, lock_fingerprint="b" * 64)
 
     detector = _CountingDetector()
-    outcome = process_shard(run, source, SHARD, detector=detector, snapshot=snapshot, batch_size=6)
+    outcome = process_shard(
+        run,
+        source,
+        SHARD,
+        detector=detector,
+        splitter=fake_splitter(),
+        snapshot=snapshot,
+        batch_size=6,
+    )
     rows = _annotations(run)
 
     assert detector.calls == 1
@@ -501,15 +533,15 @@ def test_the_text_cache_is_bounded_and_reuses_recent_entries() -> None:
     cache = BoundedTextCache(max_entries=2)
     detector = _CountingDetector()
 
-    cache.result_for("first text here", detector)
-    cache.result_for("second text here", detector)
-    cache.result_for("first text here", detector)
+    cache.analysis_for("first text here", detector)
+    cache.analysis_for("second text here", detector)
+    cache.analysis_for("first text here", detector)
     assert detector.calls == 2
     assert len(cache) == 2
 
-    cache.result_for("third text here", detector)
+    cache.analysis_for("third text here", detector)
     assert len(cache) == 2
-    cache.result_for("second text here", detector)
+    cache.analysis_for("second text here", detector)
     assert detector.calls == 4
 
 
@@ -578,7 +610,15 @@ def test_detector_errors_are_not_converted_into_completed_results(tmp_path: Path
         raise RuntimeError("detector exploded")
 
     with pytest.raises(RuntimeError, match="detector exploded"):
-        process_shard(run, source, SHARD, detector=_failing, snapshot=snapshot, batch_size=4)
+        process_shard(
+            run,
+            source,
+            SHARD,
+            detector=_failing,
+            splitter=fake_splitter(),
+            snapshot=snapshot,
+            batch_size=4,
+        )
 
     assert not shard_paths(run, SHARD).checkpoint.exists()
 
@@ -597,7 +637,14 @@ def test_an_unknown_shard_is_rejected(tmp_path: Path) -> None:
     source, run, snapshot = _prepare(tmp_path)
 
     with pytest.raises(Exception, match="not in snapshot"):
-        process_shard(run, source, "absent.parquet", detector=_detector, snapshot=snapshot)
+        process_shard(
+            run,
+            source,
+            "absent.parquet",
+            detector=_detector,
+            splitter=fake_splitter(),
+            snapshot=snapshot,
+        )
 
 
 def _tamper_checkpoint(run: Path, **changes: object) -> None:

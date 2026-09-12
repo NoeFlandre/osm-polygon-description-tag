@@ -7,7 +7,10 @@ exact original text, the detection outcome, and the run identity that produced
 it, so a part file is self-describing and independently verifiable.
 """
 
+from __future__ import annotations
+
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, cast
 
@@ -18,9 +21,14 @@ from osm_polygon_description_tag.dataset.languages.atomic import atomic_write_vi
 from osm_polygon_description_tag.dataset.languages.models import LanguageResult, LanguageStatus
 from osm_polygon_description_tag.dataset.languages.records import DescriptionEntry
 from osm_polygon_description_tag.dataset.manifest import file_sha256
+from osm_polygon_description_tag.dataset.sentences.models import (
+    SentenceSplitResult,
+    SentenceSplitStatus,
+)
 
-ANNOTATION_SCHEMA_VERSION: Final = 1
+ANNOTATION_SCHEMA_VERSION: Final = 2
 ANNOTATION_COMPRESSION: Final = "zstd"
+_SPLIT_STATUS_VALUES: Final = frozenset(str(status) for status in SentenceSplitStatus)
 
 ANNOTATION_SCHEMA: Final = pa.schema(
     [
@@ -39,24 +47,72 @@ ANNOTATION_SCHEMA: Final = pa.schema(
         pa.field("reason", pa.string(), nullable=False),
         pa.field("snapshot_id", pa.string(), nullable=False),
         pa.field("model_config_fingerprint", pa.string(), nullable=False),
+        pa.field("split_status", pa.string(), nullable=False),
+        pa.field("split_reason", pa.string(), nullable=False),
+        pa.field("sentence_count", pa.int32(), nullable=False),
+        pa.field("sentences", pa.list_(pa.string()), nullable=False),
     ]
 )
 
-_DICTIONARY_COLUMNS: Final = ("osm_type", "tag_key", "language_code", "status", "reason")
+_DICTIONARY_COLUMNS: Final = (
+    "osm_type",
+    "tag_key",
+    "language_code",
+    "status",
+    "reason",
+    "split_status",
+    "split_reason",
+)
 
 
 class AnnotationError(ValueError):
     """Raised when an annotation part is malformed or does not match its run."""
 
 
+@dataclass(frozen=True, slots=True)
+class TextAnalysis:
+    """What the pipeline computed about one description's text.
+
+    Two objects sharing the same text share this, because both stages are pure
+    functions of the text; the entry that carries it is not part of it.
+    """
+
+    language: LanguageResult
+    split: SentenceSplitResult
+
+
+@dataclass(frozen=True, slots=True)
+class DescriptionAnnotation:
+    """Everything one description carries into its published row.
+
+    Detection and splitting each produce their own result, and both travel with
+    the entry they describe. Bundling them keeps the row builder's signature
+    stable as the pipeline grows a stage, instead of widening a tuple at every
+    call site between here and the worker.
+    """
+
+    entry: DescriptionEntry
+    language: LanguageResult
+    split: SentenceSplitResult
+
+    @classmethod
+    def from_analysis(
+        cls, entry: DescriptionEntry, analysis: TextAnalysis
+    ) -> DescriptionAnnotation:
+        """Attach one entry to the analysis of the text it carries."""
+        return cls(entry, analysis.language, analysis.split)
+
+
 def annotation_row(
-    entry: DescriptionEntry,
-    result: LanguageResult,
+    annotation: DescriptionAnnotation,
     *,
     snapshot_id: str,
     model_config_fingerprint: str,
 ) -> dict[str, object]:
-    """Build one annotation row from an entry and its detection result."""
+    """Build one annotation row from one description's detection and splitting."""
+    entry = annotation.entry
+    result = annotation.language
+    split = annotation.split
     return {
         "description_identity": entry.description_identity,
         "source_pbf": entry.source_pbf,
@@ -73,11 +129,15 @@ def annotation_row(
         "reason": result.reason,
         "snapshot_id": snapshot_id,
         "model_config_fingerprint": model_config_fingerprint,
+        "split_status": str(split.status),
+        "split_reason": split.reason,
+        "sentence_count": len(split.sentences),
+        "sentences": list(split.sentences),
     }
 
 
 def annotation_table(
-    pairs: Iterable[tuple[DescriptionEntry, LanguageResult]],
+    annotations: Iterable[DescriptionAnnotation],
     *,
     snapshot_id: str,
     model_config_fingerprint: str,
@@ -85,12 +145,11 @@ def annotation_table(
     """Build one Arrow table holding exactly one row per description entry."""
     rows = [
         annotation_row(
-            entry,
-            result,
+            annotation,
             snapshot_id=snapshot_id,
             model_config_fingerprint=model_config_fingerprint,
         )
-        for entry, result in pairs
+        for annotation in annotations
     ]
     table = pa.Table.from_pylist(rows, schema=ANNOTATION_SCHEMA)
     validate_annotation_table(
@@ -250,7 +309,52 @@ def _validate_annotation_row(
     if row.get("description_identity") != entry.description_identity:
         raise AnnotationError(f"annotation row {index} has an invalid description_identity")
     _result_from_annotation_row(row, index)
+    _validate_split_columns(row, index)
     return entry.description_identity
+
+
+def _validate_split_columns(row: Mapping[str, object], index: int) -> None:
+    """Reject a row whose splitting outcome contradicts its own sentences."""
+    sentences = _row_sentences(row, index)
+    _require_matching_sentence_count(row, index, sentences)
+    _require_supported_split_status(row, index, sentences)
+    _require_split_reason(row, index)
+
+
+def _row_sentences(row: Mapping[str, object], index: int) -> list[str]:
+    sentences = row.get("sentences")
+    if not isinstance(sentences, list):
+        raise AnnotationError(f"annotation row {index} has invalid sentences")
+    typed = cast(list[object], sentences)  # pragma: no mutate - static narrowing
+    if any(not isinstance(sentence, str) for sentence in typed):
+        raise AnnotationError(f"annotation row {index} has invalid sentences")
+    return cast(list[str], typed)  # pragma: no mutate - static narrowing
+
+
+def _require_matching_sentence_count(
+    row: Mapping[str, object], index: int, sentences: list[str]
+) -> None:
+    """The count is redundant on purpose, so a damaged part cannot pass silently."""
+    if row.get("sentence_count") != len(sentences):
+        raise AnnotationError(f"annotation row {index} has a wrong sentence_count")
+
+
+def _require_supported_split_status(
+    row: Mapping[str, object], index: int, sentences: list[str]
+) -> None:
+    """Only a split row may carry sentences, and only a known status may appear."""
+    status = row.get("split_status")
+    if status not in _SPLIT_STATUS_VALUES:
+        raise AnnotationError(f"annotation row {index} has an unsupported split_status")
+    if sentences and status != str(SentenceSplitStatus.SPLIT):
+        raise AnnotationError(f"annotation row {index} has sentences without a split status")
+
+
+def _require_split_reason(row: Mapping[str, object], index: int) -> None:
+    """Every row says why it carries the sentences it does, or why it carries none."""
+    reason = row.get("split_reason")
+    if not isinstance(reason, str) or not reason:
+        raise AnnotationError(f"annotation row {index} has an empty split_reason")
 
 
 def _entry_from_annotation_row(row: Mapping[str, object], index: int) -> DescriptionEntry:
@@ -294,6 +398,8 @@ __all__ = [
     "ANNOTATION_SCHEMA",
     "ANNOTATION_SCHEMA_VERSION",
     "AnnotationError",
+    "DescriptionAnnotation",
+    "TextAnalysis",
     "annotation_identities",
     "annotation_row",
     "annotation_table",

@@ -44,7 +44,11 @@ One row per description value, in `language-v1/data/*.parquet`:
 | `status` | string | `detected`, `uncertain`, or `non_linguistic` |
 | `reason` | string | Why that status was assigned |
 | `snapshot_id` | string | The immutable input snapshot this row came from |
-| `model_config_fingerprint` | string | Detector library, version, scope, and policy |
+| `model_config_fingerprint` | string | Detector, policy, splitter, and the splittable language set |
+| `split_status` | string | `split`, `unsupported_language`, or `not_detected` |
+| `split_reason` | string | Why that split status was assigned |
+| `sentence_count` | int32 | Number of sentences; `0` whenever nothing was split |
+| `sentences` | list\<string\> | The sentences, verbatim; empty unless `split_status` is `split` |
 
 ## Detector pipeline
 
@@ -61,6 +65,50 @@ The fallback artifact is `cis-lmu/glotlid`, file `model_v3.bin`, revision
 `a818b6bd42a628ab47d3dfc1578c7ea615c45381f3494c42535e31e8c4cafc9e`. Its
 Linux runtime is pinned to `fasttext-numpy2==0.10.2`. The snapshot records this
 identity, so a run cannot silently switch models.
+
+## Sentence splitting
+
+Splitting runs in the same pass as detection, not as a second sweep. Cold start
+dominates a Grid'5000 run --- 386 one-shard jobs pay about 6.4 hours of repeated
+model loading against roughly 49 minutes of warm inference --- so a separate
+stage would nearly double the cost to recompute something that is already in
+memory: splitting is a pure function of the text and the detection result.
+
+The splitter is SaT-3l-sm (`segment-any-text/sat-3l-sm`, revision
+`137da054051ad9f1eac42025f758db4ac9f22535`, `model.safetensors` with SHA-256
+`3e19cb0e5dbe9790d37d918d7e87880cb6577d497833f0f0627d80ae6ca1fe90`), run
+through `wtpsplit==2.2.1`.
+
+**A description is split only when its language was detected *and* the splitter
+was trained on that language.** SaT is language-agnostic at inference --- it
+takes no language argument, and `lang_code` in the library's API selects a style
+adapter this configuration does not use --- so the 85 languages of its
+supervised mixture are where it is *known competent*, and that list is the gate.
+It is pinned in source rather than read from the installed library, and its
+digest is part of `model_config_fingerprint`, so widening or narrowing it
+changes the run identity instead of quietly changing the dataset.
+
+Detection reports ISO 639-3 and SaT names its languages in ISO 639-1 (except
+Cebuano, which has no 639-1 code), so the two are joined by an explicit table
+that also maps the macrolanguage members a pinned detector actually emits ---
+`nob` and `nno` to `no`, `arb` to `ar`, `cmn` to `zh`. A code the table does not
+cover is unsupported. There is no fallback and no guessing.
+
+Every row therefore carries one of three outcomes:
+
+| `split_status` | When | `sentences` |
+| --- | --- | --- |
+| `split` | Detected, and SaT was trained on that language | The sentences, possibly none |
+| `unsupported_language` | Detected, but outside SaT's 85 | Empty |
+| `not_detected` | `uncertain` or `non_linguistic` | Empty |
+
+`split_reason` names the specific case: `split_sat_3l_sm`,
+`unsupported_language_<iso 639-3>`, or `not_detected_<detection status>`. A
+skipped description is still a complete row and never makes a run incomplete.
+
+Croatian is the clearest example of the gate doing real work: Lingua detects it
+confidently, and SaT was never trained on it, so those descriptions are
+published unsplit with `unsupported_language_hrv`.
 
 ## Limitations
 
@@ -112,7 +160,8 @@ rather than silently rewriting the identity.
 uv run osm-polygon-description-tag language run \
   --source-root <staged-source> --run-dir <run-dir> --project-root <staged-project> \
   --shard region.parquet --batch-size 512 --budget-seconds 1200 \
-  --glotlid-model-path <model_v3.bin>
+  --glotlid-model-path <model_v3.bin> \
+  --sat-model-path <sat-3l-sm-dir>
 ```
 
 `run` requires only the selected shard's file to be present, not the whole
@@ -321,6 +370,7 @@ uv run python -m scripts.run_language_grid \
   --ssh-host nancy --site nancy \
   --remote-bundle-root /home/nflandre/osm-language-grid-v3 \
   --remote-glotlid-model-path /home/nflandre/models/glotlid-v3/model_v3.bin \
+  --remote-sat-model-path /home/nflandre/models/sat-3l-sm \
   --remote-operator-dir /home/nflandre/osm-language-grid \
   --remote-cli /home/nflandre/osm-language-grid/.portable-grid-probe/bin/osm-polygon-description-tag \
   --max-shards 1
@@ -330,7 +380,7 @@ Start with `--max-shards 1` and read the emitted JSON before widening it. The
 driver is resumable: a shard whose checkpoint already validates as complete is
 skipped, so re-running continues rather than repeating work.
 
-### Stage the pinned GlotLID model once
+### Stage the pinned models once
 
 The cascade needs the pinned fallback model on storage the compute node can
 read; `--glotlid-model-path` is an absolute path, and the job verifies its
@@ -349,12 +399,45 @@ The artifact is about 1.6 GiB, so confirm `quota -p -w` has room before
 fetching it. A digest that does not match the pinned constant must never be
 used: the loader refuses it, and so should you.
 
+The sentence splitter needs the same treatment, with one difference:
+`--sat-model-path` is a **directory**, not a file. `wtpsplit` loads a model the
+way `transformers` does, from a directory holding `config.json` beside the
+weights, and it needs a tokenizer in that directory too --- the library's
+default would fetch `xlm-roberta-base` from the Hub, and a compute node has no
+reason to have network access. The job verifies the weights' SHA-256 before
+loading anything.
+
+```bash
+mkdir -p ~/models/sat-3l-sm
+cd ~/models/sat-3l-sm
+rev=137da054051ad9f1eac42025f758db4ac9f22535
+for name in model.safetensors config.json; do
+  curl -sSL -O "https://huggingface.co/segment-any-text/sat-3l-sm/resolve/$rev/$name"
+done
+# the tokenizer SaT expects, staged beside the weights so nothing is fetched at run time
+for name in tokenizer.json tokenizer_config.json sentencepiece.bpe.model special_tokens_map.json; do
+  curl -sSL -O "https://huggingface.co/FacebookAI/xlm-roberta-base/resolve/main/$name"
+done
+sha256sum model.safetensors
+# must print 3e19cb0e5dbe9790d37d918d7e87880cb6577d497833f0f0627d80ae6ca1fe90
+```
+
+The weights are about 815 MiB and the tokenizer adds roughly 17 MiB, so budget
+about 2.5 GiB of home quota for the two models together. Confirm the directory
+loads before submitting 386 jobs:
+
+```bash
+python -c "from wtpsplit import SaT; d='$HOME/models/sat-3l-sm'; \
+  print(SaT(d, tokenizer_name_or_path=d).split('A park. It has benches.'))"
+```
+
 Prepare a portable payload containing the project, lockfile, immutable
 snapshot, exactly one source shard, and validated resume artifacts:
 
 ```bash
 uv run --no-sync osm-polygon-description-tag language grid stage --run-dir <run-dir> --project-root <project> --source-root <source> --shard region.parquet --remote-bundle-dir /home/user/language-bundle \
-  --glotlid-model-path /home/user/models/glotlid-v3/model_v3.bin
+  --glotlid-model-path /home/user/models/glotlid-v3/model_v3.bin \
+  --sat-model-path /home/user/models/sat-3l-sm
 ```
 
 This creates local staging files and prints the exact transfer argument vector.
@@ -365,7 +448,8 @@ an explicitly requested continuation.
 
 ```bash
 uv run --no-sync osm-polygon-description-tag language grid prepare --run-dir <run-dir> --shard region.parquet --remote-project-dir /home/user/project --remote-source-dir /tmp/staging/source --remote-run-dir /tmp/staging/run \
-  --glotlid-model-path /home/user/models/glotlid-v3/model_v3.bin
+  --glotlid-model-path /home/user/models/glotlid-v3/model_v3.bin \
+  --sat-model-path /home/user/models/sat-3l-sm
 ```
 
 `prepare` is the lower-level script/metadata operation for already staged inputs;
@@ -378,7 +462,7 @@ user's shell. Spaces and metacharacters in a local script path therefore remain
 part of the filename, not executable syntax.
 
 ```bash
-uv run --no-sync osm-polygon-description-tag language grid submit --run-dir <run-dir> --shard region.parquet --site nancy --remote-project-dir ... --remote-source-dir ... --remote-run-dir ... --glotlid-model-path /home/user/models/glotlid-v3/model_v3.bin
+uv run --no-sync osm-polygon-description-tag language grid submit --run-dir <run-dir> --shard region.parquet --site nancy --remote-project-dir ... --remote-source-dir ... --remote-run-dir ... --glotlid-model-path /home/user/models/glotlid-v3/model_v3.bin --sat-model-path /home/user/models/sat-3l-sm
 ```
 
 Without `--apply` this only plans: it contacts no scheduler and prints the

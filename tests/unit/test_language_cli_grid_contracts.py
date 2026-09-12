@@ -26,6 +26,7 @@ from osm_polygon_description_tag.dataset.languages.models import (
 from osm_polygon_description_tag.dataset.languages.snapshot import SnapshotError
 from osm_polygon_description_tag.workflow.grid_operator import GridOperatorError
 from tests.helpers.messages import exactly
+from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH
 
 SHARD = "region.parquet"
 
@@ -407,6 +408,7 @@ def test_preparing_a_job_forwards_the_requested_budget_and_reports_its_directory
         "/remote/run",
         900,
         64,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
 
     assert seen == [
@@ -416,6 +418,7 @@ def test_preparing_a_job_forwards_the_requested_budget_and_reports_its_directory
             "remote_run_dir": "/remote/run",
             "processing_seconds": 900,
             "batch_size": 64,
+            "sat_model_path": REMOTE_SAT_MODEL_PATH,
             "glotlid_model_path": None,
         }
     ]
@@ -494,6 +497,7 @@ def test_a_reused_staged_payload_is_verified_against_this_shards_bundle(
         processing_seconds=900,
         batch_size=64,
         walltime_seconds=1800,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
 
     assert seen == [(payload_root, bundle)]
@@ -538,6 +542,7 @@ def test_submitting_forwards_the_budget_and_the_daytime_authorisation(
         64,
         True,
         False,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
     capsys.readouterr()
 
@@ -549,6 +554,7 @@ def test_submitting_forwards_the_budget_and_the_daytime_authorisation(
             "processing_seconds": 900,
             "batch_size": 64,
             "walltime_seconds": 1800,
+            "sat_model_path": REMOTE_SAT_MODEL_PATH,
             "glotlid_model_path": None,
         }
     ]
@@ -592,6 +598,7 @@ def test_a_first_submission_prepares_the_job_with_the_requested_budget(
         64,
         False,
         False,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
     capsys.readouterr()
 
@@ -603,6 +610,7 @@ def test_a_first_submission_prepares_the_job_with_the_requested_budget(
             "processing_seconds": 900,
             "batch_size": 64,
             "walltime_seconds": 1800,
+            "sat_model_path": REMOTE_SAT_MODEL_PATH,
             "glotlid_model_path": None,
             "remote_bundle_dir": None,
         }

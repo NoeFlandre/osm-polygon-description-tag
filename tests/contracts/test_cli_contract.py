@@ -77,6 +77,7 @@ LANGUAGE_COMMAND_OPTIONS = {
         "--budget-seconds",
         "--project-root",
         "--glotlid-model-path",
+        "--sat-model-path",
     },
     "validate": {*HELP_OPTION, "--run-dir", "--shard"},
     "export": {*HELP_OPTION, "--run-dir", "--export-dir", "--card-section"},
@@ -109,6 +110,7 @@ GRID_COMMAND_OPTIONS = {
         "--walltime-seconds",
         "--apply",
         "--glotlid-model-path",
+        "--sat-model-path",
     },
     "prepare": {
         *HELP_OPTION,
@@ -117,6 +119,7 @@ GRID_COMMAND_OPTIONS = {
         "--shard",
         "--processing-seconds",
         "--batch-size",
+        "--sat-model-path",
     },
     "submit": {
         *HELP_OPTION,
@@ -129,6 +132,7 @@ GRID_COMMAND_OPTIONS = {
         "--batch-size",
         "--allow-daytime",
         "--apply",
+        "--sat-model-path",
     },
     "status": {*HELP_OPTION, "--run-dir", "--shard", "--apply"},
     "collect": {

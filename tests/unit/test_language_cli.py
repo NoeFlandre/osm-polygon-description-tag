@@ -25,11 +25,19 @@ from osm_polygon_description_tag.dataset.languages.models import (
 )
 from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
+from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH, fake_splitter
 
+SAT_MODEL_PATH = "/models/sat-3l-sm/model.safetensors"
 SHARD = "region.parquet"
 # A Tuesday at 22:00 Europe/Paris: outside the blocked weekday daytime window,
 # with room for the whole walltime before the next 09:00 boundary.
 NIGHT_INSTANT = datetime(2026, 9, 8, 20, 0, tzinfo=UTC)
+
+
+@pytest.fixture(autouse=True)
+def _fake_sentence_splitter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the CLI tests about wiring; the real adapter has its own tests."""
+    monkeypatch.setattr(language_cli, "build_sat_splitter", lambda *, model_dir: fake_splitter())
 
 
 @pytest.fixture
@@ -56,6 +64,8 @@ def test_run_rejects_changed_project_artifacts_before_building_the_detector(
         [
             "language",
             "run",
+            "--sat-model-path",
+            SAT_MODEL_PATH,
             "--source-root",
             str(source),
             "--run-dir",
@@ -102,6 +112,8 @@ def test_run_constructs_the_language_scope_frozen_in_the_snapshot(
             [
                 "language",
                 "run",
+                "--sat-model-path",
+                SAT_MODEL_PATH,
                 "--source-root",
                 str(source),
                 "--run-dir",
@@ -136,6 +148,8 @@ def test_run_refuses_a_detector_with_a_different_configuration(
         [
             "language",
             "run",
+            "--sat-model-path",
+            SAT_MODEL_PATH,
             "--source-root",
             str(source),
             "--run-dir",
@@ -382,6 +396,8 @@ def test_run_processes_a_shard_and_validate_reports_completeness(
         [
             "language",
             "run",
+            "--sat-model-path",
+            SAT_MODEL_PATH,
             "--source-root",
             str(source),
             "--run-dir",
@@ -438,6 +454,8 @@ def test_run_resumes_after_an_exhausted_budget(
     arguments = [
         "language",
         "run",
+        "--sat-model-path",
+        SAT_MODEL_PATH,
         "--source-root",
         str(source),
         "--run-dir",
@@ -523,6 +541,8 @@ def test_run_reports_an_unknown_shard_on_stderr(
         [
             "language",
             "run",
+            "--sat-model-path",
+            SAT_MODEL_PATH,
             "--source-root",
             str(source),
             "--run-dir",
@@ -568,6 +588,8 @@ def test_a_second_worker_is_rejected_while_the_run_is_locked(
             [
                 "language",
                 "run",
+                "--sat-model-path",
+                SAT_MODEL_PATH,
                 "--source-root",
                 str(source),
                 "--run-dir",
@@ -632,6 +654,8 @@ _REMOTE = [
     "/scratch/staging/run",
     "--glotlid-model-path",
     "/home/user/models/glotlid-v3/model_v3.bin",
+    "--sat-model-path",
+    SAT_MODEL_PATH,
 ]
 
 
@@ -668,6 +692,8 @@ def test_grid_submit_without_the_apply_gate_only_plans(
             "language",
             "grid",
             "submit",
+            "--sat-model-path",
+            SAT_MODEL_PATH,
             "--run-dir",
             str(run_dir),
             "--shard",
@@ -722,6 +748,8 @@ def test_grid_collect_reports_run_completeness(
             [
                 "language",
                 "run",
+                "--sat-model-path",
+                SAT_MODEL_PATH,
                 "--source-root",
                 str(source),
                 "--run-dir",
@@ -788,12 +816,14 @@ def test_grid_stage_plans_a_portable_transfer_without_the_apply_gate(
         batch_size=512,
         walltime_seconds=1800,
         apply=False,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
 
     assert calls["prepare"] == (
         (run_dir, project_root, source_root, snapshot, SHARD),
         {
             "remote_bundle_dir": "/scratch/bundle",
+            "sat_model_path": REMOTE_SAT_MODEL_PATH,
             "processing_seconds": 1200,
             "batch_size": 512,
             "walltime_seconds": 1800,
@@ -855,6 +885,7 @@ def test_grid_stage_apply_executes_only_the_explicit_transfer_argv(
         walltime_seconds=1800,
         apply=True,
         runner=fake_runner,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
 
     payload = _stdout(capsys)
@@ -917,7 +948,8 @@ def test_grid_stage_reports_transport_failures(
             batch_size=512,
             walltime_seconds=1800,
             apply=True,
-            runner=failing_runner,  # type: ignore[arg-type]
+            runner=failing_runner,  # type: ignore[arg-type],
+            sat_model_path=REMOTE_SAT_MODEL_PATH,
         )
 
 
@@ -974,6 +1006,7 @@ def test_grid_submit_passes_fresh_account_wide_policy_evidence(
         True,
         True,
         runner=evidence_runner,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
 
     assert observed["gather"] == ("nancy", evidence_runner)
@@ -1288,6 +1321,8 @@ def test_grid_submit_with_the_apply_gate_uses_live_policy_evidence(
             "language",
             "grid",
             "submit",
+            "--sat-model-path",
+            SAT_MODEL_PATH,
             "--run-dir",
             str(run_dir),
             "--shard",
@@ -1325,6 +1360,8 @@ def test_grid_stage_quarantines_and_reports_uncheckpointed_orphans(
         "language",
         "grid",
         "stage",
+        "--sat-model-path",
+        SAT_MODEL_PATH,
         "--run-dir",
         str(run_dir),
         "--project-root",
@@ -1407,6 +1444,8 @@ def test_grid_stage_then_submit_reuses_the_exact_staged_script_contract(
                 "language",
                 "grid",
                 "stage",
+                "--sat-model-path",
+                SAT_MODEL_PATH,
                 "--run-dir",
                 str(run_dir),
                 "--project-root",
@@ -1458,6 +1497,8 @@ def test_grid_stage_then_submit_reuses_the_exact_staged_script_contract(
             "language",
             "grid",
             "submit",
+            "--sat-model-path",
+            SAT_MODEL_PATH,
             "--run-dir",
             str(run_dir),
             "--shard",
@@ -1577,6 +1618,8 @@ def test_grid_prepare_then_submit_reuses_the_legacy_script_contract(
                 "language",
                 "grid",
                 "prepare",
+                "--sat-model-path",
+                SAT_MODEL_PATH,
                 "--run-dir",
                 str(run_dir),
                 "--shard",
@@ -1597,6 +1640,8 @@ def test_grid_prepare_then_submit_reuses_the_legacy_script_contract(
                 "language",
                 "grid",
                 "submit",
+                "--sat-model-path",
+                SAT_MODEL_PATH,
                 "--run-dir",
                 str(run_dir),
                 "--shard",
@@ -1654,6 +1699,8 @@ def _completed_run(tmp_path: Path, project: Path, source: Path) -> Path:
             [
                 "language",
                 "run",
+                "--sat-model-path",
+                SAT_MODEL_PATH,
                 "--source-root",
                 str(source),
                 "--run-dir",

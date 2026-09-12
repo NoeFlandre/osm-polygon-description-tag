@@ -21,6 +21,7 @@ from osm_polygon_description_tag.workflow.grid_operator import (
 )
 from osm_polygon_description_tag.workflow.grid_scheduler import CommandResult, SchedulerError
 from tests.helpers.messages import exactly
+from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH
 from tests.unit.workflow.test_grid_operator import SHARD
 from tests.unit.workflow.test_grid_operator import collection_runs as collection_runs
 from tests.unit.workflow.test_grid_operator import portable_prepared as portable_prepared
@@ -131,7 +132,13 @@ def test_a_payload_is_materialised_inside_the_job_directory(
     monkeypatch.setattr(operator.tempfile, "mkdtemp", recording_mkdtemp)
 
     prepared_job = prepare_portable_job(
-        run, project, source, snapshot, SHARD, remote_bundle_dir=_REMOTE_BUNDLE
+        run,
+        project,
+        source,
+        snapshot,
+        SHARD,
+        remote_bundle_dir=_REMOTE_BUNDLE,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
 
     assert seen == [{"prefix": ".payload-", "dir": prepared_job.paths.root}]
@@ -143,7 +150,13 @@ def test_a_staged_payload_is_verified_against_the_bundle_it_was_staged_for(
     """Reusing another shard's payload would run the wrong input on the node."""
     project, source, run, snapshot = request.getfixturevalue("portable_prepared")
     prepared_job = prepare_portable_job(
-        run, project, source, snapshot, SHARD, remote_bundle_dir=_REMOTE_BUNDLE
+        run,
+        project,
+        source,
+        snapshot,
+        SHARD,
+        remote_bundle_dir=_REMOTE_BUNDLE,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
     foreign = operator.bundle_for_shard(snapshot, SHARD)
     foreign = type(foreign)(
@@ -184,7 +197,15 @@ def test_an_unusable_remote_bundle_directory_is_refused_under_its_own_label(
     project, source, run, snapshot = request.getfixturevalue("portable_prepared")
 
     with pytest.raises(GridOperatorError, match=exactly(message)):
-        prepare_portable_job(run, project, source, snapshot, SHARD, remote_bundle_dir=value)
+        prepare_portable_job(
+            run,
+            project,
+            source,
+            snapshot,
+            SHARD,
+            remote_bundle_dir=value,
+            sat_model_path=REMOTE_SAT_MODEL_PATH,
+        )
 
 
 def test_a_retrieved_run_directory_that_is_not_a_directory_is_named_in_full(
@@ -229,7 +250,13 @@ def test_the_payload_root_is_selected_for_the_bundle_being_staged(
     monkeypatch.setattr(operator, "_existing_payload_for_resume", recording)
 
     prepared_job = prepare_portable_job(
-        run, project, source, snapshot, SHARD, remote_bundle_dir=_REMOTE_BUNDLE
+        run,
+        project,
+        source,
+        snapshot,
+        SHARD,
+        remote_bundle_dir=_REMOTE_BUNDLE,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
 
     assert seen
@@ -250,7 +277,15 @@ def test_a_prepared_view_describes_the_job_and_bundle_that_were_staged(
 
     monkeypatch.setattr(operator, "_prepared_view", recording)
 
-    prepare_portable_job(run, project, source, snapshot, SHARD, remote_bundle_dir=_REMOTE_BUNDLE)
+    prepare_portable_job(
+        run,
+        project,
+        source,
+        snapshot,
+        SHARD,
+        remote_bundle_dir=_REMOTE_BUNDLE,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
+    )
 
     expected_bundle = operator.bundle_for_shard(snapshot, SHARD)
     assert seen == [(operator.job_paths(run, expected_bundle), expected_bundle)]
@@ -262,7 +297,13 @@ def test_a_portable_job_carries_the_documented_default_batch_size(
     project, source, run, snapshot = request.getfixturevalue("portable_prepared")
 
     prepared_job = prepare_portable_job(
-        run, project, source, snapshot, SHARD, remote_bundle_dir=_REMOTE_BUNDLE
+        run,
+        project,
+        source,
+        snapshot,
+        SHARD,
+        remote_bundle_dir=_REMOTE_BUNDLE,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
 
     script = (prepared_job.payload_root / operator.JOB_SCRIPT_FILENAME).read_text(encoding="utf-8")
@@ -275,7 +316,13 @@ def test_a_staged_payload_whose_snapshot_is_unreadable_reports_the_readers_words
     """Replacing the cause with ``None`` would report the string ``None``."""
     project, source, run, snapshot = request.getfixturevalue("portable_prepared")
     prepared_job = prepare_portable_job(
-        run, project, source, snapshot, SHARD, remote_bundle_dir=_REMOTE_BUNDLE
+        run,
+        project,
+        source,
+        snapshot,
+        SHARD,
+        remote_bundle_dir=_REMOTE_BUNDLE,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
     run_root = prepared_job.payload_root / operator.STAGE_RUN_DIRNAME
     (run_root / operator.SNAPSHOT_FILENAME).write_text("{not json", encoding="utf-8")
@@ -308,7 +355,13 @@ def test_a_portable_job_normalises_its_remote_bundle_root_once(
     project, source, run, snapshot = request.getfixturevalue("portable_prepared")
 
     prepared_job = prepare_portable_job(
-        run, project, source, snapshot, SHARD, remote_bundle_dir=remote_bundle_dir
+        run,
+        project,
+        source,
+        snapshot,
+        SHARD,
+        remote_bundle_dir=remote_bundle_dir,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
 
     script = (prepared_job.payload_root / operator.JOB_SCRIPT_FILENAME).read_text(encoding="utf-8")
@@ -373,7 +426,13 @@ def test_restaging_an_unchanged_payload_reports_this_jobs_own_paths(
     """The second staging returns early; it must still describe this job."""
     project, source, run, snapshot = request.getfixturevalue("portable_prepared")
     first = prepare_portable_job(
-        run, project, source, snapshot, SHARD, remote_bundle_dir=_REMOTE_BUNDLE
+        run,
+        project,
+        source,
+        snapshot,
+        SHARD,
+        remote_bundle_dir=_REMOTE_BUNDLE,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
     seen: list[object] = []
     real = operator._prepared_view
@@ -385,7 +444,13 @@ def test_restaging_an_unchanged_payload_reports_this_jobs_own_paths(
     monkeypatch.setattr(operator, "_prepared_view", recording)
 
     second = prepare_portable_job(
-        run, project, source, snapshot, SHARD, remote_bundle_dir=_REMOTE_BUNDLE
+        run,
+        project,
+        source,
+        snapshot,
+        SHARD,
+        remote_bundle_dir=_REMOTE_BUNDLE,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
 
     expected_bundle = operator.bundle_for_shard(snapshot, SHARD)
@@ -412,4 +477,5 @@ def test_a_processing_budget_that_does_not_fit_the_walltime_is_refused_when_prep
             processing_seconds=1000,
             batch_size=64,
             walltime_seconds=900,
+            sat_model_path=REMOTE_SAT_MODEL_PATH,
         )
