@@ -24,6 +24,7 @@ from osm_polygon_description_tag.publication.language import (
     build_language_upload_plan,
     export_language_annotations,
     read_language_export,
+    render_language_card_section,
 )
 from osm_polygon_description_tag.publication.language_upload import (
     PublicationOutcome,
@@ -127,6 +128,10 @@ def test_plan_identity_covers_exact_root_repository_and_file_bytes(
         ],
     }
     encoded = (json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()
+    # The rendered card ships in the same commit as the files, so it is part of
+    # the identity too; without it a corrected card is indistinguishable from
+    # the published one and can never be uploaded.
+    encoded += render_language_card_section(completed_export).encode()
 
     plan = build_language_upload_plan(
         completed_export, "owner/export-é", confirm_repo="owner/export-é"
@@ -147,9 +152,18 @@ def test_plan_identity_changes_with_repository_root_or_file_identity(tmp_path: P
         ("owner/one", tmp_path, (UploadItem(item.relative_path, 10, "b" * 64),)),
         ("owner/one", tmp_path, (UploadItem("language-v1/other.json", 10, item.sha256),)),
     ]
-    plans = [export_module._identified_plan(repo, root, files) for repo, root, files in variants]
+    plans = [
+        export_module._identified_plan(repo, root, files, "## card\n")
+        for repo, root, files in variants
+    ]
 
     assert len({plan.identity_sha256 for plan in plans}) == len(variants)
+    # The card is held constant here, so any difference comes from the repo,
+    # the root or the files -- which is what this test is about.
+    assert (
+        export_module._identified_plan(*variants[0], "## other\n").identity_sha256
+        != plans[0].identity_sha256
+    )
     for plan, (repo, root, files) in zip(plans, variants, strict=True):
         assert (plan.repo_id, plan.data_root, plan.files) == (repo, str(root), files)
         assert len(plan.identity_sha256) == 64

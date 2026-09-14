@@ -960,3 +960,32 @@ def test_a_traversing_upload_path_is_rejected(export: LanguageExport) -> None:
 
     with pytest.raises(LanguagePublicationError, match="must not traverse"):
         build_language_upload_plan(traversing, REPO, confirm_repo=REPO)
+
+
+def test_the_plan_identity_covers_the_card_section_it_will_commit(
+    export: LanguageExport, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A changed card must be a different publication, or it can never ship.
+
+    ``upload`` commits the data files *and* the rendered card section in one
+    commit, but the identity was computed over the files alone. Correcting the
+    card while the data stayed byte-identical therefore produced the same
+    identity, `publish` resumed its recorded outcome, skipped the upload
+    entirely, and the corrected card could never reach the Hub.
+    """
+    before = build_language_upload_plan(export, REPO, confirm_repo=REPO).identity_sha256
+
+    monkeypatch.setattr(
+        language_module, "render_language_card_section", lambda _export: "## rewritten\n"
+    )
+    after = build_language_upload_plan(export, REPO, confirm_repo=REPO).identity_sha256
+
+    assert before != after
+
+
+def test_the_plan_identity_is_stable_when_nothing_changes(export: LanguageExport) -> None:
+    """Identity must still be a pure function of what gets committed."""
+    first = build_language_upload_plan(export, REPO, confirm_repo=REPO)
+    second = build_language_upload_plan(export, REPO, confirm_repo=REPO)
+
+    assert first.identity_sha256 == second.identity_sha256

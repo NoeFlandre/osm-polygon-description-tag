@@ -407,16 +407,25 @@ def build_language_upload_plan(
     _validate_allowlist(relative_paths)
     _validate_export_seal(export)
     items = tuple(_upload_item(export.export_root, path) for path in sorted(relative_paths))
-    return _identified_plan(repo_id, export.export_root, items)
+    return _identified_plan(
+        repo_id, export.export_root, items, render_language_card_section(export)
+    )
 
 
-def _identified_plan(repo_id: str, root: Path, items: tuple[UploadItem, ...]) -> UploadPlan:
+def _identified_plan(
+    repo_id: str, root: Path, items: tuple[UploadItem, ...], card_section: str
+) -> UploadPlan:
     # ``identity_sha256`` is omitted from ``UploadPlan.to_payload`` by design, so this
     # provisional-only field cannot reach the digest below: changing it is equivalent.
     # pragma: no mutate start
     provisional = UploadPlan(repo_id=repo_id, data_root=str(root), files=items, identity_sha256="")
     # pragma: no mutate end
-    identity = file_sha256_bytes(provisional.to_json().encode())
+    # The card section is part of the same commit as the files, so it belongs in
+    # the identity. Without it, correcting the card while the data stays
+    # byte-identical yields the same identity, publication resumes its recorded
+    # outcome, and the corrected card can never reach the Hub.
+    digest_input = provisional.to_json().encode() + card_section.encode()
+    identity = file_sha256_bytes(digest_input)
     return UploadPlan(repo_id=repo_id, data_root=str(root), files=items, identity_sha256=identity)
 
 
