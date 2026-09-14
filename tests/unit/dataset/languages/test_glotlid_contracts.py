@@ -108,14 +108,6 @@ def test_a_non_numeric_score_is_refused_exactly(score: object) -> None:
     assert str(caught.value) == "GlotLID scores must be numeric"
 
 
-@pytest.mark.parametrize("score", [-0.001, 1.001, float("inf"), float("nan")])
-def test_a_score_outside_the_unit_interval_is_refused_exactly(score: float) -> None:
-    with pytest.raises(GlotLIDLabelError) as caught:
-        _adapter((["__label__fra_Latn"], [score]))("x")
-
-    assert str(caught.value) == "GlotLID scores must be between 0 and 1"
-
-
 @pytest.mark.parametrize("score", [0.0, 1.0, 0, 1])
 def test_both_ends_of_the_unit_interval_are_accepted(score: float) -> None:
     """The bounds are inclusive; narrowing either one would drop real rows."""
@@ -204,3 +196,45 @@ def test_the_pinned_runtime_version_is_read_for_the_pinned_distribution(
 
     assert glotlid_module._installed_fasttext_version() == GLOTLID_RUNTIME_LIBRARY_VERSION
     assert queried == [GLOTLID_RUNTIME_LIBRARY_NAME]
+
+
+@pytest.mark.parametrize("score", [1.0000066757202148, 1.0000100135803223, 1.0 + 1e-6])
+def test_float32_rounding_just_above_one_is_clamped_not_refused(score: float) -> None:
+    """fastText really returns these, and refusing them loses real rows.
+
+    Its probabilities are accumulated in float32, so a confident prediction
+    comes back marginally over 1.0 --- 1.0000100135803223 was observed on 12 of
+    194 Afghan descriptions. A probability above one is still impossible, so
+    the value is clamped rather than stored as it arrived.
+    """
+    assert _adapter((["__label__fra_Latn"], [score]))("x") == {"fra": 1.0}
+
+
+@pytest.mark.parametrize("score", [1.001, 1.01, 2.0, 1.0 + 1e-3])
+def test_a_score_beyond_float32_rounding_is_still_refused_exactly(score: float) -> None:
+    """The tolerance covers rounding only; it must not hide a broken model."""
+    with pytest.raises(GlotLIDLabelError) as caught:
+        _adapter((["__label__fra_Latn"], [score]))("x")
+
+    assert str(caught.value) == "GlotLID scores must be between 0 and 1"
+
+
+@pytest.mark.parametrize("score", [-0.001, -1e-3, float("inf"), float("nan")])
+def test_a_score_below_zero_or_not_finite_is_refused_exactly(score: float) -> None:
+    """Nothing rounds a probability below zero; there is no tolerance that way."""
+    with pytest.raises(GlotLIDLabelError) as caught:
+        _adapter((["__label__fra_Latn"], [score]))("x")
+
+    assert str(caught.value) == "GlotLID scores must be between 0 and 1"
+
+
+def test_a_score_inside_the_interval_is_never_altered() -> None:
+    """Clamping must touch only the impossible values, never a real score."""
+    assert _adapter((["__label__fra_Latn"], [0.87654321]))("x") == {"fra": 0.87654321}
+
+
+def test_the_rounding_tolerance_is_an_inclusive_upper_bound() -> None:
+    """The bound is inclusive like the others; excluding it drops a real row."""
+    at_the_bound = 1.0 + glotlid_module.SCORE_ROUNDING_TOLERANCE
+
+    assert _adapter((["__label__fra_Latn"], [at_the_bound]))("x") == {"fra": 1.0}

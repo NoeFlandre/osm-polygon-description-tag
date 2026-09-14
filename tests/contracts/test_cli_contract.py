@@ -133,6 +133,10 @@ GRID_COMMAND_OPTIONS = {
         "--allow-daytime",
         "--apply",
         "--sat-model-path",
+        # Sites disagree on what a bare oarsub means: several auto-select a
+        # queue that does not exist and reject the job, others refuse an
+        # explicit one, so the queue is a per-site input.
+        "--queue",
     },
     "status": {*HELP_OPTION, "--run-dir", "--shard", "--apply"},
     "collect": {

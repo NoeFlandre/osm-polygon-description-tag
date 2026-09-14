@@ -68,6 +68,7 @@ from osm_polygon_description_tag.workflow.grid_operator import (
     JobPaths,
     SubmissionIntent,
     acknowledge_collected_results,
+    adopt_retrieved_intent,
     build_bundle_transfer_argv,
     build_result_retrieval_argv,
     bundle_for_shard,
@@ -520,6 +521,7 @@ def handle_grid_submit(
     runner: CommandRunner | None = None,
     sat_model_path: str,
     glotlid_model_path: str | None = None,
+    queue: str | None = None,
 ) -> None:
     """Plan a submission, and perform it only behind the apply gate."""
     snapshot = read_snapshot(run_dir)
@@ -583,6 +585,7 @@ def handle_grid_submit(
         require_fresh_policy=apply,
         runner=command_runner,
         now=moment,
+        queue=queue,
     )
     print_json(
         {
@@ -809,9 +812,17 @@ def _copy_retrieval_snapshot(source: Path, target: Path) -> None:
         raise GridOperatorError(f"cannot seed retrieved run snapshot: {error}") from error
 
 
-def _acknowledge_imported_results(run_dir: Path, shard: str, report: RunReport) -> SubmissionIntent:
+def _acknowledge_imported_results(
+    run_dir: Path, shard: str, report: RunReport, retrieved_run_dir: Path | None = None
+) -> SubmissionIntent:
     bundle = bundle_for_shard(read_snapshot(run_dir), shard)
-    return acknowledge_collected_results(job_paths(run_dir, bundle), report)
+    paths = job_paths(run_dir, bundle)
+    if retrieved_run_dir is not None:
+        # The job was submitted from the site's frontend against the site's own
+        # copy of the run, so the durable intent lives there; adopt it before
+        # acknowledging, or there is nothing here to acknowledge against.
+        adopt_retrieved_intent(paths, retrieved_run_dir, bundle)
+    return acknowledge_collected_results(paths, report)
 
 
 def handle_grid_collect(
@@ -855,7 +866,7 @@ def _require_retrieved_run_dir(retrieved_run_dir: Path | None) -> Path:
 
 def _import_and_acknowledge_collection(run_dir: Path, shard: str, retrieved_run_dir: Path) -> None:
     report = import_retrieved_results(run_dir, retrieved_run_dir, shard)
-    acknowledgment = _acknowledge_imported_results(run_dir, shard, report)
+    acknowledgment = _acknowledge_imported_results(run_dir, shard, report, retrieved_run_dir)
     print_json(
         {
             **report.to_payload(),
@@ -886,7 +897,7 @@ def _retrieve_and_collect(
     _seed_retrieval_snapshot(run_dir, retrieved_run_dir)
     result = _execute_transport(transfer_argv, runner)
     report = import_retrieved_results(run_dir, retrieved_run_dir, shard)
-    acknowledgment = _acknowledge_imported_results(run_dir, shard, report)
+    acknowledgment = _acknowledge_imported_results(run_dir, shard, report, retrieved_run_dir)
     print_json(
         {
             **report.to_payload(),
@@ -988,6 +999,13 @@ def grid_submit_command(
     allow_daytime: AllowDaytime = False,
     apply: Apply = False,
     glotlid_model_path: RemoteGlotLIDModelPath = None,
+    queue: Annotated[
+        str | None,
+        typer.Option(
+            "--queue",
+            help="Scheduler queue; sites disagree on what a bare submission means",
+        ),
+    ] = None,
     *,
     sat_model_path: RemoteSatModelPath,
 ) -> None:
@@ -1005,6 +1023,7 @@ def grid_submit_command(
         apply,
         sat_model_path=sat_model_path,
         glotlid_model_path=glotlid_model_path,
+        queue=queue,
     )
 
 

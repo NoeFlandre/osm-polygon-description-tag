@@ -72,6 +72,10 @@ def _pinned_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     model_dir.mkdir()
     (model_dir / "model.safetensors").write_bytes(b"weights")
     (model_dir / "config.json").write_text("{}", encoding="utf-8")
+    tokenizer_dir = model_dir / "tokenizer"
+    tokenizer_dir.mkdir()
+    (tokenizer_dir / "config.json").write_text("{}", encoding="utf-8")
+    (tokenizer_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(sat_module, "SAT_MODEL_SHA256", hashlib.sha256(b"weights").hexdigest())
     return model_dir
 
@@ -86,14 +90,22 @@ def test_the_pinned_artifact_is_the_published_sat_3l_sm_revision() -> None:
 def test_the_model_and_its_tokenizer_come_from_the_verified_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The tokenizer is named explicitly so nothing reaches the Hub on a node."""
+    """The tokenizer is named explicitly so nothing reaches the Hub on a node.
+
+    It must be its own directory: SaT's ``config.json`` declares the custom
+    ``xlm-token`` model type, so a tokenizer loaded from the model directory
+    resolves to a generic fast tokenizer with no special tokens at all. Padding
+    then writes ``None`` into the input ids and inference dies mid-batch. The
+    ``tokenizer`` subdirectory carries XLM-R's own config, which names the real
+    tokenizer class.
+    """
     model = _FakeModel()
     loads = _install_fake_runtime(monkeypatch, model)
     path = _pinned_model(tmp_path, monkeypatch)
 
     build_sat_splitter(model_dir=path)
 
-    assert loads == [(str(path), str(path))]
+    assert loads == [(str(path), str(path / "tokenizer"))]
 
 
 def test_a_model_whose_digest_is_not_the_pinned_artifact_is_refused_exactly(
@@ -101,8 +113,7 @@ def test_a_model_whose_digest_is_not_the_pinned_artifact_is_refused_exactly(
 ) -> None:
     model = _FakeModel()
     loads = _install_fake_runtime(monkeypatch, model)
-    path = tmp_path / "sat-3l-sm"
-    path.mkdir()
+    path = _pinned_model(tmp_path, monkeypatch)
     (path / "model.safetensors").write_bytes(b"wrong bytes")
     (path / "config.json").write_text("{}", encoding="utf-8")
 
@@ -299,3 +310,35 @@ def test_the_pinned_runtime_is_the_one_imported_and_version_checked(
 
     assert IMPORTED == [SAT_RUNTIME_LIBRARY_NAME]
     assert QUERIED == [SAT_RUNTIME_LIBRARY_NAME]
+
+
+@pytest.mark.parametrize("missing", ["config.json", "tokenizer.json"])
+def test_a_tokenizer_directory_missing_a_required_file_names_that_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
+    """A tokenizer without its own config silently loses every special token."""
+    _install_fake_runtime(monkeypatch, _FakeModel())
+    model_dir = _pinned_model(tmp_path, monkeypatch)
+    (model_dir / "tokenizer" / missing).unlink()
+
+    with pytest.raises(
+        SentenceSplitterError,
+        match=exactly(f"SaT tokenizer directory is missing {missing}: {model_dir / 'tokenizer'}"),
+    ):
+        build_sat_splitter(model_dir=model_dir)
+
+
+def test_a_missing_tokenizer_directory_is_refused_by_its_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_runtime(monkeypatch, _FakeModel())
+    model_dir = _pinned_model(tmp_path, monkeypatch)
+    for name in ("config.json", "tokenizer.json"):
+        (model_dir / "tokenizer" / name).unlink()
+    (model_dir / "tokenizer").rmdir()
+
+    with pytest.raises(
+        SentenceSplitterError,
+        match=exactly(f"SaT tokenizer directory must be a directory: {model_dir / 'tokenizer'}"),
+    ):
+        build_sat_splitter(model_dir=model_dir)

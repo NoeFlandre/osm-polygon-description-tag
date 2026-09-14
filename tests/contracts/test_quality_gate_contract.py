@@ -8,8 +8,10 @@ import tomllib
 from collections import defaultdict
 from pathlib import Path
 
+import pytest
 from packaging.requirements import Requirement
 
+from scripts import run_mutation_gate
 from scripts.coverage_associations import (
     associations_for_file,
     mangled_names,
@@ -48,6 +50,13 @@ def test_local_and_ci_coverage_commands_explicitly_measure_branches() -> None:
     assert all("--cov-branch" in command for command in commands)
     workflow = (PROJECT_ROOT / ".github/workflows/quality.yml").read_text()
     assert "--cov-branch" in workflow
+
+
+def test_mutation_recipes_do_not_force_tmpdir_inside_the_repository() -> None:
+    """Negative project-root tests need the caller's external temporary root."""
+    justfile = (PROJECT_ROOT / "justfile").read_text(encoding="utf-8")
+
+    assert 'TMPDIR="$PWD/data-root/.tmp"' not in justfile
 
 
 def test_crap_report_is_deterministic_and_uses_the_documented_formula(tmp_path: Path) -> None:
@@ -714,3 +723,42 @@ def test_bounded_mutation_runner_can_skip_repeated_clean_runs(tmp_path: Path) ->
     runner = bounded_pytest_runner(FakeRunner, tmp_path, skip_clean_tests=True)
 
     assert runner().run_tests(mutant_name=None, tests=()) == 0
+
+
+def test_the_mutation_batch_size_is_tunable_and_still_lossless() -> None:
+    """Batch size is a speed dial, not a correctness one.
+
+    Every batch costs one mutmut invocation, and each invocation re-scans the
+    whole source tree before running anything. At the default of four that
+    overhead dominated a full gate. Raising it must not drop or duplicate a
+    single mutant.
+    """
+    mutants = tuple(range(1000))
+
+    batches = mutation_batches(mutants, batch_size=250)
+
+    assert len(batches) == 4
+    assert tuple(item for batch in batches for item in batch) == mutants
+
+
+@pytest.mark.parametrize("batch_size", [1, 7, 999, 5000])
+def test_any_positive_batch_size_preserves_every_mutant_in_order(batch_size: int) -> None:
+    mutants = tuple(range(1000))
+
+    batches = mutation_batches(mutants, batch_size=batch_size)
+
+    assert tuple(item for batch in batches for item in batch) == mutants
+    assert max(map(len, batches)) <= batch_size
+
+
+def test_the_gate_accepts_a_mutation_batch_size_from_the_command_line() -> None:
+    """The operator has to be able to raise it without editing the script."""
+    parsed = run_mutation_gate._parse_args_from(["--mutation-batch-size", "250"])
+
+    assert parsed.mutation_batch_size == 250
+
+
+def test_the_mutation_batch_size_defaults_to_the_module_constant() -> None:
+    parsed = run_mutation_gate._parse_args_from([])
+
+    assert parsed.mutation_batch_size == run_mutation_gate.DEFAULT_MUTATION_BATCH_SIZE

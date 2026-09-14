@@ -33,6 +33,8 @@ SAT_MODEL_REPOSITORY: Final = "segment-any-text/sat-3l-sm"
 SAT_MODEL_REVISION: Final = "137da054051ad9f1eac42025f758db4ac9f22535"
 SAT_MODEL_FILENAME: Final = "model.safetensors"
 SAT_CONFIG_FILENAME: Final = "config.json"
+SAT_TOKENIZER_DIRNAME: Final = "tokenizer"
+SAT_TOKENIZER_FILENAMES: Final = ("config.json", "tokenizer.json")
 SAT_MODEL_SHA256: Final = "3e19cb0e5dbe9790d37d918d7e87880cb6577d497833f0f0627d80ae6ca1fe90"
 SAT_RUNTIME_LIBRARY_NAME: Final = "wtpsplit"
 SAT_RUNTIME_LIBRARY_VERSION: Final = "2.2.1"
@@ -76,6 +78,7 @@ def _verified_model_dir(model_dir: Path) -> Path:
     """Verify the staged directory holds exactly the pinned weights and its config."""
     _require_regular_directory(model_dir)
     _require_staged_files(model_dir)
+    _require_staged_tokenizer(model_dir)
     _require_pinned_weights(model_dir)
     return model_dir
 
@@ -91,6 +94,35 @@ def _require_staged_files(model_dir: Path) -> None:
         staged = model_dir / name
         if staged.is_symlink() or not staged.is_file():
             raise SentenceSplitterError(f"SaT model directory is missing {name}: {model_dir}")
+
+
+def _require_staged_tokenizer(model_dir: Path) -> None:
+    """The tokenizer needs its own directory, and its own config above all.
+
+    SaT's ``config.json`` declares the custom ``xlm-token`` model type, which
+    no tokenizer class is registered for. Pointed at the model directory,
+    ``AutoTokenizer`` therefore falls back to a generic fast tokenizer that has
+    no special tokens: ``pad_token_id`` is ``None``, padding writes ``None``
+    into the input ids, and inference fails part-way through a batch. Staging
+    XLM-R's own config beside its tokenizer is what names the real class.
+    """
+    tokenizer_dir = model_dir / SAT_TOKENIZER_DIRNAME
+    _require_tokenizer_directory(tokenizer_dir)
+    _require_tokenizer_files(tokenizer_dir)
+
+
+def _require_tokenizer_directory(tokenizer_dir: Path) -> None:
+    if tokenizer_dir.is_symlink() or not tokenizer_dir.is_dir():
+        raise SentenceSplitterError(f"SaT tokenizer directory must be a directory: {tokenizer_dir}")
+
+
+def _require_tokenizer_files(tokenizer_dir: Path) -> None:
+    for name in SAT_TOKENIZER_FILENAMES:
+        staged = tokenizer_dir / name
+        if staged.is_symlink() or not staged.is_file():
+            raise SentenceSplitterError(
+                f"SaT tokenizer directory is missing {name}: {tokenizer_dir}"
+            )
 
 
 def _require_pinned_weights(model_dir: Path) -> None:
@@ -112,8 +144,13 @@ def _load_sat_model(model_dir: Path) -> _Segmenter:
         raise SentenceSplitterError(f"{SAT_RUNTIME_LIBRARY_NAME} runtime lacks SaT")
     try:
         # The tokenizer is named explicitly: the library's default would fetch
-        # ``xlm-roberta-base`` from the Hub, and this runs offline.
-        model = loader(str(model_dir), tokenizer_name_or_path=str(model_dir))
+        # ``xlm-roberta-base`` from the Hub, and this runs offline. It is its
+        # own directory because SaT's config names a model type that no
+        # tokenizer class is registered for; see _require_staged_tokenizer.
+        model = loader(
+            str(model_dir),
+            tokenizer_name_or_path=str(model_dir / SAT_TOKENIZER_DIRNAME),
+        )
     except (OSError, RuntimeError, ValueError) as error:
         raise SentenceSplitterError(f"could not load the pinned {SPLITTER_NAME} model") from error
     return cast(_Segmenter, model)  # pragma: no mutate - static cast
@@ -157,6 +194,8 @@ __all__ = [
     "SAT_MODEL_SHA256",
     "SAT_RUNTIME_LIBRARY_NAME",
     "SAT_RUNTIME_LIBRARY_VERSION",
+    "SAT_TOKENIZER_DIRNAME",
+    "SAT_TOKENIZER_FILENAMES",
     "SPLITTER_NAME",
     "SentenceSplitterError",
     "build_sat_splitter",

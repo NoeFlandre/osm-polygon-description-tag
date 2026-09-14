@@ -872,3 +872,111 @@ def test_an_absent_optional_identity_field_does_not_stop_the_remaining_checks(
         match=exactly("model identity field does not match derived value: config_fingerprint"),
     ):
         read_snapshot(run)
+
+
+_SPLITTER_FIELDS = ("splitter_name", "splitter_revision", "splitter_languages_fingerprint")
+
+
+def test_the_snapshot_names_the_splitter_that_produced_the_run(tmp_path: Path) -> None:
+    """The splitter binds through config_fingerprint, but nobody can read a hash.
+
+    A person opening snapshot.json has to be able to say which sentence
+    splitter made these sentences, without recomputing a fingerprint.
+    """
+    source, run, manifest = _prepared(tmp_path)
+
+    recorded = json.loads((run / "snapshot.json").read_text(encoding="utf-8"))["model_identity"]
+
+    assert recorded["splitter_name"] == manifest.model_identity.splitter_name
+    assert recorded["splitter_revision"] == manifest.model_identity.splitter_revision
+    assert (
+        recorded["splitter_languages_fingerprint"]
+        == manifest.model_identity.splitter_languages_fingerprint
+    )
+
+
+def test_the_recorded_splitter_is_the_pinned_sat_artifact(tmp_path: Path) -> None:
+    """Naming the wrong splitter would be worse than naming none at all."""
+    _, run, _ = _prepared(tmp_path)
+
+    recorded = json.loads((run / "snapshot.json").read_text(encoding="utf-8"))["model_identity"]
+
+    assert recorded["splitter_name"] == "sat-3l-sm"
+    assert recorded["splitter_revision"] == "137da054051ad9f1eac42025f758db4ac9f22535"
+
+
+def test_a_snapshot_carrying_the_splitter_still_round_trips(tmp_path: Path) -> None:
+    _, run, manifest = _prepared(tmp_path)
+
+    assert read_snapshot(run) == manifest
+
+
+@pytest.mark.parametrize("field", _SPLITTER_FIELDS)
+def test_a_recorded_splitter_field_that_disagrees_is_refused(tmp_path: Path, field: str) -> None:
+    """A run claiming one splitter and computed with another is not publishable."""
+    _, run, _ = _prepared(tmp_path)
+    _rewrite(run, lambda payload: payload["model_identity"].update({field: "tampered"}))
+
+    with pytest.raises(
+        SnapshotError,
+        match=exactly(f"model identity field does not match derived value: {field}"),
+    ):
+        read_snapshot(run)
+
+
+@pytest.mark.parametrize("field", _SPLITTER_FIELDS)
+def test_a_model_payload_without_the_splitter_keys_is_read_not_refused(
+    tmp_path: Path, field: str
+) -> None:
+    """A missing key has nothing to disagree with, so it must not be a refusal.
+
+    This is about parsing the identity, not about the snapshot id. A snapshot
+    frozen before these keys existed had its id hashed over a payload without
+    them, so the id itself no longer verifies; see the test below.
+    """
+    _, run, _ = _prepared(tmp_path)
+    _rewrite(run, lambda payload: payload["model_identity"].pop(field))
+
+    assert read_snapshot(run).model_identity.splitter_name == "sat-3l-sm"
+
+
+def test_a_snapshot_frozen_before_the_splitter_was_recorded_must_be_re_prepared(
+    tmp_path: Path,
+) -> None:
+    """Recording the splitter changes the id, and that has to be visible.
+
+    Every id is a hash over the recorded payload, so widening the payload
+    retires the ids that came before it. A stale run directory must be refused
+    loudly and re-prepared, never silently accepted against new code.
+    """
+    _, run, manifest = _prepared(tmp_path)
+
+    def to_the_old_shape(payload: dict[str, Any]) -> None:
+        for name in _SPLITTER_FIELDS:
+            payload["model_identity"].pop(name)
+        identity = {key: value for key, value in payload.items() if key != "snapshot_id"}
+        payload["snapshot_id"] = snapshot_module._sha256_json(identity)
+
+    _rewrite(run, to_the_old_shape)
+
+    with pytest.raises(
+        SnapshotError, match=exactly("snapshot id does not match canonical content")
+    ):
+        read_snapshot(run)
+
+    assert json.loads((run / "snapshot.json").read_text(encoding="utf-8"))["snapshot_id"] != (
+        manifest.snapshot_id
+    )
+
+
+def test_the_legacy_payload_never_gained_the_splitter_fields() -> None:
+    """Legacy ids were hashed over exactly these names; adding one breaks them."""
+    assert snapshot_module._LEGACY_MODEL_FIELDS == (
+        "library_name",
+        "library_version",
+        "language_scope",
+        "policy",
+        "policy_fingerprint",
+        "config_fingerprint",
+        "binary_artifact_hash",
+    )

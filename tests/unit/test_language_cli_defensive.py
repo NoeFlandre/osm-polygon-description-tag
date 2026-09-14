@@ -164,11 +164,20 @@ def test_collecting_an_already_retrieved_run_imports_and_acknowledges(
     monkeypatch.setattr(language_cli, "read_snapshot", lambda _: object())
     monkeypatch.setattr(language_cli, "bundle_for_shard", lambda *_: object())
     monkeypatch.setattr(language_cli, "job_paths", lambda *_: paths)
+    monkeypatch.setattr(
+        language_cli,
+        "adopt_retrieved_intent",
+        lambda received_paths, incoming, _bundle: observed.append(
+            ("adopt", received_paths, incoming)
+        ),
+        raising=False,
+    )
 
     language_cli.handle_grid_collect(run_dir, SHARD, retrieved_run_dir=retrieved_run_dir)
 
     assert observed == [
         ("import", run_dir, retrieved_run_dir, SHARD),
+        ("adopt", paths, retrieved_run_dir),
         ("ack", paths, report),
     ]
     assert _stdout(capsys) == {

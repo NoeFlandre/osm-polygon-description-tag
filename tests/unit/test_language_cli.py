@@ -1126,6 +1126,11 @@ def test_grid_collect_retrieves_imports_and_acknowledges_terminal_results(
     monkeypatch.setattr(language_cli, "read_snapshot", lambda _: object())
     monkeypatch.setattr(language_cli, "acknowledge_collected_results", fake_ack, raising=False)
 
+    def fake_adopt(received_paths: object, incoming: Path, received_bundle: object) -> None:
+        observed.append(("adopt", received_paths, incoming, received_bundle))
+
+    monkeypatch.setattr(language_cli, "adopt_retrieved_intent", fake_adopt, raising=False)
+
     language_cli.handle_grid_collect(
         run_dir,
         SHARD,
@@ -1138,6 +1143,7 @@ def test_grid_collect_retrieves_imports_and_acknowledges_terminal_results(
     assert observed == [
         ("transfer", transfer_argv, 120.0),
         ("import", run_dir, retrieved_run_dir, SHARD),
+        ("adopt", paths, retrieved_run_dir, bundle),
         ("ack", paths, report),
     ]
     assert (retrieved_run_dir / "snapshot.json").read_text(encoding="utf-8") == (

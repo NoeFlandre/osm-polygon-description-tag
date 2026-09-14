@@ -38,7 +38,7 @@ One row per description value, in `language-v1/data/*.parquet`:
 | `original_text` | string | The exact original value |
 | `text_sha256` | string | SHA-256 of the original text |
 | `language_code` | string (nullable) | ISO 639-3, only when `status` is `detected` |
-| `top_score` | float64 (nullable) | **Raw** detector score |
+| `top_score` | float64 (nullable) | **Raw** detector score, clamped to 1.0 only where float32 rounding exceeded it |
 | `runner_up_score` | float64 (nullable) | **Raw** runner-up score |
 | `margin` | float64 (nullable) | `top_score - runner_up_score` |
 | `status` | string | `detected`, `uncertain`, or `non_linguistic` |
@@ -59,6 +59,13 @@ The production detector is a deterministic cascade:
 - If GlotLID also returns `uncertain`, the original Lingua result is retained.
 - A fallback-resolved row has `reason=fallback_glotlid_v3`; all other reasons
   retain their normal meaning.
+
+One detail of the fallback's arithmetic is visible in the data. fastText
+accumulates its softmax in float32, so a confident prediction comes back
+marginally over 1.0 --- 1.0000100135803223 was observed on 12 of 194 Afghan
+descriptions. A probability above one is rounding, not a score, so values
+within 1e-4 of 1.0 are clamped to exactly 1.0 and anything beyond that is still
+refused. Scores inside the interval are never altered.
 
 The fallback artifact is `cis-lmu/glotlid`, file `model_v3.bin`, revision
 `85cd6716494360367b75f642b5bc78667605d0b4`, with SHA-256
@@ -227,29 +234,57 @@ one. Real errors propagate; they are never converted into a completed result.
 
 !!! danger "Execution status"
     **The full dataset has not been processed and nothing has been published
-    to Hugging Face.** What has actually run on Grid'5000 is a three-shard
-    pilot on site `nancy` under the V2 policy: OAR jobs `6917617`
-    (`afghanistan-latest.parquet`), `6917620` (`albania-latest.parquet`), and
-    `6917621` (`algeria-latest.parquet`), each one core with a 1800 s
-    walltime, all reconciled to `terminated`, collected, and acknowledged on
-    2026-09-09. That pilot covered 2 267 of 906 631 snapshot rows (0.25 %).
+    to Hugging Face.** The pipeline itself is proven end to end on a compute
+    node: OAR job `6923270` on `nancy` processed `afghanistan-latest.parquet`,
+    184 rows into 194 annotations, `complete` with no issues, under snapshot
+    `02a8e396...`. Detection, gated sentence splitting, and the pinned
+    fallback all ran there; only the full 386-shard pass remains.
 
-    Those pilot results are **not** publishable: `snapshot_id` binds the code
-    and lockfile fingerprints, and both have since changed, so a full run
-    starts from a fresh snapshot. Publication additionally refuses any
-    incomplete run, so the Hugging Face step stays blocked until all 386
-    shards are complete under one snapshot.
+    Earlier pilot results are **not** publishable, and neither is that
+    validation shard: `snapshot_id` binds the code and lockfile fingerprints,
+    which have changed repeatedly, and recording the splitter in the snapshot
+    payload retired every id hashed before it. Publication additionally
+    refuses any incomplete run, so the Hugging Face step stays blocked until
+    all 386 shards are complete under one snapshot.
 
-    The cascade run is prepared but has not been submitted. Its snapshot
-    `639783b0...` is frozen over all 386 shards (906 631 rows) under the v1
-    policy, the pinned GlotLID artifact is staged on `nancy` with a verified
-    SHA-256, and one shard's portable payload transferred with all 106 staged
-    files byte-identical to its stage manifest. Two things still block it: the
-    frontend operator environment fails with the NumPy baseline error described
-    below, and weekday daytime in Europe/Paris is refused by default, which
-    leaves only the night window. At roughly three minutes per shard and a
-    concurrency of one, a full pass is on the order of twenty hours of
-    supervised submission.
+    Four blockers were found by actually running, none of which unit tests
+    could have surfaced, and all are fixed:
+
+    - the multi-shard driver read `outcome` at the top level of the submit
+      payload, where the CLI nests it under `result`, so a genuinely queued
+      job was reported as an unclean submission;
+    - `AutoTokenizer` cannot resolve a tokenizer class from SaT's `xlm-token`
+      model type, so the tokenizer needs its own directory carrying XLM-R's
+      config, or `pad_token_id` is `None` and inference dies mid-batch;
+    - the job is submitted from the frontend against the site's copy of the
+      run, so the durable submission intent is written there and has to be
+      adopted back before a shard can be acknowledged at all;
+    - fastText accumulates its softmax in float32 and returns probabilities
+      marginally over 1.0, which the score guard refused outright.
+
+    The NumPy baseline blocker described below is resolved: every frontend
+    reports zero x86-64-v2 flags, and pinning the *operator* environment to
+    `numpy==1.26.4` is enough, because inference uses the locked environment
+    built inside the job.
+
+    Eight sites are staged and verified --- `nancy`, `grenoble`, `lille`,
+    `lyon`, `nantes`, `sophia`, `toulouse`, `luxembourg` --- each with `uv`,
+    the current source, an operator environment, and both pinned models with
+    matching digests. `rennes` is deliberately excluded: its home sits at
+    24.8 GiB of a 25 GiB quota.
+
+    Because the run-wide locks make a run directory single-writer by design,
+    the sites do not share one. Each takes its own run-directory clone over
+    the *same* snapshot and a disjoint round-robin share of the shards
+    (`--shard-stride` / `--shard-index`), merged before export. That keeps one
+    core and one active job per site, which is what the policy bounds, while
+    eight sites make progress at once.
+
+    Shard sizes are very uneven --- median 540 rows, largest 92 441 --- so a
+    large shard need not fit one 20-minute job. It does not have to: partial
+    progress is committed against an input cursor and the staged payload
+    carries the resume artifacts, so the next pass continues rather than
+    restarting. The drivers therefore loop until a pass completes nothing.
 
     Production data stays under the requested Seagate project root; it only
     gets there when the workflow is run with those paths.
@@ -402,10 +437,19 @@ used: the loader refuses it, and so should you.
 The sentence splitter needs the same treatment, with one difference:
 `--sat-model-path` is a **directory**, not a file. `wtpsplit` loads a model the
 way `transformers` does, from a directory holding `config.json` beside the
-weights, and it needs a tokenizer in that directory too --- the library's
-default would fetch `xlm-roberta-base` from the Hub, and a compute node has no
-reason to have network access. The job verifies the weights' SHA-256 before
-loading anything.
+weights, and it needs a tokenizer staged too --- the library's default would
+fetch `xlm-roberta-base` from the Hub, and a compute node has no reason to have
+network access. The job verifies the weights' SHA-256 before loading anything.
+
+The tokenizer goes in its own `tokenizer/` subdirectory, with XLM-R's *own*
+`config.json` beside it. This is not tidiness. SaT's `config.json` declares the
+custom model type `xlm-token`, which no tokenizer class is registered for, so a
+tokenizer loaded from the model directory resolves to a generic fast tokenizer
+carrying no special tokens at all: `pad_token_id` is `None`, padding writes
+`None` into the input ids, and inference dies part-way through the first batch
+with a `TypeError` from deep inside `wtpsplit`. XLM-R's config names the real
+tokenizer class, which is what makes `<pad>` resolve to id 1 --- exactly the
+`pad_token_id` SaT's own config expects.
 
 ```bash
 mkdir -p ~/models/sat-3l-sm
@@ -414,10 +458,13 @@ rev=137da054051ad9f1eac42025f758db4ac9f22535
 for name in model.safetensors config.json; do
   curl -sSL -O "https://huggingface.co/segment-any-text/sat-3l-sm/resolve/$rev/$name"
 done
-# the tokenizer SaT expects, staged beside the weights so nothing is fetched at run time
-for name in tokenizer.json tokenizer_config.json sentencepiece.bpe.model special_tokens_map.json; do
+# the tokenizer SaT expects, in its own directory with XLM-R's own config, so
+# nothing is fetched at run time and the real tokenizer class is named
+mkdir -p tokenizer && cd tokenizer
+for name in config.json tokenizer.json tokenizer_config.json sentencepiece.bpe.model; do
   curl -sSL -O "https://huggingface.co/FacebookAI/xlm-roberta-base/resolve/main/$name"
 done
+cd ..
 sha256sum model.safetensors
 # must print 3e19cb0e5dbe9790d37d918d7e87880cb6577d497833f0f0627d80ae6ca1fe90
 ```
@@ -428,7 +475,7 @@ loads before submitting 386 jobs:
 
 ```bash
 python -c "from wtpsplit import SaT; d='$HOME/models/sat-3l-sm'; \
-  print(SaT(d, tokenizer_name_or_path=d).split('A park. It has benches.'))"
+  print(SaT(d, tokenizer_name_or_path=d + '/tokenizer').split('A park. It has benches.'))"
 ```
 
 Prepare a portable payload containing the project, lockfile, immutable
@@ -616,6 +663,16 @@ cascade, the configuration fingerprint also records the exact GlotLID repository
 revision, runtime, and model SHA-256; `binary_artifact_hash` is populated only
 with that independently verified pinned artifact. Legacy pure-Lingua snapshots
 may keep it unset.
+
+The snapshot also records the splitter by name: `splitter_name`,
+`splitter_revision`, and `splitter_languages_fingerprint`. These are bound into
+`snapshot_id` anyway, through `config_fingerprint`, but a fingerprint cannot be
+read --- someone opening `snapshot.json` has to be able to say which splitter
+produced the sentences without recomputing a hash. They are verified whenever
+they are present; a snapshot written before the fields existed has nothing there
+to disagree with, so parsing it still works. Its `snapshot_id`, however, was
+hashed over a payload without them and no longer verifies, so a run directory
+frozen before this change must be re-prepared rather than resumed.
 
 Detection is deterministic: scores within the fixed tie epsilon produce an
 uncertain result without a language label, so the provider's ordering of tied

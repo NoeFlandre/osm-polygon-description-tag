@@ -2161,3 +2161,75 @@ def test_a_resume_payload_directory_is_named_by_sixteen_fingerprint_characters(
     assert name.startswith("payload")
     if name != "payload":
         assert len(name) == len("payload-") + 16
+
+
+def test_an_applied_submission_requests_the_queue_the_operator_named(
+    prepared: tuple[Path, Path, SnapshotManifest],
+) -> None:
+    """The queue has to survive all the way into the argv oarsub receives.
+
+    Four Grid'5000 sites auto-select a queue that does not exist and reject the
+    job outright, so a queue silently dropped on this path is not a cosmetic
+    loss: it is the difference between a site working and being unusable.
+    """
+    _, run, snapshot = prepared
+    bundle, paths = prepare_job(run, snapshot, SHARD, **REMOTE)
+    observed: list[tuple[str, ...]] = []
+
+    plan, result = submit_job(
+        paths,
+        bundle,
+        policy=_verdict(),
+        allowed_root=run,
+        apply=True,
+        queue="default",
+        runner=_runner(  # type: ignore[arg-type]
+            [CommandResult((), 0, "OAR_JOB_ID=6917617\n", "")], observed
+        ),
+    )
+
+    assert result is not None
+    assert observed, "the runner was never called"
+    sent = observed[0]
+    assert "-q" in sent
+    assert sent[sent.index("-q") + 1] == "default"
+    assert "-q" in plan.argv
+    assert plan.argv[plan.argv.index("-q") + 1] == "default"
+
+
+def test_an_applied_submission_without_a_queue_asks_for_none(
+    prepared: tuple[Path, Path, SnapshotManifest],
+) -> None:
+    """Sophia refuses an explicit queue, so the bare form must stay reachable."""
+    _, run, snapshot = prepared
+    bundle, paths = prepare_job(run, snapshot, SHARD, **REMOTE)
+    observed: list[tuple[str, ...]] = []
+
+    _, result = submit_job(
+        paths,
+        bundle,
+        policy=_verdict(),
+        allowed_root=run,
+        apply=True,
+        runner=_runner(  # type: ignore[arg-type]
+            [CommandResult((), 0, "OAR_JOB_ID=6917617\n", "")], observed
+        ),
+    )
+
+    assert result is not None
+    assert "-q" not in observed[0]
+
+
+def test_a_planned_submission_shows_the_queue_it_would_request(
+    prepared: tuple[Path, Path, SnapshotManifest],
+) -> None:
+    """The plan is what an operator reads before allowing the apply gate."""
+    _, run, snapshot = prepared
+    bundle, paths = prepare_job(run, snapshot, SHARD, **REMOTE)
+
+    plan, result = submit_job(
+        paths, bundle, policy=_verdict(), allowed_root=run, apply=False, queue="default"
+    )
+
+    assert result is None
+    assert plan.argv[plan.argv.index("-q") + 1] == "default"

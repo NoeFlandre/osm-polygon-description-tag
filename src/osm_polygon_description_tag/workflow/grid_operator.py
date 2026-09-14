@@ -1853,6 +1853,54 @@ def _copy_tree_entry(source: Path, destination: Path) -> None:
         raise GridOperatorError(f"retrieved results contain a non-file: {source}")
 
 
+def adopt_retrieved_intent(
+    paths: JobPaths, retrieved_run_dir: Path, bundle: JobBundle
+) -> Path | None:
+    """Bring the site's record of a submission into the owned run directory.
+
+    A bounded job is submitted from the site's frontend against the site's copy
+    of the run, so the durable intent is written there rather than here.
+    Collection retrieves that copy; adopting its intent is what lets the owned
+    run acknowledge the shard instead of seeing a bundle nothing ever claimed
+    to submit.
+
+    An intent already recorded here always wins. It is this run's own record,
+    and it may already carry an acknowledgment that a retrieved copy predates.
+    """
+    if _owns_an_intent_already(paths):
+        return None
+    intent = _bound_retrieved_intent(job_paths(retrieved_run_dir, bundle).intent, bundle)
+    with submission_lock(paths.run_dir):
+        if paths.intent.exists():
+            return None
+        paths.root.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(paths.intent, intent.to_payload())
+        return paths.intent
+
+
+def _owns_an_intent_already(paths: JobPaths) -> bool:
+    if paths.intent.is_symlink():
+        raise GridOperatorError(f"submission intent must be a regular file: {paths.intent}")
+    return paths.intent.exists()
+
+
+def _bound_retrieved_intent(incoming: Path, bundle: JobBundle) -> SubmissionIntent:
+    intent = _retrieved_intent(incoming)
+    if intent.bundle_id != bundle.bundle_id or intent.shard != bundle.shard:
+        raise GridOperatorError(
+            f"retrieved submission intent is not bound to this bundle: {incoming}"
+        )
+    return intent
+
+
+def _retrieved_intent(incoming: Path) -> SubmissionIntent:
+    if incoming.is_symlink() or (incoming.exists() and not incoming.is_file()):
+        raise GridOperatorError(f"submission intent must be a regular file: {incoming}")
+    if not incoming.exists():
+        raise GridOperatorError(f"retrieved run has no submission intent: {incoming}")
+    return read_intent(incoming)
+
+
 def acknowledge_collected_results(
     paths: JobPaths, report: RunReport, *, now: datetime | None = None
 ) -> SubmissionIntent:
@@ -2148,10 +2196,11 @@ def plan_submission(
     max_attempts: int | None = None,
     require_fresh_policy: bool = False,
     now: datetime | None = None,
+    queue: str | None = None,
 ) -> SubmissionPlan:
     """Describe the submission without contacting the scheduler."""
     _validate_prepared_submission(paths, bundle, walltime_seconds)
-    request = _submission_request(bundle, walltime_seconds, night_noretry, paths)
+    request = _submission_request(bundle, walltime_seconds, night_noretry, paths, queue)
     blocked_reason, attempt = _submission_block(
         paths,
         bundle,
@@ -2243,14 +2292,21 @@ def _submission_request(
     walltime_seconds: int,
     night_noretry: bool,
     paths: JobPaths,
+    queue: str | None = None,
 ) -> SubmissionRequest:
-    """Build the request; the walltime is validated before this is reached."""
+    """Build the request; the walltime is validated before this is reached.
+
+    ``queue`` is a per-site input because Grid'5000 sites disagree about what a
+    bare submission means: several auto-select a queue that does not exist and
+    reject the job outright, while others refuse an explicit one.
+    """
     return SubmissionRequest(
         script=paths.script,
         walltime_seconds=walltime_seconds,
         cores=REQUIRED_CORES,
         name=f"lang-{bundle.bundle_id[:16]}",
         night_noretry=night_noretry,
+        queue=queue,
     )
 
 
@@ -2267,6 +2323,7 @@ def submit_job(
     require_fresh_policy: bool = False,
     runner: CommandRunner = run_command,
     now: datetime | None = None,
+    queue: str | None = None,
 ) -> tuple[SubmissionPlan, SubmissionResult | None]:
     """Submit one job only behind an explicit gate and a passing policy verdict.
 
@@ -2285,6 +2342,7 @@ def submit_job(
                 max_attempts=max_attempts,
                 require_fresh_policy=require_fresh_policy,
                 now=now,
+                queue=queue,
             ),
             None,
         )
@@ -2299,6 +2357,7 @@ def submit_job(
             max_attempts=max_attempts,
             require_fresh_policy=True,
             now=now,
+            queue=queue,
         )
         if not plan.may_apply:
             return plan, None
@@ -2312,7 +2371,7 @@ def submit_job(
             attempt=plan.attempt,
         )
         atomic_write_json(paths.intent, intent.to_payload())
-        request = _submission_request(bundle, walltime_seconds, night_noretry, paths)
+        request = _submission_request(bundle, walltime_seconds, night_noretry, paths, queue)
         result = submit(request, allowed_root=allowed_root, runner=runner)
         _record_outcome(paths, intent, result)
         return plan, result
@@ -2559,6 +2618,7 @@ __all__ = [
     "SubmissionIntent",
     "SubmissionPlan",
     "acknowledge_collected_results",
+    "adopt_retrieved_intent",
     "build_bundle_transfer_argv",
     "build_result_retrieval_argv",
     "bundle_for_shard",

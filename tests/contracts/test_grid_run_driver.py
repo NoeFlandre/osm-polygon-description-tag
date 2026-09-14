@@ -9,6 +9,7 @@ own, and it processes the snapshot's shards in the snapshot's own order.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -17,8 +18,10 @@ import pytest
 from scripts.run_language_grid import (
     DriverError,
     Remote,
+    _cli,
     _parse_args,
     _shard_slug,
+    selected_shards,
     shards_of,
     submit,
 )
@@ -90,7 +93,7 @@ def test_daytime_submission_is_off_unless_the_operator_asks_for_it(
 
     def fake_ssh(remote: Remote, command: str, *, capture_json: bool = False) -> dict[str, Any]:
         sent.append(command)
-        return {"outcome": "submitted", "job_id": 1}
+        return _apply_payload("submitted")
 
     monkeypatch.setattr("scripts.run_language_grid._ssh", fake_ssh)
 
@@ -107,7 +110,7 @@ def test_daytime_submission_is_forwarded_only_when_explicitly_requested(
 
     def fake_ssh(remote: Remote, command: str, *, capture_json: bool = False) -> dict[str, Any]:
         sent.append(command)
-        return {"outcome": "submitted", "job_id": 1}
+        return _apply_payload("submitted")
 
     monkeypatch.setattr("scripts.run_language_grid._ssh", fake_ssh)
 
@@ -171,3 +174,177 @@ def test_every_remote_model_path_is_required_by_the_driver() -> None:
 
     assert args.remote_sat_model_path == "/home/op/models/sat-3l-sm/model.safetensors"
     assert args.remote_glotlid_model_path == "/home/op/models/glotlid-v3/model_v3.bin"
+
+
+def _apply_payload(outcome: str, *, job_id: int | None = 6923144) -> dict[str, Any]:
+    """Return the payload ``language grid submit --apply`` actually prints.
+
+    The CLI wraps the submission under ``result``; it does not put ``outcome``
+    at the top level. A driver that reads the top level sees no outcome at all
+    and halts a run whose job is genuinely queued, which is the worst possible
+    reading: the job exists and the operator is told it does not.
+    """
+    return {
+        "applied": True,
+        "plan": {"shard": "region.parquet", "may_apply": True},
+        "result": {
+            "outcome": outcome,
+            "job_id": job_id,
+            "detail": "job submitted",
+            "attempt": 1,
+        },
+    }
+
+
+def test_a_clean_submission_in_the_cli_payload_shape_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A queued job must be recognised from the shape the CLI really emits."""
+    monkeypatch.setattr(
+        "scripts.run_language_grid._ssh", lambda *args, **kwargs: _apply_payload("submitted")
+    )
+
+    submit(_args(), _remote(), "region.parquet", _plan())
+
+
+def test_the_recognised_submission_reports_the_scheduler_job_id(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The operator needs the job id to reconcile; it must reach the log."""
+    monkeypatch.setattr(
+        "scripts.run_language_grid._ssh", lambda *args, **kwargs: _apply_payload("submitted")
+    )
+
+    submit(_args(), _remote(), "region.parquet", _plan())
+
+    logged = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert logged["event"] == "submitted"
+    assert logged["job_id"] == 6923144
+
+
+@pytest.mark.parametrize("outcome", ["ambiguous", "rejected", "", "SUBMITTED_MAYBE"])
+def test_an_unclean_outcome_inside_the_cli_payload_halts_the_run(
+    outcome: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reading the nested outcome must not lose the ambiguity check."""
+    monkeypatch.setattr(
+        "scripts.run_language_grid._ssh", lambda *args, **kwargs: _apply_payload(outcome)
+    )
+
+    with pytest.raises(DriverError) as caught:
+        submit(_args(), _remote(), "region.parquet", _plan())
+
+    assert "do not resubmit" in str(caught.value)
+
+
+def test_a_refused_apply_gate_halts_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``result`` is null when the gate refused; nothing was submitted."""
+    monkeypatch.setattr(
+        "scripts.run_language_grid._ssh",
+        lambda *args, **kwargs: {
+            "applied": False,
+            "plan": {"blocked_reason": "daytime submission is refused"},
+            "result": None,
+        },
+    )
+
+    with pytest.raises(DriverError) as caught:
+        submit(_args(), _remote(), "region.parquet", _plan())
+
+    assert "do not resubmit" in str(caught.value)
+
+
+def test_the_whole_snapshot_is_selected_by_default() -> None:
+    """Without a partition the driver must still see every shard."""
+    shards = (("a.parquet", 1), ("b.parquet", 2), ("c.parquet", 3))
+
+    assert selected_shards(shards, stride=1, index=0) == shards
+
+
+@pytest.mark.parametrize("index", [0, 1, 2])
+def test_a_partition_keeps_the_snapshot_order_within_its_share(index: int) -> None:
+    shards = tuple((f"{n}.parquet", n) for n in range(9))
+
+    chosen = selected_shards(shards, stride=3, index=index)
+
+    assert chosen == tuple(shards[position] for position in range(index, 9, 3))
+
+
+def test_partitions_of_one_stride_are_disjoint_and_cover_everything() -> None:
+    """Two drivers must never pick the same shard, and none may be dropped."""
+    shards = tuple((f"{n}.parquet", n) for n in range(20))
+
+    parts = [selected_shards(shards, stride=4, index=index) for index in range(4)]
+
+    flattened = [entry for part in parts for entry in part]
+    assert sorted(flattened) == sorted(shards)
+    assert len(flattened) == len(set(flattened))
+
+
+@pytest.mark.parametrize(
+    ("stride", "index"),
+    [(0, 0), (-1, 0), (2, 2), (2, -1), (2, 5)],
+)
+def test_an_impossible_partition_is_refused(stride: int, index: int) -> None:
+    """A bad partition would silently drop or double-process shards."""
+    with pytest.raises(DriverError) as caught:
+        selected_shards((("a.parquet", 1),), stride=stride, index=index)
+
+    assert "partition" in str(caught.value)
+
+
+def test_the_partition_defaults_to_the_whole_snapshot() -> None:
+    args = _args()
+
+    assert args.shard_stride == 1
+    assert args.shard_index == 0
+
+
+def test_no_queue_is_requested_unless_the_operator_names_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Some sites reject an explicit queue, so the bare form stays the default."""
+    sent: list[str] = []
+
+    def fake_ssh(remote: Remote, command: str, *, capture_json: bool = False) -> dict[str, Any]:
+        sent.append(command)
+        return _apply_payload("submitted")
+
+    monkeypatch.setattr("scripts.run_language_grid._ssh", fake_ssh)
+
+    submit(_args(), _remote(), "region.parquet", _plan())
+
+    assert "--queue" not in sent[0]
+
+
+def test_a_named_queue_is_forwarded_to_the_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Four of the eight sites cannot be used at all without this."""
+    sent: list[str] = []
+
+    def fake_ssh(remote: Remote, command: str, *, capture_json: bool = False) -> dict[str, Any]:
+        sent.append(command)
+        return _apply_payload("submitted")
+
+    monkeypatch.setattr("scripts.run_language_grid._ssh", fake_ssh)
+
+    submit(_args(extra=["--queue", "default"]), _remote(), "region.parquet", _plan())
+
+    assert "--queue default" in sent[0]
+
+
+def test_the_driver_never_shells_out_through_uv() -> None:
+    """Every CLI call must go straight to the interpreter's own console script.
+
+    ``uv run`` takes a lock on the shared uv cache for the duration of the
+    command. The driver invokes the CLI once per shard to test completeness, so
+    routing those through ``uv run`` makes a parent holding that lock spawn a
+    child that waits for it. With several drivers in parallel the run stops
+    dead: seven sweep workers sat for thirty minutes with no child process at
+    all. Calling the console script beside ``sys.executable`` removes the lock
+    from the hot path, and a process start with it.
+    """
+    argv = _cli()
+
+    assert "uv" not in argv
+    assert Path(argv[0]).name == "osm-polygon-description-tag"
+    assert Path(argv[0]).parent == Path(sys.executable).parent

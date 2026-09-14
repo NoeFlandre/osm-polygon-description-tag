@@ -245,11 +245,15 @@ def _install_collection_fakes(
         observed.append(("ack", received_paths, received_report))
         return acknowledgment
 
+    def fake_adopt(received_paths: object, incoming: Path, received_bundle: object) -> None:
+        observed.append(("adopt", received_paths, incoming, received_bundle))
+
     monkeypatch.setattr(language_cli, "import_retrieved_results", fake_import, raising=False)
     monkeypatch.setattr(language_cli, "read_snapshot", fake_read_snapshot)
     monkeypatch.setattr(language_cli, "bundle_for_shard", fake_bundle_for_shard)
     monkeypatch.setattr(language_cli, "job_paths", fake_job_paths)
     monkeypatch.setattr(language_cli, "acknowledge_collected_results", fake_ack, raising=False)
+    monkeypatch.setattr(language_cli, "adopt_retrieved_intent", fake_adopt, raising=False)
     return snapshot, paths
 
 
@@ -271,6 +275,7 @@ def test_importing_a_retrieved_run_acknowledges_this_run_and_this_shard(
         ("snapshot", run_dir),
         ("bundle", snapshot, SHARD),
         ("paths", run_dir, bundle),
+        ("adopt", paths, retrieved, bundle),
         ("ack", paths, report),
     ]
     assert _stdout(capsys)["applied"] is False
@@ -331,6 +336,7 @@ def test_a_retrieval_transfers_the_remote_run_child_of_the_bundle_root(
         ("snapshot", run_dir),
         ("bundle", snapshot, SHARD),
         ("paths", run_dir, bundle),
+        ("adopt", paths, retrieved, bundle),
         ("ack", paths, report),
     ]
     assert _stdout(capsys)["applied"] is True
@@ -615,3 +621,65 @@ def test_a_first_submission_prepares_the_job_with_the_requested_budget(
             "remote_bundle_dir": None,
         }
     ]
+
+
+def _submit_with_queue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, queue: str | None
+) -> list[object]:
+    """Run one submission and return the queue each submit_job call received."""
+    run_dir = tmp_path / "run"
+    paths = SimpleNamespace(root=run_dir / "jobs")
+    queues: list[object] = []
+
+    monkeypatch.setattr(language_cli, "read_snapshot", lambda _run: object())
+    monkeypatch.setattr(
+        language_cli, "_reuse_verified_staged_job", lambda *_a, **_k: (object(), paths)
+    )
+    monkeypatch.setattr(
+        language_cli,
+        "evaluate_policy",
+        lambda **_kwargs: SimpleNamespace(decision="allowed"),
+    )
+
+    def fake_submit(*_args: object, **kwargs: object) -> object:
+        queues.append(kwargs.get("queue"))
+        return SimpleNamespace(to_payload=lambda: {}), None
+
+    monkeypatch.setattr(language_cli, "submit_job", fake_submit)
+
+    language_cli.handle_grid_submit(
+        run_dir,
+        SHARD,
+        "/remote/project",
+        "/remote/source",
+        "/remote/run",
+        "nancy",
+        1800,
+        900,
+        64,
+        False,
+        False,
+        sat_model_path=REMOTE_SAT_MODEL_PATH,
+        queue=queue,
+    )
+    return queues
+
+
+def test_the_requested_queue_reaches_the_submission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A queue dropped here makes four Grid'5000 sites unusable."""
+    queues = _submit_with_queue(tmp_path, monkeypatch, "default")
+    capsys.readouterr()
+
+    assert queues == ["default"]
+
+
+def test_no_queue_is_requested_when_the_operator_names_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Sophia refuses an explicit queue, so None must stay None."""
+    queues = _submit_with_queue(tmp_path, monkeypatch, None)
+    capsys.readouterr()
+
+    assert queues == [None]

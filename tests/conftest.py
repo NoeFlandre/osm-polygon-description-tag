@@ -3,6 +3,7 @@
 import os
 import shlex
 import shutil
+import socket
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
@@ -14,6 +15,37 @@ from shapely.geometry import MultiPolygon, Polygon
 
 from osm_polygon_description_tag.extraction import ExportRecord
 from osm_polygon_description_tag.transform import transform_record
+
+
+class NetworkAccessInTestError(RuntimeError):
+    """Raised when a test tries to open a connection off this machine."""
+
+
+@pytest.fixture(autouse=True)
+def _no_outbound_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Refuse outbound connections, loudly, from every test.
+
+    A unit test must not depend on the network, but the stronger reason is
+    mutation testing. Several mutants bypass an injected HTTP session, and the
+    code then falls back to building a real one and calling the Hugging Face
+    dataset-viewer API. That call does not fail fast: the worker hangs and dies
+    on a signal, and the gate records a segfault rather than a killed mutant.
+    Refusing the connection turns that into an ordinary assertion failure, so
+    the mutant is killed for the reason it should be.
+
+    Loopback stays open: local servers and socketpairs are not the network.
+    """
+    real_connect = socket.socket.connect
+
+    def guarded_connect(self: socket.socket, address: object) -> object:
+        host = address[0] if isinstance(address, tuple) and address else None
+        if host in {"127.0.0.1", "::1", "localhost", None}:
+            return real_connect(self, address)  # type: ignore[arg-type]
+        raise NetworkAccessInTestError(
+            f"a test tried to connect to {host!r}; tests must not use the network"
+        )
+
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
 
 
 def _is_test_owned_executable(executable: str) -> bool:

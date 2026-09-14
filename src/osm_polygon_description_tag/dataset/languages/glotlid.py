@@ -59,12 +59,20 @@ def _predictions(result: tuple[object, object]) -> tuple[tuple[object, object], 
     return pairs
 
 
+#: fastText accumulates its softmax in float32, so a confident prediction comes
+#: back marginally over 1.0 --- values up to 1.0000100135803223 were observed on
+#: real descriptions. That is rounding, not a probability, so scores within this
+#: much of 1.0 are clamped to 1.0 and anything beyond it is still refused.
+SCORE_ROUNDING_TOLERANCE: Final = 1e-4
+
+
 def _score(value: object) -> float:
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise GlotLIDLabelError("GlotLID scores must be numeric")
     score = float(value)
-    if not math.isfinite(score) or not 0 <= score <= 1:
+    if not math.isfinite(score) or not 0 <= score <= 1 + SCORE_ROUNDING_TOLERANCE:
         raise GlotLIDLabelError("GlotLID scores must be between 0 and 1")
+    score = min(score, 1.0)
     return score
 
 

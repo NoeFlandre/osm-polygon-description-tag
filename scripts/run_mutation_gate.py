@@ -23,7 +23,7 @@ import os
 import shutil
 import tempfile
 import threading
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any, cast
@@ -430,7 +430,11 @@ def _verify_mutmut_can_fail(runner: Any) -> None:
 
 
 def run_gate(
-    *, max_children: int, fast_tests_per_function: int, coverage_file: Path = Path()
+    *,
+    max_children: int,
+    fast_tests_per_function: int,
+    coverage_file: Path = Path(),
+    mutation_batch_size: int = DEFAULT_MUTATION_BATCH_SIZE,
 ) -> None:
     """Escalate mutation triage, then confirm every survivor exactly."""
 
@@ -480,7 +484,7 @@ def run_gate(
                 remaining = unresolved_mutants(Path("mutants"))
                 if not remaining:
                     break
-                for mutant_batch in mutation_batches(remaining):
+                for mutant_batch in mutation_batches(remaining, batch_size=mutation_batch_size):
                     # Load the just-written selection instead of reusing the prior pass's map.
                     mutmut._reset_globals()
                     mutmut.tests_by_mangled_function_name.clear()
@@ -495,6 +499,10 @@ def run_gate(
 
 
 def _parse_args() -> argparse.Namespace:
+    return _parse_args_from(None)
+
+
+def _parse_args_from(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--max-children", type=int, default=DEFAULT_MAX_CHILDREN)
     parser.add_argument(
@@ -506,17 +514,29 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--fast-tests-per-function", type=int, default=DEFAULT_FAST_TESTS_PER_FUNCTION
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--mutation-batch-size",
+        type=int,
+        default=DEFAULT_MUTATION_BATCH_SIZE,
+        help=(
+            "mutants per mutmut invocation; each invocation re-scans the whole "
+            "source tree first, so a small batch pays that cost thousands of times"
+        ),
+    )
+    return parser.parse_args(argv)
 
 
 def main() -> None:
     args = _parse_args()
     if args.max_children < 1:
         raise SystemExit("--max-children must be positive")
+    if args.mutation_batch_size < 1:
+        raise SystemExit("--mutation-batch-size must be positive")
     run_gate(
         max_children=args.max_children,
         fast_tests_per_function=args.fast_tests_per_function,
         coverage_file=args.coverage_file,
+        mutation_batch_size=args.mutation_batch_size,
     )
 
 

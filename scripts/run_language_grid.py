@@ -103,6 +103,25 @@ def shards_of(run_dir: Path) -> tuple[tuple[str, int], ...]:
     )
 
 
+def selected_shards(
+    shards: tuple[tuple[str, int], ...], *, stride: int, index: int
+) -> tuple[tuple[str, int], ...]:
+    """Return this driver's share of the snapshot, in snapshot order.
+
+    Several drivers may work one snapshot at once, each against its own run
+    directory at its own site, because the run-wide locks make a shared run
+    directory single-writer by design. Round-robin by position keeps the shares
+    disjoint and complete without any coordination between them: every shard
+    belongs to exactly one index, so no shard is processed twice and none is
+    dropped.
+    """
+    if stride < 1:
+        raise DriverError(f"partition stride must be at least 1, not {stride}")
+    if not 0 <= index < stride:
+        raise DriverError(f"partition index {index} is outside a stride of {stride}")
+    return shards[index::stride]
+
+
 def shard_is_complete(run_dir: Path, shard: str) -> bool:
     """Return whether this shard already has a committed complete checkpoint."""
     report = _run(
@@ -122,7 +141,16 @@ def shard_is_complete(run_dir: Path, shard: str) -> bool:
 
 
 def _cli() -> list[str]:
-    return ["uv", "run", "--no-sync", "osm-polygon-description-tag"]
+    """Return the CLI invocation, deliberately without ``uv``.
+
+    ``uv run`` locks the shared uv cache for the life of the command. This
+    driver calls the CLI once per shard just to ask whether it is already
+    complete, so going through ``uv`` makes a process that holds that lock
+    spawn one that waits for it; several drivers in parallel then wedge
+    completely. The console script sits beside the running interpreter, so
+    calling it directly is both lock-free and one process cheaper.
+    """
+    return [str(Path(sys.executable).parent / "osm-polygon-description-tag")]
 
 
 def stage(args: argparse.Namespace, remote: Remote, shard: str) -> dict[str, Any]:
@@ -195,19 +223,36 @@ def submit(args: argparse.Namespace, remote: Remote, shard: str, plan: dict[str,
             f"--batch-size {args.batch_size}",
             f"--glotlid-model-path {remote.glotlid_model_path}",
             f"--sat-model-path {remote.sat_model_path}",
+            f"--queue {args.queue}" if args.queue else "",
             "--allow-daytime" if args.allow_daytime else "",
             "--apply",
         ]
     )
-    result = _ssh(remote, command, capture_json=True)
-    assert result is not None
-    outcome = str(result.get("outcome", "")).lower()
-    if outcome != "submitted":
+    payload = _ssh(remote, command, capture_json=True)
+    assert payload is not None
+    submission = _submitted_job(payload)
+    if submission is None:
         raise DriverError(
-            f"shard {shard} was not submitted cleanly (outcome={outcome!r}); "
-            f"reconcile it by hand and do not resubmit: {json.dumps(result, sort_keys=True)}"
+            f"shard {shard} was not submitted cleanly; "
+            f"reconcile it by hand and do not resubmit: {json.dumps(payload, sort_keys=True)}"
         )
-    _log("submitted", shard=shard, job_id=result.get("job_id"), outcome=outcome)
+    _log("submitted", shard=shard, job_id=submission.get("job_id"), outcome="submitted")
+
+
+def _submitted_job(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the submission record only when OAR cleanly accepted a job.
+
+    ``language grid submit --apply`` reports the submission under ``result``,
+    which is null whenever its own apply gate refused. Anything else --- a
+    missing record, a non-object, or any outcome but ``submitted`` --- means a
+    job may or may not exist, and the caller must stop rather than guess.
+    """
+    record = payload.get("result")
+    if not isinstance(record, dict):
+        return None
+    if str(record.get("outcome", "")).lower() != "submitted":
+        return None
+    return record
 
 
 def await_terminal(args: argparse.Namespace, remote: Remote, shard: str, run_dir: str) -> None:
@@ -290,8 +335,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.remote_glotlid_model_path,
         args.remote_sat_model_path,
     )
-    shards = shards_of(args.run_dir)
-    _log("run_start", shards=len(shards), rows=sum(rows for _, rows in shards))
+    shards = selected_shards(
+        shards_of(args.run_dir), stride=args.shard_stride, index=args.shard_index
+    )
+    _log(
+        "run_start",
+        shards=len(shards),
+        rows=sum(rows for _, rows in shards),
+        stride=args.shard_stride,
+        index=args.shard_index,
+    )
 
     done = failed = skipped = 0
     for shard, rows in shards:
@@ -331,6 +384,26 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--poll-seconds", type=int, default=DEFAULT_POLL_SECONDS)
     parser.add_argument("--job-timeout-seconds", type=int, default=DEFAULT_JOB_TIMEOUT_SECONDS)
     parser.add_argument("--max-shards", type=int, default=0)
+    parser.add_argument(
+        "--queue",
+        default=None,
+        help=(
+            "Scheduler queue to request; sites disagree on what a bare "
+            "submission means, and several reject the queue they pick themselves."
+        ),
+    )
+    parser.add_argument(
+        "--shard-stride",
+        type=int,
+        default=1,
+        help="Split the snapshot across this many cooperating drivers.",
+    )
+    parser.add_argument(
+        "--shard-index",
+        type=int,
+        default=0,
+        help="Which share of --shard-stride this driver owns.",
+    )
     parser.add_argument(
         "--allow-daytime",
         action="store_true",

@@ -36,17 +36,17 @@ risk:
 # Record which tests execute which source lines. The mutation gate turns this
 # into the exact covering-test set per function, which is what keeps it fast:
 # a test that never runs a function's lines cannot kill that function's mutants.
+# Keep TMPDIR inherited from the caller; it must remain outside the repository.
 mutation-contexts:
     mkdir -p data-root/.tmp
-    TMPDIR="$PWD/data-root/.tmp" COVERAGE_FILE="$PWD/data-root/.tmp/.coverage-ctx" \
+    COVERAGE_FILE="$PWD/data-root/.tmp/.coverage-ctx" \
         uv run pytest -q -p no:cacheprovider \
         --cov=osm_polygon_description_tag --cov-branch --cov-context=test --cov-report=
 
 # Run the all-source mutation gate for all source modules; mutmut resumes from its ignored cache.
 mutation: mutation-contexts
     mkdir -p reports data-root/.tmp
-    TMPDIR="$PWD/data-root/.tmp" \
-        uv run python -m scripts.run_mutation_gate --max-children 8 \
+    uv run python -m scripts.run_mutation_gate --max-children 8 \
         --coverage-file data-root/.tmp/.coverage-ctx
     uv run python scripts/check_mutation_score.py \
         --mutants-root mutants \

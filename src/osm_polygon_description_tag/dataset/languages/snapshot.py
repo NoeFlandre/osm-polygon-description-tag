@@ -140,6 +140,9 @@ def _model_payload(identity: LanguageModelIdentity) -> dict[str, object]:
         "policy_fingerprint": identity.policy_fingerprint,
         "config_fingerprint": identity.config_fingerprint,
         "binary_artifact_hash": identity.binary_artifact_hash,
+        "splitter_name": identity.splitter_name,
+        "splitter_revision": identity.splitter_revision,
+        "splitter_languages_fingerprint": identity.splitter_languages_fingerprint,
     }
 
 
@@ -184,6 +187,17 @@ _DERIVED_MODEL_FIELDS: Final = (
     "config_fingerprint",
 )
 
+# The splitter identity binds through ``config_fingerprint`` and is recorded in
+# full so a reader can name the splitter without recomputing a hash. It is
+# verified only where it is present: a snapshot written before these keys
+# existed had its id hashed over a payload without them, so there is nothing
+# there to disagree with.
+_OPTIONAL_DERIVED_MODEL_FIELDS: Final = (
+    "splitter_name",
+    "splitter_revision",
+    "splitter_languages_fingerprint",
+)
+
 
 def _derived_identity(reader: PayloadReader, policy: LanguagePolicy) -> LanguageModelIdentity:
     try:
@@ -217,8 +231,17 @@ def _optional_text(reader: PayloadReader, key: str, default: str | None = None) 
 def _verify_derived_fields(reader: PayloadReader, identity: LanguageModelIdentity) -> None:
     """Refuse a snapshot whose recorded derived fields differ from the recomputed ones."""
     for name in _DERIVED_MODEL_FIELDS:
-        if reader.text(name) != getattr(identity, name):
-            raise SnapshotError(f"model identity field does not match derived value: {name}")
+        _verify_derived_field(reader, identity, name)
+    for name in _OPTIONAL_DERIVED_MODEL_FIELDS:
+        if reader.has(name):
+            _verify_derived_field(reader, identity, name)
+
+
+def _verify_derived_field(
+    reader: PayloadReader, identity: LanguageModelIdentity, name: str
+) -> None:
+    if reader.text(name) != getattr(identity, name):
+        raise SnapshotError(f"model identity field does not match derived value: {name}")
 
 
 def _binary_artifact_hash(reader: PayloadReader) -> str | None:
