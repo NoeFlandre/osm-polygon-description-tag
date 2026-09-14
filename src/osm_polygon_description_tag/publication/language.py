@@ -440,28 +440,23 @@ def language_config_yaml() -> str:
 
 
 def _language_provenance(export: LanguageExport) -> str:
+    primary = (
+        "Lingua"
+        if export.detector_name in (LINGUA_DETECTOR_NAME, CASCADE_DETECTOR_NAME)
+        else f"`{export.library_name}`"
+    )
     base = (
-        f"Produced by `{export.library_name}` {export.library_version} using detector "
-        f"pipeline `{export.detector_name}` over input snapshot `{export.snapshot_id}` "
+        f"The primary detector is {primary} {export.library_version}. The run used "
+        f"pipeline `{export.detector_name}` on input snapshot `{export.snapshot_id}` "
         f"with detector configuration `{export.model_config_fingerprint}`."
     )
     if export.detector_name != CASCADE_DETECTOR_NAME:
         return base
     return (
-        f"{base} Lingua is primary; GlotLID v3 (`{GLOTLID_MODEL_REPOSITORY}`, revision "
-        f"`{GLOTLID_MODEL_REVISION}`, SHA-256 `{GLOTLID_MODEL_SHA256}`) is used only "
-        "when Lingua returns `uncertain`."
+        f"{base} When Lingua is uncertain, the pinned GlotLID v3 model "
+        f"(`{GLOTLID_MODEL_REPOSITORY}`, revision `{GLOTLID_MODEL_REVISION}`, "
+        f"SHA-256 `{GLOTLID_MODEL_SHA256}`) is used as a fallback."
     )
-
-
-def _language_attribution(export: LanguageExport) -> str:
-    base = (
-        f"Language labels are derived annotations produced with `{export.library_name}`, "
-        "which is distributed under the Apache License 2.0."
-    )
-    if export.detector_name == CASCADE_DETECTOR_NAME:
-        return f"{base} Unresolved values additionally use GlotLID v3."
-    return base
 
 
 def render_language_card_section(export: LanguageExport) -> str:
@@ -469,9 +464,10 @@ def render_language_card_section(export: LanguageExport) -> str:
     stats = export.stats
     return f"""## Language annotations (`{LANGUAGE_CONFIG_NAME}`)
 
-An additive configuration: the language of each description value, and its split
-into sentences. The default configuration and its files are unchanged. One row
-per *description value*, not per polygon.
+This optional configuration adds a language label to each description value when
+the detector meets its confidence policy, plus sentence splits. It has one row
+per *description value*—not per polygon. The default configuration and its files
+are unchanged.
 
 | Measure | Value |
 | --- | ---: |
@@ -483,20 +479,16 @@ per *description value*, not per polygon.
 | Split into sentences | {stats.split_count} |
 | Sentences | {stats.sentence_count} |
 
-**Provenance.** {_language_provenance(export)}
+**Models and provenance.** {_language_provenance(export)}
 
-**Limitations.** `top_score`, `runner_up_score` and `margin` are **raw detector
-scores, not calibrated probabilities**; they must not be read as confidence
-percentages. No accuracy has been measured on this dataset, and it
-has **not** been benchmarked here: no ground-truth labels exist for it. Short
-values are `uncertain` by design, as is mixed-language evidence (`mixed_text`).
-A value in a language outside the detector's set may be misclassified as a
-supported language. A `description:<suffix>` key is opaque: the annotation
-describes the text, not the suffix. Text with no letters is `non_linguistic`.
-
-**Licensing.** OpenStreetMap data,
-© OpenStreetMap contributors, under the Open Database License (ODbL).
-{_language_attribution(export)}
+**How to read this.** `language_code` is null for uncertain or non-linguistic
+values. `top_score`, `runner_up_score`, and `margin` are **raw detector scores,
+not calibrated probabilities**; they must not be read as confidence percentages.
+No accuracy has been measured because this dataset has no ground-truth labels.
+Short or mixed-language text may remain unresolved (`mixed_text`), and text
+outside the detector's supported set may be misclassified as a supported
+language. A `description:<suffix>` key is opaque and is not used as a language
+label. Text with no letters is `non_linguistic`.
 """
 
 

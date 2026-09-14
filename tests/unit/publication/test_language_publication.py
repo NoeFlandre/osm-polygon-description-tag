@@ -494,23 +494,14 @@ def test_export_name_does_not_strip_valid_letter_characters() -> None:
     assert _export_name("X-region-X.parquet") == "x-region-x.parquet"
 
 
-def test_language_attribution_is_exact_for_the_pinned_library(export: LanguageExport) -> None:
-    assert language_module._language_attribution(export) == (
-        "Language labels are derived annotations produced with `lingua-language-detector`, "
-        "which is distributed under the Apache License 2.0."
-    )
-
-
-def test_language_attribution_identifies_the_cascade_fallback_exactly(
+def test_the_card_section_names_the_primary_model_and_avoids_duplicate_licensing(
     export: LanguageExport,
 ) -> None:
-    cascade = replace(export, detector_name=CASCADE_DETECTOR_NAME)
+    section = render_language_card_section(export)
 
-    assert language_module._language_attribution(cascade) == (
-        "Language labels are derived annotations produced with `lingua-language-detector`, "
-        "which is distributed under the Apache License 2.0. Unresolved values additionally "
-        "use GlotLID v3."
-    )
+    assert "**Models and provenance.**" in section
+    assert f"The primary detector is Lingua {export.library_version}." in section
+    assert "**Licensing.**" not in section
 
 
 def test_completed_reexport_changes_identity_and_invalidates_the_prior_plan(
@@ -564,15 +555,13 @@ def test_the_card_section_reports_validated_counts_and_no_accuracy_claim(
     assert "Base `description` values" not in section
     assert export.snapshot_id in section
     assert export.model_config_fingerprint in section
-    assert "lingua-language-detector" in section
     prose = " ".join(section.replace("**", "").split())
     assert "raw detector scores, not calibrated probabilities" in prose
     assert "must not be read as confidence percentages" in prose
-    assert "No accuracy has been measured on this dataset" in section
-    assert "has **not** been benchmarked" in section
-    assert "OpenStreetMap contributors" in section
-    assert "Open Database License (ODbL)" in section
-    assert "Apache License 2.0" in section
+    assert (
+        "No accuracy has been measured because this dataset has no ground-truth labels" in section
+    )
+    assert "`language_code` is null for uncertain or non-linguistic values" in prose
     assert "opaque" in section
     assert "mixed_text" in section
     assert "may be misclassified as a supported language" in prose
@@ -584,10 +573,10 @@ def test_the_card_section_identifies_the_cascade_fallback(export: LanguageExport
 
     section = render_language_card_section(cascade)
 
-    assert f"detector pipeline `{CASCADE_DETECTOR_NAME}`" in section
-    assert f"GlotLID v3 (`{GLOTLID_MODEL_REPOSITORY}`" in section
+    assert f"pipeline `{CASCADE_DETECTOR_NAME}`" in section
+    assert f"pinned GlotLID v3 model (`{GLOTLID_MODEL_REPOSITORY}`" in section
     assert GLOTLID_MODEL_REVISION in section
-    assert "only when Lingua returns `uncertain`" in section
+    assert "used as a fallback" in section
 
 
 def test_the_card_section_never_claims_a_measured_score(export: LanguageExport) -> None:

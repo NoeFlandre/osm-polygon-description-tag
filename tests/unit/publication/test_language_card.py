@@ -375,3 +375,44 @@ def test_install_refuses_a_marker_with_prefix_text(export: LanguageExport) -> No
         match=exactly("dataset card language-v1 section markers must occupy complete lines"),
     ):
         install_language_card(card, export)
+
+
+def _card_with_sections() -> str:
+    return (
+        _card()
+        + "\n## Methodology\n\nThe source pipeline is deterministic.\n"
+        + "\n## Limitations\n\nSource text can be incomplete.\n"
+        + "\n## License and attribution\n\nODbL.\n"
+    )
+
+
+def test_install_places_language_section_before_general_limitations(
+    export: LanguageExport,
+) -> None:
+    updated = install_language_card(_card_with_sections(), export)
+
+    assert updated.index(LANGUAGE_CARD_SECTION_START) < updated.index("## Limitations")
+    assert updated.index("## Limitations") < updated.index("## License and attribution")
+
+
+def test_install_moves_an_existing_end_section_before_general_limitations(
+    export: LanguageExport,
+) -> None:
+    card = _card_with_sections()
+    legacy = (
+        card
+        + "\n"
+        + LANGUAGE_CARD_SECTION_START
+        + "\n"
+        + render_language_card_section(export)
+        + "\n"
+        + LANGUAGE_CARD_SECTION_END
+        + "\n"
+    )
+
+    updated = install_language_card(legacy, export)
+
+    assert updated.index(LANGUAGE_CARD_SECTION_START) < updated.index("## Limitations")
+    assert updated.count(LANGUAGE_CARD_SECTION_START) == 1
+    assert updated.count(LANGUAGE_CARD_SECTION_END) == 1
+    assert install_language_card(updated, export) == updated

@@ -22,6 +22,7 @@ LANGUAGE_CARD_SECTION_END: Final = "<!-- GENERATED:LANGUAGE_V1:END -->"
 
 _SECTION_HEADING = f"## Language annotations (`{LANGUAGE_CONFIG_NAME}`)"
 _FRONT_MATTER_OPEN = re.compile(r"\A---[ \t]*(?P<newline>\r?\n)")
+_LIMITATIONS_HEADING = re.compile(r"(?m)^## Limitations[ \t]*(?:\r?\n|\Z)")
 _FRONT_MATTER_CLOSE = re.compile(r"^---[ \t]*(?:\r?\n|\Z)", re.MULTILINE)
 
 
@@ -238,14 +239,23 @@ def _append_section(readme: str, block: str, newline: str) -> str:
     return readme + separator + block
 
 
-def _replace_section(readme: str, block: str) -> str:
+def _insert_section(readme: str, block: str, newline: str) -> str:
+    limitations = _LIMITATIONS_HEADING.search(readme)
+    if limitations is None:
+        return _append_section(readme, block, newline)
+    before = readme[: limitations.start()].rstrip("\r\n")
+    after = readme[limitations.start() :]
+    return before + newline + newline + block + newline + after
+
+
+def _replace_section(readme: str, block: str, newline: str = "\n") -> str:
     start, end = _marker_offsets(readme)
     _require_marker_lines(readme, start, end)
     end_after = end + len(LANGUAGE_CARD_SECTION_END)
     if _SECTION_HEADING not in readme[start:end]:
         raise _card_error("language-v1 section markers do not contain the section heading")
     end_after = _consume_line_ending(readme, end_after)
-    return readme[:start] + block + readme[end_after:]
+    return _insert_section(readme[:start] + readme[end_after:], block, newline)
 
 
 def _marker_offsets(readme: str) -> tuple[int, int]:
@@ -292,7 +302,7 @@ def _install_section(readme: str, export: LanguageExport, newline: str) -> str:
     block = _section_block(export, newline)
     if starts == 0:
         return _append_unmarked_section(readme, block, newline, heading_count)
-    return _replace_marked_section(readme, block, heading_count)
+    return _replace_marked_section(readme, block, heading_count, newline)
 
 
 def _validate_marker_counts(starts: int, ends: int) -> None:
@@ -303,13 +313,18 @@ def _validate_marker_counts(starts: int, ends: int) -> None:
 def _append_unmarked_section(readme: str, block: str, newline: str, heading_count: int) -> str:
     if heading_count:
         raise _card_error("contains an unmarked language-v1 card section")
-    return _append_section(readme, block, newline)
+    return _insert_section(readme, block, newline)
 
 
-def _replace_marked_section(readme: str, block: str, heading_count: int) -> str:
+def _replace_marked_section(
+    readme: str,
+    block: str,
+    heading_count: int,
+    newline: str = "\n",
+) -> str:
     if heading_count != 1:
         raise _card_error("has a malformed language-v1 card section")
-    return _replace_section(readme, block)
+    return _replace_section(readme, block, newline)
 
 
 def install_language_card(readme: str, export: LanguageExport) -> str:

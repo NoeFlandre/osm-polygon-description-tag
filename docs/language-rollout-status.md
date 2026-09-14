@@ -364,8 +364,8 @@ Published and verified.
 | Field | Value |
 | --- | --- |
 | Repository | `NoeFlandre/osm-polygon-description-tag` |
-| Baseline revision | `fcac0ce894d8d6569b526c73874b20d447005dd1` |
-| Published revision | `fec858b679f5ee7e87f0ecfaaa6b7223b2a7f5e2` |
+| Baseline revision | `fec858b679f5ee7e87f0ecfaaa6b7223b2a7f5e2` |
+| Published revision | `7a9c678242e62ee1c7d5a9468b7751fa9aefb26b` |
 | Files uploaded | 388 (386 Parquet + `stats.json` + `export-manifest.json`) |
 | Bytes under `language-v1/` | 101 207 496 |
 | Files verified by size and SHA-256 | 388 / 388 |
