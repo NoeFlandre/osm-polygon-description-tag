@@ -69,6 +69,28 @@ find the wrong one. Give the gate a `TMPDIR` nothing else uses, too: sharing one
 with an ad-hoc `pytest` run deletes the numbered directory underneath it, and
 the gate's stats collection then dies with `FileNotFoundError`.
 
+Always export `MUTATION_TMP_ROOT` as well. The gate starts a janitor that reaps
+each mutant's abandoned scratch directory, but only when that variable is set,
+so the safeguard is off by default and nothing warns you. One interrupted run
+without it left **79 586** pytest directories totalling 5.0 GB.
+
+`--mutation-batch-size` is worth raising from its default of 4. Every batch is
+one `mutmut` invocation, and each invocation re-scans the whole source tree
+before running anything (~2.3 s). At the default an 18 000-mutant run pays that
+roughly 2 987 times --- about two hours of pure overhead; at 400 it pays it
+about 52 times.
+
+Do not run the gate beside other heavy CPU work. A contended run produced three
+verdicts that were simply wrong: one mutant reported `survived` that its own
+existing test kills outright, and two reported `segfault` that fail 19 and 21
+tests respectively. Confirm any survivor individually before writing a test for
+it:
+
+```bash
+PYTHONPATH=mutants/src MUTANT_UNDER_TEST=<mutant> \
+  .venv/bin/python -m pytest <its test file> -q --no-cov
+```
+
 ### Refresh the gate's test selection after adding tests
 
 Per-test coverage contexts override mutmut's recorded association, so a stale
@@ -140,6 +162,26 @@ Install hooks once per checkout:
 uv run pre-commit install
 uv run pre-commit run --all-files
 ```
+
+## The Grid'5000 driver
+
+Two properties of `scripts/run_language_grid.py` are easy to undo by accident.
+
+**Never route the driver's CLI calls through `uv run`.** `uv run` holds a lock
+on the shared uv cache for the whole command, and the driver invokes the CLI
+once per shard, so a process holding that lock spawns a child that waits for it.
+Seven drivers in parallel wedged for thirty minutes with no child process at
+all. `_cli()` returns the console script beside `sys.executable` for this
+reason, and a contract test pins it.
+
+**`shard_is_complete` is O(all shards), not O(1).** It runs a full run-directory
+validate, which against a directory holding 384 shards measured 3 m 40 s --- 0.63 s
+of CPU, the rest blocked on I/O. The driver's per-shard loop is therefore
+quadratic: discovering work across a 55-shard partition costs hours before a
+single job is submitted. This is a real defect and the highest-value improvement
+available to this tooling. Until it is fixed, finish a known handful of shards
+by naming them rather than letting the driver discover them, and use a run
+directory that holds only those shards.
 
 ## Test-driven changes
 

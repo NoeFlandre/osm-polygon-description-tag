@@ -4,7 +4,7 @@ A living record of the `language-v1` cascade rollout: what is finished, what is
 not, and what the next operator has to do. Update it in the same commit as the
 work it describes.
 
-**Last updated:** 2026-09-12 · **Code:** `main`
+**Last updated:** 2026-09-14 · **Code:** `main`
 
 ## Summary
 
@@ -13,10 +13,10 @@ work it describes.
 | Cascade implementation (Lingua primary, GlotLID v3 fallback) | **Done** |
 | Sentence splitting (SaT-3l-sm, gated on the languages it was trained on) | **Done** |
 | Local quality gates | **Done** |
-| Mutation gate at 100 % | **Done** — 18 036 / 18 036 killed |
+| Mutation gate at 100 % | **Done** — 18 135 / 18 135 killed |
 | Grid'5000 operator environment | **Done** — the NumPy baseline blocker is resolved |
-| Grid'5000 full-dataset run | **Not done** — unblocked, not yet executed |
-| Hugging Face publication | **Not done** — blocked on the run above |
+| Grid'5000 full-dataset run | **Done** — 386 / 386 shards, 906 631 rows, 919 126 annotations |
+| Hugging Face publication | **Done** — revision `710bd784`, 388 files under `language-v1/` |
 
 ## Done
 
@@ -110,19 +110,21 @@ fingerprint guard will keep refusing.
 
 ### Quality gates
 
-3 261 passed / 1 skipped, 99.51 % branch coverage, CRAP max 5.01, Radon max
-complexity 5, ruff format and lint, `ty`, pre-commit, `uv lock --check`,
-`uv build`, wheel contents, strict MkDocs.
+3 334 passed / 3 skipped, 99.49 % branch coverage, ruff format and lint, `ty`,
+pre-commit, `uv lock --check`, `uv build`, wheel contents, strict MkDocs.
 
-The single skip is the Docker smoke test, which needs `RUN_DOCKER_SMOKE=1`.
-Run the suite with a `TMPDIR` free of shell metacharacters or two end-to-end
-job-script tests skip as well; see the note at the end of this document.
+One skip is the Docker smoke test, which needs `RUN_DOCKER_SMOKE=1`. The other
+two are the end-to-end job-script tests, which skip whenever `TMPDIR` contains a
+shell metacharacter --- as every absolute path under `/Volumes/Seagate M3` does.
+That is the guard working, not a gap: a remote path may not contain
+metacharacters because OAR evaluates the stored command through a shell. Point
+`TMPDIR` at a plain path to run them; see the note at the end of this document.
 
 ### Mutation gate at 100 %
 
 `python scripts/check_mutation_score.py --mutants-root mutants --output
 reports/mutation-summary.json --minimum-score 100` reports **100.00 %
-(18 036 / 18 036)** with every unresolved bucket at zero: no survivor, timeout,
+(18 135 / 18 135)** with every unresolved bucket at zero: no survivor, timeout,
 `no_tests`, skipped, suspicious, segfault, or interrupted mutant.
 
 Reaching it from 624 survivors took three kinds of change, in this order of
@@ -294,58 +296,97 @@ Source changes here invalidate a prepared Grid snapshot, because `snapshot_id`
 binds `fingerprint_project_source`. This work changed `src/`, so the snapshot
 must be re-frozen before the run below; that is already listed as step 1 there.
 
-## Not done
+## Executed
 
-### 1. Grid'5000 full-dataset run
+### Grid'5000 full-dataset run
 
-Prepared and verified, not submitted.
+Complete. Snapshot
+`9a03d00020191df375c25d3e4fa9b79e28ac9f8d83868d274a508ab954a84e98`, frozen over
+all 386 shards, processed end to end in `data-root/language-run-sat-full`.
 
-- Snapshot `639783b081d7caa7e6cc6e6db501e81768de821df448a6596aa6aff4daaa5088`
-  is frozen over all 386 shards (906 631 rows) under the v1 policy, in
-  `data-root/language-run-lingua-glotlid-v3-full`.
-- The pinned GlotLID artifact is staged at
-  `nancy:/home/nflandre/models/glotlid-v3/model_v3.bin`; its SHA-256 matches
-  the pinned constant.
-- One shard's portable payload transferred to
-  `nancy:/home/nflandre/osm-language-grid-v3/`, with all 106 staged files
-  byte-identical to `stage.json`.
+| Measure | Value |
+| --- | --- |
+| Shards complete | 386 / 386 |
+| Source rows processed | 906 631 / 906 631 |
+| Annotations produced | 919 126 |
+| Base `description` values | 887 077 |
+| Localized `description:*` values | 32 049 |
+| Detected | 572 328 |
+| Uncertain | 340 924 |
+| Non-linguistic | 5 874 |
+| Distinct languages assigned | 324 |
+| Split into sentences | 534 731 |
+| Skipped, language unsupported by the splitter | 37 597 |
+| Skipped, no language detected | 346 798 |
+| Sentences | 649 186 |
+| Validation issues | none |
 
-The frontend blocker is resolved; see the operator-environment section above.
-What remains is scheduling, plus two steps that must happen in this order.
+The three category triples each sum to the annotation total, which is the
+cheapest end-to-end consistency check available: 887 077 + 32 049, and
+572 328 + 340 924 + 5 874, and 534 731 + 37 597 + 346 798 all equal 919 126.
 
-1. **Re-freeze the snapshot.** `snapshot_id` binds `fingerprint_project_source`
-   over `src/`, and this work changed `src/`. Snapshot
-   `639783b0...` is therefore stale, and so is the one staged shard on `nancy`.
-   Re-run `language prepare` against the current tree before staging anything.
-2. **Refresh the operator copy on the site.** The editable environment under
-   `~/osm-language-grid/project` is a different vintage of the code, so
-   `grid status` refuses with `model identity field does not match derived
-   value: config_fingerprint`. Sync the committed tree there first.
+Ten most frequent assigned languages, by annotation count: `eng` 202 847,
+`deu` 92 452, `fra` 34 427, `por` 33 993, `rus` 33 185, `pol` 29 694,
+`spa` 22 510, `vec` 19 461, `nld` 13 196, `ita` 12 287.
 
-**Policy window.** The account owner has authorised this rollout's weekday
-daytime accounting, so the operator may pass `--allow-daytime`; without that
-flag, daytime remains refused by default. The whole walltime must still fit one
-side of the 09:00/19:00 Europe/Paris boundary, and every other fail-closed
-policy check remains mandatory. The weekend is not weekday daytime and is
-therefore unrestricted.
+**Sites.** Eight operator sites carried the run: `nancy`, `grenoble`, `lille`,
+`lyon`, `nantes`, `sophia`, `toulouse`, `luxembourg`. `rennes` was excluded
+because its home directory sat at roughly 24.8 GiB of a 25 GiB quota. Every job
+was one core with a walltime of at most 30 minutes, one active job per site, and
+no job was ever resubmitted while another might still exist.
 
-At roughly three minutes per shard end to end and a concurrency of one, a full
-pass is on the order of twenty hours of supervised submission — more than one
-night window, so plan for a weekend or several nights. The three completed
-shards of the earlier V2 pilot are **not** reusable: `snapshot_id` binds the
-code and lockfile fingerprints, and both have changed.
+Because a run directory is single-writer by design, the sites did not share one.
+Each took its own run-directory clone over the *same* snapshot and a disjoint
+share of the shards, merged into the master before export. A shard too large for
+one job committed an input cursor and resumed in the next.
 
-`scripts/run_language_grid.py` sequences the per-shard protocol and is
-resumable; it halts rather than resubmitting anything ambiguous. See
-[the runbook](language-detection.md) for how to invoke it and why the transfer
-has to be arranged over SSH rather than by `grid stage --apply`.
+**Recovery worth recording.** Two shards finished on their compute nodes but
+were never collected, because the local helper driving them was interrupted
+between the job terminating and the results being fetched. Their durable intents
+survived on the *sites'* copies of the run with `terminal_state` unset, which is
+exactly what the fail-closed rule is for: `submit` refuses to retry a job that
+may still exist. Reconciling each with `grid status --apply` and then collecting
+recovered both without recomputing anything — `us-kansas` (468 rows, 468
+annotations) on `lyon` job `2066906`, and `us-missouri` (892 rows, 892
+annotations) on `nantes` job `337775`.
 
-### 2. Hugging Face publication
+**A merge trap.** The master carries a placeholder checkpoint for every shard
+from the moment it is staged: status `paused`, cursor 0, zero annotations. A
+merge built on `rsync --ignore-existing` therefore *keeps the placeholder* and
+silently discards the completed per-site result, leaving the run permanently
+incomplete for no visible reason. The merge must prefer a `complete` checkpoint
+over a non-complete one and never the reverse.
 
-Blocked by design, not skipped. `export` refuses any run that is not complete
-(currently 3 of 386 shards under the old pilot snapshot, 0 of 386 under the new
-one), so nothing can be published until stage 1 finishes. The dataset repo is
-reachable and authenticated; it currently carries **no** `language-v1/` files.
+### Hugging Face publication
+
+Published and verified.
+
+| Field | Value |
+| --- | --- |
+| Repository | `NoeFlandre/osm-polygon-description-tag` |
+| Baseline revision | `fcac0ce894d8d6569b526c73874b20d447005dd1` |
+| Published revision | `710bd78400b84d7a0cc6291e0bd2dff15f043985` |
+| Files uploaded | 388 (386 Parquet + `stats.json` + `export-manifest.json`) |
+| Bytes under `language-v1/` | 101 207 496 |
+| Files verified by size and SHA-256 | 388 / 388 |
+| Outstanding issues | none |
+
+The upload is additive: everything lands under `language-v1/`, and the same
+commit adds a `language-v1` configuration listing its Parquet paths explicitly
+rather than by wildcard, plus a generated section in the root `README.md`. The
+`default` configuration and every existing file are untouched.
+
+The first apply returned `unverified` with a single issue --- the Dataset Viewer
+had not yet exposed the new configuration. That is indexing latency, not a
+failed upload: all 388 files already verified by digest at the resulting
+revision. Re-running publish once the viewer caught up verified the same
+revision rather than re-uploading anything, and returned `verified` with no
+issues.
+
+The dataset card states plainly that `top_score`, `runner_up_score` and `margin`
+are raw detector scores rather than calibrated probabilities, and that **no
+accuracy has been measured** on this dataset because no ground-truth labels
+exist for it. Nothing in the card claims an accuracy figure.
 
 ## Running the suite from the mounted volume
 

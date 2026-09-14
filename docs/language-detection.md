@@ -232,59 +232,51 @@ one. Real errors propagate; they are never converted into a completed result.
     authorised run, and the preflight fails closed on anything it cannot
     positively interpret.
 
-!!! danger "Execution status"
-    **The full dataset has not been processed and nothing has been published
-    to Hugging Face.** The pipeline itself is proven end to end on a compute
-    node: OAR job `6923270` on `nancy` processed `afghanistan-latest.parquet`,
-    184 rows into 194 annotations, `complete` with no issues, under snapshot
-    `02a8e396...`. Detection, gated sentence splitting, and the pinned
-    fallback all ran there; only the full 386-shard pass remains.
+!!! success "Execution status"
+    **The full dataset has been processed and published.** Snapshot
+    `9a03d00020191df375c25d3e4fa9b79e28ac9f8d83868d274a508ab954a84e98` ran to
+    completion across all 386 shards: 906 631 source rows into 919 126
+    annotations, validating `complete` with no issues. It is published at
+    revision `710bd78400b84d7a0cc6291e0bd2dff15f043985` of
+    `NoeFlandre/osm-polygon-description-tag`, 388 files under `language-v1/`,
+    all verified against the Hub by size and SHA-256.
 
-    Earlier pilot results are **not** publishable, and neither is that
-    validation shard: `snapshot_id` binds the code and lockfile fingerprints,
-    which have changed repeatedly, and recording the splitter in the snapshot
-    payload retired every id hashed before it. Publication additionally
-    refuses any incomplete run, so the Hugging Face step stays blocked until
-    all 386 shards are complete under one snapshot.
+    Eight sites carried the run --- `nancy`, `grenoble`, `lille`, `lyon`,
+    `nantes`, `sophia`, `toulouse`, `luxembourg` --- one core and at most a
+    30-minute walltime per job, one active job per site throughout. `rennes`
+    was excluded on home quota. Full counts, per-language totals and the
+    publication record are in
+    [the rollout status](language-rollout-status.md#executed).
 
-    Four blockers were found by actually running, none of which unit tests
-    could have surfaced, and all are fixed:
+    Five things were found only by running it, and all are fixed:
 
     - the multi-shard driver read `outcome` at the top level of the submit
-      payload, where the CLI nests it under `result`, so a genuinely queued
-      job was reported as an unclean submission;
+      payload, where the CLI nests it under `result`, so a genuinely queued job
+      was reported as an unclean submission;
     - `AutoTokenizer` cannot resolve a tokenizer class from SaT's `xlm-token`
       model type, so the tokenizer needs its own directory carrying XLM-R's
       config, or `pad_token_id` is `None` and inference dies mid-batch;
-    - the job is submitted from the frontend against the site's copy of the
-      run, so the durable submission intent is written there and has to be
-      adopted back before a shard can be acknowledged at all;
+    - the submission intent is written on the *site's* copy of the run, so it
+      has to be adopted back before a shard can be acknowledged at all;
     - fastText accumulates its softmax in float32 and returns probabilities
-      marginally over 1.0, which the score guard refused outright.
+      marginally over 1.0, which the score guard refused outright;
+    - sites disagree on what a bare `oarsub` means: several auto-select a queue
+      that does not exist and reject the job, while `sophia` refuses an explicit
+      queue, so the queue is a per-site input.
+
+    Two operational traps are worth carrying forward. A driver interrupted
+    between a job terminating and its results being fetched leaves a terminal,
+    unacknowledged intent on the site; `submit` then refuses to retry, correctly,
+    and the shard must be reconciled with `grid status --apply` and collected
+    rather than resubmitted. And the master run holds a placeholder checkpoint
+    (`paused`, cursor 0) for every staged shard, so a merge using
+    `rsync --ignore-existing` keeps the placeholder and silently drops the real
+    result.
 
     The NumPy baseline blocker described below is resolved: every frontend
     reports zero x86-64-v2 flags, and pinning the *operator* environment to
     `numpy==1.26.4` is enough, because inference uses the locked environment
     built inside the job.
-
-    Eight sites are staged and verified --- `nancy`, `grenoble`, `lille`,
-    `lyon`, `nantes`, `sophia`, `toulouse`, `luxembourg` --- each with `uv`,
-    the current source, an operator environment, and both pinned models with
-    matching digests. `rennes` is deliberately excluded: its home sits at
-    24.8 GiB of a 25 GiB quota.
-
-    Because the run-wide locks make a run directory single-writer by design,
-    the sites do not share one. Each takes its own run-directory clone over
-    the *same* snapshot and a disjoint round-robin share of the shards
-    (`--shard-stride` / `--shard-index`), merged before export. That keeps one
-    core and one active job per site, which is what the policy bounds, while
-    eight sites make progress at once.
-
-    Shard sizes are very uneven --- median 540 rows, largest 92 441 --- so a
-    large shard need not fit one 20-minute job. It does not have to: partial
-    progress is committed against an input cursor and the staged payload
-    carries the resume artifacts, so the next pass continues rather than
-    restarting. The drivers therefore loop until a pass completes nothing.
 
     Production data stays under the requested Seagate project root; it only
     gets there when the workflow is run with those paths.
