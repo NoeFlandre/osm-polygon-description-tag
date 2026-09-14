@@ -460,53 +460,33 @@ def render_language_card_section(export: LanguageExport) -> str:
     stats = export.stats
     return f"""## Language annotations (`{LANGUAGE_CONFIG_NAME}`)
 
-An additive configuration that labels the language of each OpenStreetMap
-description value. The default configuration, its GeoParquet files, and schema
-3 are unchanged.
-
-**Counting unit.** One row per *description value*, not per polygon. An object
-with a base `description` and two `description:<suffix>` values contributes
-three rows.
+An additive configuration: the language of each description value, and its split
+into sentences. The default configuration and its files are unchanged. One row
+per *description value*, not per polygon.
 
 | Measure | Value |
-| --- | --- |
+| --- | ---: |
 | Annotations | {stats.annotation_count} |
-| Distinct OSM objects | {stats.object_count} |
-| Base `description` values | {stats.base_description_count} |
-| Localized `description:*` values | {stats.localized_description_count} |
 | Detected | {stats.detected_count} |
 | Uncertain | {stats.uncertain_count} |
 | Non-linguistic | {stats.non_linguistic_count} |
-| Distinct languages assigned | {stats.distinct_language_count} |
+| Distinct languages | {stats.distinct_language_count} |
 | Split into sentences | {stats.split_count} |
-| Skipped, language unsupported by the splitter | {stats.unsupported_language_count} |
-| Skipped, no language detected | {stats.not_detected_count} |
 | Sentences | {stats.sentence_count} |
 
 **Provenance.** {_language_provenance(export)}
 
-**Limitations.**
+**Limitations.** `top_score`, `runner_up_score` and `margin` are **raw detector
+scores, not calibrated probabilities**; they must not be read as confidence
+percentages. No accuracy has been measured on this dataset, and it
+has **not** been benchmarked here: no ground-truth labels exist for it. Short
+values are `uncertain` by design, as is mixed-language evidence (`mixed_text`).
+A value in a language outside the detector's set may be misclassified as a
+supported language. A `description:<suffix>` key is opaque: the annotation
+describes the text, not the suffix. Text with no letters is `non_linguistic`.
 
-- `top_score`, `runner_up_score`, and `margin` are **raw detector scores, not
-  calibrated probabilities**. They must not be read as confidence percentages.
-- No accuracy has been measured on this dataset. The detector was selected for
-  its documented suitability on short text, and has **not** been benchmarked
-  here.
-- Short values are frequently `uncertain` by design: a conservative minimum
-  length, minimum score, and minimum margin are applied before any language is
-  assigned.
-- When the detector identifies mixed-language evidence, the value is reported
-  as `uncertain` with reason `mixed_text`. Mixed-language detection is not
-  guaranteed, especially for short values.
-- Languages outside the detector's supported set cannot be assigned. Such
-  values may be `uncertain` or may be misclassified as a supported language.
-- Localized `description:<suffix>` keys are treated as opaque. A suffix is
-  **not** assumed to be a language code, and the annotation reflects the text
-  itself rather than the suffix.
-- Text that contains no letters is labelled `non_linguistic`.
-
-**Licensing and attribution.** The annotated text is OpenStreetMap data,
-© OpenStreetMap contributors, available under the Open Database License (ODbL).
+**Licensing.** OpenStreetMap data,
+© OpenStreetMap contributors, under the Open Database License (ODbL).
 {_language_attribution(export)}
 """
 

@@ -557,7 +557,11 @@ def test_the_card_section_reports_validated_counts_and_no_accuracy_claim(
     section = render_language_card_section(export)
 
     assert f"| Annotations | {export.stats.annotation_count} |" in section
-    assert f"| Distinct OSM objects | {export.stats.object_count} |" in section
+    # Object, base and localized counts are deliberately absent: the card
+    # already reports them under "Description coverage", and repeating them
+    # here is what made this section read as a bolted-on appendix.
+    assert "Distinct OSM objects" not in section
+    assert "Base `description` values" not in section
     assert export.snapshot_id in section
     assert export.model_config_fingerprint in section
     assert "lingua-language-detector" in section
@@ -572,7 +576,7 @@ def test_the_card_section_reports_validated_counts_and_no_accuracy_claim(
     assert "opaque" in section
     assert "mixed_text" in section
     assert "may be misclassified as a supported language" in prose
-    assert "When the detector identifies mixed-language evidence" in prose
+    assert "mixed_text" in prose
 
 
 def test_the_card_section_identifies_the_cascade_fallback(export: LanguageExport) -> None:

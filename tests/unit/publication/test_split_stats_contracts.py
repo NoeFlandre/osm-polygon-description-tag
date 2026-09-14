@@ -98,6 +98,7 @@ def test_the_card_section_reports_sentence_splitting(export: object) -> None:
     section = render_language_card_section(export)  # type: ignore[arg-type]
 
     assert "| Split into sentences | 2 |" in section
-    assert "| Skipped, language unsupported by the splitter | 1 |" in section
-    assert "| Skipped, no language detected | 1 |" in section
     assert "| Sentences | 4 |" in section
+    # The two skip counts are derivable from the totals and were dropped to
+    # keep the card section short; the split totals still have to be exact.
+    assert "Skipped, language unsupported" not in section
