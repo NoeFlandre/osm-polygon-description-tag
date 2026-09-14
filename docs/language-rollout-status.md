@@ -13,10 +13,10 @@ work it describes.
 | Cascade implementation (Lingua primary, GlotLID v3 fallback) | **Done** |
 | Sentence splitting (SaT-3l-sm, gated on the languages it was trained on) | **Done** |
 | Local quality gates | **Done** |
-| Mutation gate at 100 % | **Done** — 18 135 / 18 135 killed |
+| Mutation gate at 100 % | **Done** — 18 140 / 18 140 killed |
 | Grid'5000 operator environment | **Done** — the NumPy baseline blocker is resolved |
 | Grid'5000 full-dataset run | **Done** — 386 / 386 shards, 906 631 rows, 919 126 annotations |
-| Hugging Face publication | **Done** — revision `710bd784`, 388 files under `language-v1/` |
+| Hugging Face publication | **Done** — revision `fec858b6`, 388 files under `language-v1/` |
 
 ## Done
 
@@ -110,7 +110,7 @@ fingerprint guard will keep refusing.
 
 ### Quality gates
 
-3 334 passed / 3 skipped, 99.49 % branch coverage, ruff format and lint, `ty`,
+3 336 passed / 3 skipped, 99.49 % branch coverage, ruff format and lint, `ty`,
 pre-commit, `uv lock --check`, `uv build`, wheel contents, strict MkDocs.
 
 One skip is the Docker smoke test, which needs `RUN_DOCKER_SMOKE=1`. The other
@@ -124,7 +124,7 @@ metacharacters because OAR evaluates the stored command through a shell. Point
 
 `python scripts/check_mutation_score.py --mutants-root mutants --output
 reports/mutation-summary.json --minimum-score 100` reports **100.00 %
-(18 135 / 18 135)** with every unresolved bucket at zero: no survivor, timeout,
+(18 140 / 18 140)** with every unresolved bucket at zero: no survivor, timeout,
 `no_tests`, skipped, suspicious, segfault, or interrupted mutant.
 
 Reaching it from 624 survivors took three kinds of change, in this order of
@@ -365,7 +365,7 @@ Published and verified.
 | --- | --- |
 | Repository | `NoeFlandre/osm-polygon-description-tag` |
 | Baseline revision | `fcac0ce894d8d6569b526c73874b20d447005dd1` |
-| Published revision | `710bd78400b84d7a0cc6291e0bd2dff15f043985` |
+| Published revision | `fec858b679f5ee7e87f0ecfaaa6b7223b2a7f5e2` |
 | Files uploaded | 388 (386 Parquet + `stats.json` + `export-manifest.json`) |
 | Bytes under `language-v1/` | 101 207 496 |
 | Files verified by size and SHA-256 | 388 / 388 |
@@ -375,6 +375,16 @@ The upload is additive: everything lands under `language-v1/`, and the same
 commit adds a `language-v1` configuration listing its Parquet paths explicitly
 rather than by wildcard, plus a generated section in the root `README.md`. The
 `default` configuration and every existing file are untouched.
+
+The dataset-card section was later shortened, which exposed a defect worth
+recording: `upload` commits the data files *and* the rendered card in one
+commit, but the plan identity covered only the files. A card-only change
+therefore produced the same identity, publication resumed its recorded outcome,
+skipped the upload entirely, and returned `verified` --- against the *old*
+revision, with the stale card still on the Hub. A green status while the
+artifact is unchanged is the worst shape that failure could take, and it was
+caught only by fetching the published card and comparing it. The identity now
+covers the card section, so a changed card is a different publication.
 
 The first apply returned `unverified` with a single issue --- the Dataset Viewer
 had not yet exposed the new configuration. That is indexing latency, not a

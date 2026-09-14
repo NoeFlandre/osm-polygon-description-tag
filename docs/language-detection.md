@@ -237,7 +237,7 @@ one. Real errors propagate; they are never converted into a completed result.
     `9a03d00020191df375c25d3e4fa9b79e28ac9f8d83868d274a508ab954a84e98` ran to
     completion across all 386 shards: 906 631 source rows into 919 126
     annotations, validating `complete` with no issues. It is published at
-    revision `710bd78400b84d7a0cc6291e0bd2dff15f043985` of
+    revision `fec858b679f5ee7e87f0ecfaaa6b7223b2a7f5e2` of
     `NoeFlandre/osm-polygon-description-tag`, 388 files under `language-v1/`,
     all verified against the Hub by size and SHA-256.
 
