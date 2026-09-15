@@ -104,7 +104,11 @@ jobs:
 
   mutation:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # The all-source mutation sweep is intentionally exhaustive. Keep the
+    # full gate intact and give it enough wall-clock time to finish on the
+    # hosted runner instead of converting a still-running check into a
+    # cancellation.
+    timeout-minutes: 90
     needs: quality
     env:
       HF_HUB_OFFLINE: "1"
