@@ -122,6 +122,11 @@ jobs:
       - name: Install Python
         run: uv python install 3.12
 
+      - name: Install osmium
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y osmium-tool
+
       - name: Sync locked environment
         run: uv sync --frozen
 
