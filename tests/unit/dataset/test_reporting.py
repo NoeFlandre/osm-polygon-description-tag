@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
-from shapely.geometry import Polygon
+from shapely.geometry import MultiPolygon, Polygon
 
 from osm_polygon_description_tag.dataset.reporting import collect_stats, generate_dataset_docs
 from osm_polygon_description_tag.dataset.stats import (
@@ -117,9 +117,16 @@ def test_collect_stats_aggregates_from_validated_artifacts(tmp_path: Path) -> No
     assert stats["base_description_rows"] == 0
     assert stats["localized_description_rows"] == 3
     assert "generation_timestamp_utc" not in stats
+    assert stats["area_m2_total_m2"] > 0
+    assert stats["area_m2_mean_m2"] == pytest.approx(stats["area_m2_total_m2"] / 3)
+    assert stats["dataset_bbox"] == [0.0, 0.0, 11.0, 11.0]
+    assert stats["geometry_vertices_total"] == 12
+    assert stats["geometry_rings_total"] == 3
+    assert stats["geometry_holes_total"] == 0
+    assert stats["multipolygon_components_total"] == 1
     assert stats["area_m2_min_m2"] is not None and stats["area_m2_min_m2"] > 0
     assert stats["area_m2_max_m2"] >= stats["area_m2_min_m2"]
-    assert stats["stats_schema_version"] == 6
+    assert stats["stats_schema_version"] == 7
 
 
 def test_collect_stats_separates_base_and_localized_description_words(
@@ -152,13 +159,58 @@ def test_collect_stats_separates_base_and_localized_description_words(
 
     stats = collect_stats(data_root)
 
-    assert stats["stats_schema_version"] == 6
+    assert stats["stats_schema_version"] == 7
     assert stats["base_description_values"] == 2
     assert stats["base_description_words_total"] == 3
     assert stats["base_description_words_median"] == 1.5
     assert stats["localized_description_values"] == 3
     assert stats["localized_description_words_total"] == 6
     assert stats["localized_description_words_median"] == 2.0
+
+
+def test_collect_stats_counts_holes_and_multipolygon_parts_from_every_row(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    source_root.mkdir()
+    outer = [(0, 0), (0, 4), (4, 4), (4, 0), (0, 0)]
+    hole = [(1, 1), (1, 2), (2, 2), (2, 1), (1, 1)]
+    multipolygon = MultiPolygon(
+        [
+            Polygon([(10, 10), (10, 11), (11, 11), (11, 10)]),
+            Polygon([(20, 20), (20, 21), (21, 21), (21, 20)]),
+        ]
+    )
+    write_finalized_dataset(
+        data_root,
+        source_root,
+        {
+            "complex": [
+                make_record_dict(
+                    Polygon(outer, [hole]),
+                    {"description": "with hole"},
+                    osm_id=1,
+                    source_pbf="complex.osm.pbf",
+                ),
+                make_record_dict(
+                    multipolygon,
+                    {"description": "two parts"},
+                    osm_type="relation",
+                    osm_id=2,
+                    source_pbf="complex.osm.pbf",
+                ),
+            ]
+        },
+    )
+
+    stats = collect_stats(data_root)
+
+    assert stats["geometry_vertices_total"] == 16
+    assert stats["geometry_rings_total"] == 4
+    assert stats["geometry_holes_total"] == 1
+    assert stats["multipolygon_components_total"] == 2
+    assert stats["dataset_bbox"] == [0.0, 0.0, 21.0, 21.0]
 
 
 def test_collect_stats_uses_zero_totals_and_null_medians_for_empty_dataset(

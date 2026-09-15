@@ -57,6 +57,16 @@ These values are calculated from validated Parquet rows. Full suffix counts,
 per-file identities, rejection counts, and all other machine-readable facts
 remain in the published `stats.json`.
 
+The machine-readable report also contains dataset-wide polygon geometry facts:
+`area_m2_total_m2`, `area_m2_mean_m2`, `area_m2_min_m2`,
+`area_m2_p25_m2`, `area_m2_median_m2`, `area_m2_p75_m2`, and
+`area_m2_max_m2`; `dataset_bbox` as `[min_lon, min_lat, max_lon, max_lat]`;
+and total `geometry_vertices_total`, `geometry_rings_total`,
+`geometry_holes_total`, and `multipolygon_components_total`. Area is summed
+from every row; geometry vertices exclude each ring's repeated closing
+coordinate. The same values are rendered in the generated dataset-card
+statistics block.
+
 ## Reproducibility
 
 Each source has one output Parquet and one manifest containing source/output
