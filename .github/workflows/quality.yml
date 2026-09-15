@@ -125,6 +125,11 @@ jobs:
       - name: Sync locked environment
         run: uv sync --frozen
 
+      - name: Install just
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y just
+
       - name: Run all-source CRAP budget gate
         run: just risk
 
