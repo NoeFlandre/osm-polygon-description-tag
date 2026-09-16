@@ -82,11 +82,16 @@ Options:
   `NoeFlandre/osm-polygon-description-tag`.
 - `--apply` / `--dry-run`: upload and verify, or compute only (the default).
 
-The JSON report records the target repository, the plan identity, the verified
-remote revision, every published file with its SHA-256 and size, the validated
-Parquet file count, and the published row count. Regeneration writes a file
-only when its bytes change, so a second run over unchanged artifacts is a
-no-op that yields the same plan identity.
+Before `--apply` uploads anything, the command pins the current Hub revision
+and verifies the complete remote `data/` and `manifests/` inventory against the
+local Parquet/manifest bytes. It refuses to publish when that inventory cannot
+be verified or differs locally; it verifies the same inventory again at the
+resulting metadata commit to catch a concurrent data change. The JSON report
+records that preflight `data_revision`, the target repository, the plan
+identity, the verified metadata revision, every published file with its
+SHA-256 and size, the validated Parquet file count, and the published row
+count. Regeneration writes a file only when its bytes change, so a second run
+over unchanged artifacts is a no-op that yields the same plan identity.
 
 Equivalent recipes: `just release-stats-dry-run` and `just release-stats`.
 

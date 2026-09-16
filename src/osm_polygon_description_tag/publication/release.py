@@ -1,10 +1,11 @@
 """Deterministic metadata release: compute, validate, publish, verify.
 
 The release path is intentionally narrow. It recomputes the dataset card and
-``stats.json`` from the complete validated Parquet inventory, publishes only
-those metadata artifacts to the exact Hub dataset, and verifies the remote
-files afterwards. Source data, manifests, and unrelated Hub files are never
-rewritten by this path.
+``stats.json`` from the complete validated Parquet inventory, pins and verifies
+the remote data/manifest inventory before publishing, publishes only those
+metadata artifacts to the exact Hub dataset, and verifies the remote files and
+inventory afterwards. Source data, manifests, and unrelated Hub files are
+never rewritten by this path.
 
 Determinism: statistics come from every valid published row and its matching
 manifest. Regeneration writes a file only when its bytes actually change, so a
@@ -18,7 +19,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from osm_polygon_description_tag.dataset.manifest import _manifest_path_for
 from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
 from osm_polygon_description_tag.publication.models import (
     REPO_ID,
@@ -29,7 +29,8 @@ from osm_polygon_description_tag.publication.models import (
 )
 from osm_polygon_description_tag.publication.planning import (
     _build_metadata_only_upload_plan,
-    _validate_manifest,
+    _collect_data_items,
+    _collect_manifest_items,
 )
 from osm_polygon_description_tag.publication.upload import execute_upload
 from osm_polygon_description_tag.publication.verification import (
@@ -50,18 +51,13 @@ class ReleaseReport:
     rows: int
     published: bool
     revision: str | None
+    data_revision: str | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return {
             "data_root": self.data_root,
-            "files": [
-                {
-                    "relative_path": item.relative_path,
-                    "sha256": item.sha256,
-                    "size_bytes": item.size_bytes,
-                }
-                for item in self.files
-            ],
+            "data_revision": self.data_revision,
+            "files": _upload_items_payload(self.files),
             "plan_identity_sha256": self.plan_identity_sha256,
             "published": self.published,
             "repo_id": self.repo_id,
@@ -69,6 +65,18 @@ class ReleaseReport:
             "rows": self.rows,
             "validated_parquet_files": self.validated_parquet_files,
         }
+
+
+def _upload_items_payload(files: tuple[UploadItem, ...]) -> list[dict[str, object]]:
+    """Serialize upload evidence in the stable report order."""
+    return [
+        {
+            "relative_path": item.relative_path,
+            "sha256": item.sha256,
+            "size_bytes": item.size_bytes,
+        }
+        for item in files
+    ]
 
 
 def _require_exact_repo(confirm_repo: str) -> None:
@@ -84,29 +92,61 @@ def validate_published_inventory(data_root: Path) -> int:
     An empty or missing ``data/`` directory is refused: a release must never
     publish statistics computed over nothing.
     """
+    return sum(item.relative_path.startswith("data/") for item in _published_inventory(data_root))
+
+
+def _require_real_directory(path: Path, message: str) -> None:
+    if path.is_symlink() or not path.is_dir():
+        raise PublicationError(f"{message}: {path}")
+
+
+def _require_nonempty_inventory(items: list[UploadItem], path: Path) -> list[UploadItem]:
+    if not items:
+        raise PublicationError(f"no published Parquet files under {path}")
+    return items
+
+
+def _published_inventory(data_root: Path) -> tuple[UploadItem, ...]:
     data_dir = data_root / "data"
-    if data_dir.is_symlink() or not data_dir.is_dir():
-        raise PublicationError(f"published data directory missing: {data_dir}")
-    parquets = sorted(data_dir.glob("*.parquet"), key=lambda path: path.name)
-    if not parquets:
-        raise PublicationError(f"no published Parquet files under {data_dir}")
-    for parquet in parquets:
-        _validate_manifest(_manifest_path_for(parquet.name, data_root), parquet)
-    return len(parquets)
+    _require_real_directory(data_dir, "published data directory missing")
+    data_items = _require_nonempty_inventory(_collect_data_items(data_root), data_dir)
+    manifests_dir = data_root / "manifests"
+    _require_real_directory(manifests_dir, "published manifest directory missing")
+    manifest_items = _collect_manifest_items(data_root)
+    return tuple(sorted((*data_items, *manifest_items), key=lambda item: item.relative_path))
+
+
+def _require_inventory_verifier(verifier: HubVerifier) -> Any:
+    inventory_verifier = getattr(verifier, "verify_inventory", None)
+    if not callable(inventory_verifier):
+        raise PublicationError(
+            "--apply requires a verifier for the complete data/manifest inventory"
+        )
+    return inventory_verifier
 
 
 def _publish(
     plan: UploadPlan,
     *,
+    inventory: tuple[UploadItem, ...],
     runner: Runner | None,
     verifier: HubVerifier | None,
-) -> str:
-    execute_upload(plan, confirmation=plan.identity_sha256, runner=runner)
+) -> tuple[str, str]:
     resolved_verifier = build_default_hub_verifier() if verifier is None else verifier
+    inventory_verifier = _require_inventory_verifier(resolved_verifier)
+    data_revision = inventory_verifier(plan.repo_id, inventory)
+    if not data_revision:
+        raise PublicationError("hub inventory verification returned an empty revision")
+    execute_upload(plan, confirmation=plan.identity_sha256, runner=runner)
     revision = resolved_verifier(plan.repo_id, plan.files)
     if not revision:
         raise PublicationError("hub verification returned an empty revision")
-    return revision
+    verified_revision = inventory_verifier(plan.repo_id, inventory, revision=revision)
+    if verified_revision != revision:
+        raise PublicationError(
+            "hub inventory verification returned a revision different from the upload"
+        )
+    return data_revision, revision
 
 
 def release_metadata(
@@ -129,7 +169,16 @@ def release_metadata(
     validated_files = validate_published_inventory(resolved_root)
     stats = generate_dataset_docs(resolved_root, template_path)
     plan = _build_metadata_only_upload_plan(resolved_root)
-    revision = _publish(plan, runner=runner, verifier=verifier) if apply else None
+    inventory = _published_inventory(resolved_root)
+    data_revision: str | None = None
+    revision: str | None = None
+    if apply:
+        data_revision, revision = _publish(
+            plan,
+            inventory=inventory,
+            runner=runner,
+            verifier=verifier,
+        )
     return ReleaseReport(
         repo_id=plan.repo_id,
         data_root=plan.data_root,
@@ -139,6 +188,7 @@ def release_metadata(
         rows=int(stats["rows"]),
         published=apply,
         revision=revision,
+        data_revision=data_revision,
     )
 
 

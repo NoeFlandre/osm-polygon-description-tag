@@ -357,3 +357,33 @@ def test_execute_upload_forwards_default_runner_arguments(
             observer,
         )
     ]
+
+
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        (
+            subprocess.CalledProcessError(7, ["hf", "upload"]),
+            "upload failed with exit code 7",
+        ),
+        (
+            subprocess.TimeoutExpired(["hf", "upload"], 12.5),
+            "upload timed out after 12.5 seconds",
+        ),
+    ],
+)
+def test_execute_upload_wraps_final_subprocess_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    failure: BaseException,
+    message: str,
+) -> None:
+    plan = _plan(tmp_path)
+
+    def fail(*_args: object, **_kwargs: object) -> None:
+        raise failure
+
+    monkeypatch.setattr(upload, "_default_runner_with_retry", fail)
+
+    with pytest.raises(PublicationError, match=_exact(message)):
+        upload.execute_upload(plan, confirmation=plan.identity_sha256)

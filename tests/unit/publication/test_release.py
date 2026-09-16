@@ -14,10 +14,12 @@ import pytest
 from osm_polygon_description_tag.publication import (
     REPO_ID,
     PublicationError,
+    ReleaseReport,
     UploadItem,
     release_metadata,
     validate_published_inventory,
 )
+from osm_polygon_description_tag.publication.verification import HubVerificationError
 from osm_polygon_description_tag.runtime.resources import dataset_card_template
 from tests.helpers.dataset import write_reporting_fixture
 
@@ -28,10 +30,21 @@ class _RecordingVerifier:
     def __init__(self, revision: str = "deadbeef") -> None:
         self.revision = revision
         self.calls: list[tuple[str, tuple[UploadItem, ...]]] = []
+        self.inventory_calls: list[tuple[str, tuple[UploadItem, ...], str | None]] = []
 
     def __call__(self, repo_id: str, files: tuple[UploadItem, ...]) -> str:
         self.calls.append((repo_id, files))
         return self.revision
+
+    def verify_inventory(
+        self,
+        repo_id: str,
+        files: tuple[UploadItem, ...],
+        *,
+        revision: str | None = None,
+    ) -> str:
+        self.inventory_calls.append((repo_id, files, revision))
+        return revision or "data-revision"
 
 
 @pytest.fixture
@@ -89,6 +102,75 @@ def test_apply_uploads_only_metadata_and_verifies(workspace: Path) -> None:
     assert not any(argument.startswith("data/") for argument in included)
     assert not any(argument.startswith("manifests/") for argument in included)
     assert verifier.calls == [(REPO_ID, report.files)]
+    assert report.data_revision == "data-revision"
+    assert verifier.inventory_calls[0][0] == REPO_ID
+    assert verifier.inventory_calls[0][2] is None
+    assert [item.relative_path for item in verifier.inventory_calls[0][1]] == [
+        "data/region-a.parquet",
+        "data/region-b.parquet",
+        "manifests/region-a.manifest.json",
+        "manifests/region-b.manifest.json",
+    ]
+    assert verifier.inventory_calls[1][2] == "deadbeef"
+
+
+def test_apply_requires_remote_inventory_verifier(workspace: Path) -> None:
+    commands: list[list[str]] = []
+
+    with pytest.raises(PublicationError, match="data/manifest inventory"):
+        _release(workspace, apply=True, runner=commands.append, verifier=lambda *_args: "revision")
+
+    assert commands == []
+
+
+def test_apply_refuses_remote_inventory_mismatch(workspace: Path) -> None:
+    commands: list[list[str]] = []
+
+    class MismatchedVerifier(_RecordingVerifier):
+        def verify_inventory(
+            self,
+            repo_id: str,
+            files: tuple[UploadItem, ...],
+            *,
+            revision: str | None = None,
+        ) -> str:
+            raise HubVerificationError("remote data/manifest inventory mismatch")
+
+    with pytest.raises(HubVerificationError, match="inventory mismatch"):
+        _release(
+            workspace,
+            apply=True,
+            runner=commands.append,
+            verifier=MismatchedVerifier(),
+        )
+
+    assert commands == []
+
+
+def test_apply_refuses_when_inventory_changes_after_upload(workspace: Path) -> None:
+    commands: list[list[str]] = []
+
+    class ChangingVerifier(_RecordingVerifier):
+        def verify_inventory(
+            self,
+            repo_id: str,
+            files: tuple[UploadItem, ...],
+            *,
+            revision: str | None = None,
+        ) -> str:
+            if revision is not None:
+                raise HubVerificationError("remote data/manifest inventory changed")
+            return super().verify_inventory(repo_id, files, revision=revision)
+
+    with pytest.raises(HubVerificationError, match="inventory changed"):
+        _release(
+            workspace,
+            apply=True,
+            runner=commands.append,
+            verifier=ChangingVerifier(),
+        )
+
+    assert len(commands) == 1
 
 
 def test_second_run_is_a_byte_stable_no_op(workspace: Path) -> None:
@@ -126,10 +208,38 @@ def test_parquet_without_matching_manifest_is_refused(workspace: Path) -> None:
 
 
 def test_empty_remote_revision_is_refused(workspace: Path) -> None:
+    verifier = _RecordingVerifier(revision="")
+
     with pytest.raises(PublicationError, match="empty revision"):
         _release(
             workspace,
             apply=True,
             runner=lambda command: None,
-            verifier=lambda repo_id, files: "",
+            verifier=verifier,
         )
+
+
+def test_release_report_payload_serializes_file_evidence() -> None:
+    report = ReleaseReport(
+        repo_id=REPO_ID,
+        data_root="generated",
+        plan_identity_sha256="plan",
+        files=(UploadItem("README.md", 4, "hash"),),
+        validated_parquet_files=1,
+        rows=2,
+        published=True,
+        revision="revision",
+        data_revision="data-revision",
+    )
+
+    assert report.to_payload() == {
+        "data_root": "generated",
+        "data_revision": "data-revision",
+        "files": [{"relative_path": "README.md", "sha256": "hash", "size_bytes": 4}],
+        "plan_identity_sha256": "plan",
+        "published": True,
+        "repo_id": REPO_ID,
+        "revision": "revision",
+        "rows": 2,
+        "validated_parquet_files": 1,
+    }

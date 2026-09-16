@@ -240,10 +240,15 @@ def execute_upload(
     _require_confirmation(plan, confirmation)
     _verify_identity(plan)
     command = _build_command(plan)
-    if runner is None:
-        _run_default_upload(command, timeout, retry_observer)
-    else:
-        runner(command)
+    try:
+        if runner is None:
+            _run_default_upload(command, timeout, retry_observer)
+        else:
+            runner(command)
+    except subprocess.CalledProcessError as error:
+        raise PublicationError(f"upload failed with exit code {error.returncode}") from error
+    except subprocess.TimeoutExpired as error:
+        raise PublicationError(f"upload timed out after {error.timeout} seconds") from error
 
 
 def _require_confirmation(plan: UploadPlan, confirmation: str | None) -> None:
