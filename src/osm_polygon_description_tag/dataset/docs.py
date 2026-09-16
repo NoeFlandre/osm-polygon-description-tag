@@ -155,13 +155,55 @@ def _coerce_bbox_coordinates(value: object) -> tuple[float, float, float, float]
     return coordinates[0], coordinates[1], coordinates[2], coordinates[3]
 
 
-def _fmt_bbox(value: object) -> str:
-    """Format a ``[min_lon, min_lat, max_lon, max_lat]`` dataset extent."""
+def _fmt_geometry_bbox(value: object) -> str:
+    """Format a dataset extent for the geometry statistics section."""
     coordinates = _coerce_bbox_coordinates(value)
     if coordinates is None:
         return "—"
     min_x, min_y, max_x, max_y = coordinates
-    return f"lon {min_x:.4f}° to {max_x:.4f}°, lat {min_y:.4f}° to {max_y:.4f}°"
+    return f"[{min_x:.4f}°, {min_y:.4f}°] to [{max_x:.4f}°, {max_y:.4f}°]"
+
+
+def _render_geometry_stats_section(stats: Mapping[str, Any]) -> list[str]:
+    """Render the additive geometry statistics section."""
+    geometry_types = stats.get("geometry_types", {})
+    if not isinstance(geometry_types, Mapping):
+        geometry_types = {}
+    return [
+        "## Polygon surface and geometry",
+        "",
+        "Computed deterministically from the complete published polygon table: "
+        f"all {_fmt_int(stats['rows'])} rows across {_fmt_int(stats['output_files'])} "
+        "Parquet files, using only the dataset's area_m2, bbox, and geometry columns. "
+        "No sampling, truncation, external lookup, or raw-PBF recomputation is used.",
+        "",
+        "| Metric | Value |",
+        "| --- | ---: |",
+        f"| Polygons measured | {_fmt_int(stats['rows'])} |",
+        "| Surface area (total / mean) | "
+        f"{_fmt_area(stats.get('area_m2_total_m2'))} / "
+        f"{_fmt_area(stats.get('area_m2_mean_m2'))} |",
+        "| Smallest / largest area | "
+        f"{_fmt_area(stats.get('area_m2_min_m2'))} / "
+        f"{_fmt_area(stats.get('area_m2_max_m2'))} |",
+        "| Area p25 / median / p75 | "
+        f"{_fmt_area(stats.get('area_m2_p25_m2'))} / "
+        f"{_fmt_area(stats.get('area_m2_median_m2'))} / "
+        f"{_fmt_area(stats.get('area_m2_p75_m2'))} |",
+        f"| Dataset bounding box | {_fmt_geometry_bbox(stats.get('dataset_bbox'))} |",
+        "| Geometry totals (vertices / rings / holes / MultiPolygon parts) | "
+        f"{_fmt_int(stats.get('geometry_vertices_total', 0))} / "
+        f"{_fmt_int(stats.get('geometry_rings_total', 0))} / "
+        f"{_fmt_int(stats.get('geometry_holes_total', 0))} / "
+        f"{_fmt_int(stats.get('multipolygon_components_total', 0))} |",
+        "| Polygon / MultiPolygon rows | "
+        f"{_fmt_int(geometry_types.get('Polygon', 0))} / "
+        f"{_fmt_int(geometry_types.get('MultiPolygon', 0))} |",
+        "",
+        "The complete machine-readable report is published in stats.json. These values "
+        "are generated from the data only and are deterministic for unchanged published "
+        "artifacts.",
+    ]
 
 
 def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
@@ -182,22 +224,6 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
         f"| Relations | {_fmt_int(stats['osm_types'].get('relation', 0))} |",
         f"| Polygon geometries | {_fmt_int(stats['geometry_types'].get('Polygon', 0))} |",
         f"| MultiPolygon geometries | {_fmt_int(stats['geometry_types'].get('MultiPolygon', 0))} |",
-        "",
-        "| Surface area (total / mean) | "
-        f"{_fmt_area(stats.get('area_m2_total_m2'))} / "
-        f"{_fmt_area(stats.get('area_m2_mean_m2'))} |",
-        "| Polygon area (minimum / p25 / median / p75 / maximum) | "
-        f"{_fmt_area(stats.get('area_m2_min_m2'))} / "
-        f"{_fmt_area(stats.get('area_m2_p25_m2'))} / "
-        f"{_fmt_area(stats.get('area_m2_median_m2'))} / "
-        f"{_fmt_area(stats.get('area_m2_p75_m2'))} / "
-        f"{_fmt_area(stats.get('area_m2_max_m2'))} |",
-        f"| Dataset extent | {_fmt_bbox(stats.get('dataset_bbox'))} |",
-        "| Geometry totals (vertices / rings / holes / MultiPolygon parts) | "
-        f"{_fmt_int(stats.get('geometry_vertices_total', 0))} / "
-        f"{_fmt_int(stats.get('geometry_rings_total', 0))} / "
-        f"{_fmt_int(stats.get('geometry_holes_total', 0))} / "
-        f"{_fmt_int(stats.get('multipolygon_components_total', 0))} |",
         "",
         "## Description coverage",
         "",
@@ -256,6 +282,7 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
             "",
         ]
     )
+    lines.extend(_render_geometry_stats_section(stats))
     return "\n".join(lines)
 
 
@@ -376,9 +403,7 @@ def _update_stats_block(readme: str, stats: dict[str, Any], stats_sha256: str) -
     newline = _newline_for(readme)
     block = _render_stats_block(stats, stats_sha256).replace("\n", newline)
     if starts == 0:
-        marker_block = (
-            f"{_STATS_START_MARKER}{newline}{block}{_STATS_END_MARKER}{newline}"
-        )
+        marker_block = f"{_STATS_START_MARKER}{newline}{block}{_STATS_END_MARKER}{newline}"
         return _insert_stats_block(readme, marker_block, newline)
     if _GENERATED_PATTERN.search(readme) is None:
         raise ReportingError("existing README has malformed generated stats markers")

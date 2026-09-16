@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 
-from osm_polygon_description_tag.publication import release as release_module
 from osm_polygon_description_tag.publication import (
     REPO_ID,
     PublicationError,
@@ -20,6 +19,7 @@ from osm_polygon_description_tag.publication import (
     release_metadata,
     validate_published_inventory,
 )
+from osm_polygon_description_tag.publication import release as release_module
 from osm_polygon_description_tag.publication.language_card import (
     LANGUAGE_CARD_SECTION_END,
     LANGUAGE_CARD_SECTION_START,
@@ -74,6 +74,49 @@ def _release(data_root: Path, **kwargs: object) -> object:
         apply=bool(kwargs.pop("apply", False)),
         **kwargs,  # type: ignore[arg-type]
     )
+
+
+_PRE_REGRESSION_CARD = Path(__file__).parents[2] / "fixtures" / "hf_description_card_7a9c678.md"
+_CURRENT_5CAD_STATS_BLOCK = (
+    "<!-- GENERATED:STATS:START -->\n"
+    "<!-- stats_sha256: e3f23671bb7eaa3a2a15a07629b96730f424ca195e21b8e280fc52b5f303d449 -->\n"
+    "<!-- stats_schema_version: 7 -->\n"
+    "\n"
+    "## Polygon surface and geometry\n"
+    "\n"
+    "Computed deterministically from the complete published polygon table: "
+    "all 906,631 rows across 386 Parquet files, using only the dataset's area_m2, "
+    "bbox, and geometry columns. No sampling, truncation, external lookup, or "
+    "raw-PBF recomputation is used.\n"
+    "\n"
+    "| Metric | Value |\n"
+    "| --- | ---: |\n"
+    "| Polygons measured | 906,631 |\n"
+    "| Surface area (total / mean) | 24,988,429.0 km² / 27.6 km² |\n"
+    "| Smallest / largest area | 6.19e-05 m² / 3,477,486.0 km² |\n"
+    "| Area p25 / median / p75 | 85.3 / 501.2 / 10,391.2 m² |\n"
+    "| Dataset bounding box | [-179.1479°, -82.1117°] to [179.8992°, 83.6651°] |\n"
+    "| Geometry totals (vertices / rings / holes / MultiPolygon parts) | "
+    "45,960,475 / 1,029,446 / 70,335 / 959,111 |\n"
+    "| Polygon / MultiPolygon rows | 0 / 906,631 |\n"
+    "\n"
+    "The complete machine-readable report is published in stats.json. These values "
+    "are generated from the data only and are deterministic for unchanged published "
+    "artifacts.\n"
+    "<!-- GENERATED:STATS:END -->"
+)
+
+
+def _replace_stats_marker_block(readme: str, replacement: str) -> str:
+    start_marker = "<!-- GENERATED:STATS:START -->"
+    end_marker = "<!-- GENERATED:STATS:END -->"
+    start = readme.index(start_marker)
+    end = readme.index(end_marker, start) + len(end_marker)
+    return readme[:start] + replacement + readme[end:]
+
+
+def _without_stats_marker_block(readme: str) -> str:
+    return _replace_stats_marker_block(readme, "")
 
 
 def test_dry_run_computes_plan_without_uploading(workspace: Path) -> None:
@@ -197,9 +240,7 @@ def test_release_preserves_existing_language_card_content(workspace: Path) -> No
         "An unrelated generated section.\n"
         "<!-- GENERATED:AUDIT:END -->\n"
     )
-    existing = template.replace(
-        "\n---\n\n", f"\n{language_config}{other_config}---\n\n", 1
-    )
+    existing = template.replace("\n---\n\n", f"\n{language_config}{other_config}---\n\n", 1)
     existing = existing.replace(
         "\n## Terminology",
         f"\n{language_section}\n{other_section}<!-- preserved metadata -->\n\n## Terminology",
@@ -226,6 +267,74 @@ def test_release_preserves_existing_language_card_content(workspace: Path) -> No
         existing[existing.index(stats_start) : existing.index(stats_end) + len(stats_end)], ""
     )
     assert updated_without_stats == existing_without_stats
+
+
+def test_release_restores_pre_regression_card_without_losing_content(
+    workspace: Path,
+) -> None:
+    golden = _PRE_REGRESSION_CARD.read_text(encoding="utf-8")
+    assert len(golden) == 27_804
+    regressed = _replace_stats_marker_block(golden, _CURRENT_5CAD_STATS_BLOCK)
+    (workspace / "README.md").write_text(regressed, encoding="utf-8")
+
+    _release(workspace)
+
+    updated = (workspace / "README.md").read_text(encoding="utf-8")
+    assert _without_stats_marker_block(updated) == _without_stats_marker_block(golden)
+
+    stats_start = updated.index("<!-- GENERATED:STATS:START -->")
+    stats_end = updated.index("<!-- GENERATED:STATS:END -->", stats_start)
+    generated_stats = updated[stats_start : stats_end + len("<!-- GENERATED:STATS:END -->")]
+    for expected in (
+        "<!-- stats_sha256: ",
+        "<!-- stats_schema_version: ",
+        "<!-- schema_version: ",
+        "## Dataset at a glance",
+        "| Polygons | 3 |",
+        "| Parquet files | 2 |",
+        "## Description coverage",
+        "| Localized descriptions | 3 |",
+        "### Most common localized suffixes",
+        "| " + chr(96) + "en" + chr(96) + " | 2 |",
+        "| " + chr(96) + "pt-BR" + chr(96) + " | 1 |",
+        "### Area distribution",
+        "![Area distribution of description-tagged polygons](assets/area_distribution.png)",
+        "**OSM object timestamps (UTC):**",
+        (
+            "Detailed machine-readable statistics, exact suffix frequencies, rejection counts, "
+            "and per-file SHA-256 provenance are available in "
+            + chr(96)
+            + "stats.json"
+            + chr(96)
+            + "(stats.json)."
+        ),
+        "## Polygon surface and geometry",
+        "| Polygons measured | 3 |",
+        "| Polygon / MultiPolygon rows | 2 / 1 |",
+    ):
+        assert expected in generated_stats
+
+    preserved = _without_stats_marker_block(updated)
+    for expected in (
+        "- config_name: language-v1",
+        "language-v1/data/zimbabwe-latest.parquet",
+        "<!-- GENERATED:LANGUAGE_V1:START -->",
+        "## Language annotations (" + chr(96) + "language-v1" + chr(96) + ")",
+        "## Terminology",
+        "## Schema",
+        "## Load the data",
+        "## Methodology",
+        "## Limitations",
+        "## License and attribution",
+        "## Reproducibility",
+        "## Citation",
+        "https://github.com/NoeFlandre/osm-polygon-description-tag",
+        "https://noeflandre-osm-polygon-description-tag-trackio.static.hf.space/",
+        "https://noeflandre.github.io/osm-polygon-description-tag/slides/dataset/dataset.html",
+        "https://opendatacommons.org/licenses/odbl/",
+        "CITATION.cff",
+    ):
+        assert expected in preserved
 
 
 def test_apply_requires_remote_inventory_verifier(workspace: Path) -> None:

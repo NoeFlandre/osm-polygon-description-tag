@@ -232,13 +232,6 @@ def test_stats_block_is_an_exact_contract_for_non_default_values() -> None:
             "| Polygon geometries | 1,200 |",
             "| MultiPolygon geometries | 90 |",
             "",
-            "| Surface area (total / mean) | 1.0 km² / 80.0 m² |",
-            "| Polygon area (minimum / p25 / median / p75 / maximum) | "
-            "0.5 m² / 10.0 m² / 50.0 m² / 100.0 m² / 2.0 km² |",
-            "| Dataset extent | lon -10.0000° to 30.0000°, lat -20.0000° to 40.0000° |",
-            "| Geometry totals (vertices / rings / holes / MultiPolygon parts) | "
-            "2,000 / 500 / 20 / 120 |",
-            "",
             "## Description coverage",
             "",
             "| Description type | Values | Total words | Median words per description |",
@@ -268,6 +261,27 @@ def test_stats_block_is_an_exact_contract_for_non_default_values() -> None:
             "Detailed machine-readable statistics, exact suffix frequencies, rejection counts, "
             "and per-file SHA-256 provenance are available in [`stats.json`](stats.json).",
             "",
+            "## Polygon surface and geometry",
+            "",
+            "Computed deterministically from the complete published polygon table: all "
+            "12,345 rows across 6 Parquet files, using only the dataset's area_m2, bbox, "
+            "and geometry columns. No sampling, truncation, external lookup, or "
+            "raw-PBF recomputation is used.",
+            "",
+            "| Metric | Value |",
+            "| --- | ---: |",
+            "| Polygons measured | 12,345 |",
+            "| Surface area (total / mean) | 1.0 km² / 80.0 m² |",
+            "| Smallest / largest area | 0.5 m² / 2.0 km² |",
+            "| Area p25 / median / p75 | 10.0 m² / 50.0 m² / 100.0 m² |",
+            "| Dataset bounding box | [-10.0000°, -20.0000°] to [30.0000°, 40.0000°] |",
+            "| Geometry totals (vertices / rings / holes / MultiPolygon parts) | "
+            "2,000 / 500 / 20 / 120 |",
+            "| Polygon / MultiPolygon rows | 1,200 / 90 |",
+            "",
+            "The complete machine-readable report is published in stats.json. These values "
+            "are generated from the data only and are deterministic for unchanged "
+            "published artifacts.",
         ]
     )
 
