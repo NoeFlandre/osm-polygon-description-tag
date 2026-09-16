@@ -10,9 +10,15 @@ from osm_polygon_description_tag.publication.models import UploadItem
 
 
 class HubVerifier(Protocol):
-    """Verify uploaded files and the pinned published inventory."""
+    """Verify published files and the pinned published inventory."""
 
     def __call__(self, repo_id: str, files: tuple[UploadItem, ...]) -> str: ...
+
+    def matching_revision(
+        self,
+        repo_id: str,
+        files: tuple[UploadItem, ...],
+    ) -> str | None: ...
 
     def verify_inventory(
         self,
@@ -171,6 +177,19 @@ def default_hub_verifier_factory(*, cache_dir: Path | None = None) -> HubVerifie
         _verify_files_at_revision(api, repo_id, files, revision)
         return revision
 
+    def matching_revision(
+        repo_id: str,
+        files: tuple[UploadItem, ...],
+    ) -> str | None:
+        """Return the current revision when every intended file already matches."""
+        api = _authenticated_api()
+        revision = _repository_revision(api, repo_id)
+        try:
+            _verify_files_at_revision(api, repo_id, files, revision)
+        except _RemoteFileMismatch:
+            return None
+        return revision
+
     def verify_inventory(
         repo_id: str,
         files: tuple[UploadItem, ...],
@@ -239,6 +258,13 @@ def default_hub_verifier_factory(*, cache_dir: Path | None = None) -> HubVerifie
         def __call__(self, repo_id: str, files: tuple[UploadItem, ...]) -> str:
             return verifier(repo_id, files)
 
+        def matching_revision(
+            self,
+            repo_id: str,
+            files: tuple[UploadItem, ...],
+        ) -> str | None:
+            return matching_revision(repo_id, files)
+
         def verify_inventory(
             self,
             repo_id: str,
@@ -261,3 +287,7 @@ def build_default_hub_verifier() -> HubVerifier:
 
 class HubVerificationError(RuntimeError):
     """Raised when the default Hub verifier cannot confirm the uploaded files."""
+
+
+class _RemoteFileMismatch(HubVerificationError):
+    """Expected difference used by the idempotence preflight."""

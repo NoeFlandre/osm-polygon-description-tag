@@ -65,6 +65,36 @@ def install_map_block(template: str, block_body: str) -> str:
     return template[: match.start()] + replacement + template[match.end() :]
 
 
+def insert_map_block(template: str, block_body: str) -> str:
+    """Add the map marker block when an older card has no map markers.
+
+    Existing marker pairs are refreshed through :func:`install_map_block`.
+    When no pair exists, the new block is inserted immediately before the
+    stats block, or appended when the card has no stats marker. In both cases
+    every pre-existing byte remains unchanged.
+    """
+    start_count = template.count(H3_MAP_START_MARKER)
+    end_count = template.count(H3_MAP_END_MARKER)
+    if start_count == 1 and end_count == 1:
+        return install_map_block(template, block_body)
+    if start_count != 0 or end_count != 0:
+        raise ValueError("dataset card has malformed H3 map markers")
+
+    newline = "\r\n" if "\r\n" in template else "\n"
+    normalized_body = block_body.replace("\r\n", "\n").rstrip("\r\n")
+    normalized_body = normalized_body.replace("\n", newline)
+    block = (
+        f"{H3_MAP_START_MARKER}{newline}"
+        f"{normalized_body}{newline}"
+        f"{H3_MAP_END_MARKER}{newline}"
+    )
+    stats_marker = f"<!-- GENERATED:STATS:START -->{newline}"
+    if stats_marker in template:
+        return template.replace(stats_marker, block + stats_marker, 1)
+    separator = "" if not template else (newline if template.endswith(newline) else newline * 2)
+    return template + separator + block
+
+
 def write_map_block_marker_to_template(
     template_path: Path, *, asset_relative_path: str = H3_MAP_ASSET_RELATIVE_PATH
 ) -> None:
@@ -123,6 +153,7 @@ __all__ = [
     "H3_MAP_END_MARKER",
     "H3_MAP_START_MARKER",
     "H3_MAP_TITLE",
+    "insert_map_block",
     "install_map_block",
     "render_map_block",
     "write_map_block_marker_to_template",

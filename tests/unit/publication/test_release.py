@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from osm_polygon_description_tag.publication import release as release_module
 from osm_polygon_description_tag.publication import (
     REPO_ID,
     PublicationError,
@@ -18,6 +19,10 @@ from osm_polygon_description_tag.publication import (
     UploadItem,
     release_metadata,
     validate_published_inventory,
+)
+from osm_polygon_description_tag.publication.language_card import (
+    LANGUAGE_CARD_SECTION_END,
+    LANGUAGE_CARD_SECTION_START,
 )
 from osm_polygon_description_tag.publication.verification import HubVerificationError
 from osm_polygon_description_tag.runtime.resources import dataset_card_template
@@ -31,6 +36,8 @@ class _RecordingVerifier:
         self.revision = revision
         self.calls: list[tuple[str, tuple[UploadItem, ...]]] = []
         self.inventory_calls: list[tuple[str, tuple[UploadItem, ...], str | None]] = []
+        self.matching_calls: list[tuple[str, tuple[UploadItem, ...]]] = []
+        self.remote_metadata_revision: str | None = None
 
     def __call__(self, repo_id: str, files: tuple[UploadItem, ...]) -> str:
         self.calls.append((repo_id, files))
@@ -45,6 +52,10 @@ class _RecordingVerifier:
     ) -> str:
         self.inventory_calls.append((repo_id, files, revision))
         return revision or "data-revision"
+
+    def matching_revision(self, repo_id: str, files: tuple[UploadItem, ...]) -> str | None:
+        self.matching_calls.append((repo_id, files))
+        return self.remote_metadata_revision
 
 
 @pytest.fixture
@@ -112,6 +123,109 @@ def test_apply_uploads_only_metadata_and_verifies(workspace: Path) -> None:
         "manifests/region-b.manifest.json",
     ]
     assert verifier.inventory_calls[1][2] == "deadbeef"
+
+
+def test_apply_is_remote_idempotent_when_metadata_already_matches(workspace: Path) -> None:
+    commands: list[list[str]] = []
+    verifier = _RecordingVerifier()
+
+    def observe_upload(_command: list[str]) -> None:
+        verifier.remote_metadata_revision = "deadbeef"
+        commands.append(_command)
+
+    first = _release(workspace, apply=True, runner=observe_upload, verifier=verifier)
+    second = _release(workspace, apply=True, runner=observe_upload, verifier=verifier)
+
+    assert first.revision == second.revision == "deadbeef"
+    assert len(commands) == 1
+    assert len(verifier.matching_calls) == 2
+    assert len(verifier.calls) == 1
+
+
+def test_apply_preflights_remote_revision_before_computing_stats(
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    verifier = _RecordingVerifier()
+    original_generate = release_module.generate_dataset_docs
+
+    def record_generate(*args: object, **kwargs: object) -> object:
+        events.append("compute")
+        return original_generate(*args, **kwargs)  # type: ignore[arg-type]
+
+    def record_inventory(
+        repo_id: str,
+        files: tuple[UploadItem, ...],
+        *,
+        revision: str | None = None,
+    ) -> str:
+        events.append(f"inventory:{revision}")
+        return _RecordingVerifier.verify_inventory(verifier, repo_id, files, revision=revision)
+
+    monkeypatch.setattr(release_module, "generate_dataset_docs", record_generate)
+    verifier.verify_inventory = record_inventory  # type: ignore[method-assign]
+
+    _release(workspace, apply=True, runner=lambda _command: None, verifier=verifier)
+
+    assert events == ["inventory:None", "compute", "inventory:deadbeef"]
+
+
+def test_release_preserves_existing_language_card_content(workspace: Path) -> None:
+    template = dataset_card_template().read_text(encoding="utf-8")
+    language_config = (
+        "- config_name: language-v1\n"
+        "  data_files:\n"
+        "  - split: train\n"
+        "    path:\n"
+        "    - language-v1/data/region.parquet\n"
+    )
+    other_config = (
+        "- config_name: audit-v1\n"
+        "  data_files:\n"
+        "  - split: train\n"
+        "    path: audit-v1/data/audit.parquet\n"
+    )
+    language_section = (
+        f"{LANGUAGE_CARD_SECTION_START}\n"
+        "## Language annotations (`language-v1`)\n\n"
+        "Controlled language-v1 snapshot content.\n"
+        f"{LANGUAGE_CARD_SECTION_END}\n"
+    )
+    other_section = (
+        "<!-- GENERATED:AUDIT:START -->\n"
+        "An unrelated generated section.\n"
+        "<!-- GENERATED:AUDIT:END -->\n"
+    )
+    existing = template.replace(
+        "\n---\n\n", f"\n{language_config}{other_config}---\n\n", 1
+    )
+    existing = existing.replace(
+        "\n## Terminology",
+        f"\n{language_section}\n{other_section}<!-- preserved metadata -->\n\n## Terminology",
+        1,
+    )
+    (workspace / "README.md").write_text(existing, encoding="utf-8")
+
+    _release(workspace)
+
+    updated = (workspace / "README.md").read_text(encoding="utf-8")
+    assert language_config in updated
+    assert other_config in updated
+    assert language_section in updated
+    assert other_section in updated
+    assert "<!-- preserved metadata -->" in updated
+    assert "| Polygon geometries |" in updated
+
+    stats_start = "<!-- GENERATED:STATS:START -->"
+    stats_end = "<!-- GENERATED:STATS:END -->"
+    updated_without_stats = updated.replace(
+        updated[updated.index(stats_start) : updated.index(stats_end) + len(stats_end)], ""
+    )
+    existing_without_stats = existing.replace(
+        existing[existing.index(stats_start) : existing.index(stats_end) + len(stats_end)], ""
+    )
+    assert updated_without_stats == existing_without_stats
 
 
 def test_apply_requires_remote_inventory_verifier(workspace: Path) -> None:

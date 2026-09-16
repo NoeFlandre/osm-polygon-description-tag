@@ -35,6 +35,7 @@ from osm_polygon_description_tag.dataset.geography.card import (
     H3_MAP_END_MARKER,
     H3_MAP_START_MARKER,
     H3_MAP_TITLE,
+    insert_map_block,
     install_map_block,
     render_map_block,
 )
@@ -78,6 +79,7 @@ __all__ = [
     "cell_rings",
     "collect_h3_counts",
     "coordinate_to_h3",
+    "insert_map_block",
     "install_map_block",
     "iter_centroids",
     "render_area_histogram",

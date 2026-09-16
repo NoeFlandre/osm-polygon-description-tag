@@ -25,10 +25,8 @@ from osm_polygon_description_tag.dataset.geography.area_histogram import (
 from osm_polygon_description_tag.dataset.geography.basemap import bundled_basemap_path
 from osm_polygon_description_tag.dataset.geography.card import (
     H3_MAP_ASSET_RELATIVE_PATH,
-    H3_MAP_END_MARKER,
-    H3_MAP_START_MARKER,
     H3_MAP_TITLE,
-    install_map_block,
+    insert_map_block,
 )
 from osm_polygon_description_tag.dataset.geography.rendering import render_density_map
 from osm_polygon_description_tag.dataset.manifest import file_sha256
@@ -43,9 +41,13 @@ _AREA_HISTOGRAM_TITLE = "Area distribution of description-tagged polygons"
 _DATASET_CARD_HERO_FILENAME = "dataset-card-hero.png"
 _DATASET_CARD_HERO_ASSET_RELATIVE_PATH = f"assets/{_DATASET_CARD_HERO_FILENAME}"
 _BYTE_UNITS = ("B", "KiB", "MiB", "GiB", "TiB")
+_STATS_START_MARKER = "<!-- GENERATED:STATS:START -->"
+_STATS_END_MARKER = "<!-- GENERATED:STATS:END -->"
 _GENERATED_PATTERN = re.compile(
-    r"(<!-- GENERATED:STATS:START -->\n)(.*?)(<!-- GENERATED:STATS:END -->)", re.DOTALL
+    rf"({_STATS_START_MARKER}\r?\n)(.*?)({_STATS_END_MARKER})", re.DOTALL
 )
+_FRONT_MATTER_OPEN = re.compile(r"\A---[ \t]*(?P<newline>\r?\n)")
+_FRONT_MATTER_CLOSE = re.compile(r"^---[ \t]*(?:\r?\n|\Z)", re.MULTILINE)
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:
@@ -336,6 +338,55 @@ def _write_dataset_hero(data_root: Path) -> None:
     )
 
 
+def _card_source(data_root: Path, template_path: Path) -> str:
+    """Return the existing card so regeneration can update it additively."""
+    existing_path = data_root / "README.md"
+    if existing_path.is_file():
+        # pragma: no mutate start - UTF-8 read aliases are runtime-equivalent
+        return existing_path.read_text(encoding="utf-8")
+        # pragma: no mutate end
+    # pragma: no mutate start - UTF-8 read aliases are runtime-equivalent
+    return template_path.read_text(encoding="utf-8")
+    # pragma: no mutate end
+
+
+def _newline_for(text: str) -> str:
+    return "\r\n" if "\r\n" in text else "\n"
+
+
+def _insert_stats_block(readme: str, block: str, newline: str) -> str:
+    """Insert a new stats block without changing any existing card bytes."""
+    opening = _FRONT_MATTER_OPEN.match(readme)
+    if opening is not None:
+        closing = _FRONT_MATTER_CLOSE.search(readme, opening.end())
+        if closing is None:
+            raise ReportingError("existing README has unterminated YAML front matter")
+        separator = "" if readme[closing.end() - 1 : closing.end()] in ("\n", "\r") else newline
+        position = closing.end()
+        return readme[:position] + separator + block + readme[position:]
+    separator = "" if not readme else (newline if readme.endswith(newline) else newline * 2)
+    return readme + separator + block
+
+
+def _update_stats_block(readme: str, stats: dict[str, Any], stats_sha256: str) -> str:
+    starts = readme.count(_STATS_START_MARKER)
+    ends = readme.count(_STATS_END_MARKER)
+    if starts != ends or starts > 1:
+        raise ReportingError("existing README has malformed generated stats markers")
+    newline = _newline_for(readme)
+    block = _render_stats_block(stats, stats_sha256).replace("\n", newline)
+    if starts == 0:
+        marker_block = (
+            f"{_STATS_START_MARKER}{newline}{block}{_STATS_END_MARKER}{newline}"
+        )
+        return _insert_stats_block(readme, marker_block, newline)
+    if _GENERATED_PATTERN.search(readme) is None:
+        raise ReportingError("existing README has malformed generated stats markers")
+    return _GENERATED_PATTERN.sub(
+        lambda match: match.group(1) + block + match.group(3), readme, count=1
+    )
+
+
 def _write_dataset_docs(
     data_root: Path,
     template_path: Path,
@@ -345,20 +396,9 @@ def _write_dataset_docs(
     # pragma: no mutate start - UTF-8 codec names are case-insensitive
     stats_sha256 = hashlib.sha256(stats_json.encode("utf-8")).hexdigest()
     # pragma: no mutate end
-    # pragma: no mutate start - UTF-8 read aliases are runtime-equivalent
-    template = template_path.read_text(encoding="utf-8")
-    # pragma: no mutate end
-    if not _GENERATED_PATTERN.search(template):
-        raise ReportingError(f"template missing GENERATED:STATS markers: {template_path}")
-    readme = _GENERATED_PATTERN.sub(
-        lambda match: match.group(1) + _render_stats_block(stats, stats_sha256) + match.group(3),
-        template,
-    )
-    if H3_MAP_START_MARKER in readme and H3_MAP_END_MARKER in readme:
-        readme = install_map_block(
-            readme,
-            _render_h3_map_block(),
-        )
+    template = _card_source(data_root, template_path)
+    readme = _update_stats_block(template, stats, stats_sha256)
+    readme = insert_map_block(readme, _render_h3_map_block())
     _write_if_changed(data_root / "stats.json", stats_json)
     _write_if_changed(data_root / "README.md", readme)
 
