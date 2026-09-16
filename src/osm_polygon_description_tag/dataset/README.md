@@ -42,6 +42,13 @@ positive WGS84 geodesic `area_m2`. GeoParquet writing and validation are bounded
 Manifest identity, statistics, and generated dataset-card content are deterministic and
 artifact-derived.
 
+The generated `stats.json` includes dataset-wide `area_m2` totals, mean, exact
+quartiles, minimum, and maximum; a global `[min_lon, min_lat, max_lon, max_lat]`
+`dataset_bbox`; and total geometry vertices, rings, interior holes, and
+MultiPolygon components. These values are computed by streaming every row in
+the validated Parquet set and are also rendered in the generated dataset-card
+statistics block.
+
 ## Tests
 
 Run `uv run pytest tests/unit/dataset tests/contracts/test_schema_contract.py

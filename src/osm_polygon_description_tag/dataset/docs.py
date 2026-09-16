@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from osm_polygon_description_tag.dataset.geography import (
     DEFAULT_H3_RESOLUTION,
@@ -121,6 +122,46 @@ def _fmt_median(value: float | None) -> str:
     return _fmt_int(int(value)) if value.is_integer() else f"{value:,.1f}"
 
 
+def _fmt_area(value: float | None) -> str:
+    """Format an area with deterministic, readable metric units."""
+    if value is None or not math.isfinite(value):
+        return "—"
+    if abs(value) >= 1_000_000:
+        return f"{value / 1_000_000:,.1f} km²"
+    if abs(value) >= 1:
+        return f"{value:,.1f} m²"
+    return f"{value:.3g} m²"
+
+
+def _coerce_float_values(values: Sequence[object]) -> tuple[float, ...] | None:
+    """Convert object values to floats, returning ``None`` on conversion errors."""
+    try:
+        return tuple(float(cast(Any, value)) for value in values)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_bbox_coordinates(value: object) -> tuple[float, float, float, float] | None:
+    """Convert a persisted ``[min_lon, min_lat, max_lon, max_lat]`` extent."""
+    if not isinstance(value, list | tuple) or len(value) != 4:
+        return None
+    coordinates = _coerce_float_values(value)
+    if coordinates is None:
+        return None
+    if not all(map(math.isfinite, coordinates)):
+        return None
+    return coordinates[0], coordinates[1], coordinates[2], coordinates[3]
+
+
+def _fmt_bbox(value: object) -> str:
+    """Format a ``[min_lon, min_lat, max_lon, max_lat]`` dataset extent."""
+    coordinates = _coerce_bbox_coordinates(value)
+    if coordinates is None:
+        return "—"
+    min_x, min_y, max_x, max_y = coordinates
+    return f"lon {min_x:.4f}° to {max_x:.4f}°, lat {min_y:.4f}° to {max_y:.4f}°"
+
+
 def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
     lines: list[str] = [
         f"<!-- stats_sha256: {stats_sha256} -->",
@@ -139,6 +180,22 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
         f"| Relations | {_fmt_int(stats['osm_types'].get('relation', 0))} |",
         f"| Polygon geometries | {_fmt_int(stats['geometry_types'].get('Polygon', 0))} |",
         f"| MultiPolygon geometries | {_fmt_int(stats['geometry_types'].get('MultiPolygon', 0))} |",
+        "",
+        "| Surface area (total / mean) | "
+        f"{_fmt_area(stats.get('area_m2_total_m2'))} / "
+        f"{_fmt_area(stats.get('area_m2_mean_m2'))} |",
+        "| Polygon area (minimum / p25 / median / p75 / maximum) | "
+        f"{_fmt_area(stats.get('area_m2_min_m2'))} / "
+        f"{_fmt_area(stats.get('area_m2_p25_m2'))} / "
+        f"{_fmt_area(stats.get('area_m2_median_m2'))} / "
+        f"{_fmt_area(stats.get('area_m2_p75_m2'))} / "
+        f"{_fmt_area(stats.get('area_m2_max_m2'))} |",
+        f"| Dataset extent | {_fmt_bbox(stats.get('dataset_bbox'))} |",
+        "| Geometry totals (vertices / rings / holes / MultiPolygon parts) | "
+        f"{_fmt_int(stats.get('geometry_vertices_total', 0))} / "
+        f"{_fmt_int(stats.get('geometry_rings_total', 0))} / "
+        f"{_fmt_int(stats.get('geometry_holes_total', 0))} / "
+        f"{_fmt_int(stats.get('multipolygon_components_total', 0))} |",
         "",
         "## Description coverage",
         "",

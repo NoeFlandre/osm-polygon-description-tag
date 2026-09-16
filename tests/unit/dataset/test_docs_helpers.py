@@ -298,6 +298,29 @@ def test_format_bytes_handles_values_above_the_last_named_unit() -> None:
     assert docs_module._fmt_bytes(1024**5) == "1,024.0 TiB"
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, "—"),
+        (0.0000618958, "6.19e-05 m²"),
+        (12.5, "12.5 m²"),
+        (1_000_000.0, "1.0 km²"),
+    ],
+)
+def test_format_area_uses_stable_metric_units(value: float | None, expected: str) -> None:
+    assert docs_module._fmt_area(value) == expected
+
+
+def test_format_bbox_rejects_invalid_extents_and_formats_valid_extent() -> None:
+    assert docs_module._fmt_bbox(None) == "—"
+    assert docs_module._fmt_bbox([0, 1, 2]) == "—"
+    assert docs_module._fmt_bbox([0, 1, "bad", 2]) == "—"
+    assert docs_module._fmt_bbox([0, 1, float("inf"), 2]) == "—"
+    assert docs_module._fmt_bbox([-1.25, -2.5, 3.75, 4.5]) == (
+        "lon -1.2500° to 3.7500°, lat -2.5000° to 4.5000°"
+    )
+
+
 def test_write_dataset_docs_renders_stats_map_and_canonical_json(
     tmp_path: Path,
 ) -> None:
