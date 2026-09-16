@@ -147,9 +147,7 @@ def _publish(
                 revision=str(existing_revision),
             )
             if not current_data_revision:
-                raise PublicationError(
-                    "hub inventory verification returned an empty revision"
-                )
+                raise PublicationError("hub inventory verification returned an empty revision")
             return str(current_data_revision), str(existing_revision)
     execute_upload(
         plan,

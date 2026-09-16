@@ -92,14 +92,8 @@ def insert_map_block(template: str, block_body: str) -> str:
 
     newline = _newline_for(template)
     normalized_body = _normalize_block_body(block_body, newline)
-    block = (
-        f"{H3_MAP_START_MARKER}{newline}"
-        f"{normalized_body}{newline}"
-        f"{H3_MAP_END_MARKER}{newline}"
-    )
-    stats_match = re.search(
-        rf"{re.escape('<!-- GENERATED:STATS:START -->')}\r?\n", template
-    )
+    block = f"{H3_MAP_START_MARKER}{newline}{normalized_body}{newline}{H3_MAP_END_MARKER}{newline}"
+    stats_match = re.search(rf"{re.escape('<!-- GENERATED:STATS:START -->')}\r?\n", template)
     if stats_match is not None:
         return template[: stats_match.start()] + block + template[stats_match.start() :]
     separator = "" if not template else (newline if template.endswith(newline) else newline * 2)
@@ -139,9 +133,7 @@ def _template_with_map_markers(text: str, asset_relative_path: str) -> str:
     # ends with the same newline that introduces the stats marker, so the
     # surrounding prose is preserved byte-for-byte.
     newline = _newline_for(text)
-    stats_match = re.search(
-        rf"{re.escape('<!-- GENERATED:STATS:START -->')}\r?\n", text
-    )
+    stats_match = re.search(rf"{re.escape('<!-- GENERATED:STATS:START -->')}\r?\n", text)
     if stats_match is None:
         raise ValueError("template missing GENERATED:STATS:START marker; cannot insert map block")
     block = (

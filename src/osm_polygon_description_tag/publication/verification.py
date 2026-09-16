@@ -171,9 +171,7 @@ def default_hub_verifier_factory(*, cache_dir: Path | None = None) -> HubVerifie
             lfs_sha = getattr(lfs_info, "sha256", None) if lfs_info is not None else None
             if lfs_sha:
                 if str(lfs_sha).lower() != str(item.sha256).lower():
-                    raise _RemoteFileMismatch(
-                        f"remote LFS SHA mismatch for {item.relative_path}"
-                    )
+                    raise _RemoteFileMismatch(f"remote LFS SHA mismatch for {item.relative_path}")
                 continue
             # Fallback: read the remote content via hf_hub_download for direct
             # SHA-256 comparison. This is the authoritative identity for small
