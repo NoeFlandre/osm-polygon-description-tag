@@ -141,8 +141,11 @@ def test_default_verifier_checks_multiple_files_with_lfs_and_download_fallback(
     assert hub.calls == [
         ("whoami", (), {}),
         ("repo_info", REPO_ID, "dataset"),
-        ("get_paths_info", (lfs_item.relative_path,), "revision-1"),
-        ("get_paths_info", (downloaded_item.relative_path,), "revision-1"),
+        (
+            "get_paths_info",
+            (lfs_item.relative_path, downloaded_item.relative_path),
+            "revision-1",
+        ),
         ("hf_hub_download", downloaded_item.relative_path, tmp_path / "cache"),
     ]
 
@@ -238,8 +241,11 @@ def test_default_verifier_checks_pinned_data_manifest_inventory(
     assert hub.calls == [
         ("whoami", (), {}),
         ("list_repo_files", "revision-1", "dataset"),
-        ("get_paths_info", (data.relative_path,), "revision-1"),
-        ("get_paths_info", (manifest.relative_path,), "revision-1"),
+        (
+            "get_paths_info",
+            (data.relative_path, manifest.relative_path),
+            "revision-1",
+        ),
         ("hf_hub_download", manifest.relative_path, tmp_path / "cache"),
     ]
 
@@ -395,7 +401,7 @@ def test_default_verifier_rejects_download_hash_mismatch(
         verifier(REPO_ID, (item,))
 
 
-def test_matching_revision_fails_closed_on_real_remote_mismatch(
+def test_matching_revision_returns_none_on_real_remote_mismatch(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -408,17 +414,7 @@ def test_matching_revision_fails_closed_on_real_remote_mismatch(
     _install_hub(monkeypatch, hub)
     verifier = verification.default_hub_verifier_factory()
 
-    with pytest.raises(
-        verification.HubVerificationError,
-        match=(
-            rf"^remote metadata verification failed for {REPO_ID}@revision-1: "
-            rf"remote size mismatch for {item.relative_path}: "
-            rf"local={item.size_bytes}, remote={item.size_bytes + 1}$"
-        ),
-    ) as caught:
-        verifier.matching_revision(REPO_ID, (item,))
-
-    assert isinstance(caught.value.__cause__, verification.HubVerificationError)
+    assert verifier.matching_revision(REPO_ID, (item,)) is None
     assert hub.calls == [
         ("whoami", (), {}),
         ("repo_info", REPO_ID, "dataset"),

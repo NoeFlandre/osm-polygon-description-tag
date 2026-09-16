@@ -302,11 +302,7 @@ def test_release_restores_pre_regression_card_without_losing_content(
         "**OSM object timestamps (UTC):**",
         (
             "Detailed machine-readable statistics, exact suffix frequencies, rejection counts, "
-            "and per-file SHA-256 provenance are available in "
-            + chr(96)
-            + "stats.json"
-            + chr(96)
-            + "(stats.json)."
+            "and per-file SHA-256 provenance are available in [`stats.json`](stats.json)."
         ),
         "## Polygon surface and geometry",
         "| Polygons measured | 3 |",

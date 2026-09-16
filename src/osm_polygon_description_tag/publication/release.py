@@ -15,6 +15,8 @@ plan identity and the same remote revision.
 
 from __future__ import annotations
 
+import os
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -131,13 +133,30 @@ def _publish(
     inventory: tuple[UploadItem, ...],
     runner: Runner | None,
     verifier: HubVerifier | None,
+    data_revision: str,
 ) -> tuple[str, str]:
     resolved_verifier = build_default_hub_verifier() if verifier is None else verifier
     inventory_verifier = _require_inventory_verifier(resolved_verifier)
-    data_revision = inventory_verifier(plan.repo_id, inventory)
-    if not data_revision:
-        raise PublicationError("hub inventory verification returned an empty revision")
-    execute_upload(plan, confirmation=plan.identity_sha256, runner=runner)
+    matching_revision = getattr(resolved_verifier, "matching_revision", None)
+    if callable(matching_revision):
+        existing_revision = matching_revision(plan.repo_id, plan.files)
+        if existing_revision:
+            current_data_revision = inventory_verifier(
+                plan.repo_id,
+                inventory,
+                revision=str(existing_revision),
+            )
+            if not current_data_revision:
+                raise PublicationError(
+                    "hub inventory verification returned an empty revision"
+                )
+            return str(current_data_revision), str(existing_revision)
+    execute_upload(
+        plan,
+        confirmation=plan.identity_sha256,
+        runner=runner,
+        parent_revision=data_revision,
+    )
     revision = resolved_verifier(plan.repo_id, plan.files)
     if not revision:
         raise PublicationError("hub verification returned an empty revision")
@@ -167,17 +186,37 @@ def release_metadata(
     _require_exact_repo(confirm_repo)
     resolved_root = data_root.resolve(strict=False)
     validated_files = validate_published_inventory(resolved_root)
-    stats = generate_dataset_docs(resolved_root, template_path)
-    plan = _build_metadata_only_upload_plan(resolved_root)
-    inventory = _published_inventory(resolved_root)
+    resolved_verifier: HubVerifier | None = None
+    inventory: tuple[UploadItem, ...] | None = None
     data_revision: str | None = None
+    if apply:
+        resolved_verifier = build_default_hub_verifier() if verifier is None else verifier
+        inventory_verifier = _require_inventory_verifier(resolved_verifier)
+        inventory = _published_inventory(resolved_root)
+        data_revision = inventory_verifier(confirm_repo, inventory)
+        if not data_revision:
+            raise PublicationError("hub inventory verification returned an empty revision")
+        _sync_remote_card(resolved_root, resolved_verifier, confirm_repo, data_revision)
+    stats = generate_dataset_docs(
+        resolved_root,
+        template_path,
+        preserve_existing=True,
+    )
+    plan = _build_metadata_only_upload_plan(resolved_root)
+    computed_inventory = _published_inventory(resolved_root)
+    if inventory is not None and computed_inventory != inventory:
+        raise PublicationError("local data/manifest inventory changed during stats generation")
+    inventory = computed_inventory
     revision: str | None = None
     if apply:
+        assert resolved_verifier is not None
+        assert data_revision is not None
         data_revision, revision = _publish(
             plan,
             inventory=inventory,
             runner=runner,
-            verifier=verifier,
+            verifier=resolved_verifier,
+            data_revision=data_revision,
         )
     return ReleaseReport(
         repo_id=plan.repo_id,
@@ -190,6 +229,36 @@ def release_metadata(
         revision=revision,
         data_revision=data_revision,
     )
+
+
+def _sync_remote_card(
+    data_root: Path,
+    verifier: HubVerifier,
+    repo_id: str,
+    revision: str,
+) -> None:
+    """Use the pinned remote card as the release base when supported."""
+    read_file = getattr(verifier, "read_file", None)
+    if not callable(read_file):
+        return
+    try:
+        remote_readme = read_file(repo_id, "README.md", revision=revision)
+    except TypeError as error:
+        raise PublicationError("Hub verifier read_file has an incompatible interface") from error
+    if not isinstance(remote_readme, str):
+        raise PublicationError("Hub verifier returned a non-text README")
+    target = data_root / "README.md"
+    if target.is_file() and target.read_text(encoding="utf-8") == remote_readme:
+        return
+    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(remote_readme, encoding="utf-8", newline="")
+        with temporary.open("rb") as handle:
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
 
 
 __all__ = ["ReleaseReport", "release_metadata", "validate_published_inventory"]

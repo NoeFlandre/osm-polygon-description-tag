@@ -25,8 +25,11 @@ from osm_polygon_description_tag.dataset.geography.area_histogram import (
 from osm_polygon_description_tag.dataset.geography.basemap import bundled_basemap_path
 from osm_polygon_description_tag.dataset.geography.card import (
     H3_MAP_ASSET_RELATIVE_PATH,
+    H3_MAP_END_MARKER,
+    H3_MAP_START_MARKER,
     H3_MAP_TITLE,
     insert_map_block,
+    install_map_block,
 )
 from osm_polygon_description_tag.dataset.geography.rendering import render_density_map
 from osm_polygon_description_tag.dataset.manifest import file_sha256
@@ -155,13 +158,13 @@ def _coerce_bbox_coordinates(value: object) -> tuple[float, float, float, float]
     return coordinates[0], coordinates[1], coordinates[2], coordinates[3]
 
 
-def _fmt_geometry_bbox(value: object) -> str:
+def _fmt_bbox(value: object) -> str:
     """Format a dataset extent for the geometry statistics section."""
     coordinates = _coerce_bbox_coordinates(value)
     if coordinates is None:
         return "—"
     min_x, min_y, max_x, max_y = coordinates
-    return f"[{min_x:.4f}°, {min_y:.4f}°] to [{max_x:.4f}°, {max_y:.4f}°]"
+    return f"lon {min_x:.4f}° to {max_x:.4f}°, lat {min_y:.4f}° to {max_y:.4f}°"
 
 
 def _render_geometry_stats_section(stats: Mapping[str, Any]) -> list[str]:
@@ -190,7 +193,7 @@ def _render_geometry_stats_section(stats: Mapping[str, Any]) -> list[str]:
         f"{_fmt_area(stats.get('area_m2_p25_m2'))} / "
         f"{_fmt_area(stats.get('area_m2_median_m2'))} / "
         f"{_fmt_area(stats.get('area_m2_p75_m2'))} |",
-        f"| Dataset bounding box | {_fmt_geometry_bbox(stats.get('dataset_bbox'))} |",
+        f"| Dataset bounding box | {_fmt_bbox(stats.get('dataset_bbox'))} |",
         "| Geometry totals (vertices / rings / holes / MultiPolygon parts) | "
         f"{_fmt_int(stats.get('geometry_vertices_total', 0))} / "
         f"{_fmt_int(stats.get('geometry_rings_total', 0))} / "
@@ -365,15 +368,25 @@ def _write_dataset_hero(data_root: Path) -> None:
     )
 
 
-def _card_source(data_root: Path, template_path: Path) -> str:
-    """Return the existing card so regeneration can update it additively."""
+def _card_source(
+    data_root: Path,
+    template_path: Path,
+    *,
+    preserve_existing: bool,
+) -> tuple[str, bool]:
+    """Return the card source and whether it is the already-published card.
+
+    Normal generation starts from the supplied template so template updates
+    take effect. A release explicitly opts into the existing card so remote
+    language annotations and other published prose remain byte-for-byte intact.
+    """
     existing_path = data_root / "README.md"
-    if existing_path.is_file():
+    if preserve_existing and existing_path.is_file():
         # pragma: no mutate start - UTF-8 read aliases are runtime-equivalent
-        return existing_path.read_text(encoding="utf-8")
+        return existing_path.read_text(encoding="utf-8"), True
         # pragma: no mutate end
     # pragma: no mutate start - UTF-8 read aliases are runtime-equivalent
-    return template_path.read_text(encoding="utf-8")
+    return template_path.read_text(encoding="utf-8"), False
     # pragma: no mutate end
 
 
@@ -396,6 +409,7 @@ def _insert_stats_block(readme: str, block: str, newline: str) -> str:
 
 
 def _update_stats_block(readme: str, stats: dict[str, Any], stats_sha256: str) -> str:
+    """Replace the generated stats block, or insert one into a card without it."""
     starts = readme.count(_STATS_START_MARKER)
     ends = readme.count(_STATS_END_MARKER)
     if starts != ends or starts > 1:
@@ -412,18 +426,34 @@ def _update_stats_block(readme: str, stats: dict[str, Any], stats_sha256: str) -
     )
 
 
+def card_has_stats_block(card: str) -> bool:
+    """Report whether a dataset card already carries the generated stats block."""
+    return _GENERATED_PATTERN.search(card) is not None
+
+
 def _write_dataset_docs(
     data_root: Path,
     template_path: Path,
     stats: dict[str, Any],
+    *,
+    preserve_existing: bool = False,
 ) -> None:
     stats_json = json.dumps(stats, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     # pragma: no mutate start - UTF-8 codec names are case-insensitive
     stats_sha256 = hashlib.sha256(stats_json.encode("utf-8")).hexdigest()
     # pragma: no mutate end
-    template = _card_source(data_root, template_path)
-    readme = _update_stats_block(template, stats, stats_sha256)
-    readme = insert_map_block(readme, _render_h3_map_block())
+    source, is_published_card = _card_source(
+        data_root, template_path, preserve_existing=preserve_existing
+    )
+    if not is_published_card and not card_has_stats_block(source):
+        raise ReportingError(f"template missing GENERATED:STATS markers: {template_path}")
+    readme = _update_stats_block(source, stats, stats_sha256)
+    h3_starts = readme.count(H3_MAP_START_MARKER)
+    h3_ends = readme.count(H3_MAP_END_MARKER)
+    if h3_starts == 0 and h3_ends == 0:
+        readme = insert_map_block(readme, _render_h3_map_block())
+    elif h3_starts == 1 and h3_ends == 1:
+        readme = install_map_block(readme, _render_h3_map_block())
     _write_if_changed(data_root / "stats.json", stats_json)
     _write_if_changed(data_root / "README.md", readme)
 
@@ -433,6 +463,7 @@ def generate_dataset_docs(
     template_path: Path,
     *,
     clock: Callable[[], str] = utc_now_iso,
+    preserve_existing: bool = False,
 ) -> dict[str, Any]:
     """Write deterministic stats, README, and derived media artifacts."""
     stats = collect_stats(data_root, clock=clock)
@@ -448,8 +479,16 @@ def generate_dataset_docs(
     stats["area_histogram_render_version"] = AREA_HISTOGRAM_RENDER_VERSION
     stats["area_histogram_total_rows"] = histogram_total_rows
     _write_dataset_hero(data_root)
-    _write_dataset_docs(data_root, template_path, stats)
+    if preserve_existing:
+        _write_dataset_docs(
+            data_root,
+            template_path,
+            stats,
+            preserve_existing=True,
+        )
+    else:
+        _write_dataset_docs(data_root, template_path, stats)
     return stats
 
 
-__all__ = ["generate_dataset_docs"]
+__all__ = ["card_has_stats_block", "generate_dataset_docs"]

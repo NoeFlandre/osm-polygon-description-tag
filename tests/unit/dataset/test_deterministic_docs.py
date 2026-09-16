@@ -274,7 +274,7 @@ def test_stats_block_is_an_exact_contract_for_non_default_values() -> None:
             "| Surface area (total / mean) | 1.0 km² / 80.0 m² |",
             "| Smallest / largest area | 0.5 m² / 2.0 km² |",
             "| Area p25 / median / p75 | 10.0 m² / 50.0 m² / 100.0 m² |",
-            "| Dataset bounding box | [-10.0000°, -20.0000°] to [30.0000°, 40.0000°] |",
+            "| Dataset bounding box | lon -10.0000° to 30.0000°, lat -20.0000° to 40.0000° |",
             "| Geometry totals (vertices / rings / holes / MultiPolygon parts) | "
             "2,000 / 500 / 20 / 120 |",
             "| Polygon / MultiPolygon rows | 1,200 / 90 |",

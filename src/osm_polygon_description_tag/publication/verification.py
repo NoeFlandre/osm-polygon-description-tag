@@ -29,6 +29,14 @@ class HubVerifier(Protocol):
     ) -> str: ...
 
 
+class HubVerificationError(RuntimeError):
+    """Raised when the default Hub verifier cannot confirm a remote fact."""
+
+
+class _RemoteFileMismatch(HubVerificationError):
+    """Expected content mismatch used by the idempotence probe."""
+
+
 class _HuggingFaceHub:
     """Lazy wrapper around the huggingface_hub package.
 
@@ -59,6 +67,18 @@ class _HuggingFaceHub:
 _huggingface_hub = _HuggingFaceHub()
 
 
+def _entries_by_path(requested_paths: list[str], entries: list[Any]) -> dict[str, Any]:
+    """Associate one batched Hub response with requested paths.
+
+    Older test doubles and some compatible Hub clients omit ``path`` on the
+    response objects, so their documented response order is retained as a
+    fallback. Real Hub entries carry paths and are keyed explicitly.
+    """
+    if all(isinstance(getattr(entry, "path", None), str) for entry in entries):
+        return {str(entry.path): entry for entry in entries}
+    return {path: entry for path, entry in zip(requested_paths, entries, strict=False)}
+
+
 def default_hub_verifier_factory(*, cache_dir: Path | None = None) -> HubVerifier:
     """Return a verifier that talks to the live Hugging Face Hub.
 
@@ -75,7 +95,9 @@ def default_hub_verifier_factory(*, cache_dir: Path | None = None) -> HubVerifie
     4. Queries the dataset repository and reads its current commit SHA via
        ``HfApi.repo_info`` when no revision is supplied.
     5. Returns the verified commit SHA, or raises :class:`HubVerificationError`
-       on any mismatch / missing file / unauthenticated identity.
+       on a mismatch / missing file / unauthenticated identity. The dedicated
+       ``matching_revision`` probe returns ``None`` for an expected content
+       mismatch so a caller can safely decide to publish.
 
     The ``HfApi`` is resolved at invocation time (not at factory time), so
     tests may monkeypatch ``orch._huggingface_hub.HfApi`` BEFORE the
@@ -116,26 +138,32 @@ def default_hub_verifier_factory(*, cache_dir: Path | None = None) -> HubVerifie
         files: tuple[UploadItem, ...],
         revision: str,
     ) -> None:
-        for item in files:
-            try:
-                entries = api.get_paths_info(
+        requested_paths = [item.relative_path for item in files]
+        if not requested_paths:
+            return
+        try:
+            entries = list(
+                api.get_paths_info(
                     repo_id,
-                    paths=[item.relative_path],
+                    paths=requested_paths,
                     revision=revision,
                     repo_type="dataset",
                 )
-            except Exception as error:
-                raise HubVerificationError(
-                    f"hub verification failed for {item.relative_path}: {error}"
-                ) from error
-            entry = next((e for e in entries), None)
+            )
+        except Exception as error:
+            raise HubVerificationError(
+                f"hub verification failed for {', '.join(requested_paths)}: {error}"
+            ) from error
+        entries_by_path = _entries_by_path(requested_paths, entries)
+        for item in files:
+            entry = entries_by_path.get(item.relative_path)
             if entry is None:
-                raise HubVerificationError(
+                raise _RemoteFileMismatch(
                     f"remote file missing in revision {revision}: {item.relative_path}"
                 )
             size = getattr(entry, "size", None)
             if size is not None and int(size) != int(item.size_bytes):
-                raise HubVerificationError(
+                raise _RemoteFileMismatch(
                     f"remote size mismatch for {item.relative_path}: "
                     f"local={item.size_bytes}, remote={size}"
                 )
@@ -143,7 +171,9 @@ def default_hub_verifier_factory(*, cache_dir: Path | None = None) -> HubVerifie
             lfs_sha = getattr(lfs_info, "sha256", None) if lfs_info is not None else None
             if lfs_sha:
                 if str(lfs_sha).lower() != str(item.sha256).lower():
-                    raise HubVerificationError(f"remote LFS SHA mismatch for {item.relative_path}")
+                    raise _RemoteFileMismatch(
+                        f"remote LFS SHA mismatch for {item.relative_path}"
+                    )
                 continue
             # Fallback: read the remote content via hf_hub_download for direct
             # SHA-256 comparison. This is the authoritative identity for small
@@ -166,7 +196,7 @@ def default_hub_verifier_factory(*, cache_dir: Path | None = None) -> HubVerifie
                 ) from error
             digest = file_sha256(Path(local_path))
             if digest.lower() != str(item.sha256).lower():
-                raise HubVerificationError(
+                raise _RemoteFileMismatch(
                     f"remote SHA mismatch for {item.relative_path}: "
                     f"local={item.sha256}, remote={digest}"
                 )
@@ -183,19 +213,38 @@ def default_hub_verifier_factory(*, cache_dir: Path | None = None) -> HubVerifie
     ) -> str | None:
         """Return the current revision when every intended file already matches.
 
-        Authentication, repository lookup, and per-file verification failures
-        all propagate as :class:`HubVerificationError` so callers cannot treat
-        an unverified remote file as a safe no-op.
+        Authentication, repository lookup, and operational verification
+        failures propagate as :class:`HubVerificationError`. A missing file or
+        content mismatch is an expected non-match and returns ``None``.
         """
         api = _authenticated_api()
         revision = _repository_revision(api, repo_id)
         try:
             _verify_files_at_revision(api, repo_id, files, revision)
+        except _RemoteFileMismatch:
+            return None
         except HubVerificationError as error:
             raise HubVerificationError(
                 f"remote metadata verification failed for {repo_id}@{revision}: {error}"
             ) from error
         return revision
+
+    def read_file(repo_id: str, path: str, *, revision: str) -> str:
+        """Read one small text artifact from an exact Hub revision."""
+        api = _authenticated_api()
+        try:
+            local_path = api.hf_hub_download(
+                repo_id,
+                path,
+                revision=revision,
+                repo_type="dataset",
+                **({"cache_dir": cache_dir} if cache_dir is not None else {}),
+            )
+            return Path(local_path).read_text(encoding="utf-8")
+        except Exception as error:
+            raise HubVerificationError(
+                f"could not read {path} from {repo_id}@{revision}: {error}"
+            ) from error
 
     def verify_inventory(
         repo_id: str,
@@ -281,6 +330,9 @@ def default_hub_verifier_factory(*, cache_dir: Path | None = None) -> HubVerifie
         ) -> str:
             return verify_inventory(repo_id, files, revision=revision)
 
+        def read_file(self, repo_id: str, path: str, *, revision: str) -> str:
+            return read_file(repo_id, path, revision=revision)
+
         def reconcile_managed_files(self, repo_id: str, expected_paths: set[str]) -> str | None:
             return reconcile_managed_files(repo_id, expected_paths)
 
@@ -290,7 +342,3 @@ def default_hub_verifier_factory(*, cache_dir: Path | None = None) -> HubVerifie
 def build_default_hub_verifier() -> HubVerifier:
     """Build a fresh default Hub verifier."""
     return default_hub_verifier_factory()
-
-
-class HubVerificationError(RuntimeError):
-    """Raised when the default Hub verifier cannot confirm the uploaded files."""
