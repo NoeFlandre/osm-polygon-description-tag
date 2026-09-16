@@ -181,13 +181,20 @@ def default_hub_verifier_factory(*, cache_dir: Path | None = None) -> HubVerifie
         repo_id: str,
         files: tuple[UploadItem, ...],
     ) -> str | None:
-        """Return the current revision when every intended file already matches."""
+        """Return the current revision when every intended file already matches.
+
+        Authentication, repository lookup, and per-file verification failures
+        all propagate as :class:`HubVerificationError` so callers cannot treat
+        an unverified remote file as a safe no-op.
+        """
         api = _authenticated_api()
         revision = _repository_revision(api, repo_id)
         try:
             _verify_files_at_revision(api, repo_id, files, revision)
-        except _RemoteFileMismatch:
-            return None
+        except HubVerificationError as error:
+            raise HubVerificationError(
+                f"remote metadata verification failed for {repo_id}@{revision}: {error}"
+            ) from error
         return revision
 
     def verify_inventory(
@@ -287,7 +294,3 @@ def build_default_hub_verifier() -> HubVerifier:
 
 class HubVerificationError(RuntimeError):
     """Raised when the default Hub verifier cannot confirm the uploaded files."""
-
-
-class _RemoteFileMismatch(HubVerificationError):
-    """Expected difference used by the idempotence preflight."""

@@ -395,6 +395,37 @@ def test_default_verifier_rejects_download_hash_mismatch(
         verifier(REPO_ID, (item,))
 
 
+def test_matching_revision_fails_closed_on_real_remote_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    item = _item("README.md", b"expected")
+    hub = _StrictVerifierHub(
+        tmp_path,
+        {item.relative_path: _StrictEntry(size=item.size_bytes + 1, lfs_sha=item.sha256)},
+        {},
+    )
+    _install_hub(monkeypatch, hub)
+    verifier = verification.default_hub_verifier_factory()
+
+    with pytest.raises(
+        verification.HubVerificationError,
+        match=(
+            rf"^remote metadata verification failed for {REPO_ID}@revision-1: "
+            rf"remote size mismatch for {item.relative_path}: "
+            rf"local={item.size_bytes}, remote={item.size_bytes + 1}$"
+        ),
+    ) as caught:
+        verifier.matching_revision(REPO_ID, (item,))
+
+    assert isinstance(caught.value.__cause__, verification.HubVerificationError)
+    assert hub.calls == [
+        ("whoami", (), {}),
+        ("repo_info", REPO_ID, "dataset"),
+        ("get_paths_info", (item.relative_path,), "revision-1"),
+    ]
+
+
 def test_default_verifier_downloads_when_lfs_metadata_has_no_sha256(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
