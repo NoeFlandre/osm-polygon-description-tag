@@ -53,6 +53,16 @@ mutation: mutation-contexts
         --output reports/mutation-summary.json \
         --minimum-score 100
 
+# Compute and validate the dataset card and statistics report without uploading.
+release-stats-dry-run:
+    uv run osm-polygon-description-tag release-stats \
+        --confirm-repo NoeFlandre/osm-polygon-description-tag
+
+# Compute, validate, publish, and verify only the card and statistics report.
+release-stats:
+    uv run osm-polygon-description-tag release-stats \
+        --confirm-repo NoeFlandre/osm-polygon-description-tag --apply
+
 build:
     uv build
 

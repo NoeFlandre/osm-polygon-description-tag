@@ -56,6 +56,40 @@ Options:
 - `--osmium NAME`: executable name or path; defaults to `osmium`.
 - `--confirm-repo REPO`: required exact target repository confirmation.
 
+### `release-stats`
+
+The statistics release wrapper. It validates the complete published Parquet
+inventory against its manifests, recomputes `stats.json` and `README.md` from
+every valid published row, and publishes only the card, the report, and the
+required visual assets. Source data, manifests, and unrelated Hub files are
+never touched.
+
+```bash
+# 1. Dry run: compute, validate, and print the exact plan. No network.
+uv run osm-polygon-description-tag release-stats \
+  --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root" \
+  --confirm-repo NoeFlandre/osm-polygon-description-tag
+
+# 2. Publish and verify the remote revision.
+uv run osm-polygon-description-tag release-stats \
+  --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root" \
+  --confirm-repo NoeFlandre/osm-polygon-description-tag --apply
+```
+
+Options:
+
+- `--confirm-repo REPO`: required; must equal
+  `NoeFlandre/osm-polygon-description-tag`.
+- `--apply` / `--dry-run`: upload and verify, or compute only (the default).
+
+The JSON report records the target repository, the plan identity, the verified
+remote revision, every published file with its SHA-256 and size, the validated
+Parquet file count, and the published row count. Regeneration writes a file
+only when its bytes change, so a second run over unchanged artifacts is a
+no-op that yields the same plan identity.
+
+Equivalent recipes: `just release-stats-dry-run` and `just release-stats`.
+
 ### `publish`
 
 The lower-level publication command requires an exact plan identity generated

@@ -34,7 +34,9 @@ from osm_polygon_description_tag.publication import (
     PublicationError,
     create_upload_plan,
     execute_upload,
+    release_metadata,
 )
+from osm_polygon_description_tag.publication.verification import HubVerificationError
 from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.runtime.logging import RunLogger
 from osm_polygon_description_tag.runtime.presentation import TerminalPresenter, print_json
@@ -218,6 +220,19 @@ def handle_publish(args: SimpleNamespace) -> int:
     plan = create_upload_plan(paths.data_root)
     execute_upload(plan, confirmation=args.plan)
     print_json({"repo_id": plan.repo_id, "identity_sha256": plan.identity_sha256})
+    return 0
+
+
+def handle_release_stats(args: SimpleNamespace) -> int:
+    """Compute, validate, and publish only the dataset card and stats report."""
+    paths = _resolve_paths(args)
+    report = release_metadata(
+        paths.data_root,
+        dataset_card_template(),
+        confirm_repo=args.confirm_repo,
+        apply=args.apply,
+    )
+    print_json(report.to_payload())
     return 0
 
 
@@ -405,6 +420,38 @@ def publish_command(
 
 
 @app.command(
+    "release-stats",
+    help="Publish only the card and stats report",
+)
+def release_stats_command(
+    confirm_repo: Annotated[
+        str,
+        typer.Option(
+            "--confirm-repo",
+            help="Exact dataset repo id (must equal NoeFlandre/osm-polygon-description-tag)",
+        ),
+    ],
+    apply: Annotated[
+        bool,
+        typer.Option("--apply/--dry-run", help="Upload and verify (default: dry run)"),
+    ] = False,
+    source_root: SourceRoot = None,
+    data_root: DataRoot = None,
+    osmium: Osmium = "osmium",
+) -> None:
+    _invoke(
+        handle_release_stats,
+        SimpleNamespace(
+            source_root=source_root,
+            data_root=data_root,
+            osmium=osmium,
+            confirm_repo=confirm_repo,
+            apply=apply,
+        ),
+    )
+
+
+@app.command(
     "run-and-publish",
     help="Stoppable, resumable build+publish for every discovered PBF",
 )
@@ -444,6 +491,7 @@ _ERROR_TYPES = (
     StorageError,
     ReportingError,
     PublicationError,
+    HubVerificationError,
     PreflightError,
     OrchestratorError,
     MigrationError,
