@@ -394,18 +394,31 @@ def _newline_for(text: str) -> str:
     return "\r\n" if "\r\n" in text else "\n"
 
 
-def _insert_stats_block(readme: str, block: str, newline: str) -> str:
-    """Insert a new stats block without changing any existing card bytes."""
-    opening = _FRONT_MATTER_OPEN.match(readme)
-    if opening is not None:
-        closing = _FRONT_MATTER_CLOSE.search(readme, opening.end())
-        if closing is None:
-            raise ReportingError("existing README has unterminated YAML front matter")
-        separator = "" if readme[closing.end() - 1 : closing.end()] in ("\n", "\r") else newline
-        position = closing.end()
-        return readme[:position] + separator + block + readme[position:]
+def _append_generated_block(readme: str, block: str, newline: str) -> str:
+    """Append a generated block with the card's existing separator style."""
     separator = "" if not readme else (newline if readme.endswith(newline) else newline * 2)
     return readme + separator + block
+
+
+def _insert_after_front_matter(readme: str, block: str, newline: str) -> str | None:
+    """Insert a generated block immediately after complete YAML front matter."""
+    opening = _FRONT_MATTER_OPEN.match(readme)
+    if opening is None:
+        return None
+    closing = _FRONT_MATTER_CLOSE.search(readme, opening.end())
+    if closing is None:
+        raise ReportingError("existing README has unterminated YAML front matter")
+    position = closing.end()
+    separator = "" if readme[position - 1 : position] in ("\n", "\r") else newline
+    return readme[:position] + separator + block + readme[position:]
+
+
+def _insert_stats_block(readme: str, block: str, newline: str) -> str:
+    """Insert a new stats block without changing any existing card bytes."""
+    inserted = _insert_after_front_matter(readme, block, newline)
+    if inserted is not None:
+        return inserted
+    return _append_generated_block(readme, block, newline)
 
 
 def _update_stats_block(readme: str, stats: dict[str, Any], stats_sha256: str) -> str:
@@ -431,6 +444,17 @@ def card_has_stats_block(card: str) -> bool:
     return _GENERATED_PATTERN.search(card) is not None
 
 
+def _update_map_block(readme: str, block_body: str) -> str:
+    """Insert or refresh the map block while leaving malformed cards untouched."""
+    h3_starts = readme.count(H3_MAP_START_MARKER)
+    h3_ends = readme.count(H3_MAP_END_MARKER)
+    if h3_starts == 0 and h3_ends == 0:
+        return insert_map_block(readme, block_body)
+    if h3_starts == 1 and h3_ends == 1:
+        return install_map_block(readme, block_body)
+    return readme
+
+
 def _write_dataset_docs(
     data_root: Path,
     template_path: Path,
@@ -448,12 +472,7 @@ def _write_dataset_docs(
     if not is_published_card and not card_has_stats_block(source):
         raise ReportingError(f"template missing GENERATED:STATS markers: {template_path}")
     readme = _update_stats_block(source, stats, stats_sha256)
-    h3_starts = readme.count(H3_MAP_START_MARKER)
-    h3_ends = readme.count(H3_MAP_END_MARKER)
-    if h3_starts == 0 and h3_ends == 0:
-        readme = insert_map_block(readme, _render_h3_map_block())
-    elif h3_starts == 1 and h3_ends == 1:
-        readme = install_map_block(readme, _render_h3_map_block())
+    readme = _update_map_block(readme, _render_h3_map_block())
     _write_if_changed(data_root / "stats.json", stats_json)
     _write_if_changed(data_root / "README.md", readme)
 

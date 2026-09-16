@@ -35,6 +35,18 @@ def _normalize_block_body(block_body: str, newline: str) -> str:
     return block_body.replace("\r\n", "\n").replace("\n", newline).rstrip("\r\n")
 
 
+def _insert_new_map_block(template: str, block_body: str) -> str:
+    """Build and place a new map block in a card without map markers."""
+    newline = _newline_for(template)
+    normalized_body = _normalize_block_body(block_body, newline)
+    block = f"{H3_MAP_START_MARKER}{newline}{normalized_body}{newline}{H3_MAP_END_MARKER}{newline}"
+    stats_match = re.search(rf"{re.escape('<!-- GENERATED:STATS:START -->')}\r?\n", template)
+    if stats_match is not None:
+        return template[: stats_match.start()] + block + template[stats_match.start() :]
+    separator = "" if not template else (newline if template.endswith(newline) else newline * 2)
+    return template + separator + block
+
+
 def render_map_block() -> str:
     """Return the canonical map block to install in the dataset card.
 
@@ -89,15 +101,7 @@ def insert_map_block(template: str, block_body: str) -> str:
         return install_map_block(template, block_body)
     if start_count != 0 or end_count != 0:
         raise ValueError("dataset card has malformed H3 map markers")
-
-    newline = _newline_for(template)
-    normalized_body = _normalize_block_body(block_body, newline)
-    block = f"{H3_MAP_START_MARKER}{newline}{normalized_body}{newline}{H3_MAP_END_MARKER}{newline}"
-    stats_match = re.search(rf"{re.escape('<!-- GENERATED:STATS:START -->')}\r?\n", template)
-    if stats_match is not None:
-        return template[: stats_match.start()] + block + template[stats_match.start() :]
-    separator = "" if not template else (newline if template.endswith(newline) else newline * 2)
-    return template + separator + block
+    return _insert_new_map_block(template, block_body)
 
 
 def write_map_block_marker_to_template(

@@ -321,6 +321,85 @@ def test_format_bbox_rejects_invalid_extents_and_formats_valid_extent() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("readme", "expected"),
+    [
+        ("", "block"),
+        ("existing\n", "existing\n\nblock"),
+        ("existing", "existing\n\nblock"),
+    ],
+)
+def test_append_generated_block_preserves_card_separators(
+    readme: str,
+    expected: str,
+) -> None:
+    assert docs_module._append_generated_block(readme, "block", "\n") == expected
+
+
+def test_insert_after_front_matter_preserves_existing_front_matter() -> None:
+    readme = "---\ntitle: Dataset\n---\n\nbody"
+
+    assert docs_module._insert_after_front_matter(readme, "block", "\n") == (
+        "---\ntitle: Dataset\n---\nblock\nbody"
+    )
+    assert docs_module._insert_after_front_matter("body", "block", "\n") is None
+
+
+def test_update_map_block_handles_absent_complete_and_malformed_markers() -> None:
+    stats_card = "<!-- GENERATED:STATS:START -->\nbody\n<!-- GENERATED:STATS:END -->\n"
+    inserted = docs_module._update_map_block(stats_card, "![map](map.png)")
+    assert inserted.index(docs_module.H3_MAP_START_MARKER) < inserted.index(
+        docs_module._STATS_START_MARKER
+    )
+    assert "![map](map.png)" in inserted
+
+    existing = "<!-- GENERATED:H3_MAP:START -->\n<!-- GENERATED:H3_MAP:END -->\nafter\n"
+    refreshed = docs_module._update_map_block(existing, "![map](map.png)")
+    assert "![map](map.png)" in refreshed
+
+    malformed = "<!-- GENERATED:H3_MAP:START -->\n"
+    assert docs_module._update_map_block(malformed, "![map](map.png)") == malformed
+
+
+@pytest.mark.parametrize(
+    "readme",
+    [
+        docs_module._STATS_START_MARKER + "\n",
+        (
+            docs_module._STATS_START_MARKER
+            + "\nold\n"
+            + docs_module._STATS_END_MARKER
+            + "\n"
+            + docs_module._STATS_START_MARKER
+            + "\nagain\n"
+            + docs_module._STATS_END_MARKER
+        ),
+    ],
+)
+def test_update_stats_block_rejects_malformed_marker_counts(readme: str) -> None:
+    with pytest.raises(docs_module.ReportingError, match="malformed"):
+        docs_module._update_stats_block(readme, {}, "hash")
+
+
+def test_update_stats_block_inserts_missing_block() -> None:
+    with patch.object(docs_module, "_render_stats_block", return_value="new stats"):
+        updated = docs_module._update_stats_block("card", {}, "hash")
+
+    assert updated == (
+        "card\n\n<!-- GENERATED:STATS:START -->\nnew stats<!-- GENERATED:STATS:END -->\n"
+    )
+
+
+def test_update_stats_block_rejects_marker_pair_without_start_newline() -> None:
+    readme = docs_module._STATS_START_MARKER + "old\n" + docs_module._STATS_END_MARKER
+
+    with (
+        patch.object(docs_module, "_render_stats_block", return_value="new stats"),
+        pytest.raises(docs_module.ReportingError, match="malformed"),
+    ):
+        docs_module._update_stats_block(readme, {}, "hash")
+
+
 def test_write_dataset_docs_renders_stats_map_and_canonical_json(
     tmp_path: Path,
 ) -> None:

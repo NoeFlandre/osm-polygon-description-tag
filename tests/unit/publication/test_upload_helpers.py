@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 import osm_polygon_description_tag.publication.upload as upload
+import osm_polygon_description_tag.publication.verification as verification
 from osm_polygon_description_tag.publication.models import (
     PublicationError,
     UploadItem,
@@ -357,6 +358,78 @@ def test_execute_upload_forwards_default_runner_arguments(
             observer,
         )
     ]
+
+
+def test_execute_upload_uses_parented_metadata_commit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    plan = _plan(tmp_path)
+    operations: list[dict[str, object]] = []
+    created_operations: list[object] = []
+    commits: list[dict[str, object]] = []
+
+    class Operation:
+        def __init__(self, **kwargs: object) -> None:
+            operations.append(kwargs)
+            created_operations.append(self)
+
+    class Api:
+        def create_commit(self, **kwargs: object) -> None:
+            commits.append(kwargs)
+
+    monkeypatch.setattr(verification._huggingface_hub, "HfApi", lambda: Api())
+    monkeypatch.setattr(
+        verification._huggingface_hub,
+        "CommitOperationAdd",
+        Operation,
+        raising=False,
+    )
+
+    upload.execute_upload(
+        plan,
+        confirmation=plan.identity_sha256,
+        parent_revision="parent-revision",
+    )
+
+    assert operations == [
+        {
+            "path_in_repo": "artifact.txt",
+            "path_or_fileobj": tmp_path / "artifact.txt",
+        }
+    ]
+    assert commits == [
+        {
+            "repo_id": plan.repo_id,
+            "operations": created_operations,
+            "repo_type": "dataset",
+            "commit_message": "Update deterministic dataset statistics",
+            "parent_commit": "parent-revision",
+        }
+    ]
+
+
+def test_execute_upload_reports_parented_metadata_commit_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    plan = _plan(tmp_path)
+
+    class Api:
+        def create_commit(self, **_kwargs: object) -> None:
+            raise RuntimeError("remote changed")
+
+    monkeypatch.setattr(verification._huggingface_hub, "HfApi", lambda: Api())
+
+    with pytest.raises(
+        PublicationError,
+        match=_exact("metadata commit failed or remote revision changed: remote changed"),
+    ):
+        upload.execute_upload(
+            plan,
+            confirmation=plan.identity_sha256,
+            parent_revision="parent-revision",
+        )
 
 
 @pytest.mark.parametrize(

@@ -69,6 +69,13 @@ class ReleaseReport:
         }
 
 
+@dataclass(frozen=True)
+class _RemoteReleaseContext:
+    verifier: HubVerifier
+    inventory: tuple[UploadItem, ...]
+    data_revision: str
+
+
 def _upload_items_payload(files: tuple[UploadItem, ...]) -> list[dict[str, object]]:
     """Serialize upload evidence in the stable report order."""
     return [
@@ -127,6 +134,56 @@ def _require_inventory_verifier(verifier: HubVerifier) -> Any:
     return inventory_verifier
 
 
+def _verify_inventory_revision(
+    inventory_verifier: Any,
+    repo_id: str,
+    inventory: tuple[UploadItem, ...],
+    revision: str,
+) -> str:
+    current_data_revision = inventory_verifier(repo_id, inventory, revision=revision)
+    if not current_data_revision:
+        raise PublicationError("hub inventory verification returned an empty revision")
+    return str(current_data_revision)
+
+
+def _matching_metadata_revision(
+    plan: UploadPlan,
+    inventory: tuple[UploadItem, ...],
+    verifier: HubVerifier,
+    inventory_verifier: Any,
+) -> tuple[str, str] | None:
+    matching_revision = getattr(verifier, "matching_revision", None)
+    if not callable(matching_revision):
+        return None
+    existing_revision = matching_revision(plan.repo_id, plan.files)
+    if not existing_revision:
+        return None
+    current_data_revision = _verify_inventory_revision(
+        inventory_verifier,
+        plan.repo_id,
+        inventory,
+        str(existing_revision),
+    )
+    return current_data_revision, str(existing_revision)
+
+
+def _verify_metadata_revision(
+    plan: UploadPlan,
+    inventory: tuple[UploadItem, ...],
+    verifier: HubVerifier,
+    inventory_verifier: Any,
+) -> str:
+    revision = verifier(plan.repo_id, plan.files)
+    if not revision:
+        raise PublicationError("hub verification returned an empty revision")
+    verified_revision = inventory_verifier(plan.repo_id, inventory, revision=revision)
+    if verified_revision != revision:
+        raise PublicationError(
+            "hub inventory verification returned a revision different from the upload"
+        )
+    return revision
+
+
 def _publish(
     plan: UploadPlan,
     *,
@@ -137,32 +194,73 @@ def _publish(
 ) -> tuple[str, str]:
     resolved_verifier = build_default_hub_verifier() if verifier is None else verifier
     inventory_verifier = _require_inventory_verifier(resolved_verifier)
-    matching_revision = getattr(resolved_verifier, "matching_revision", None)
-    if callable(matching_revision):
-        existing_revision = matching_revision(plan.repo_id, plan.files)
-        if existing_revision:
-            current_data_revision = inventory_verifier(
-                plan.repo_id,
-                inventory,
-                revision=str(existing_revision),
-            )
-            if not current_data_revision:
-                raise PublicationError("hub inventory verification returned an empty revision")
-            return str(current_data_revision), str(existing_revision)
+    matching = _matching_metadata_revision(
+        plan,
+        inventory,
+        resolved_verifier,
+        inventory_verifier,
+    )
+    if matching is not None:
+        return matching
     execute_upload(
         plan,
         confirmation=plan.identity_sha256,
         runner=runner,
         parent_revision=data_revision,
     )
-    revision = resolved_verifier(plan.repo_id, plan.files)
-    if not revision:
-        raise PublicationError("hub verification returned an empty revision")
-    verified_revision = inventory_verifier(plan.repo_id, inventory, revision=revision)
-    if verified_revision != revision:
-        raise PublicationError(
-            "hub inventory verification returned a revision different from the upload"
-        )
+    revision = _verify_metadata_revision(
+        plan,
+        inventory,
+        resolved_verifier,
+        inventory_verifier,
+    )
+    return data_revision, revision
+
+
+def _prepare_remote_release(
+    data_root: Path,
+    repo_id: str,
+    verifier: HubVerifier | None,
+) -> _RemoteReleaseContext:
+    resolved_verifier = build_default_hub_verifier() if verifier is None else verifier
+    inventory_verifier = _require_inventory_verifier(resolved_verifier)
+    inventory = _published_inventory(data_root)
+    data_revision = inventory_verifier(repo_id, inventory)
+    if not data_revision:
+        raise PublicationError("hub inventory verification returned an empty revision")
+    _sync_remote_card(data_root, resolved_verifier, repo_id, data_revision)
+    return _RemoteReleaseContext(resolved_verifier, inventory, data_revision)
+
+
+def _compute_release_artifacts(
+    data_root: Path,
+    template_path: Path,
+) -> tuple[dict[str, Any], UploadPlan, tuple[UploadItem, ...]]:
+    stats = generate_dataset_docs(
+        data_root,
+        template_path,
+        preserve_existing=True,
+    )
+    plan = _build_metadata_only_upload_plan(data_root)
+    inventory = _published_inventory(data_root)
+    return stats, plan, inventory
+
+
+def _publish_if_requested(
+    context: _RemoteReleaseContext | None,
+    plan: UploadPlan,
+    inventory: tuple[UploadItem, ...],
+    runner: Runner | None,
+) -> tuple[str | None, str | None]:
+    if context is None:
+        return None, None
+    data_revision, revision = _publish(
+        plan,
+        inventory=inventory,
+        runner=runner,
+        verifier=context.verifier,
+        data_revision=context.data_revision,
+    )
     return data_revision, revision
 
 
@@ -184,38 +282,11 @@ def release_metadata(
     _require_exact_repo(confirm_repo)
     resolved_root = data_root.resolve(strict=False)
     validated_files = validate_published_inventory(resolved_root)
-    resolved_verifier: HubVerifier | None = None
-    inventory: tuple[UploadItem, ...] | None = None
-    data_revision: str | None = None
-    if apply:
-        resolved_verifier = build_default_hub_verifier() if verifier is None else verifier
-        inventory_verifier = _require_inventory_verifier(resolved_verifier)
-        inventory = _published_inventory(resolved_root)
-        data_revision = inventory_verifier(confirm_repo, inventory)
-        if not data_revision:
-            raise PublicationError("hub inventory verification returned an empty revision")
-        _sync_remote_card(resolved_root, resolved_verifier, confirm_repo, data_revision)
-    stats = generate_dataset_docs(
-        resolved_root,
-        template_path,
-        preserve_existing=True,
-    )
-    plan = _build_metadata_only_upload_plan(resolved_root)
-    computed_inventory = _published_inventory(resolved_root)
-    if inventory is not None and computed_inventory != inventory:
+    context = _prepare_remote_release(resolved_root, confirm_repo, verifier) if apply else None
+    stats, plan, computed_inventory = _compute_release_artifacts(resolved_root, template_path)
+    if context is not None and computed_inventory != context.inventory:
         raise PublicationError("local data/manifest inventory changed during stats generation")
-    inventory = computed_inventory
-    revision: str | None = None
-    if apply:
-        assert resolved_verifier is not None
-        assert data_revision is not None
-        data_revision, revision = _publish(
-            plan,
-            inventory=inventory,
-            runner=runner,
-            verifier=resolved_verifier,
-            data_revision=data_revision,
-        )
+    data_revision, revision = _publish_if_requested(context, plan, computed_inventory, runner)
     return ReleaseReport(
         repo_id=plan.repo_id,
         data_root=plan.data_root,
@@ -229,6 +300,24 @@ def release_metadata(
     )
 
 
+def _read_remote_card(
+    verifier: HubVerifier,
+    repo_id: str,
+    revision: str,
+) -> str | None:
+    """Read the remote card when the verifier exposes that optional capability."""
+    read_file = getattr(verifier, "read_file", None)
+    if not callable(read_file):
+        return None
+    try:
+        remote_readme = read_file(repo_id, "README.md", revision=revision)
+    except TypeError as error:
+        raise PublicationError("Hub verifier read_file has an incompatible interface") from error
+    if not isinstance(remote_readme, str):
+        raise PublicationError("Hub verifier returned a non-text README")
+    return remote_readme
+
+
 def _sync_remote_card(
     data_root: Path,
     verifier: HubVerifier,
@@ -236,15 +325,9 @@ def _sync_remote_card(
     revision: str,
 ) -> None:
     """Use the pinned remote card as the release base when supported."""
-    read_file = getattr(verifier, "read_file", None)
-    if not callable(read_file):
+    remote_readme = _read_remote_card(verifier, repo_id, revision)
+    if remote_readme is None:
         return
-    try:
-        remote_readme = read_file(repo_id, "README.md", revision=revision)
-    except TypeError as error:
-        raise PublicationError("Hub verifier read_file has an incompatible interface") from error
-    if not isinstance(remote_readme, str):
-        raise PublicationError("Hub verifier returned a non-text README")
     target = data_root / "README.md"
     if target.is_file() and target.read_text(encoding="utf-8") == remote_readme:
         return

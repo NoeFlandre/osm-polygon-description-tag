@@ -269,6 +269,78 @@ def test_release_preserves_existing_language_card_content(workspace: Path) -> No
     assert updated_without_stats == existing_without_stats
 
 
+def test_read_remote_card_handles_optional_verifier_reader() -> None:
+    class Reader:
+        def read_file(self, repo_id: str, path: str, *, revision: str) -> str:
+            assert (repo_id, path, revision) == (REPO_ID, "README.md", "revision")
+            return "remote card"
+
+    assert release_module._read_remote_card(_RecordingVerifier(), REPO_ID, "revision") is None
+    assert release_module._read_remote_card(Reader(), REPO_ID, "revision") == "remote card"
+
+
+def test_read_remote_card_rejects_incompatible_verifier_reader() -> None:
+    class Reader:
+        def read_file(self, repo_id: str, path: str) -> str:
+            return f"{repo_id}:{path}"
+
+    with pytest.raises(PublicationError, match="incompatible interface"):
+        release_module._read_remote_card(Reader(), REPO_ID, "revision")
+
+
+def test_read_remote_card_rejects_non_text_verifier_response() -> None:
+    class Reader:
+        def read_file(self, repo_id: str, path: str, *, revision: str) -> object:
+            return {"repo_id": repo_id, "path": path, "revision": revision}
+
+    with pytest.raises(PublicationError, match="non-text README"):
+        release_module._read_remote_card(Reader(), REPO_ID, "revision")
+
+
+def test_sync_remote_card_replaces_remote_card_and_cleans_temp(tmp_path: Path) -> None:
+    target = tmp_path / "README.md"
+    target.write_text("local card", encoding="utf-8")
+
+    release_module._sync_remote_card(tmp_path, _RecordingVerifier(), REPO_ID, "revision")
+    assert target.read_text(encoding="utf-8") == "local card"
+
+    class Reader:
+        def read_file(self, repo_id: str, path: str, *, revision: str) -> str:
+            assert (repo_id, path, revision) == (REPO_ID, "README.md", "revision")
+            return "remote card"
+
+    release_module._sync_remote_card(tmp_path, Reader(), REPO_ID, "revision")
+
+    assert target.read_text(encoding="utf-8") == "remote card"
+    assert list(tmp_path.glob(".*.tmp")) == []
+
+
+def test_apply_refuses_metadata_revision_mismatch(workspace: Path) -> None:
+    commands: list[list[str]] = []
+
+    class DivergentVerifier(_RecordingVerifier):
+        def verify_inventory(
+            self,
+            repo_id: str,
+            files: tuple[UploadItem, ...],
+            *,
+            revision: str | None = None,
+        ) -> str:
+            if revision is not None:
+                return "different-revision"
+            return super().verify_inventory(repo_id, files, revision=revision)
+
+    with pytest.raises(PublicationError, match="different from the upload"):
+        _release(
+            workspace,
+            apply=True,
+            runner=commands.append,
+            verifier=DivergentVerifier(),
+        )
+
+    assert len(commands) == 1
+
+
 def test_release_restores_pre_regression_card_without_losing_content(
     workspace: Path,
 ) -> None:

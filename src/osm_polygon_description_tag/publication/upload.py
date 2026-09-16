@@ -219,6 +219,23 @@ def _sleep_before_retry(
 _default_runner_with_retry: _RetryRunner = _run_with_retry
 
 
+def _dispatch_upload(
+    plan: UploadPlan,
+    command: list[str],
+    runner: Runner | None,
+    timeout: float | None,
+    retry_observer: Callable[..., None] | None,
+    parent_revision: str | None,
+) -> None:
+    if runner is not None:
+        runner(command)
+        return
+    if parent_revision is not None:
+        _run_parented_metadata_commit(plan, parent_revision)
+        return
+    _run_default_upload(command, timeout, retry_observer)
+
+
 def execute_upload(
     plan: UploadPlan,
     *,
@@ -242,12 +259,7 @@ def execute_upload(
     _verify_identity(plan)
     command = _build_command(plan)
     try:
-        if runner is None and parent_revision is not None:
-            _run_parented_metadata_commit(plan, parent_revision)
-        elif runner is None:
-            _run_default_upload(command, timeout, retry_observer)
-        else:
-            runner(command)
+        _dispatch_upload(plan, command, runner, timeout, retry_observer, parent_revision)
     except subprocess.CalledProcessError as error:
         raise PublicationError(f"upload failed with exit code {error.returncode}") from error
     except subprocess.TimeoutExpired as error:
