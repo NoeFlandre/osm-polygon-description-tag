@@ -83,11 +83,7 @@ def insert_map_block(template: str, block_body: str) -> str:
     newline = "\r\n" if "\r\n" in template else "\n"
     normalized_body = block_body.replace("\r\n", "\n").rstrip("\r\n")
     normalized_body = normalized_body.replace("\n", newline)
-    block = (
-        f"{H3_MAP_START_MARKER}{newline}"
-        f"{normalized_body}{newline}"
-        f"{H3_MAP_END_MARKER}{newline}"
-    )
+    block = f"{H3_MAP_START_MARKER}{newline}{normalized_body}{newline}{H3_MAP_END_MARKER}{newline}"
     stats_marker = f"<!-- GENERATED:STATS:START -->{newline}"
     if stats_marker in template:
         return template.replace(stats_marker, block + stats_marker, 1)
