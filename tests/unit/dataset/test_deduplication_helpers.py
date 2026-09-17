@@ -4,17 +4,23 @@ import builtins
 import hashlib
 import os
 from collections.abc import Mapping
+from datetime import UTC
 from pathlib import Path
 from types import SimpleNamespace
 
 import duckdb
+import pyarrow.parquet as pq
 import pytest
+from shapely import from_wkb, to_wkb
 from shapely.geometry import Polygon
 
+import osm_polygon_description_tag.dataset.canonical_rows as canonical_rows
 import osm_polygon_description_tag.dataset.deduplication as dedup_module
+import osm_polygon_description_tag.dataset.stats as stats_module
 from osm_polygon_description_tag.dataset.deduplication import (
     _STATE_RELATIVE_PATH,
     DEDUPLICATION_POLICY_SHA256,
+    DEDUPLICATION_POLICY_VERSION,
     DUPLICATE_REJECTION_REASON,
     DeduplicationError,
     DeduplicationResult,
@@ -586,6 +592,174 @@ def test_canonical_relation_keeps_one_highest_version_per_osm_identity(
     assert rows == [(1, 2, "a.osm.pbf"), (2, 1, "b.osm.pbf")]
 
 
+def test_canonical_relation_selects_the_same_differing_payload_row_in_any_order(
+    tmp_path: Path,
+) -> None:
+    base = make_record_dict(
+        Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+        {"description": "same"},
+        osm_id=77,
+        source_pbf="same.osm.pbf",
+    )
+    candidate = dict(
+        base,
+        area_m2=999.0,
+        bbox_min_x=10.0,
+        bbox_min_y=10.0,
+        bbox_max_x=11.0,
+        bbox_max_y=11.0,
+    )
+    first = tmp_path / "first.parquet"
+    second = tmp_path / "second.parquet"
+    write_geoparquet([base], first)
+    write_geoparquet([candidate], second)
+
+    def selected(paths: tuple[Path, Path]) -> tuple[object, ...]:
+        connection = duckdb.connect()
+        try:
+            _canonical_relation(connection, paths)
+            return connection.execute(
+                """
+                SELECT area_m2, bbox_min_x, bbox_min_y, bbox_max_x, bbox_max_y
+                FROM deduplicated
+                WHERE osm_id = 77
+                """
+            ).fetchone()
+        finally:
+            connection.close()
+
+    expected = (999.0, 10.0, 10.0, 11.0, 11.0)
+    assert selected((first, second)) == expected
+    assert selected((second, first)) == expected
+
+
+def test_all_canonical_selectors_choose_the_same_payload_for_opposite_endian_geometry(
+    tmp_path: Path,
+) -> None:
+    geometry = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
+    base = make_record_dict(
+        geometry,
+        {"description": "base"},
+        osm_id=77,
+        source_pbf="same.osm.pbf",
+    )
+    little_endian = dict(
+        base,
+        area_m2=1.0,
+        description="a-1",
+        geometry=to_wkb(geometry, byte_order=1),
+        timestamp=None,
+    )
+    big_endian = dict(
+        base,
+        area_m2=5.0,
+        description="b-5",
+        geometry=to_wkb(geometry, byte_order=0),
+        timestamp=None,
+    )
+    expected = select_canonical_row((little_endian, big_endian))
+    assert expected["description"] == "a-1"
+    expected_raw_geometry = expected["geometry"]
+    assert isinstance(expected_raw_geometry, bytes | bytearray | memoryview)
+    expected_geometry = to_wkb(from_wkb(bytes(expected_raw_geometry)), byte_order=1)
+    expected_selection = (
+        expected["description"],
+        expected["area_m2"],
+        expected_geometry,
+        canonical_rows._row_fingerprint(expected),
+    )
+
+    first = tmp_path / "first.parquet"
+    second = tmp_path / "second.parquet"
+    write_geoparquet([little_endian], first)
+    write_geoparquet([big_endian], second)
+
+    def selected_parquet(paths: tuple[Path, Path]) -> tuple[object, ...]:
+        connection = duckdb.connect()
+        try:
+            _canonical_relation(connection, paths)
+            row = connection.execute(
+                "SELECT description, area_m2, geometry, "  # noqa: S608 - shared canonical SQL policy
+                f"{canonical_rows._full_row_fingerprint_sql()} "
+                "FROM deduplicated WHERE osm_id = 77"
+            ).fetchone()
+        finally:
+            connection.close()
+        assert row is not None
+        return row[0], row[1], bytes(row[2]), row[3]
+
+    def selected_stats(paths: tuple[Path, Path]) -> tuple[object, ...]:
+        connection = duckdb.connect()
+        try:
+            stats_module._create_feature_table(connection)
+            for path in paths:
+                reader = pq.ParquetFile(path)
+                for batch in reader.iter_batches(columns=stats_module._FEATURE_COLUMNS):
+                    stats_module._insert_batch(connection, batch, path.name)
+            stats_module._create_unique_feature_view(connection)
+            row = connection.execute(
+                "SELECT description, area_m2, geometry, "  # noqa: S608 - shared canonical SQL policy
+                f"{canonical_rows._full_row_fingerprint_sql(key_value_columns_are_maps=True)} "
+                "FROM features WHERE osm_id = 77"
+            ).fetchone()
+        finally:
+            connection.close()
+        assert row is not None
+        return row[0], row[1], bytes(row[2]), row[3]
+
+    for paths in ((first, second), (second, first)):
+        assert (
+            select_canonical_row(
+                (little_endian, big_endian)
+                if paths == (first, second)
+                else (big_endian, little_endian)
+            )["description"]
+            == expected["description"]
+        )
+        assert selected_parquet(paths) == expected_selection
+        assert selected_stats(paths) == expected_selection
+
+
+def test_python_and_sql_selectors_choose_the_same_persisted_payload(
+    tmp_path: Path,
+) -> None:
+    first_row = make_record_dict(
+        Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+        {"description": "same"},
+        osm_id=77,
+        source_pbf="same.osm.pbf",
+    )
+    second_row = dict(first_row)
+    first_row["area_m2"] = 1.0
+    second_row["area_m2"] = 6.0
+    first_row["timestamp"] = None
+    second_row["timestamp"] = None
+    expected = select_canonical_row((first_row, second_row))
+    assert expected["area_m2"] == 6.0
+
+    first = tmp_path / "first.parquet"
+    second = tmp_path / "second.parquet"
+    write_geoparquet([first_row], first)
+    write_geoparquet([second_row], second)
+
+    connection = duckdb.connect()
+    try:
+        _canonical_relation(connection, (first, second))
+        actual = connection.execute("SELECT area_m2 FROM deduplicated WHERE osm_id = 77").fetchone()
+        sql_fingerprint = connection.execute(
+            "SELECT area_m2, "  # noqa: S608 - shared SQL policy
+            f"{canonical_rows._full_row_fingerprint_sql()} "
+            "FROM deduplicated ORDER BY area_m2"
+        ).fetchall()
+    finally:
+        connection.close()
+
+    assert actual == (expected["area_m2"],)
+    assert sql_fingerprint == [
+        (expected["area_m2"], canonical_rows._row_fingerprint(expected)),
+    ]
+
+
 def test_read_manifests_maps_each_parquet_to_its_manifest(
     tmp_path: Path,
 ) -> None:
@@ -952,6 +1126,80 @@ def test_select_canonical_row_rejects_empty_groups() -> None:
         select_canonical_row([])
 
 
+def test_parse_timestamp_accepts_zulu_suffix_and_normalizes_it_explicitly() -> None:
+    """Keep the explicit Zulu compatibility normalization independent of parser version."""
+    replacements: list[tuple[str, str]] = []
+
+    class _ZuluTimestamp(str):
+        def replace(self, old: str, new: str, count: int = -1) -> str:
+            replacements.append((old, new))
+            return super().replace(old, new, count)
+
+    parsed = canonical_rows._parse_timestamp(_ZuluTimestamp("2026-01-01T00:00:00Z"))
+
+    assert parsed is not None
+    assert parsed.isoformat() == "2026-01-01T00:00:00+00:00"
+    assert replacements == [("Z", "+00:00")]
+
+
+def test_timestamp_rank_normalizes_to_utc_before_epoch_conversion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen_timezones: list[object] = []
+
+    class _ParsedTimestamp:
+        tzinfo = UTC
+
+        def astimezone(self, timezone: object) -> object:
+            seen_timezones.append(timezone)
+            return self
+
+        def timestamp(self) -> float:
+            return 42.0
+
+    monkeypatch.setattr(canonical_rows, "_parse_timestamp", lambda _value: _ParsedTimestamp())
+
+    assert canonical_rows._timestamp_rank("ignored") == 42.0
+    assert seen_timezones == [UTC]
+
+
+def test_row_fingerprint_uses_explicit_lowercase_utf8_encoding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The canonical byte encoding is an explicit deterministic policy invariant."""
+    encodings: list[tuple[str, str]] = []
+
+    class _Payload(str):
+        def encode(self, encoding: str = "utf-8", errors: str = "strict") -> bytes:
+            encodings.append((encoding, errors))
+            return super().encode(encoding, errors)
+
+    monkeypatch.setattr(canonical_rows.json, "dumps", lambda *_args, **_kwargs: _Payload("x"))
+
+    canonical_rows._row_fingerprint({})
+
+    assert encodings == [("utf-8", "strict")]
+
+
+def test_canonical_row_order_sql_has_stable_keyword_casing() -> None:
+    """SQL keyword spelling is kept stable even where DuckDB treats case as equivalent."""
+    order = canonical_rows.canonical_row_order_sql()
+
+    assert order.split(", sha256", 1)[0] == (
+        "version DESC NULLS LAST, timestamp DESC NULLS LAST, source_pbf ASC"
+    )
+
+
+def test_canonical_rows_sql_preserves_selection_validation_contract() -> None:
+    with pytest.raises(ValueError) as empty:
+        canonical_rows.canonical_rows_sql("rows", ())
+    assert str(empty.value) == "unique-row views require at least one selected column"
+
+    with pytest.raises(ValueError) as unknown:
+        canonical_rows.canonical_rows_sql("rows", ("not_a_schema_column",))
+    assert str(unknown.value) == ("unsupported unique-row columns: ['not_a_schema_column']")
+
+
 def test_promote_artifact_moves_staged_file_and_reuses_identical_target(tmp_path: Path) -> None:
     stage = tmp_path / "stage"
     root = tmp_path / "root"
@@ -1095,7 +1343,7 @@ def test_state_payload_records_policy_inputs_and_duplicate_delta(tmp_path: Path)
 
     assert payload == {
         "schema_version": 1,
-        "policy_version": 1,
+        "policy_version": DEDUPLICATION_POLICY_VERSION,
         "policy_sha256": DEDUPLICATION_POLICY_SHA256,
         "status": "staged",
         "inputs": {"a.parquet": "a", "z.parquet": "z"},

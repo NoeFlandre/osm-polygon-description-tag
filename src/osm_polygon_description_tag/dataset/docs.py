@@ -28,6 +28,7 @@ from osm_polygon_description_tag.dataset.geography.card import (
     H3_MAP_END_MARKER,
     H3_MAP_START_MARKER,
     H3_MAP_TITLE,
+    insert_map_block,
     install_map_block,
 )
 from osm_polygon_description_tag.dataset.geography.rendering import render_density_map
@@ -43,9 +44,13 @@ _AREA_HISTOGRAM_TITLE = "Area distribution of description-tagged polygons"
 _DATASET_CARD_HERO_FILENAME = "dataset-card-hero.png"
 _DATASET_CARD_HERO_ASSET_RELATIVE_PATH = f"assets/{_DATASET_CARD_HERO_FILENAME}"
 _BYTE_UNITS = ("B", "KiB", "MiB", "GiB", "TiB")
+_STATS_START_MARKER = "<!-- GENERATED:STATS:START -->"
+_STATS_END_MARKER = "<!-- GENERATED:STATS:END -->"
 _GENERATED_PATTERN = re.compile(
-    r"(<!-- GENERATED:STATS:START -->\n)(.*?)(<!-- GENERATED:STATS:END -->)", re.DOTALL
+    rf"({_STATS_START_MARKER}\r?\n)(.*?)({_STATS_END_MARKER})", re.DOTALL
 )
+_FRONT_MATTER_OPEN = re.compile(r"\A---[ \t]*(?P<newline>\r?\n)")
+_FRONT_MATTER_CLOSE = re.compile(r"^---[ \t]*(?:\r?\n|\Z)", re.MULTILINE)
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:
@@ -154,7 +159,7 @@ def _coerce_bbox_coordinates(value: object) -> tuple[float, float, float, float]
 
 
 def _fmt_bbox(value: object) -> str:
-    """Format a ``[min_lon, min_lat, max_lon, max_lat]`` dataset extent."""
+    """Format a dataset extent for the geometry statistics section."""
     coordinates = _coerce_bbox_coordinates(value)
     if coordinates is None:
         return "—"
@@ -162,7 +167,72 @@ def _fmt_bbox(value: object) -> str:
     return f"lon {min_x:.4f}° to {max_x:.4f}°, lat {min_y:.4f}° to {max_y:.4f}°"
 
 
+def _polygon_count_metrics(stats: Mapping[str, Any]) -> tuple[int, int, int, int]:
+    globally_unique = int(stats.get("globally_unique_polygons", stats.get("rows", 0)))
+    overlap_duplicates = int(stats.get("regional_overlap_duplicate_rows", 0))
+    regional_rows = int(stats.get("regional_rows", globally_unique + overlap_duplicates))
+    manifest_duplicates = int(
+        stats.get("manifest_duplicate_rows", stats.get("deduplicated_rows", 0))
+    )
+    return regional_rows, globally_unique, overlap_duplicates, manifest_duplicates
+
+
+def _render_geometry_stats_section(stats: Mapping[str, Any]) -> list[str]:
+    """Render the additive geometry statistics section."""
+    geometry_types = stats.get("geometry_types", {})
+    if not isinstance(geometry_types, Mapping):
+        geometry_types = {}
+    regional_rows, globally_unique, overlap_duplicates, _manifest_duplicates = (
+        _polygon_count_metrics(stats)
+    )
+    return [
+        "## Polygon surface and geometry",
+        "",
+        "Computed deterministically from the complete published polygon table: "
+        f"all {_fmt_int(globally_unique)} canonical globally unique "
+        "`(osm_type, osm_id)` polygons with successfully extracted trimmed "
+        "non-empty description text from "
+        f"{_fmt_int(regional_rows)} regional/raw rows across "
+        f"{_fmt_int(stats['output_files'])} "
+        "Parquet files, using only the dataset's area_m2, bbox, and geometry columns. "
+        f"{_fmt_int(overlap_duplicates)} regional-overlap duplicate rows are excluded. "
+        "No sampling, truncation, external lookup, or raw-PBF recomputation is used.",
+        "",
+        "| Metric | Value |",
+        "| --- | ---: |",
+        f"| Canonical globally unique `(osm_type, osm_id)` polygons with "
+        f"successfully extracted trimmed non-empty description text | "
+        f"{_fmt_int(globally_unique)} |",
+        "| Surface area (total / mean) | "
+        f"{_fmt_area(stats.get('area_m2_total_m2'))} / "
+        f"{_fmt_area(stats.get('area_m2_mean_m2'))} |",
+        "| Smallest / largest area | "
+        f"{_fmt_area(stats.get('area_m2_min_m2'))} / "
+        f"{_fmt_area(stats.get('area_m2_max_m2'))} |",
+        "| Area p25 / median / p75 | "
+        f"{_fmt_area(stats.get('area_m2_p25_m2'))} / "
+        f"{_fmt_area(stats.get('area_m2_median_m2'))} / "
+        f"{_fmt_area(stats.get('area_m2_p75_m2'))} |",
+        f"| Dataset bounding box | {_fmt_bbox(stats.get('dataset_bbox'))} |",
+        "| Geometry totals (vertices / rings / holes / MultiPolygon parts) | "
+        f"{_fmt_int(stats.get('geometry_vertices_total', 0))} / "
+        f"{_fmt_int(stats.get('geometry_rings_total', 0))} / "
+        f"{_fmt_int(stats.get('geometry_holes_total', 0))} / "
+        f"{_fmt_int(stats.get('multipolygon_components_total', 0))} |",
+        "| Polygon / MultiPolygon rows | "
+        f"{_fmt_int(geometry_types.get('Polygon', 0))} / "
+        f"{_fmt_int(geometry_types.get('MultiPolygon', 0))} |",
+        "",
+        "The complete machine-readable report is published in stats.json. These values "
+        "are generated from the data only and are deterministic for unchanged published "
+        "artifacts.",
+    ]
+
+
 def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
+    regional_rows, globally_unique, overlap_duplicates, manifest_duplicates = (
+        _polygon_count_metrics(stats)
+    )
     lines: list[str] = [
         f"<!-- stats_sha256: {stats_sha256} -->",
         f"<!-- stats_schema_version: {stats['stats_schema_version']} -->",
@@ -172,30 +242,18 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
         "",
         "| Metric | Value |",
         "| --- | --- |",
-        f"| Polygons | {_fmt_int(stats['rows'])} |",
+        f"| Regional/raw polygon rows | {_fmt_int(regional_rows)} |",
+        f"| Canonical globally unique `(osm_type, osm_id)` polygons with "
+        f"successfully extracted trimmed non-empty description text | "
+        f"{_fmt_int(globally_unique)} |",
+        f"| Regional-overlap duplicate rows | {_fmt_int(overlap_duplicates)} |",
         f"| Parquet files | {_fmt_int(stats['output_files'])} |",
         f"| Download size | {_fmt_bytes(stats['output_bytes_total'])} |",
-        f"| Duplicate rows removed | {_fmt_int(stats['deduplicated_rows'])} |",
+        f"| Manifest duplicate rows rejected | {_fmt_int(manifest_duplicates)} |",
         f"| Closed ways | {_fmt_int(stats['osm_types'].get('way', 0))} |",
         f"| Relations | {_fmt_int(stats['osm_types'].get('relation', 0))} |",
         f"| Polygon geometries | {_fmt_int(stats['geometry_types'].get('Polygon', 0))} |",
         f"| MultiPolygon geometries | {_fmt_int(stats['geometry_types'].get('MultiPolygon', 0))} |",
-        "",
-        "| Surface area (total / mean) | "
-        f"{_fmt_area(stats.get('area_m2_total_m2'))} / "
-        f"{_fmt_area(stats.get('area_m2_mean_m2'))} |",
-        "| Polygon area (minimum / p25 / median / p75 / maximum) | "
-        f"{_fmt_area(stats.get('area_m2_min_m2'))} / "
-        f"{_fmt_area(stats.get('area_m2_p25_m2'))} / "
-        f"{_fmt_area(stats.get('area_m2_median_m2'))} / "
-        f"{_fmt_area(stats.get('area_m2_p75_m2'))} / "
-        f"{_fmt_area(stats.get('area_m2_max_m2'))} |",
-        f"| Dataset extent | {_fmt_bbox(stats.get('dataset_bbox'))} |",
-        "| Geometry totals (vertices / rings / holes / MultiPolygon parts) | "
-        f"{_fmt_int(stats.get('geometry_vertices_total', 0))} / "
-        f"{_fmt_int(stats.get('geometry_rings_total', 0))} / "
-        f"{_fmt_int(stats.get('geometry_holes_total', 0))} / "
-        f"{_fmt_int(stats.get('multipolygon_components_total', 0))} |",
         "",
         "## Description coverage",
         "",
@@ -235,7 +293,9 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
             "",
             "Area buckets span <1 m² to >=100B m² on a logarithmic scale; "
             "each bar shows the number of polygons in that bucket "
-            f"(total {_fmt_int(stats['rows'])}).",
+            f"(total {_fmt_int(globally_unique)} canonical globally unique "
+            "`(osm_type, osm_id)` polygons with successfully extracted trimmed "
+            "non-empty description text).",
             "",
         ]
     )
@@ -254,6 +314,7 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
             "",
         ]
     )
+    lines.extend(_render_geometry_stats_section(stats))
     return "\n".join(lines)
 
 
@@ -336,29 +397,140 @@ def _write_dataset_hero(data_root: Path) -> None:
     )
 
 
+def _card_source(
+    data_root: Path,
+    template_path: Path,
+    *,
+    preserve_existing: bool,
+) -> tuple[str, bool]:
+    """Return the card source and whether it is the already-published card.
+
+    Normal generation starts from the supplied template so template updates
+    take effect. A release explicitly opts into the existing card so remote
+    language annotations and other published prose remain byte-for-byte intact.
+    """
+    existing_path = data_root / "README.md"
+    if preserve_existing and existing_path.is_file():
+        # pragma: no mutate start - UTF-8 read aliases are runtime-equivalent
+        return existing_path.read_text(encoding="utf-8"), True
+        # pragma: no mutate end
+    # pragma: no mutate start - UTF-8 read aliases are runtime-equivalent
+    return template_path.read_text(encoding="utf-8"), False
+    # pragma: no mutate end
+
+
+def _newline_for(text: str) -> str:
+    return "\r\n" if "\r\n" in text else "\n"
+
+
+def _generated_block_separator(readme: str, newline: str) -> str:
+    if not readme:
+        return ""
+    return newline if readme.endswith(newline) else newline * 2
+
+
+def _append_generated_block(readme: str, block: str, newline: str) -> str:
+    """Append a generated block with the card's existing separator style."""
+    return readme + _generated_block_separator(readme, newline) + block
+
+
+def _front_matter_end(readme: str) -> int | None:
+    opening = _FRONT_MATTER_OPEN.match(readme)
+    if opening is None:
+        return None
+    closing = _FRONT_MATTER_CLOSE.search(readme, opening.end())
+    if closing is None:
+        raise ReportingError("existing README has unterminated YAML front matter")
+
+    return closing.end()
+
+
+def _front_matter_separator(readme: str, position: int, newline: str) -> str:
+    if readme[position - 1 : position] in ("\n", "\r"):
+        return ""
+    return newline
+
+
+def _insert_after_front_matter(readme: str, block: str, newline: str) -> str | None:
+    """Insert a generated block immediately after complete YAML front matter."""
+    position = _front_matter_end(readme)
+    if position is None:
+        return None
+
+    separator = _front_matter_separator(readme, position, newline)
+    return readme[:position] + separator + block + readme[position:]
+
+
+def _insert_stats_block(readme: str, block: str, newline: str) -> str:
+    """Insert a new stats block without changing any existing card bytes."""
+    inserted = _insert_after_front_matter(readme, block, newline)
+    return inserted if inserted is not None else _append_generated_block(readme, block, newline)
+
+
+def _stats_marker_count(readme: str) -> int:
+    starts = readme.count(_STATS_START_MARKER)
+    ends = readme.count(_STATS_END_MARKER)
+    if starts != ends or starts > 1:
+        raise ReportingError("existing README has malformed generated stats markers")
+    return starts
+
+
+def _replace_stats_block(readme: str, block: str) -> str:
+    if _GENERATED_PATTERN.search(readme) is None:
+        raise ReportingError("existing README has malformed generated stats markers")
+    return _GENERATED_PATTERN.sub(
+        lambda match: match.group(1) + block + match.group(3), readme, count=1
+    )
+
+
+def _update_stats_block(readme: str, stats: dict[str, Any], stats_sha256: str) -> str:
+    """Replace the generated stats block, or insert one into a card without it."""
+    starts = _stats_marker_count(readme)
+    newline = _newline_for(readme)
+    block = _render_stats_block(stats, stats_sha256).replace("\n", newline)
+    if starts == 0:
+        marker_block = f"{_STATS_START_MARKER}{newline}{block}{_STATS_END_MARKER}{newline}"
+        return _insert_stats_block(readme, marker_block, newline)
+    return _replace_stats_block(readme, block)
+
+
+def card_has_stats_block(card: str) -> bool:
+    """Report whether a dataset card already carries the generated stats block."""
+    return _GENERATED_PATTERN.search(card) is not None
+
+
+def _map_marker_counts(readme: str) -> tuple[int, int]:
+    return readme.count(H3_MAP_START_MARKER), readme.count(H3_MAP_END_MARKER)
+
+
+def _update_map_block(readme: str, block_body: str) -> str:
+    """Insert or refresh the map block while leaving malformed cards untouched."""
+    h3_starts, h3_ends = _map_marker_counts(readme)
+    if h3_starts == 0 and h3_ends == 0:
+        return insert_map_block(readme, block_body)
+    if h3_starts == 1 and h3_ends == 1:
+        return install_map_block(readme, block_body)
+    return readme
+
+
 def _write_dataset_docs(
     data_root: Path,
     template_path: Path,
     stats: dict[str, Any],
+    *,
+    preserve_existing: bool = False,
 ) -> None:
     stats_json = json.dumps(stats, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     # pragma: no mutate start - UTF-8 codec names are case-insensitive
     stats_sha256 = hashlib.sha256(stats_json.encode("utf-8")).hexdigest()
     # pragma: no mutate end
-    # pragma: no mutate start - UTF-8 read aliases are runtime-equivalent
-    template = template_path.read_text(encoding="utf-8")
-    # pragma: no mutate end
-    if not _GENERATED_PATTERN.search(template):
-        raise ReportingError(f"template missing GENERATED:STATS markers: {template_path}")
-    readme = _GENERATED_PATTERN.sub(
-        lambda match: match.group(1) + _render_stats_block(stats, stats_sha256) + match.group(3),
-        template,
+    source, is_published_card = _card_source(
+        data_root, template_path, preserve_existing=preserve_existing
     )
-    if H3_MAP_START_MARKER in readme and H3_MAP_END_MARKER in readme:
-        readme = install_map_block(
-            readme,
-            _render_h3_map_block(),
-        )
+    if not is_published_card and not card_has_stats_block(source):
+        raise ReportingError(f"template missing GENERATED:STATS markers: {template_path}")
+    readme = _update_stats_block(source, stats, stats_sha256)
+    readme = _update_map_block(readme, _render_h3_map_block())
     _write_if_changed(data_root / "stats.json", stats_json)
     _write_if_changed(data_root / "README.md", readme)
 
@@ -368,6 +540,7 @@ def generate_dataset_docs(
     template_path: Path,
     *,
     clock: Callable[[], str] = utc_now_iso,
+    preserve_existing: bool = False,
 ) -> dict[str, Any]:
     """Write deterministic stats, README, and derived media artifacts."""
     stats = collect_stats(data_root, clock=clock)
@@ -383,8 +556,16 @@ def generate_dataset_docs(
     stats["area_histogram_render_version"] = AREA_HISTOGRAM_RENDER_VERSION
     stats["area_histogram_total_rows"] = histogram_total_rows
     _write_dataset_hero(data_root)
-    _write_dataset_docs(data_root, template_path, stats)
+    if preserve_existing:
+        _write_dataset_docs(
+            data_root,
+            template_path,
+            stats,
+            preserve_existing=True,
+        )
+    else:
+        _write_dataset_docs(data_root, template_path, stats)
     return stats
 
 
-__all__ = ["generate_dataset_docs"]
+__all__ = ["card_has_stats_block", "generate_dataset_docs"]

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -10,6 +12,7 @@ from shapely import to_wkb
 from shapely.geometry import Polygon
 
 import osm_polygon_description_tag.cli as cli
+import osm_polygon_description_tag.publication.upload as publication_upload
 import osm_polygon_description_tag.workflow.orchestrator as workflow_orchestrator
 from osm_polygon_description_tag.osm.discovery import Source
 from osm_polygon_description_tag.osm.extraction import ExportRecord
@@ -270,6 +273,59 @@ def test_publish_success_payload_is_exact(
         "repo_id": "NoeFlandre/osm-polygon-description-tag",
         "identity_sha256": "b" * 64,
     }
+
+
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        (subprocess.CalledProcessError(7, ["hf", "upload"]), "upload failed with exit code 7"),
+        (subprocess.TimeoutExpired(["hf", "upload"], 12.5), "upload timed out after 12.5 seconds"),
+    ],
+)
+def test_publish_subprocess_failures_use_plain_cli_error_path(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_roots: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+    failure: BaseException,
+    message: str,
+) -> None:
+    source_root, data_root = cli_roots
+    content = b"metadata"
+    data_root.mkdir(parents=True)
+    (data_root / "README.md").write_bytes(content)
+    plan = UploadPlan(
+        repo_id="NoeFlandre/osm-polygon-description-tag",
+        data_root=str(data_root),
+        files=(
+            UploadItem(
+                "README.md",
+                len(content),
+                hashlib.sha256(content).hexdigest(),
+            ),
+        ),
+        identity_sha256="identity",
+    )
+    monkeypatch.setattr(cli, "create_upload_plan", lambda _root: plan)
+
+    def fail(*_args: object, **_kwargs: object) -> None:
+        raise failure
+
+    monkeypatch.setattr(publication_upload, "_default_runner_with_retry", fail)
+
+    exit_code = cli.run(
+        [
+            "publish",
+            *_common_args(source_root, data_root),
+            "--plan",
+            "identity",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err == f"error: {message}\n"
+    assert "Traceback" not in captured.err
 
 
 def _report() -> OrchestrationReport:

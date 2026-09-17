@@ -17,7 +17,7 @@ import math
 import os
 import sqlite3
 import uuid
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -41,6 +41,7 @@ from osm_polygon_description_tag.dataset.schema import (
     geo_metadata,
     mapping_to_pairs,
 )
+from osm_polygon_description_tag.dataset.text import is_nonempty_text
 
 _DICTIONARY_COLUMNS = ["source_pbf", "osm_type", "geometry_type"]
 _VALID_GEOMETRY_TYPES = {"Polygon", "MultiPolygon"}
@@ -48,6 +49,8 @@ _VALIDATION_COLUMNS = [
     "source_pbf",
     "osm_type",
     "osm_id",
+    "description",
+    "localized_descriptions",
     "geometry_type",
     "area_m2",
     "bbox_min_x",
@@ -342,6 +345,51 @@ def _validate_geometry_type(state: _ValidationState, geometry_type: str) -> None
     state.actual_types.add(geometry_type)
 
 
+def _validate_base_description(description: object) -> None:
+    if description is not None:
+        if not isinstance(description, str):
+            raise StorageError("description must be a string")
+        if not is_nonempty_text(description):
+            raise StorageError("description text must be non-empty")
+
+
+def _localized_description_entries(value: object) -> Sequence[object]:
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+        raise StorageError("localized descriptions must be a sequence")
+    return cast(Sequence[object], value)
+
+
+def _validate_localized_entry(entry: object, seen_keys: set[str]) -> None:
+    if not isinstance(entry, Mapping):
+        raise StorageError("localized description entry is malformed")
+    key = entry.get("key")
+    if not isinstance(key, str):
+        raise StorageError("localized description key is malformed")
+    if key in seen_keys:
+        raise StorageError(f"duplicate localized description key: {key!r}")
+    value = entry.get("value")
+    if not is_nonempty_text(value):
+        raise StorageError("localized description value must be non-empty text")
+    seen_keys.add(key)
+
+
+def _validate_localized_descriptions(value: object) -> int:
+    entries = _localized_description_entries(value)
+    seen_keys: set[str] = set()
+    for entry in entries:
+        _validate_localized_entry(entry, seen_keys)
+    return len(seen_keys)
+
+
+def _validate_description_values(description: object, localized_descriptions: object) -> None:
+    """Enforce the final-artifact successful non-empty-text invariant."""
+    _validate_base_description(description)
+    localized_count = _validate_localized_descriptions(localized_descriptions)
+
+    if description is None and localized_count == 0:
+        raise StorageError("at least one non-empty description text is required")
+
+
 def _validate_area(area: float | None) -> None:
     if area is None or not math.isfinite(area) or area <= 0:
         raise StorageError(f"non-positive or non-finite area_m2: {area}")
@@ -393,6 +441,9 @@ def _validate_row(columns: Mapping[str, list[Any]], index: int, state: _Validati
     osm_id = columns["osm_id"][index]
     state.uniqueness.check_and_add(osm_type, osm_id)
     _validate_source(state, columns["source_pbf"][index])
+    _validate_description_values(
+        columns["description"][index], columns["localized_descriptions"][index]
+    )
     geometry_type = columns["geometry_type"][index]
     _validate_geometry_type(state, geometry_type)
     _validate_area(columns["area_m2"][index])

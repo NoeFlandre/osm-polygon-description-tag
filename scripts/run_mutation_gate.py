@@ -1,4 +1,4 @@
-"""Run the repository-wide mutation gate with escalating passes and exact confirmation.
+"""Run a deterministic mutation gate with escalating passes and exact confirmation.
 
 Mutmut associates every source function with the tests that execute it, and runs
 each mutant under ``pytest -x``.  Two consequences shape this gate:
@@ -32,8 +32,63 @@ from scripts.check_mutation_score import STATUS_BY_EXIT_CODE
 
 DEFAULT_MAX_CHILDREN = 8
 DEFAULT_FAST_TESTS_PER_FUNCTION = 1
-DEFAULT_MUTATION_BATCH_SIZE = 4
+DEFAULT_MUTATION_BATCH_SIZE: int | None = None
 _ESCALATION_FACTOR = 8
+
+
+def parse_changed_lines(diff: str) -> dict[str, tuple[int, ...]]:
+    """Parse added/modified new-file lines from a zero-context git diff."""
+
+    changed: dict[str, set[int]] = {}
+    current_path: str | None = None
+    new_line: int | None = None
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            parts = line.split()
+            current_path = parts[-1][2:] if parts and parts[-1].startswith("b/") else None
+            if current_path is not None:
+                changed.setdefault(current_path, set())
+            new_line = None
+            continue
+        if line.startswith("@@") and current_path is not None:
+            hunk = line.split("@@", 2)[1].strip().split()
+            new_range = next((part[1:] for part in hunk if part.startswith("+")), "")
+            start_text, _, _ = new_range.partition(",")
+            new_line = int(start_text)
+            continue
+        if current_path is None or new_line is None or line.startswith("\\"):
+            continue
+        if line.startswith("+") and not line.startswith("+++"):
+            changed[current_path].add(new_line)
+            new_line += 1
+        elif line.startswith("-") and not line.startswith("---"):
+            continue
+        else:
+            new_line += 1
+    return {path: tuple(sorted(lines)) for path, lines in sorted(changed.items()) if lines}
+
+
+def _configure_mutmut(
+    mutmut: Any,
+    *,
+    only_mutate: Sequence[str],
+    test_selection: Sequence[str],
+    changed_lines: Mapping[str, Sequence[int]] | None,
+) -> None:
+    """Apply runner-only scope after mutmut resets its process globals."""
+
+    from mutmut.configuration import Config
+
+    Config.ensure_loaded()
+    config = Config.get()
+    config.only_mutate = list(only_mutate)
+    if test_selection:
+        config.pytest_add_cli_args_test_selection = list(test_selection)
+    if changed_lines is not None:
+        mutmut._covered_lines = {
+            str((Path("mutants") / path).absolute()): set(lines)
+            for path, lines in changed_lines.items()
+        }
 
 
 def bounded_pytest_runner(
@@ -200,13 +255,20 @@ def escalation_stages(
 
 
 def mutation_batches(
-    mutant_names: Iterable[str], *, batch_size: int = DEFAULT_MUTATION_BATCH_SIZE
+    mutant_names: Iterable[str], *, batch_size: int | None = DEFAULT_MUTATION_BATCH_SIZE
 ) -> tuple[tuple[str, ...], ...]:
-    """Split a mutation pass into bounded, lossless named batches."""
+    """Split a mutation pass into lossless named batches.
 
+    The default is one invocation because each mutmut invocation regenerates
+    the complete configured source tree.  An explicit positive batch size is
+    retained for operators who need smaller resumable invocations.
+    """
+
+    names = tuple(mutant_names)
+    if batch_size is None:
+        return (names,) if names else ()
     if batch_size < 1:
         raise ValueError("batch_size must be positive")
-    names = tuple(mutant_names)
     return tuple(names[start : start + batch_size] for start in range(0, len(names), batch_size))
 
 
@@ -314,6 +376,19 @@ def unresolved_mutants(mutants_root: Path) -> list[str]:
     return sorted(names)
 
 
+def mutated_function_names(mutants_root: Path) -> set[str]:
+    """Return function names represented by the generated mutant metadata."""
+
+    names: set[str] = set()
+    for metadata_path in sorted(mutants_root.glob("src/**/*.py.meta")):
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        names.update(
+            mutant_name.rsplit("__mutmut_", 1)[0]
+            for mutant_name in metadata.get("exit_code_by_key", {})
+        )
+    return names
+
+
 def _stats_path() -> Path:
     return Path("mutants") / "mutmut-stats.json"
 
@@ -395,16 +470,29 @@ def _replace_associations(
     return updated
 
 
-def _prepare_mutmut(max_children: int) -> Any:
+def _prepare_mutmut(
+    max_children: int,
+    *,
+    only_mutate: Sequence[str] = (),
+    test_selection: Sequence[str] = (),
+    changed_lines: Mapping[str, Sequence[int]] | None = None,
+) -> Any:
     """Generate/load the mutmut cache and collect the current test map."""
 
     import mutmut
     import mutmut.__main__ as mutmut_main
-    from mutmut.configuration import Config
 
     mutmut._reset_globals()
     os.environ["MUTANT_UNDER_TEST"] = "mutation_generation"
-    Config.ensure_loaded()
+    # Mutmut does not expose ``only_mutate`` as a command-line option.  Set
+    # the loaded configuration before every generation entry point so a PR
+    # scope can be applied without changing the repository-wide default.
+    _configure_mutmut(
+        mutmut,
+        only_mutate=only_mutate,
+        test_selection=test_selection,
+        changed_lines=changed_lines,
+    )
     Path("mutants").mkdir(exist_ok=True)
     mutmut_main.copy_src_dir()
     mutmut_main.copy_also_copy_files()
@@ -434,14 +522,22 @@ def run_gate(
     max_children: int,
     fast_tests_per_function: int,
     coverage_file: Path = Path(),
-    mutation_batch_size: int = DEFAULT_MUTATION_BATCH_SIZE,
+    mutation_batch_size: int | None = DEFAULT_MUTATION_BATCH_SIZE,
+    only_mutate: Sequence[str] = (),
+    test_selection: Sequence[str] = (),
+    changed_lines: Mapping[str, Sequence[int]] | None = None,
 ) -> None:
-    """Escalate mutation triage, then confirm every survivor exactly."""
+    """Escalate mutation triage, then confirm every selected survivor exactly."""
 
     import mutmut
     import mutmut.__main__ as mutmut_main
 
-    runner = _prepare_mutmut(max_children)
+    runner = _prepare_mutmut(
+        max_children,
+        only_mutate=only_mutate,
+        test_selection=test_selection,
+        changed_lines=changed_lines,
+    )
     _verify_mutmut_can_fail(runner)
 
     stats = _read_stats()
@@ -449,6 +545,14 @@ def run_gate(
     full_associations = complete_associations(
         recorded_associations(stats, _recorded_path()), durations
     )
+    if changed_lines is not None:
+        selected_functions = mutated_function_names(Path("mutants"))
+        if selected_functions:
+            full_associations = {
+                name: selection
+                for name, selection in full_associations.items()
+                if name in selected_functions
+            }
     # Prefer the exact covering-test set; keep the recorded selection wherever
     # coverage has nothing to say, because running more tests is always sound.
     covered = coverage_selection(coverage_file, durations)
@@ -474,26 +578,41 @@ def run_gate(
             _MutationScratchJanitor(scratch_root) if scratch_root is not None else nullcontext(),
             _bounded_runner_patch(mutmut_main, scratch_root, skip_clean_tests=True),
         ):
-            for max_tests in escalation_stages(fast_tests_per_function):
-                selection = (
-                    full_associations
-                    if max_tests is None
-                    else trim_associations(full_associations, durations, max_tests=max_tests)
-                )
-                _write_stats(_replace_associations(_read_stats(), selection))
-                remaining = unresolved_mutants(Path("mutants"))
-                if not remaining:
-                    break
-                for mutant_batch in mutation_batches(remaining, batch_size=mutation_batch_size):
-                    # Load the just-written selection instead of reusing the prior pass's map.
-                    mutmut._reset_globals()
-                    mutmut.tests_by_mangled_function_name.clear()
-                    mutmut.tests_by_mangled_function_name.update(
-                        {name: set(tests) for name, tests in selection.items()}
+            # ``_prepare_mutmut`` already collected the current associations.
+            # Mutmut's private ``_run`` recollects them for every escalation;
+            # keep the explicit maps below authoritative and avoid paying for
+            # another full pytest invocation at each stage.
+            original_collect_or_load_stats = mutmut_main.collect_or_load_stats
+            mutmut_main.collect_or_load_stats = cast(Any, lambda *_args, **_kwargs: None)
+            try:
+                for max_tests in escalation_stages(fast_tests_per_function):
+                    selection = (
+                        full_associations
+                        if max_tests is None
+                        else trim_associations(full_associations, durations, max_tests=max_tests)
                     )
-                    mutmut.duration_by_test.clear()
-                    mutmut.duration_by_test.update(durations)
-                    mutmut_main._run(mutant_batch, max_children)
+                    _write_stats(_replace_associations(_read_stats(), selection))
+                    remaining = unresolved_mutants(Path("mutants"))
+                    if not remaining:
+                        break
+                    for mutant_batch in mutation_batches(remaining, batch_size=mutation_batch_size):
+                        # Load the just-written selection instead of reusing the prior pass's map.
+                        mutmut._reset_globals()
+                        _configure_mutmut(
+                            mutmut,
+                            only_mutate=only_mutate,
+                            test_selection=test_selection,
+                            changed_lines=changed_lines,
+                        )
+                        mutmut.tests_by_mangled_function_name.clear()
+                        mutmut.tests_by_mangled_function_name.update(
+                            {name: set(tests) for name, tests in selection.items()}
+                        )
+                        mutmut.duration_by_test.clear()
+                        mutmut.duration_by_test.update(durations)
+                        mutmut_main._run(mutant_batch, max_children)
+            finally:
+                mutmut_main.collect_or_load_stats = original_collect_or_load_stats
     finally:
         mutmut_main.run_forced_fail_test = cast(Any, original_forced_fail)
 
@@ -519,8 +638,44 @@ def _parse_args_from(argv: Sequence[str] | None) -> argparse.Namespace:
         type=int,
         default=DEFAULT_MUTATION_BATCH_SIZE,
         help=(
-            "mutants per mutmut invocation; each invocation re-scans the whole "
-            "source tree first, so a small batch pays that cost thousands of times"
+            "mutants per mutmut invocation; omit to run each escalation pass in "
+            "one invocation (small batches repeat source generation)"
+        ),
+    )
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument(
+        "--only-mutate",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="source path to mutate; may be repeated, otherwise all source is mutated",
+    )
+    scope.add_argument(
+        "--only-mutate-file",
+        type=Path,
+        metavar="FILE",
+        help="newline-delimited source paths to mutate; an empty file selects all source",
+    )
+    scope.add_argument(
+        "--changed-lines-file",
+        type=Path,
+        metavar="FILE",
+        help="zero-context git diff whose added/modified source lines are mutated",
+    )
+    tests = parser.add_mutually_exclusive_group()
+    tests.add_argument(
+        "--test-selection",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="pytest path to select; may be repeated, otherwise the configured test root is used",
+    )
+    tests.add_argument(
+        "--test-selection-file",
+        type=Path,
+        metavar="FILE",
+        help=(
+            "newline-delimited pytest paths to select; an empty file uses the configured test root"
         ),
     )
     return parser.parse_args(argv)
@@ -530,13 +685,49 @@ def main() -> None:
     args = _parse_args()
     if args.max_children < 1:
         raise SystemExit("--max-children must be positive")
-    if args.mutation_batch_size < 1:
+    if args.mutation_batch_size is not None and args.mutation_batch_size < 1:
         raise SystemExit("--mutation-batch-size must be positive")
+    only_mutate = tuple(args.only_mutate)
+    if args.only_mutate_file is not None:
+        try:
+            only_mutate = tuple(
+                dict.fromkeys(
+                    line.strip()
+                    for line in args.only_mutate_file.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                )
+            )
+        except OSError as error:
+            raise SystemExit(f"cannot read mutation scope file: {error}") from error
+    test_selection = tuple(args.test_selection)
+    if args.test_selection_file is not None:
+        try:
+            test_selection = tuple(
+                dict.fromkeys(
+                    line.strip()
+                    for line in args.test_selection_file.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                )
+            )
+        except OSError as error:
+            raise SystemExit(f"cannot read mutation test selection file: {error}") from error
+    changed_lines: dict[str, tuple[int, ...]] | None = None
+    if args.changed_lines_file is not None:
+        try:
+            changed_lines = parse_changed_lines(args.changed_lines_file.read_text(encoding="utf-8"))
+        except OSError as error:
+            raise SystemExit(f"cannot read changed lines file: {error}") from error
+        only_mutate = tuple(changed_lines)
+        if not only_mutate:
+            raise SystemExit("changed lines file contains no Python source changes")
     run_gate(
         max_children=args.max_children,
         fast_tests_per_function=args.fast_tests_per_function,
         coverage_file=args.coverage_file,
         mutation_batch_size=args.mutation_batch_size,
+        only_mutate=only_mutate,
+        test_selection=test_selection,
+        changed_lines=changed_lines,
     )
 
 

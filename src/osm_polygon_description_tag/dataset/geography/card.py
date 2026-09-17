@@ -18,12 +18,36 @@ from typing import Final
 H3_MAP_START_MARKER: Final[str] = "<!-- GENERATED:H3_MAP:START -->"
 H3_MAP_END_MARKER: Final[str] = "<!-- GENERATED:H3_MAP:END -->"
 H3_MAP_ASSET_RELATIVE_PATH: Final[str] = "assets/description_polygon_density.png"
-H3_MAP_TITLE: Final[str] = "H3 density of description-tagged polygons"
+H3_MAP_TITLE: Final[str] = (
+    "H3 density of canonical globally unique `(osm_type, osm_id)` polygons "
+    "with successfully extracted trimmed non-empty description text"
+)
 
 _MARKER_PATTERN = re.compile(
-    rf"({re.escape(H3_MAP_START_MARKER)}\n).*?({re.escape(H3_MAP_END_MARKER)}\n)",
+    rf"({re.escape(H3_MAP_START_MARKER)}\r?\n).*?"
+    rf"({re.escape(H3_MAP_END_MARKER)}\r?\n)",
     re.DOTALL,
 )
+
+
+def _newline_for(text: str) -> str:
+    return "\r\n" if "\r\n" in text else "\n"
+
+
+def _normalize_block_body(block_body: str, newline: str) -> str:
+    return block_body.replace("\r\n", "\n").replace("\n", newline).rstrip("\r\n")
+
+
+def _insert_new_map_block(template: str, block_body: str) -> str:
+    """Build and place a new map block in a card without map markers."""
+    newline = _newline_for(template)
+    normalized_body = _normalize_block_body(block_body, newline)
+    block = f"{H3_MAP_START_MARKER}{newline}{normalized_body}{newline}{H3_MAP_END_MARKER}{newline}"
+    stats_match = re.search(rf"{re.escape('<!-- GENERATED:STATS:START -->')}\r?\n", template)
+    if stats_match is not None:
+        return template[: stats_match.start()] + block + template[stats_match.start() :]
+    separator = "" if not template else (newline if template.endswith(newline) else newline * 2)
+    return template + separator + block
 
 
 def render_map_block() -> str:
@@ -61,8 +85,26 @@ def install_map_block(template: str, block_body: str) -> str:
             f"dataset card template must contain a unique H3 map marker block; found {len(matches)}"
         )
     match = matches[0]
-    replacement = f"{match.group(1)}{block_body}{match.group(2)}"
+    newline = "\r\n" if match.group(1).endswith("\r\n") else "\n"
+    normalized_body = _normalize_block_body(block_body, newline)
+    replacement = f"{match.group(1)}{normalized_body}{newline}{match.group(2)}"
     return template[: match.start()] + replacement + template[match.end() :]
+
+
+def insert_map_block(template: str, block_body: str) -> str:
+    """Add the map marker block when an older card has no map markers.
+
+    Existing marker pairs are refreshed through :func:`install_map_block`.
+    When no pair exists, the new block is inserted immediately before the
+    stats block, or appended when the card has no stats marker.
+    """
+    start_count = template.count(H3_MAP_START_MARKER)
+    end_count = template.count(H3_MAP_END_MARKER)
+    if start_count == 1 and end_count == 1:
+        return install_map_block(template, block_body)
+    if start_count != 0 or end_count != 0:
+        raise ValueError("dataset card has malformed H3 map markers")
+    return _insert_new_map_block(template, block_body)
 
 
 def write_map_block_marker_to_template(
@@ -97,13 +139,16 @@ def _template_with_map_markers(text: str, asset_relative_path: str) -> str:
     # map image appears near the top of the dataset card. The H3 marker block
     # ends with the same newline that introduces the stats marker, so the
     # surrounding prose is preserved byte-for-byte.
-    stats_start = "<!-- GENERATED:STATS:START -->\n"
-    if stats_start not in text:
-        raise ValueError(f"template missing {stats_start!r} marker; cannot insert map block")
+    newline = _newline_for(text)
+    stats_match = re.search(rf"{re.escape('<!-- GENERATED:STATS:START -->')}\r?\n", text)
+    if stats_match is None:
+        raise ValueError("template missing GENERATED:STATS:START marker; cannot insert map block")
     block = (
-        f"{H3_MAP_START_MARKER}\n![{H3_MAP_TITLE}]({asset_relative_path})\n{H3_MAP_END_MARKER}\n"
+        f"{H3_MAP_START_MARKER}{newline}"
+        f"![{H3_MAP_TITLE}]({asset_relative_path}){newline}"
+        f"{H3_MAP_END_MARKER}{newline}"
     )
-    return text.replace(stats_start, block + stats_start, 1)
+    return text[: stats_match.start()] + block + text[stats_match.start() :]
 
 
 def _atomic_write_template(template_path: Path, new_text: str) -> None:
@@ -123,6 +168,7 @@ __all__ = [
     "H3_MAP_END_MARKER",
     "H3_MAP_START_MARKER",
     "H3_MAP_TITLE",
+    "insert_map_block",
     "install_map_block",
     "render_map_block",
     "write_map_block_marker_to_template",

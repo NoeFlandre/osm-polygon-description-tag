@@ -18,6 +18,11 @@ from osm_polygon_description_tag.publication.planning import (
 from osm_polygon_description_tag.publication.planning import (
     _collect_allowlisted_files as _collect_allowlisted_files,
 )
+from osm_polygon_description_tag.publication.release import (
+    ReleaseReport,
+    release_metadata,
+    validate_published_inventory,
+)
 from osm_polygon_description_tag.publication.upload import (
     _build_command as _build_command,
 )
@@ -34,6 +39,7 @@ from osm_polygon_description_tag.publication.upload import (
 __all__ = [
     "REPO_ID",
     "PublicationError",
+    "ReleaseReport",
     "Runner",
     "UploadItem",
     "UploadPlan",
@@ -44,4 +50,6 @@ __all__ = [
     "file_sha256_bytes",
     "metadata_only_command",
     "per_pbf_command",
+    "release_metadata",
+    "validate_published_inventory",
 ]

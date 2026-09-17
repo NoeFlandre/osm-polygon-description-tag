@@ -31,6 +31,7 @@ COMMANDS = (
     "trackio-snapshot",
     "publish-plan",
     "publish",
+    "release-stats",
     "run-and-publish",
     "language",
 )
@@ -54,6 +55,13 @@ COMMAND_OPTIONS = {
     },
     "publish-plan": {*COMMON_OPTIONS, *HELP_OPTION},
     "publish": {*COMMON_OPTIONS, *HELP_OPTION, "--plan"},
+    "release-stats": {
+        *COMMON_OPTIONS,
+        *HELP_OPTION,
+        "--confirm-repo",
+        "--apply",
+        "--dry-run",
+    },
     "run-and-publish": {*COMMON_OPTIONS, *HELP_OPTION, "--confirm-repo"},
     "language": {*HELP_OPTION},
 }
@@ -257,6 +265,15 @@ def test_publish_keeps_required_plan_option() -> None:
     missing_result = _cli("publish")
 
     assert "--plan" in help_result.stdout
+    assert missing_result.returncode == 2
+    assert "usage:" in missing_result.stderr
+
+
+def test_release_stats_keeps_required_confirm_repo_option() -> None:
+    help_result = _cli("release-stats", "--help")
+    missing_result = _cli("release-stats")
+
+    assert "--confirm-repo" in help_result.stdout
     assert missing_result.returncode == 2
     assert "usage:" in missing_result.stderr
 

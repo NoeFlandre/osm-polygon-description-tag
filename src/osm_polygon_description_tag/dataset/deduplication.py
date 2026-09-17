@@ -11,20 +11,26 @@ global pass over validated GeoParquets, keeps one canonical row for each
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
 import duckdb
 import pyarrow.parquet as pq
 
+from osm_polygon_description_tag.dataset import canonical_rows as _canonical_rows
+from osm_polygon_description_tag.dataset.canonical_rows import (
+    CANONICAL_ROW_POLICY_SHA256,
+    CANONICAL_ROW_POLICY_VERSION,
+    canonical_geometry_wkb_sql,
+    canonical_rows_sql,
+    select_canonical_row,
+)
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     _manifest_path_for,
@@ -40,13 +46,13 @@ from osm_polygon_description_tag.dataset.storage import (
     write_geoparquet,
 )
 
-DEDUPLICATION_POLICY_VERSION = 1
+DEDUPLICATION_POLICY_VERSION = CANONICAL_ROW_POLICY_VERSION
 DUPLICATE_REJECTION_REASON = "duplicate_osm_object"
-_POLICY_TEXT = (
-    "key=(osm_type,osm_id);winner=max(version);then=max(timestamp);"
-    "then=min(source_pbf);then=min(row_fingerprint)"
-)
-DEDUPLICATION_POLICY_SHA256 = hashlib.sha256(_POLICY_TEXT.encode("utf-8")).hexdigest()
+DEDUPLICATION_POLICY_SHA256 = CANONICAL_ROW_POLICY_SHA256
+_parse_timestamp = _canonical_rows._parse_timestamp
+_row_fingerprint = _canonical_rows._row_fingerprint
+_timestamp_rank = _canonical_rows._timestamp_rank
+_version = _canonical_rows._version
 _STATE_RELATIVE_PATH = Path(".work") / "dedup-state.json"
 _BATCH_SIZE = 4096
 
@@ -75,67 +81,6 @@ class _DeduplicationContext:
     manifests: dict[str, Manifest]
     inputs: dict[str, str]
     input_rows: int
-
-
-def _version(value: object) -> int:
-    return int(value) if isinstance(value, int | float) else -1
-
-
-def _parse_timestamp(value: object) -> datetime | None:
-    if isinstance(value, datetime):
-        return value
-    if not isinstance(value, str) or not value.strip():
-        return None
-    try:
-        # Keep explicit UTC-suffix normalization for Python versions whose
-        # ``fromisoformat`` implementation does not accept ``Z`` directly.
-        # pragma: no mutate start
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-        # pragma: no mutate end
-    except ValueError:
-        return None
-
-
-def _timestamp_rank(value: object) -> float:
-    parsed = _parse_timestamp(value)
-    if parsed is None:
-        return 0.0
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    # ``timestamp`` preserves the instant for either aware timezone choice.
-    # pragma: no mutate start
-    return parsed.astimezone(UTC).timestamp()
-    # pragma: no mutate end
-
-
-def _row_fingerprint(row: Mapping[str, object]) -> str:
-    payload = json.dumps(
-        {key: row.get(key) for key in SCHEMA.names if key != "source_pbf"},
-        # Explicitly keep Unicode in the byte-stable fingerprint payload.
-        ensure_ascii=False,
-        sort_keys=True,
-        default=str,
-        separators=(",", ":"),
-    )
-    # UTF-8 codec names are case-insensitive.
-    # pragma: no mutate start
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-    # pragma: no mutate end
-
-
-def select_canonical_row(rows: Sequence[Mapping[str, object]]) -> Mapping[str, object]:
-    """Select the stable canonical row for one OSM identity group."""
-    if not rows:
-        raise ValueError("cannot select a canonical row from an empty group")
-    return min(
-        rows,
-        key=lambda row: (
-            -_version(row.get("version")),
-            -_timestamp_rank(row.get("timestamp")),
-            str(row.get("source_pbf", "")),
-            _row_fingerprint(row),
-        ),
-    )
 
 
 def _sql_literal(value: str) -> str:
@@ -278,30 +223,13 @@ def _resume_staged(
 
 def _canonical_relation(connection: duckdb.DuckDBPyConnection, parquets: Sequence[Path]) -> None:
     paths = ", ".join(_sql_literal(str(path)) for path in parquets)
-    columns = ", ".join(SCHEMA.names)
-    connection.execute(
-        f"""
-        CREATE TEMP TABLE deduplicated AS
-        SELECT {columns}
-        FROM (
-            SELECT *, ROW_NUMBER() OVER (
-                PARTITION BY osm_type, osm_id
-                ORDER BY version DESC NULLS LAST,
-                         timestamp DESC NULLS LAST,
-                         source_pbf ASC,
-                         md5(concat_ws('|',
-                             coalesce(cast(version AS VARCHAR), ''),
-                             coalesce(cast(timestamp AS VARCHAR), ''),
-                             source_pbf,
-                             coalesce(description, ''),
-                             hex(ST_AsWKB(geometry))
-                         )) ASC
-            ) AS _dedup_rank
-            FROM read_parquet([{paths}])
-        ) ranked
-        WHERE _dedup_rank = 1
-        """
+    relation = (
+        "(SELECT * EXCLUDE (geometry), "
+        f"{canonical_geometry_wkb_sql('geometry', input_is_geometry=True)} AS geometry "
+        f"FROM read_parquet([{paths}]))"
     )
+    canonical_query = canonical_rows_sql(relation, SCHEMA.names)
+    connection.execute(f"CREATE TEMP TABLE deduplicated AS {canonical_query}")
 
 
 def _rows_for_source(

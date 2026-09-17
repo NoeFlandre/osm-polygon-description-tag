@@ -9,6 +9,7 @@ import pytest
 from shapely.geometry import Polygon
 
 import osm_polygon_description_tag.dataset.deduplication as dedup_module
+from osm_polygon_description_tag.dataset.canonical_rows import CANONICAL_FINGERPRINT_COLUMNS
 from osm_polygon_description_tag.dataset.deduplication import (
     DEDUPLICATION_POLICY_SHA256,
     DUPLICATE_REJECTION_REASON,
@@ -27,7 +28,6 @@ from osm_polygon_description_tag.dataset.manifest import (
     source_identity_for,
     write_manifest,
 )
-from osm_polygon_description_tag.dataset.schema import SCHEMA
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from tests.conftest import make_record_dict
 
@@ -147,7 +147,7 @@ def test_canonical_tie_break_and_fingerprint_ignore_source_filename() -> None:
     changed = dict(base, description="different")
 
     expected_payload = json.dumps(
-        {key: base.get(key) for key in SCHEMA.names if key != "source_pbf"},
+        {key: base.get(key) for key in CANONICAL_FINGERPRINT_COLUMNS},
         ensure_ascii=False,
         sort_keys=True,
         default=str,
@@ -164,10 +164,10 @@ def test_canonical_tie_break_and_fingerprint_ignore_source_filename() -> None:
 def test_row_fingerprint_is_utf8_and_stringifies_non_json_values() -> None:
     row = {
         "description": "café",
-        "timestamp": datetime(2026, 1, 1, tzinfo=UTC),
+        "name": datetime(2026, 1, 1, tzinfo=UTC),
     }
     payload = json.dumps(
-        {key: row.get(key) for key in SCHEMA.names if key != "source_pbf"},
+        {key: row.get(key) for key in CANONICAL_FINGERPRINT_COLUMNS},
         ensure_ascii=False,
         sort_keys=True,
         default=str,

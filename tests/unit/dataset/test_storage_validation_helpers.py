@@ -1,12 +1,15 @@
 """Behavioral coverage for the bounded GeoParquet validation helpers."""
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
 import pyarrow as pa
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from shapely import to_wkb
 from shapely.geometry import Polygon
 
@@ -32,6 +35,7 @@ from osm_polygon_description_tag.dataset.storage import (
     _UniquenessIndex,
     _validate_area,
     _validate_bbox,
+    _validate_description_values,
     _validate_geo_metadata_header,
     _validate_geometry,
     _validate_geometry_metadata_column,
@@ -50,12 +54,15 @@ from tests.helpers.messages import exactly
 
 
 def _columns(row: dict[str, object]) -> dict[str, list[object]]:
+    arrow_row = _arrow_record(row)
     return {
-        name: [row[name]]
+        name: [arrow_row[name]]
         for name in (
             "source_pbf",
             "osm_type",
             "osm_id",
+            "description",
+            "localized_descriptions",
             "geometry_type",
             "area_m2",
             "bbox_min_x",
@@ -175,6 +182,106 @@ def test_validate_row_counts_each_valid_row(
 
         assert state.row_count == 2
         assert state.actual_types == {"Polygon", "MultiPolygon"}
+
+
+@pytest.mark.parametrize(
+    ("description", "localized", "message"),
+    [
+        ("", [], "description text must be non-empty"),
+        (" \t", [], "description text must be non-empty"),
+        (7, [{"key": "en", "value": "valid"}], "description must be a string"),
+        (None, [], "at least one non-empty description"),
+        (None, [{"key": "en", "value": None}], "localized description value"),
+        (None, [{"key": "en", "value": ""}], "localized description value"),
+        (
+            None,
+            [{"key": "en", "value": "one"}, {"key": "en", "value": "two"}],
+            "duplicate localized description key",
+        ),
+    ],
+)
+def test_validate_description_values_rejects_blank_malformed_or_duplicate_values(
+    description: object, localized: object, message: str
+) -> None:
+    with pytest.raises(StorageError, match=message):
+        _validate_description_values(description, localized)
+
+
+@given(st.text(alphabet=st.characters(whitelist_categories=("L", "N")), min_size=1))
+def test_validate_description_values_accepts_trimmed_nonempty_text(value: str) -> None:
+    _validate_description_values(f" \t{value}\n", [])
+    _validate_description_values(None, [{"key": "en", "value": f" {value} "}])
+
+
+@pytest.mark.parametrize(
+    ("description", "message"),
+    [
+        (7, "description must be a string"),
+        (" \t", "description text must be non-empty"),
+    ],
+)
+def test_validate_base_description_preserves_exact_error_messages(
+    description: object, message: str
+) -> None:
+    with pytest.raises(StorageError) as error:
+        storage._validate_base_description(description)
+
+    assert str(error.value) == message
+
+
+@pytest.mark.parametrize(
+    ("entry", "message"),
+    [
+        ("not-an-entry", "localized description entry is malformed"),
+        (
+            {"key": 7, "value": "valid"},
+            "localized description key is malformed",
+        ),
+        (
+            {"key": "en", "value": " \t"},
+            "localized description value must be non-empty text",
+        ),
+    ],
+)
+def test_validate_localized_entry_preserves_exact_error_messages(
+    entry: object, message: str
+) -> None:
+    with pytest.raises(StorageError) as error:
+        storage._validate_localized_entry(entry, set())
+
+    assert str(error.value) == message
+
+
+@pytest.mark.parametrize("value", ["en", b"en"])
+def test_localized_description_entries_reject_text_scalars_exactly(value: object) -> None:
+    with pytest.raises(StorageError) as error:
+        storage._localized_description_entries(value)
+
+    assert str(error.value) == "localized descriptions must be a sequence"
+
+
+def test_localized_description_entries_preserves_the_runtime_cast_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The erased runtime cast still carries a precise type argument for static checking."""
+    seen_types: list[object] = []
+
+    def record_cast(type_: object, value: object) -> object:
+        seen_types.append(type_)
+        return value
+
+    monkeypatch.setattr(storage, "cast", record_cast)
+    entries = [{"key": "en", "value": "valid"}]
+
+    assert storage._localized_description_entries(entries) is entries
+    assert seen_types == [Sequence[object]]
+
+
+def test_validate_description_values_preserves_exact_missing_text_message() -> None:
+    with pytest.raises(StorageError) as error:
+        _validate_description_values(None, [])
+
+    assert str(error.value) == "at least one non-empty description text is required"
 
 
 def test_validate_row_rejects_duplicate_identity_without_counting_it(

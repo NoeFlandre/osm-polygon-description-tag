@@ -188,6 +188,9 @@ def test_validated_bbox_rejects_wrong_length_non_numeric_and_nonfinite_values(
 def test_summarize_spatial_batch_rejects_missing_geometry() -> None:
     batch = pa.record_batch(
         [
+            pa.array(["region.parquet"]),
+            pa.array(["way"]),
+            pa.array([42], type=pa.int64()),
             pa.array(["Polygon"]),
             pa.array([1.0], type=pa.float64()),
             pa.array([0.0], type=pa.float64()),
@@ -371,14 +374,17 @@ def test_insert_batch_registers_and_unregisters_the_sql_batch_name() -> None:
     with patch.object(
         stats_module,
         "_map_sql_expression",
-        side_effect=["localized_names", "map_from_entries(localized_descriptions)"],
+        side_effect=[
+            "localized_names",
+            "map_from_entries(localized_descriptions)",
+            "tags",
+        ],
     ):
         stats_module._insert_batch(connection, batch, "region.parquet")
 
     connection.register.assert_called_once_with("batch", batch)
-    query, parameters = connection.execute.call_args.args
+    (query,) = connection.execute.call_args.args
     assert "FROM batch" in query
-    assert parameters == ["region.parquet"]
     connection.unregister.assert_called_once_with("batch")
 
 
@@ -573,7 +579,10 @@ def test_build_stats_payload_preserves_public_fields_and_zero_rate_fallback() ->
 
     assert payload["regional_overlap_duplicate_rows"] == 3
     assert payload["regional_overlap_duplicate_rate"] == 0.3
-    assert payload["deduplicated_rows"] == 2
+    assert payload["regional_rows"] == 10
+    assert payload["globally_unique_polygons"] == 7
+    assert payload["deduplicated_rows"] == 3
+    assert payload["manifest_duplicate_rows"] == 2
     assert payload["source_bytes_total"] == 30
     assert payload["output_bytes_total"] == 8
     assert payload["area_m2_count"] == 10
@@ -590,7 +599,7 @@ def test_build_stats_payload_preserves_public_fields_and_zero_rate_fallback() ->
     )
     assert (
         stats_module._build_stats_payload(feature_summary, no_duplicate_manifest_summary)[
-            "deduplicated_rows"
+            "manifest_duplicate_rows"
         ]
         == 0
     )

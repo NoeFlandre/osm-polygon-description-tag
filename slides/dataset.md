@@ -506,7 +506,7 @@ Keep a polygon if it has at least one non empty description tag.
 
 ## The global distribution is dense but uneven
 
-![H3 density of description-tagged polygons](assets/description_polygon_density.png)
+![H3 density of canonical globally unique `(osm_type, osm_id)` polygons with successfully extracted trimmed non-empty description text](assets/description_polygon_density.png)
 
 7,381 H3 resolution-3 cells contain rows.
 

@@ -29,9 +29,15 @@ Explore the pipeline metrics in the [Trackio dashboard](https://noeflandre-osm-p
 
 Read the [dataset presentation](https://noeflandre.github.io/osm-polygon-description-tag/slides/dataset/dataset.html) for a concise visual overview of the snapshot, methodology, and findings.
 
-Hexbin density of every described polygon at H3 resolution 3, drawn from each
-row's geometry centroid on a logarithmic scale. Lighter cells contain more
-polygons.
+The map and generated counts describe canonical globally unique
+`(osm_type, osm_id)` polygons with successfully extracted trimmed non-empty
+description text. Regional/raw rows and overlap duplicates are reported
+separately.
+
+Hexbin density of every canonical globally unique `(osm_type, osm_id)` polygon
+with successfully extracted trimmed non-empty description text at H3 resolution
+3, drawn from each row's geometry centroid on a logarithmic scale. Lighter
+cells contain more polygons.
 <!-- GENERATED:STATS:START -->
 <!-- GENERATED:STATS:END -->
 

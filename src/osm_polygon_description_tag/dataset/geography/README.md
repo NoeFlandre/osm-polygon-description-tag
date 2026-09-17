@@ -11,9 +11,9 @@ asset.
 * The map is published exactly once at
   `assets/description_polygon_density.png` relative to the dataset
   repository root.
-* The map counts every dataset row exactly once. Regional overlap is
-  preserved: the same OSM object appearing in two regional extracts is
-  counted as two dataset rows.
+* The map counts each globally unique ``(osm_type, osm_id)`` identity exactly
+  once. The canonical row is selected deterministically when an object appears
+  in multiple regional extracts.
 * H3 resolution 3 is used.
 * The colour scale is logarithmic (`matplotlib.colors.LogNorm`).
 * Natural Earth 110m landmasses are bundled in the package and drawn in
@@ -21,8 +21,8 @@ asset.
 * The map cache identity is derived from finalized Parquet hashes, the H3
   resolution, renderer revision, and basemap hash. README-only regeneration
   reuses the existing PNG; data or rendering-input changes invalidate it.
-* The map caption reports the total dataset row count and the number
-  of occupied H3 cells, derived from the aggregation.
+* The map caption reports the total globally unique polygon count and the
+  number of occupied H3 cells, derived from the aggregation.
 * Re-rendering identical input produces byte-identical PNGs and
   preserves the existing file mtime.
 
@@ -39,12 +39,12 @@ coordinates raise a descriptive error and are never silently skipped.
 * `h3_policy` owns coordinate validation, H3 v4 cell assignment, the
   antimeridian-safe cell ring conversion, and the stable H3 v4
   `(lon, lat)` boundary ordering used by the renderer.
-* `parquet_inputs` owns the column-pruned `iter_batches` reader and
-  the centroid-to-H3 stream. The full dataset is never read into
-  memory: peak memory is bounded by the batch size and the number
-  of distinct H3 cells, not the total row count.
-* `aggregation` is a thin pure function that walks every Parquet
-  under `data/` and returns a sorted `{h3_cell: count}` mapping.
+* `parquet_inputs` owns the column-pruned unique-row reader and the
+  centroid-to-H3 stream. The full dataset is never read into memory: peak
+  memory is bounded by the batch size and the number of distinct H3 cells,
+  not the total row count.
+* `aggregation` is a thin pure function that walks the shared unique-row view
+  over `data/` and returns a sorted `{h3_cell: count}` mapping.
 * `basemap` owns loading and drawing the bundled Natural Earth 110m
   landmasses. It never performs network I/O.
 * `rendering` and `area_rendering` own the deterministic visual output.

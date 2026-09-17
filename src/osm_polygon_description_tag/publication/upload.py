@@ -4,7 +4,7 @@ import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 from osm_polygon_description_tag.dataset.manifest import file_sha256
 from osm_polygon_description_tag.publication.models import (
@@ -219,6 +219,23 @@ def _sleep_before_retry(
 _default_runner_with_retry: _RetryRunner = _run_with_retry
 
 
+def _dispatch_upload(
+    plan: UploadPlan,
+    command: list[str],
+    runner: Runner | None,
+    timeout: float | None,
+    retry_observer: Callable[..., None] | None,
+    parent_revision: str | None,
+) -> None:
+    if runner is not None:
+        runner(command)
+        return
+    if parent_revision is not None:
+        _run_parented_metadata_commit(plan, parent_revision)
+        return
+    _run_default_upload(command, timeout, retry_observer)
+
+
 def execute_upload(
     plan: UploadPlan,
     *,
@@ -226,6 +243,7 @@ def execute_upload(
     runner: Runner | None = None,
     timeout: float | None = None,
     retry_observer: Callable[..., None] | None = None,
+    parent_revision: str | None = None,
 ) -> None:
     """Execute the upload only after the exact plan identity is confirmed.
 
@@ -240,10 +258,12 @@ def execute_upload(
     _require_confirmation(plan, confirmation)
     _verify_identity(plan)
     command = _build_command(plan)
-    if runner is None:
-        _run_default_upload(command, timeout, retry_observer)
-    else:
-        runner(command)
+    try:
+        _dispatch_upload(plan, command, runner, timeout, retry_observer, parent_revision)
+    except subprocess.CalledProcessError as error:
+        raise PublicationError(f"upload failed with exit code {error.returncode}") from error
+    except subprocess.TimeoutExpired as error:
+        raise PublicationError(f"upload timed out after {error.timeout} seconds") from error
 
 
 def _require_confirmation(plan: UploadPlan, confirmation: str | None) -> None:
@@ -251,6 +271,40 @@ def _require_confirmation(plan: UploadPlan, confirmation: str | None) -> None:
         raise PublicationError("confirmation required (must match freshly computed plan identity)")
     if confirmation != plan.identity_sha256:
         raise PublicationError("confirmation does not match plan identity (refusing to upload)")
+
+
+def _run_parented_metadata_commit(plan: UploadPlan, parent_revision: str) -> None:
+    """Commit metadata with an optimistic parent revision.
+
+    The large-folder CLI can target a revision but does not expose the
+    ``parent_commit`` guard needed to prevent a concurrent language/card
+    publication from being overwritten. Metadata plans are small, so the Hub
+    commit API is the safe production path when an anchor is available.
+    """
+    from osm_polygon_description_tag.publication.verification import _huggingface_hub
+
+    try:
+        api_class: object = _huggingface_hub.HfApi
+        operation_class: object = _huggingface_hub.CommitOperationAdd
+        api = cast(Callable[[], object], api_class)()
+        operations = [
+            cast(Callable[..., object], operation_class)(
+                path_in_repo=item.relative_path,
+                path_or_fileobj=Path(plan.data_root) / item.relative_path,
+            )
+            for item in plan.files
+        ]
+        cast(Any, api).create_commit(
+            repo_id=plan.repo_id,
+            operations=operations,
+            repo_type="dataset",
+            commit_message="Update deterministic dataset statistics",
+            parent_commit=parent_revision,
+        )
+    except Exception as error:
+        raise PublicationError(
+            f"metadata commit failed or remote revision changed: {error}"
+        ) from error
 
 
 def _run_default_upload(

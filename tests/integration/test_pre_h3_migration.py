@@ -26,6 +26,7 @@ from shapely.geometry import Polygon
 
 from osm_polygon_description_tag._resources import dataset_card_template, project_code_revision
 from osm_polygon_description_tag.config import Paths
+from osm_polygon_description_tag.dataset.geography import H3_MAP_TITLE
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     RunCounts,
@@ -273,7 +274,7 @@ def test_pre_h3_migration_refreshes_readme_writes_map_and_uploads_metadata(
     # The orchestrator installed the H3 marker block and rendered the PNG.
     readme = (data_root / "README.md").read_text(encoding="utf-8")
     assert "<!-- GENERATED:H3_MAP:START -->" in readme
-    assert "H3 density of description-tagged polygons" in readme
+    assert H3_MAP_TITLE in readme
     map_path = data_root / "assets" / "description_polygon_density.png"
     assert map_path.is_file()
 

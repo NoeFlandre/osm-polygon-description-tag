@@ -7,6 +7,7 @@ import sys
 import tomllib
 from collections import defaultdict
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 from packaging.requirements import Requirement
@@ -23,7 +24,9 @@ from scripts.run_mutation_gate import (
     complete_associations,
     coverage_selection,
     escalation_stages,
+    mutated_function_names,
     mutation_batches,
+    parse_changed_lines,
     recorded_associations,
     trim_associations,
 )
@@ -568,12 +571,23 @@ def test_quality_recipes_and_required_mutation_gate_are_publicly_wired() -> None
 
     assert "risk:" in justfile
     assert "mutation:" in justfile
+    assert "mutation-scope" in justfile
     assert "run_mutation_gate" in justfile
     assert "uv run python -m scripts.run_mutation_gate" in justfile
+    assert "--changed-lines-file" in justfile
+    assert "--test-selection-file" in justfile
     assert "--max-crap-score 6" in justfile
     assert "--pattern" not in justfile
     assert "planning.x*__mutmut_*" not in justfile
     assert "all source modules" in justfile
+    assert "branches:" in workflow
+    assert "main" in workflow
+    assert "github.event_name == 'pull_request'" in workflow
+    assert "github.event_name == 'push'" in workflow
+    assert "just mutation-scope" in workflow
+    assert "--unified=0" in workflow
+    assert "scripts/**/*.py" in workflow
+    assert "tests/**/*.py" in workflow
     assert "mutation:" in workflow
     assert "run: just risk" in workflow
     assert "run: just mutation" in workflow
@@ -583,6 +597,59 @@ def test_quality_recipes_and_required_mutation_gate_are_publicly_wired() -> None
     assert project["tool"]["mutmut"]["pytest_add_cli_args_test_selection"] == ["tests"]
 
 
+def test_scoped_mutation_recipe_does_not_collect_all_test_contexts() -> None:
+    """PR mutation must not spend the gate timeout rebuilding the full map."""
+    justfile = (PROJECT_ROOT / "justfile").read_text(encoding="utf-8")
+    scope_recipe = justfile.split("mutation-scope scope_file test_scope_file:", 1)[1].split(
+        "\n\n", 1
+    )[0]
+
+    assert "mutation-contexts" not in scope_recipe
+    assert "--coverage-file" not in scope_recipe
+    assert "--changed-lines-file" in scope_recipe
+
+
+def test_mutation_scope_parser_keeps_only_added_or_modified_new_lines() -> None:
+    diff = """diff --git a/src/example.py b/src/example.py
+index 1111111..2222222 100644
+--- a/src/example.py
++++ b/src/example.py
+@@ -4,2 +4,4 @@ def existing():
+ old
++new
++also_new
+@@ -20,0 +22,2 @@ def added():
++return 1
++return 2
+"""
+
+    assert parse_changed_lines(diff) == {
+        "src/example.py": (5, 6, 22, 23),
+    }
+
+
+def test_mutated_function_names_are_read_from_generated_metadata(tmp_path: Path) -> None:
+    metadata_path = tmp_path / "mutants" / "src" / "example.py.meta"
+    metadata_path.parent.mkdir(parents=True)
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "exit_code_by_key": {
+                    "pkg.example.x_function__mutmut_1": None,
+                    "pkg.example.x_function__mutmut_2": 1,
+                    "pkg.example.x_other__mutmut_1": 0,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert mutated_function_names(tmp_path / "mutants") == {
+        "pkg.example.x_function",
+        "pkg.example.x_other",
+    }
+
+
 def test_mutation_gate_resets_state_before_first_escalation(monkeypatch) -> None:
     import mutmut
     import mutmut.__main__ as mutmut_main
@@ -590,6 +657,8 @@ def test_mutation_gate_resets_state_before_first_escalation(monkeypatch) -> None
     import scripts.run_mutation_gate as gate
 
     events: list[str] = []
+    received_scope: list[str] = []
+    received_tests: list[str] = []
 
     class FakeRunner:
         def run_tests(self, *, mutant_name, tests) -> int:
@@ -602,7 +671,15 @@ def test_mutation_gate_resets_state_before_first_escalation(monkeypatch) -> None
         "duration_by_test": {"tests/test_one.py::test_one": 0.1},
         "function_hashes": {"pkg.mod.x_function": "hash"},
     }
-    monkeypatch.setattr(gate, "_prepare_mutmut", lambda _max_children: FakeRunner())
+    monkeypatch.setattr(
+        gate,
+        "_prepare_mutmut",
+        lambda _max_children, *, only_mutate=(), test_selection=(), changed_lines=(): (
+            received_scope.extend(only_mutate)
+            or received_tests.extend(test_selection)
+            or FakeRunner()
+        ),
+    )
     monkeypatch.setattr(gate, "_verify_mutmut_can_fail", lambda _runner: None)
     monkeypatch.setattr(
         gate,
@@ -624,16 +701,30 @@ def test_mutation_gate_resets_state_before_first_escalation(monkeypatch) -> None
 
     def run_stage(_names, _children) -> None:
         events.append("run")
+        mutmut_main.collect_or_load_stats(None)
         assert dict(mutmut.tests_by_mangled_function_name) == {
             "pkg.mod.x_function": {"tests/test_one.py::test_one"}
         }
         assert mutmut.duration_by_test == {"tests/test_one.py::test_one": 0.1}
 
     monkeypatch.setattr(mutmut_main, "_run", run_stage)
+    monkeypatch.setattr(
+        mutmut_main,
+        "collect_or_load_stats",
+        lambda *_args, **_kwargs: events.append("collect-stats"),
+    )
 
-    gate.run_gate(max_children=1, fast_tests_per_function=1)
+    gate.run_gate(
+        max_children=1,
+        fast_tests_per_function=1,
+        only_mutate=("src/osm_polygon_description_tag/dataset/stats.py",),
+        test_selection=("tests/unit/publication/test_release.py",),
+        changed_lines={"src/osm_polygon_description_tag/dataset/stats.py": (1, 2)},
+    )
 
     assert events == ["clean", "write", "reset", "run"]
+    assert received_scope == ["src/osm_polygon_description_tag/dataset/stats.py"]
+    assert received_tests == ["tests/unit/publication/test_release.py"]
 
 
 def test_mutation_gate_defaults_to_single_test_triage() -> None:
@@ -650,7 +741,7 @@ def test_mutation_batches_are_bounded_and_lossless() -> None:
         ("third__mutmut_3",),
     )
 
-    assert max(map(len, mutation_batches(range(9)))) == 4
+    assert mutation_batches(range(9)) == (tuple(range(9)),)
 
 
 def test_clean_test_selection_is_the_sorted_union_of_associations() -> None:
@@ -762,3 +853,169 @@ def test_the_mutation_batch_size_defaults_to_the_module_constant() -> None:
     parsed = run_mutation_gate._parse_args_from([])
 
     assert parsed.mutation_batch_size == run_mutation_gate.DEFAULT_MUTATION_BATCH_SIZE
+
+
+def test_the_default_mutation_batch_is_one_lossless_invocation() -> None:
+    mutants = tuple(range(1000))
+
+    assert mutation_batches(mutants) == (mutants,)
+
+
+def test_the_mutation_gate_accepts_a_source_scope_file() -> None:
+    parsed = run_mutation_gate._parse_args_from(
+        ["--only-mutate-file", "/private/tmp/mutation-scope.txt"]
+    )
+
+    assert parsed.only_mutate_file == Path("/private/tmp/mutation-scope.txt")
+
+
+def test_the_mutation_gate_accepts_a_changed_lines_file() -> None:
+    parsed = run_mutation_gate._parse_args_from(
+        ["--changed-lines-file", "/private/tmp/mutation-scope.diff"]
+    )
+
+    assert parsed.changed_lines_file == Path("/private/tmp/mutation-scope.diff")
+
+
+def test_changed_line_scope_is_installed_after_mutmut_global_reset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import mutmut
+    from mutmut.configuration import Config
+
+    class FakeConfig:
+        only_mutate: ClassVar[list[str]] = []
+        pytest_add_cli_args_test_selection: ClassVar[list[str]] = []
+
+    config = FakeConfig()
+    monkeypatch.setattr(Config, "ensure_loaded", lambda: None)
+    monkeypatch.setattr(Config, "get", lambda: config)
+    monkeypatch.setattr(mutmut, "_covered_lines", None)
+
+    run_mutation_gate._configure_mutmut(
+        mutmut,
+        only_mutate=("src/example.py",),
+        test_selection=("tests/test_example.py",),
+        changed_lines={"src/example.py": (5, 6)},
+    )
+
+    assert config.only_mutate == ["src/example.py"]
+    assert config.pytest_add_cli_args_test_selection == ["tests/test_example.py"]
+    assert mutmut._covered_lines == {str((Path("mutants") / "src/example.py").absolute()): {5, 6}}
+
+
+def test_the_mutation_gate_accepts_repeated_source_scope_paths() -> None:
+    parsed = run_mutation_gate._parse_args_from(
+        [
+            "--only-mutate",
+            "src/osm_polygon_description_tag/dataset/stats.py",
+            "--only-mutate",
+            "src/osm_polygon_description_tag/publication/release.py",
+        ]
+    )
+
+    assert parsed.only_mutate == [
+        "src/osm_polygon_description_tag/dataset/stats.py",
+        "src/osm_polygon_description_tag/publication/release.py",
+    ]
+
+
+def test_the_mutation_gate_accepts_repeated_test_selection_paths() -> None:
+    parsed = run_mutation_gate._parse_args_from(
+        [
+            "--test-selection",
+            "tests/unit/publication/test_release.py",
+            "--test-selection",
+            "tests/unit/publication/test_upload_helpers.py",
+        ]
+    )
+
+    assert parsed.test_selection == [
+        "tests/unit/publication/test_release.py",
+        "tests/unit/publication/test_upload_helpers.py",
+    ]
+
+
+def test_the_mutation_gate_reads_source_scope_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    scope_file = tmp_path / "mutation-scope.txt"
+    scope_file.write_text(
+        "src/osm_polygon_description_tag/dataset/stats.py\n\n"
+        "src/osm_polygon_description_tag/publication/release.py\n",
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        run_mutation_gate,
+        "run_gate",
+        lambda **kwargs: captured.update(kwargs),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run_mutation_gate", "--only-mutate-file", str(scope_file)],
+    )
+
+    run_mutation_gate.main()
+
+    assert captured["only_mutate"] == (
+        "src/osm_polygon_description_tag/dataset/stats.py",
+        "src/osm_polygon_description_tag/publication/release.py",
+    )
+
+
+def test_the_mutation_gate_reads_changed_lines_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    scope_file = tmp_path / "mutation-scope.diff"
+    scope_file.write_text(
+        "diff --git a/src/example.py b/src/example.py\n@@ -1,0 +2,2 @@\n+new\n+also_new\n",
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        run_mutation_gate,
+        "run_gate",
+        lambda **kwargs: captured.update(kwargs),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run_mutation_gate", "--changed-lines-file", str(scope_file)],
+    )
+
+    run_mutation_gate.main()
+
+    assert captured["changed_lines"] == {"src/example.py": (2, 3)}
+
+
+def test_the_mutation_gate_reads_test_selection_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    selection_file = tmp_path / "mutation-tests.txt"
+    selection_file.write_text(
+        "tests/unit/publication/test_release.py\n\ntests/unit/publication/test_upload_helpers.py\n",
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        run_mutation_gate,
+        "run_gate",
+        lambda **kwargs: captured.update(kwargs),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run_mutation_gate", "--test-selection-file", str(selection_file)],
+    )
+
+    run_mutation_gate.main()
+
+    assert captured["test_selection"] == (
+        "tests/unit/publication/test_release.py",
+        "tests/unit/publication/test_upload_helpers.py",
+    )

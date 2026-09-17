@@ -79,6 +79,36 @@ def test_write_empty_file_is_valid(tmp_path: Path) -> None:
     assert "bbox" not in geo["columns"]["geometry"]
 
 
+@pytest.mark.parametrize("description", ["", " \t"])
+def test_validate_rejects_final_artifact_without_nonempty_description_text(
+    tmp_path: Path, description: str
+) -> None:
+    target = tmp_path / "blank-text.parquet"
+    row = {
+        "source_pbf": "r.osm.pbf",
+        "osm_type": "way",
+        "osm_id": 1,
+        "osm_url": "https://www.openstreetmap.org/way/1",
+        "version": 1,
+        "changeset": 1,
+        "timestamp": None,
+        "description": description,
+        "localized_descriptions": [],
+        "tags": [{"key": "description", "value": "source text"}],
+        "geometry_type": "Polygon",
+        "area_m2": 1.0,
+        "bbox_min_x": 0.0,
+        "bbox_min_y": 0.0,
+        "bbox_max_x": 1.0,
+        "bbox_max_y": 1.0,
+        "geometry": _POLYGON_WKB,
+    }
+    _write_raw(target, [row])
+
+    with pytest.raises(StorageError, match="description text must be non-empty"):
+        validate_geoparquet(target)
+
+
 def test_written_file_has_geoparquet_metadata(
     tmp_path: Path, valid_records: list[dict[str, object]]
 ) -> None:

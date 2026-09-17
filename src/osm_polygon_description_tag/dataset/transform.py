@@ -5,7 +5,7 @@ matching description tags, preserves every original OSM tag, converts geometry
 to WKB, computes bounding boxes and geodesic area, and yields one typed record.
 """
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -15,6 +15,7 @@ from shapely.errors import ShapelyError
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import orient
 
+from osm_polygon_description_tag.dataset.text import is_nonempty_text
 from osm_polygon_description_tag.osm.extraction import ExportRecord
 
 GEOD = Geod(ellps="WGS84")
@@ -30,7 +31,7 @@ class RejectedFeature(Exception):
 
 
 def descriptions_from_tags(
-    tags: dict[str, str],
+    tags: Mapping[str, object],
 ) -> tuple[str | None, dict[str, str]]:
     """Return ``(base, localized)`` description values.
 
@@ -42,7 +43,7 @@ def descriptions_from_tags(
     return _tag_values(tags, "description")
 
 
-def names_from_tags(tags: dict[str, str]) -> tuple[str | None, dict[str, str]]:
+def names_from_tags(tags: Mapping[str, object]) -> tuple[str | None, dict[str, str]]:
     """Return ``(base, localized)`` name values.
 
     ``base`` is the exact ``name`` value, or ``None`` when missing or
@@ -53,28 +54,33 @@ def names_from_tags(tags: dict[str, str]) -> tuple[str | None, dict[str, str]]:
     return _tag_values(tags, "name")
 
 
-def _tag_values(tags: dict[str, str], prefix: str) -> tuple[str | None, dict[str, str]]:
+def _tag_values(tags: Mapping[str, object], prefix: str) -> tuple[str | None, dict[str, str]]:
     base = _clean_base_value(tags.get(prefix))
     matches = list(_localized_items(tags, prefix))
     return base, dict(sorted(matches)) if matches else {}
 
 
-def _clean_base_value(value: str | None) -> str | None:
-    return value if value is None or value.strip() else None
+def _clean_base_value(value: object) -> str | None:
+    return value if is_nonempty_text(value) else None
 
 
-def _is_nonempty_localized(key: str, value: str, marker: str) -> bool:
-    return key.startswith(marker) and key != marker and bool(value.strip())
+def _is_nonempty_localized(key: object, value: object, marker: str) -> bool:
+    return (
+        isinstance(key, str)
+        and key.startswith(marker)
+        and key != marker
+        and is_nonempty_text(value)
+    )
 
 
-def _localized_items(tags: dict[str, str], prefix: str) -> Iterator[tuple[str, str]]:
+def _localized_items(tags: Mapping[str, object], prefix: str) -> Iterator[tuple[str, str]]:
     marker = f"{prefix}:"
     for key, value in tags.items():
-        if _is_nonempty_localized(key, value, marker):
+        if _is_nonempty_localized(key, value, marker) and is_nonempty_text(value):
             yield key.removeprefix(marker), value
 
 
-def _has_nonempty_localized(tags: dict[str, str], prefix: str) -> bool:
+def _has_nonempty_localized(tags: Mapping[str, object], prefix: str) -> bool:
     return next(_localized_items(tags, prefix), None) is not None
 
 
@@ -86,9 +92,8 @@ def _identity_rejection_reason(record: ExportRecord) -> str | None:
     return None
 
 
-def _has_nonempty_description(tags: dict[str, str]) -> bool:
-    base = tags.get("description")
-    return (base is not None and bool(base.strip())) or _has_nonempty_localized(tags, "description")
+def _has_nonempty_description(tags: Mapping[str, object]) -> bool:
+    return is_nonempty_text(tags.get("description")) or _has_nonempty_localized(tags, "description")
 
 
 def _early_rejection_reason(record: ExportRecord) -> str | None:

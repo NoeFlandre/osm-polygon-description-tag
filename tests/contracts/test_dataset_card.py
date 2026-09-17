@@ -36,6 +36,9 @@ def test_template_contains_required_handwritten_sections() -> None:
     assert "language code" in text.lower() or "language" in text.lower()
     assert "Trackio" in text
     assert "osm-polygon-description-tag-trackio" in text
+    assert "canonical globally unique" in text
+    assert "`(osm_type, osm_id)` polygons" in text
+    assert "successfully extracted trimmed non-empty description text" in text
     hero_markdown = "![OSM Polygon Description Tag dataset hero](assets/dataset-card-hero.png)"
     assert hero_markdown in text
     assert text.index(hero_markdown) < text.index("# OSM Polygon Description Tag")
@@ -158,9 +161,11 @@ def test_generated_block_contains_only_backed_numbers(
     assert "Total words" in generated
     assert "Median words per description" in generated
     assert "Detailed machine-readable statistics" in generated
+    assert "## Polygon surface and geometry" in generated
+    assert "| Polygon / MultiPolygon rows |" in generated
     assert "Files (deterministic, sorted by parquet filename)" not in readme
     assert "Source SHA-256" not in readme
     assert "Transformation rejections by reason" not in readme
-    assert len(readme.splitlines()) < 180
+    assert len(readme.splitlines()) < 240
     assert stats["files"][0]["source_sha256"]
     assert stats["files"][0]["output_sha256"]

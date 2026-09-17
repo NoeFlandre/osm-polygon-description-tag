@@ -28,6 +28,7 @@ from shapely.errors import ShapelyError
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 
+from osm_polygon_description_tag.dataset.canonical_rows import canonical_geometry_wkb_sql
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     ManifestError,
@@ -36,23 +37,20 @@ from osm_polygon_description_tag.dataset.manifest import (
     output_identity_for,
     read_manifest,
 )
-from osm_polygon_description_tag.dataset.schema import SCHEMA_VERSION
+from osm_polygon_description_tag.dataset.schema import SCHEMA, SCHEMA_VERSION
+from osm_polygon_description_tag.dataset.unique_rows import (
+    iter_unique_parquet_batches,
+    unique_rows_sql,
+)
 from osm_polygon_description_tag.runtime.time import utc_now_iso
 
 STATS_SCHEMA_VERSION = 7
 _QUANTILE_PROBABILITIES = [0.25, 0.5, 0.75]
-_FEATURE_COLUMNS = [
+_FEATURE_COLUMNS = list(SCHEMA.names)
+_SPATIAL_COLUMNS = [
+    "source_pbf",
     "osm_type",
     "osm_id",
-    "geometry_type",
-    "area_m2",
-    "timestamp",
-    "name",
-    "localized_names",
-    "description",
-    "localized_descriptions",
-]
-_SPATIAL_COLUMNS = [
     "geometry_type",
     "area_m2",
     "bbox_min_x",
@@ -185,6 +183,7 @@ class _FeatureSummary:
     geometry_rings_total: int = 0
     geometry_holes_total: int = 0
     multipolygon_components_total: int = 0
+    raw_rows: int | None = None
 
 
 @dataclass(frozen=True)
@@ -251,39 +250,63 @@ def _find_validated_artifacts(data_root: Path) -> tuple[_ValidatedArtifact, ...]
 def _create_feature_table(connection: duckdb.DuckDBPyConnection) -> None:
     connection.execute(
         """
-        CREATE TABLE features (
+        CREATE TABLE all_features (
+            source_pbf VARCHAR NOT NULL,
             osm_type VARCHAR NOT NULL,
             osm_id BIGINT NOT NULL,
-            geometry_type VARCHAR NOT NULL,
-            area_m2 DOUBLE NOT NULL,
+            osm_url VARCHAR NOT NULL,
+            version INTEGER,
+            changeset BIGINT,
             timestamp TIMESTAMP,
             name VARCHAR,
             localized_names MAP(VARCHAR, VARCHAR) NOT NULL,
             description VARCHAR,
             localized_descriptions MAP(VARCHAR, VARCHAR) NOT NULL,
-            source VARCHAR NOT NULL
+            tags MAP(VARCHAR, VARCHAR) NOT NULL,
+            geometry_type VARCHAR NOT NULL,
+            area_m2 DOUBLE NOT NULL,
+            bbox_min_x DOUBLE NOT NULL,
+            bbox_min_y DOUBLE NOT NULL,
+            bbox_max_x DOUBLE NOT NULL,
+            bbox_max_y DOUBLE NOT NULL,
+            geometry BLOB NOT NULL
         )
         """
+    )
+
+
+def _create_unique_feature_view(connection: duckdb.DuckDBPyConnection) -> None:
+    connection.execute(
+        "CREATE TEMP VIEW features AS "
+        + unique_rows_sql(
+            "all_features",
+            _FEATURE_COLUMNS,
+            key_value_columns_are_maps=True,
+        )
     )
 
 
 def _insert_batch(
     connection: duckdb.DuckDBPyConnection,
     batch: pa.RecordBatch,
-    source_name: str,
+    _source_name: str,
 ) -> None:
     localized_names_sql = _map_sql_expression(batch, "localized_names")
     localized_descriptions_sql = _map_sql_expression(batch, "localized_descriptions")
+    tags_sql = _map_sql_expression(batch, "tags")
+    geometry_sql = canonical_geometry_wkb_sql("geometry")
     connection.register("batch", batch)
     try:
         connection.execute(
             f"""
-            INSERT INTO features
+            INSERT INTO all_features
             SELECT
+                source_pbf,
                 osm_type,
                 osm_id,
-                geometry_type,
-                area_m2,
+                osm_url,
+                version,
+                changeset,
                 timestamp,
                 name,
                 CASE WHEN {localized_names_sql} IS NULL
@@ -291,10 +314,17 @@ def _insert_batch(
                 description,
                 CASE WHEN {localized_descriptions_sql} IS NULL
                      THEN MAP() ELSE {localized_descriptions_sql} END,
-                ? AS source
+                CASE WHEN {tags_sql} IS NULL
+                     THEN MAP() ELSE {tags_sql} END,
+                geometry_type,
+                area_m2,
+                bbox_min_x,
+                bbox_min_y,
+                bbox_max_x,
+                bbox_max_y,
+                {geometry_sql}
             FROM batch
             """,  # noqa: S608 - expressions are internal fixed column names
-            [source_name],
         )
     finally:
         connection.unregister("batch")
@@ -556,31 +586,37 @@ def _summarize_spatial_batch(
         strict=True,
     )
     geometries = batch.column("geometry").to_pylist()
+    source_names = (
+        batch.column("source_pbf").to_pylist()
+        if "source_pbf" in batch.schema.names
+        else [source_name] * len(areas)
+    )
     area_values: list[float] = []
     bboxes: list[tuple[float, float, float, float]] = []
     vertices_total = 0
     rings_total = 0
     holes_total = 0
     multipolygon_components_total = 0
-    for offset, (area, geometry_type, bbox, wkb) in enumerate(
-        zip(areas, geometry_types, bbox_values, geometries, strict=True)
+    for offset, (area, geometry_type, bbox, wkb, row_source) in enumerate(
+        zip(areas, geometry_types, bbox_values, geometries, source_names, strict=True)
     ):
         index = row_offset + offset
-        area_values.append(_validated_area(area, source_name=source_name, row_index=index))
+        source = str(row_source)
+        area_values.append(_validated_area(area, source_name=source, row_index=index))
         validated_type = _validated_geometry_type(
             geometry_type,
-            source_name=source_name,
+            source_name=source,
             row_index=index,
         )
         if not isinstance(wkb, bytes):
-            raise ReportingError(f"missing geometry in {source_name} at row {index}")
+            raise ReportingError(f"missing geometry in {source} at row {index}")
         vertices, rings, holes, components = _geometry_measurements(
             wkb,
             validated_type,
-            source_name=source_name,
+            source_name=source,
             row_index=index,
         )
-        bboxes.append(_validated_bbox(bbox, source_name=source_name, row_index=index))
+        bboxes.append(_validated_bbox(bbox, source_name=source, row_index=index))
         vertices_total += vertices
         rings_total += rings
         holes_total += holes
@@ -620,7 +656,10 @@ def _merge_bboxes(
 
 
 def _collect_spatial_summary(artifacts: tuple[_ValidatedArtifact, ...]) -> _SpatialSummary:
-    """Stream all spatial columns and derive dataset-wide geometry facts."""
+    """Stream unique spatial rows and derive dataset-wide geometry facts."""
+    if not artifacts:
+        return _SpatialSummary(0, 0.0, None, None, 0, 0, 0, 0)
+    data_root = artifacts[0].parquet.parent.parent
     area_total = 0.0
     row_count = 0
     dataset_bbox: tuple[float, float, float, float] | None = None
@@ -629,23 +668,21 @@ def _collect_spatial_summary(artifacts: tuple[_ValidatedArtifact, ...]) -> _Spat
     holes_total = 0
     multipolygon_components_total = 0
 
-    for artifact in artifacts:
-        reader = pq.ParquetFile(artifact.parquet)
-        row_index = 0
-        for batch in reader.iter_batches(columns=_SPATIAL_COLUMNS, batch_size=4096):
-            summary = _summarize_spatial_batch(
-                batch,
-                source_name=artifact.parquet.name,
-                row_offset=row_index,
-            )
-            dataset_bbox = _merge_bboxes(dataset_bbox, summary.dataset_bbox)
-            area_total += summary.area_total_m2
-            row_count += summary.rows
-            row_index += summary.rows
-            vertices_total += summary.geometry_vertices_total
-            rings_total += summary.geometry_rings_total
-            holes_total += summary.geometry_holes_total
-            multipolygon_components_total += summary.multipolygon_components_total
+    row_index = 0
+    for batch in iter_unique_parquet_batches(data_root, columns=_SPATIAL_COLUMNS):
+        summary = _summarize_spatial_batch(
+            batch,
+            source_name="unique.parquet",
+            row_offset=row_index,
+        )
+        dataset_bbox = _merge_bboxes(dataset_bbox, summary.dataset_bbox)
+        area_total += summary.area_total_m2
+        row_count += summary.rows
+        row_index += summary.rows
+        vertices_total += summary.geometry_vertices_total
+        rings_total += summary.geometry_rings_total
+        holes_total += summary.geometry_holes_total
+        multipolygon_components_total += summary.multipolygon_components_total
 
     return _SpatialSummary(
         rows=row_count,
@@ -708,17 +745,23 @@ def _build_stats_payload(
     feature_summary: _FeatureSummary,
     manifest_summary: _ManifestSummary,
 ) -> dict[str, Any]:
-    duplicate_rows = feature_summary.rows - feature_summary.unique_osm_objects
+    raw_rows = feature_summary.raw_rows
+    if raw_rows is None:
+        raw_rows = feature_summary.rows
+        duplicate_rows = feature_summary.rows - feature_summary.unique_osm_objects
+    else:
+        duplicate_rows = raw_rows - feature_summary.rows
+    manifest_duplicate_rows = manifest_summary.rejections.get("duplicate_osm_object", 0)
     return {
         "stats_schema_version": STATS_SCHEMA_VERSION,
         "schema_version": SCHEMA_VERSION,
         "output_files": len(manifest_summary.files),
         "rows": feature_summary.rows,
+        "regional_rows": raw_rows,
+        "globally_unique_polygons": feature_summary.unique_osm_objects,
         "unique_osm_objects": feature_summary.unique_osm_objects,
         "regional_overlap_duplicate_rows": duplicate_rows,
-        "regional_overlap_duplicate_rate": (
-            duplicate_rows / feature_summary.rows if feature_summary.rows else 0.0
-        ),
+        "regional_overlap_duplicate_rate": (duplicate_rows / raw_rows if raw_rows else 0.0),
         "emitted_features": manifest_summary.emitted_features,
         "osm_types": feature_summary.osm_types,
         "geometry_types": feature_summary.geometry_types,
@@ -735,7 +778,8 @@ def _build_stats_payload(
         "base_name_rows": feature_summary.base_name_rows,
         "localized_name_rows": feature_summary.localized_name_rows,
         "rejections": manifest_summary.rejections,
-        "deduplicated_rows": manifest_summary.rejections.get("duplicate_osm_object", 0),
+        "deduplicated_rows": duplicate_rows,
+        "manifest_duplicate_rows": manifest_duplicate_rows,
         "source_bytes_total": manifest_summary.source_bytes_total,
         "output_bytes_total": manifest_summary.output_bytes_total,
         "area_m2_count": feature_summary.rows,
@@ -771,7 +815,9 @@ def collect_stats(
     try:
         _create_feature_table(connection)
         _ingest_features(connection, artifacts)
+        _create_unique_feature_view(connection)
         feature_summary = _collect_feature_summary(connection)
+        raw_rows = _query_int(connection, "SELECT COUNT(*) FROM all_features")
     finally:
         connection.close()
 
@@ -782,6 +828,7 @@ def collect_stats(
         )
     feature_summary = replace(
         feature_summary,
+        raw_rows=raw_rows,
         area_total_m2=spatial_summary.area_total_m2,
         area_mean_m2=spatial_summary.area_mean_m2,
         dataset_bbox=spatial_summary.dataset_bbox,

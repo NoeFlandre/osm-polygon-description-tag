@@ -89,6 +89,19 @@ class _StrictVerifierHub:
         path.write_bytes(self.contents[filename])
         return str(path)
 
+    def list_repo_files(
+        self,
+        repo_id: str,
+        *,
+        revision: str,
+        repo_type: str,
+    ) -> list[str]:
+        assert repo_id == REPO_ID
+        assert revision == "revision-1"
+        assert repo_type == "dataset"
+        self.calls.append(("list_repo_files", revision, repo_type))
+        return list(self.entries)
+
 
 def _install_hub(monkeypatch: pytest.MonkeyPatch, hub: object) -> None:
     monkeypatch.setattr(verification._huggingface_hub, "HfApi", lambda: hub)
@@ -128,8 +141,11 @@ def test_default_verifier_checks_multiple_files_with_lfs_and_download_fallback(
     assert hub.calls == [
         ("whoami", (), {}),
         ("repo_info", REPO_ID, "dataset"),
-        ("get_paths_info", (lfs_item.relative_path,), "revision-1"),
-        ("get_paths_info", (downloaded_item.relative_path,), "revision-1"),
+        (
+            "get_paths_info",
+            (lfs_item.relative_path, downloaded_item.relative_path),
+            "revision-1",
+        ),
         ("hf_hub_download", downloaded_item.relative_path, tmp_path / "cache"),
     ]
 
@@ -197,6 +213,58 @@ def test_default_verifier_rejects_missing_revision(
         ),
     ):
         verifier(REPO_ID, ())
+
+
+def test_default_verifier_checks_pinned_data_manifest_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    data = _item("data/a.parquet", b"parquet")
+    manifest = _item("manifests/a.manifest.json", b"manifest")
+    hub = _StrictVerifierHub(
+        tmp_path,
+        {
+            data.relative_path: _StrictEntry(size=data.size_bytes, lfs_sha=data.sha256),
+            manifest.relative_path: _StrictEntry(
+                include_size=False,
+                include_lfs_sha=False,
+            ),
+        },
+        {manifest.relative_path: b"manifest"},
+    )
+    _install_hub(monkeypatch, hub)
+    verifier = verification.default_hub_verifier_factory(cache_dir=tmp_path / "cache")
+
+    assert (
+        verifier.verify_inventory(REPO_ID, (data, manifest), revision="revision-1") == "revision-1"
+    )
+    assert hub.calls == [
+        ("whoami", (), {}),
+        ("list_repo_files", "revision-1", "dataset"),
+        (
+            "get_paths_info",
+            (data.relative_path, manifest.relative_path),
+            "revision-1",
+        ),
+        ("hf_hub_download", manifest.relative_path, tmp_path / "cache"),
+    ]
+
+
+def test_default_verifier_rejects_pinned_inventory_path_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    data = _item("data/a.parquet", b"parquet")
+    hub = _StrictVerifierHub(
+        tmp_path,
+        {"data/other.parquet": _StrictEntry(size=1, lfs_sha="0" * 64)},
+        {},
+    )
+    _install_hub(monkeypatch, hub)
+    verifier = verification.default_hub_verifier_factory()
+
+    with pytest.raises(verification.HubVerificationError, match="inventory path mismatch"):
+        verifier.verify_inventory(REPO_ID, (data,), revision="revision-1")
 
 
 def test_default_verifier_translates_repository_lookup_errors(
@@ -331,6 +399,27 @@ def test_default_verifier_rejects_download_hash_mismatch(
 
     with pytest.raises(verification.HubVerificationError, match="remote SHA mismatch"):
         verifier(REPO_ID, (item,))
+
+
+def test_matching_revision_returns_none_on_real_remote_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    item = _item("README.md", b"expected")
+    hub = _StrictVerifierHub(
+        tmp_path,
+        {item.relative_path: _StrictEntry(size=item.size_bytes + 1, lfs_sha=item.sha256)},
+        {},
+    )
+    _install_hub(monkeypatch, hub)
+    verifier = verification.default_hub_verifier_factory()
+
+    assert verifier.matching_revision(REPO_ID, (item,)) is None
+    assert hub.calls == [
+        ("whoami", (), {}),
+        ("repo_info", REPO_ID, "dataset"),
+        ("get_paths_info", (item.relative_path,), "revision-1"),
+    ]
 
 
 def test_default_verifier_downloads_when_lfs_metadata_has_no_sha256(

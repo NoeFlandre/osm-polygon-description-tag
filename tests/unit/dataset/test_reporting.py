@@ -4,16 +4,23 @@ from pathlib import Path
 import pytest
 from shapely.geometry import MultiPolygon, Polygon
 
+from osm_polygon_description_tag.dataset.canonical_rows import select_canonical_row
+from osm_polygon_description_tag.dataset.geography import (
+    aggregate_area_histogram,
+    aggregate_h3_density,
+)
 from osm_polygon_description_tag.dataset.reporting import collect_stats, generate_dataset_docs
 from osm_polygon_description_tag.dataset.stats import (
     _collect_feature_summary,
     _collect_manifest_summary,
     _create_feature_table,
+    _create_unique_feature_view,
     _find_validated_artifacts,
     _ingest_features,
     _new_connection,
     _validate_artifact,
 )
+from osm_polygon_description_tag.dataset.unique_rows import iter_unique_parquet_batches
 from tests.conftest import make_record_dict
 from tests.helpers.dataset import write_finalized_dataset, write_reporting_fixture
 
@@ -83,6 +90,7 @@ def test_reporting_feature_phase_matches_public_stats(tmp_path: Path) -> None:
     try:
         _create_feature_table(connection)
         _ingest_features(connection, artifacts)
+        _create_unique_feature_view(connection)
         summary = _collect_feature_summary(connection)
     finally:
         connection.close()
@@ -107,8 +115,11 @@ def test_collect_stats_aggregates_from_validated_artifacts(tmp_path: Path) -> No
     assert stats["output_files"] == 2
     assert stats["rows"] == 3
     assert stats["unique_osm_objects"] == 3
+    assert stats["regional_rows"] == 3
+    assert stats["globally_unique_polygons"] == 3
     assert stats["regional_overlap_duplicate_rows"] == 0
     assert stats["regional_overlap_duplicate_rate"] == 0.0
+    assert stats["manifest_duplicate_rows"] == 0
     assert stats["osm_types"] == {"relation": 1, "way": 2}
     assert stats["geometry_types"] == {"MultiPolygon": 1, "Polygon": 2}
     assert stats["description_suffixes"] == {"en": 2, "pt-BR": 1}
@@ -127,6 +138,142 @@ def test_collect_stats_aggregates_from_validated_artifacts(tmp_path: Path) -> No
     assert stats["area_m2_min_m2"] is not None and stats["area_m2_min_m2"] > 0
     assert stats["area_m2_max_m2"] >= stats["area_m2_min_m2"]
     assert stats["stats_schema_version"] == 7
+
+
+def test_statistics_media_and_card_use_one_canonical_row_per_osm_identity(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    source_root.mkdir()
+    old_duplicate = make_record_dict(
+        Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+        {"description": "old duplicate"},
+        osm_id=42,
+        source_pbf="region-a.osm.pbf",
+    )
+    old_duplicate["version"] = 1
+    old_duplicate["area_m2"] = 1.0
+    canonical_duplicate = make_record_dict(
+        Polygon([(10, 10), (10, 11), (11, 11), (11, 10)]),
+        {"description": "canonical duplicate"},
+        osm_id=42,
+        source_pbf="region-b.osm.pbf",
+    )
+    canonical_duplicate["version"] = 2
+    canonical_duplicate["area_m2"] = 1_000.0
+    other = make_record_dict(
+        Polygon([(20, 20), (20, 21), (21, 21), (21, 20)]),
+        {"description": "other"},
+        osm_id=42,
+        osm_type="relation",
+        source_pbf="region-b.osm.pbf",
+    )
+    other["area_m2"] = 10.0
+    write_finalized_dataset(
+        data_root,
+        source_root,
+        {"region-a": [old_duplicate], "region-b": [canonical_duplicate, other]},
+    )
+
+    stats = collect_stats(data_root, clock=_frozen_clock)
+    h3_counts = aggregate_h3_density(data_root)
+    area_counts = aggregate_area_histogram(data_root)
+    generated = generate_dataset_docs(data_root, _TEMPLATE_PATH)
+    card = (data_root / "README.md").read_text(encoding="utf-8")
+
+    assert stats["rows"] == 2
+    assert stats["unique_osm_objects"] == 2
+    assert stats["regional_overlap_duplicate_rows"] == 1
+    assert stats["osm_types"] == {"relation": 1, "way": 1}
+    assert stats["area_m2_count"] == 2
+    assert stats["area_m2_total_m2"] == pytest.approx(1_010.0)
+    assert stats["dataset_bbox"] == [10.0, 10.0, 21.0, 21.0]
+    assert sum(h3_counts.values()) == 2
+    assert sum(area_counts.values()) == 2
+    assert area_counts["1-10 m²"] == 0
+    assert area_counts["10-100 m²"] == 1
+    assert area_counts["1k-10k m²"] == 1
+    assert generated["rows"] == 2
+    assert stats["regional_rows"] == 3
+    assert stats["globally_unique_polygons"] == 2
+    assert stats["manifest_duplicate_rows"] == 0
+    assert "| Regional/raw polygon rows | 3 |" in card
+    assert (
+        "| Canonical globally unique `(osm_type, osm_id)` polygons with successfully "
+        "extracted trimmed non-empty description text | 2 |"
+    ) in card
+    assert "| Regional-overlap duplicate rows | 1 |" in card
+    assert "| Manifest duplicate rows rejected | 0 |" in card
+    assert (
+        "| Canonical globally unique `(osm_type, osm_id)` polygons with successfully "
+        "extracted trimmed non-empty description text | 2 |"
+    ) in card
+
+
+def test_unique_row_selection_is_stable_when_equal_ranked_input_order_reverses(
+    tmp_path: Path,
+) -> None:
+    first = make_record_dict(
+        Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+        {"description": "same"},
+        osm_id=77,
+        source_pbf="region.osm.pbf",
+    )
+    second = make_record_dict(
+        Polygon([(10, 10), (10, 11), (11, 11), (11, 10)]),
+        {"description": "same"},
+        osm_id=77,
+        source_pbf="region.osm.pbf",
+    )
+    second["version"] = int(first["version"]) + 1
+
+    def selected_rows(name: str, records: list[dict[str, object]]) -> list[dict[str, object]]:
+        data_root = tmp_path / name / "generated"
+        source_root = tmp_path / name / "raw"
+        write_finalized_dataset(
+            data_root,
+            source_root,
+            {"region-a": [records[0]], "region-b": [records[1]]},
+        )
+        return [
+            row
+            for batch in iter_unique_parquet_batches(
+                data_root,
+                columns=(
+                    "osm_type",
+                    "osm_id",
+                    "description",
+                    "area_m2",
+                    "bbox_min_x",
+                    "bbox_min_y",
+                    "bbox_max_x",
+                    "bbox_max_y",
+                    "geometry",
+                ),
+            )
+            for row in batch.to_pylist()
+        ]
+
+    forward = selected_rows("forward", [first, second])
+    reverse = selected_rows("reverse", [second, first])
+    expected = select_canonical_row((first, second))
+
+    assert forward == reverse
+    assert forward[0]["osm_id"] == 77
+    assert forward[0]["description"] == expected["description"]
+    assert forward[0]["area_m2"] == pytest.approx(expected["area_m2"])
+    assert (
+        forward[0]["bbox_min_x"],
+        forward[0]["bbox_min_y"],
+        forward[0]["bbox_max_x"],
+        forward[0]["bbox_max_y"],
+    ) == (
+        expected["bbox_min_x"],
+        expected["bbox_min_y"],
+        expected["bbox_max_x"],
+        expected["bbox_max_y"],
+    )
 
 
 def test_collect_stats_separates_base_and_localized_description_words(

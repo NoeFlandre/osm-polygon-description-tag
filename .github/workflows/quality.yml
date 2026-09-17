@@ -2,6 +2,8 @@ name: quality
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 permissions:
@@ -104,10 +106,9 @@ jobs:
 
   mutation:
     runs-on: ubuntu-latest
-    # The all-source mutation sweep is intentionally exhaustive. Keep the
-    # full gate intact and give it enough wall-clock time to finish on the
-    # hosted runner instead of converting a still-running check into a
-    # cancellation.
+    # Main pushes run the exhaustive all-source gate. Pull requests run the
+    # same strict gate over the exact Python source paths changed by the PR.
+    # Both modes require 100% killed mutants and zero unresolved statuses.
     timeout-minutes: 90
     needs: quality
     env:
@@ -116,6 +117,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
@@ -139,10 +142,34 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y just
 
+      - name: Select changed source scope
+        if: github.event_name == 'pull_request'
+        run: >-
+          git diff --unified=0
+          "${{ github.event.pull_request.base.sha }}"
+          "${{ github.event.pull_request.head.sha }}"
+          -- 'src/**/*.py' 'scripts/**/*.py' > "$RUNNER_TEMP/mutation-scope.txt"
+
+      - name: Select changed mutation tests
+        if: github.event_name == 'pull_request'
+        run: >-
+          git diff --name-only
+          "${{ github.event.pull_request.base.sha }}"
+          "${{ github.event.pull_request.head.sha }}"
+          -- 'tests/**/*.py' > "$RUNNER_TEMP/mutation-tests.txt"
+
       - name: Run all-source CRAP budget gate
         run: just risk
 
+      - name: Run changed-source mutation gate
+        if: github.event_name == 'pull_request'
+        run: >-
+          just mutation-scope
+          "$RUNNER_TEMP/mutation-scope.txt"
+          "$RUNNER_TEMP/mutation-tests.txt"
+
       - name: Run all-source mutation gate
+        if: github.event_name == 'push'
         run: just mutation
 
       - name: Upload mutation and CRAP reports

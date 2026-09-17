@@ -20,10 +20,9 @@ def aggregate_h3_density(
 ) -> dict[str, int]:
     """Aggregate H3 cell counts over the complete validated local dataset.
 
-    Every row in every Parquet under ``data/`` contributes exactly once
-    to the count, preserving regional overlap semantics: the same OSM
-    object appearing in two regional extracts is counted as two dataset
-    rows, matching the published dataset's row-count contract.
+    The shared deterministic unique-row view contributes exactly one count
+    for each ``(osm_type, osm_id)`` identity, even when the same object
+    appears in multiple regional extracts.
 
     The ``h3_resolution`` argument uses an explicit ``None`` check:
     passing ``h3_resolution=0`` selects resolution 0 (valid), while

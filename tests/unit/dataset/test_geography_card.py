@@ -58,7 +58,7 @@ def _populate_dataset(data_root: Path, source_root: Path) -> None:
 
 def _stub_map_block() -> str:
     """Return a deterministic map body (no markers) for unit tests."""
-    return f"![H3 density of description-tagged polygons]({H3_MAP_ASSET_RELATIVE_PATH})\n"
+    return f"![{H3_MAP_TITLE}]({H3_MAP_ASSET_RELATIVE_PATH})\n"
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +130,28 @@ def test_install_map_block_rejects_duplicate_markers() -> None:
     )
     with pytest.raises(ValueError, match="unique"):
         install_map_block(template, "![alt](map.png)")
+
+
+def test_insert_map_block_handles_insertion_refresh_append_and_partial_markers() -> None:
+    stats_card = "before\n<!-- GENERATED:STATS:START -->\nstats\n"
+    inserted = card_module.insert_map_block(stats_card, "![map](map.png)\n")
+    assert inserted.index(H3_MAP_START_MARKER) < inserted.index("<!-- GENERATED:STATS:START -->")
+    assert inserted.endswith("<!-- GENERATED:STATS:START -->\nstats\n")
+
+    appended = card_module.insert_map_block("before", "![map](map.png)\n")
+    assert appended == (
+        "before\n\n"
+        "<!-- GENERATED:H3_MAP:START -->\n![map](map.png)\n<!-- GENERATED:H3_MAP:END -->\n"
+    )
+
+    complete = "before\n<!-- GENERATED:H3_MAP:START -->\nold\n<!-- GENERATED:H3_MAP:END -->\nafter"
+    refreshed = card_module.insert_map_block(complete, "new\n")
+    assert refreshed == (
+        "before\n<!-- GENERATED:H3_MAP:START -->\nnew\n<!-- GENERATED:H3_MAP:END -->\nafter"
+    )
+
+    with pytest.raises(ValueError, match="malformed"):
+        card_module.insert_map_block("<!-- GENERATED:H3_MAP:START -->\n", "body")
 
 
 def test_render_map_block_uses_relative_asset_path() -> None:
