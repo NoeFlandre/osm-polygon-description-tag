@@ -630,6 +630,46 @@ def test_canonical_relation_selects_the_same_differing_payload_row_in_any_order(
     assert selected((second, first)) == expected
 
 
+def test_python_and_sql_selectors_choose_the_same_persisted_payload(
+    tmp_path: Path,
+) -> None:
+    first_row = make_record_dict(
+        Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+        {"description": "same"},
+        osm_id=77,
+        source_pbf="same.osm.pbf",
+    )
+    second_row = dict(first_row)
+    first_row["area_m2"] = 1.0
+    second_row["area_m2"] = 6.0
+    first_row["timestamp"] = None
+    second_row["timestamp"] = None
+    expected = select_canonical_row((first_row, second_row))
+    assert expected["area_m2"] == 6.0
+
+    first = tmp_path / "first.parquet"
+    second = tmp_path / "second.parquet"
+    write_geoparquet([first_row], first)
+    write_geoparquet([second_row], second)
+
+    connection = duckdb.connect()
+    try:
+        _canonical_relation(connection, (first, second))
+        actual = connection.execute("SELECT area_m2 FROM deduplicated WHERE osm_id = 77").fetchone()
+        sql_fingerprint = connection.execute(
+            "SELECT area_m2, "  # noqa: S608 - shared SQL policy
+            f"{canonical_rows._full_row_fingerprint_sql()} "
+            "FROM deduplicated ORDER BY area_m2"
+        ).fetchall()
+    finally:
+        connection.close()
+
+    assert actual == (expected["area_m2"],)
+    assert sql_fingerprint == [
+        (expected["area_m2"], canonical_rows._row_fingerprint(expected)),
+    ]
+
+
 def test_read_manifests_maps_each_parquet_to_its_manifest(
     tmp_path: Path,
 ) -> None:
@@ -1055,7 +1095,7 @@ def test_canonical_row_order_sql_has_stable_keyword_casing() -> None:
     """SQL keyword spelling is kept stable even where DuckDB treats case as equivalent."""
     order = canonical_rows.canonical_row_order_sql()
 
-    assert order.split(", md5", 1)[0] == (
+    assert order.split(", sha256", 1)[0] == (
         "version DESC NULLS LAST, timestamp DESC NULLS LAST, source_pbf ASC"
     )
 

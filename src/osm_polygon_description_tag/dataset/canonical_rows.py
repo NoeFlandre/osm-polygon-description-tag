@@ -7,12 +7,12 @@ import json
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
-from osm_polygon_description_tag.dataset.schema import SCHEMA
+from osm_polygon_description_tag.dataset.schema import KEY_VALUE_COLUMNS, SCHEMA, mapping_to_pairs
 
-CANONICAL_ROW_POLICY_VERSION = 2
+CANONICAL_ROW_POLICY_VERSION = 3
 _POLICY_TEXT = (
     "key=(osm_type,osm_id);winner=max(version);then=max(timestamp);"
-    "then=min(source_pbf);then=min(full_row_fingerprint)"
+    "then=min(source_pbf);then=min(payload_sha256_json_fingerprint)"
 )
 CANONICAL_ROW_POLICY_SHA256 = hashlib.sha256(_POLICY_TEXT.encode("utf-8")).hexdigest()
 
@@ -23,7 +23,9 @@ CANONICAL_RANK_COLUMNS = (
     "version",
     "timestamp",
 )
-CANONICAL_FINGERPRINT_COLUMNS = tuple(SCHEMA.names)
+CANONICAL_FINGERPRINT_COLUMNS = tuple(
+    column for column in SCHEMA.names if column not in CANONICAL_RANK_COLUMNS
+)
 
 
 def _version(value: object) -> int:
@@ -50,9 +52,19 @@ def _timestamp_rank(value: object) -> float:
     return parsed.astimezone(UTC).timestamp()
 
 
+def _fingerprint_value(column: str, value: object) -> object:
+    if value is None:
+        return None
+    if column in KEY_VALUE_COLUMNS:
+        return mapping_to_pairs(value)
+    if column == "geometry" and isinstance(value, bytes | bytearray | memoryview):
+        return bytes(value).hex()
+    return value
+
+
 def _row_fingerprint(row: Mapping[str, object]) -> str:
     payload = json.dumps(
-        {key: row.get(key) for key in SCHEMA.names if key != "source_pbf"},
+        {key: _fingerprint_value(key, row.get(key)) for key in CANONICAL_FINGERPRINT_COLUMNS},
         ensure_ascii=False,
         sort_keys=True,
         default=str,
@@ -76,9 +88,17 @@ def select_canonical_row(rows: Sequence[Mapping[str, object]]) -> Mapping[str, o
     )
 
 
+def _sql_fingerprint_value(column: str) -> str:
+    quoted = f'"{column}"'
+    return f"lower(hex({quoted}))" if column == "geometry" else quoted
+
+
 def _full_row_fingerprint_sql() -> str:
-    fields = ", ".join(f'"{column}" := "{column}"' for column in CANONICAL_FINGERPRINT_COLUMNS)
-    return f"md5(to_json(struct_pack({fields})))"
+    fields = ", ".join(
+        f"'{column}', {_sql_fingerprint_value(column)}"
+        for column in sorted(CANONICAL_FINGERPRINT_COLUMNS)
+    )
+    return f"sha256(json_object({fields}))"
 
 
 def canonical_row_order_sql() -> str:

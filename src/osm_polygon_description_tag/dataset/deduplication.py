@@ -222,7 +222,10 @@ def _resume_staged(
 
 def _canonical_relation(connection: duckdb.DuckDBPyConnection, parquets: Sequence[Path]) -> None:
     paths = ", ".join(_sql_literal(str(path)) for path in parquets)
-    relation = f"read_parquet([{paths}])"
+    relation = (
+        "(SELECT * EXCLUDE (geometry), ST_AsWKB(geometry) AS geometry "
+        f"FROM read_parquet([{paths}]))"
+    )
     canonical_query = canonical_rows_sql(relation, SCHEMA.names)
     connection.execute(f"CREATE TEMP TABLE deduplicated AS {canonical_query}")
 
