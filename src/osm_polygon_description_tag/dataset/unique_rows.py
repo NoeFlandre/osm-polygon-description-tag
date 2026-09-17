@@ -13,6 +13,7 @@ import pyarrow.parquet as pq
 from osm_polygon_description_tag.dataset.canonical_rows import (
     CANONICAL_FINGERPRINT_COLUMNS,
     CANONICAL_RANK_COLUMNS,
+    canonical_geometry_wkb_sql,
     canonical_rows_sql,
 )
 
@@ -46,9 +47,18 @@ def _parquet_paths(data_root: Path) -> tuple[Path, ...]:
     return tuple(sorted((data_root / "data").glob("*.parquet"), key=lambda path: path.name))
 
 
-def unique_rows_sql(relation: str, columns: Sequence[str]) -> str:
+def unique_rows_sql(
+    relation: str,
+    columns: Sequence[str],
+    *,
+    key_value_columns_are_maps: bool = False,
+) -> str:
     """Return the canonical one-row-per-OSM-identity query for a relation."""
-    return canonical_rows_sql(relation, columns)
+    return canonical_rows_sql(
+        relation,
+        columns,
+        key_value_columns_are_maps=key_value_columns_are_maps,
+    )
 
 
 def _sql_literal(value: str) -> str:
@@ -83,8 +93,11 @@ def _parquet_column_expression(
             path=path,
             required_columns=required_columns,
         )
-    if column == "geometry" and has_geo_metadata:
-        return "ST_AsWKB(geometry) AS geometry"
+    if column == "geometry":
+        return (
+            f"{canonical_geometry_wkb_sql('geometry', input_is_geometry=has_geo_metadata)} "
+            "AS geometry"
+        )
     return column
 
 

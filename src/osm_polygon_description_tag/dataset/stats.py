@@ -28,6 +28,7 @@ from shapely.errors import ShapelyError
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 
+from osm_polygon_description_tag.dataset.canonical_rows import canonical_geometry_wkb_sql
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     ManifestError,
@@ -276,7 +277,12 @@ def _create_feature_table(connection: duckdb.DuckDBPyConnection) -> None:
 
 def _create_unique_feature_view(connection: duckdb.DuckDBPyConnection) -> None:
     connection.execute(
-        "CREATE TEMP VIEW features AS " + unique_rows_sql("all_features", _FEATURE_COLUMNS)
+        "CREATE TEMP VIEW features AS "
+        + unique_rows_sql(
+            "all_features",
+            _FEATURE_COLUMNS,
+            key_value_columns_are_maps=True,
+        )
     )
 
 
@@ -288,6 +294,7 @@ def _insert_batch(
     localized_names_sql = _map_sql_expression(batch, "localized_names")
     localized_descriptions_sql = _map_sql_expression(batch, "localized_descriptions")
     tags_sql = _map_sql_expression(batch, "tags")
+    geometry_sql = canonical_geometry_wkb_sql("geometry")
     connection.register("batch", batch)
     try:
         connection.execute(
@@ -315,7 +322,7 @@ def _insert_batch(
                 bbox_min_y,
                 bbox_max_x,
                 bbox_max_y,
-                geometry
+                {geometry_sql}
             FROM batch
             """,  # noqa: S608 - expressions are internal fixed column names
         )

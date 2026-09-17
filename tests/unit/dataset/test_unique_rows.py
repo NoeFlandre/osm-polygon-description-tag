@@ -21,14 +21,19 @@ def test_parquet_column_expression_normalizes_geoparquet_geometry() -> None:
             has_geo_metadata=True,
             path=Path("region.parquet"),
         )
-        == "ST_AsWKB(geometry) AS geometry"
+        == "ST_AsWKB(ST_GeomFromWKB(ST_AsWKB(geometry))) AS geometry"
     )
 
 
 @pytest.mark.parametrize(
     ("column", "available", "has_geo_metadata", "expected"),
     [
-        ("geometry", {"geometry"}, False, "geometry"),
+        (
+            "geometry",
+            {"geometry"},
+            False,
+            "ST_AsWKB(ST_GeomFromWKB(geometry)) AS geometry",
+        ),
         ("version", set(), False, "CAST(NULL AS INTEGER) AS version"),
         ("timestamp", set(), False, "CAST(NULL AS TIMESTAMP) AS timestamp"),
         ("description", set(), False, "CAST(NULL AS VARCHAR) AS description"),
@@ -77,7 +82,7 @@ def test_parquet_select_reads_schema_once_and_builds_pruned_sql(
     )
 
     assert "CAST(NULL AS INTEGER) AS version" in sql
-    assert "ST_AsWKB(geometry) AS geometry" in sql
+    assert "ST_AsWKB(ST_GeomFromWKB(ST_AsWKB(geometry))) AS geometry" in sql
     assert "FROM read_parquet('region''s.parquet')" in sql
 
 

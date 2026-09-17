@@ -9,11 +9,14 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import duckdb
+import pyarrow.parquet as pq
 import pytest
+from shapely import from_wkb, to_wkb
 from shapely.geometry import Polygon
 
 import osm_polygon_description_tag.dataset.canonical_rows as canonical_rows
 import osm_polygon_description_tag.dataset.deduplication as dedup_module
+import osm_polygon_description_tag.dataset.stats as stats_module
 from osm_polygon_description_tag.dataset.deduplication import (
     _STATE_RELATIVE_PATH,
     DEDUPLICATION_POLICY_SHA256,
@@ -628,6 +631,93 @@ def test_canonical_relation_selects_the_same_differing_payload_row_in_any_order(
     expected = (999.0, 10.0, 10.0, 11.0, 11.0)
     assert selected((first, second)) == expected
     assert selected((second, first)) == expected
+
+
+def test_all_canonical_selectors_choose_the_same_payload_for_opposite_endian_geometry(
+    tmp_path: Path,
+) -> None:
+    geometry = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
+    base = make_record_dict(
+        geometry,
+        {"description": "base"},
+        osm_id=77,
+        source_pbf="same.osm.pbf",
+    )
+    little_endian = dict(
+        base,
+        area_m2=1.0,
+        description="a-1",
+        geometry=to_wkb(geometry, byte_order=1),
+        timestamp=None,
+    )
+    big_endian = dict(
+        base,
+        area_m2=5.0,
+        description="b-5",
+        geometry=to_wkb(geometry, byte_order=0),
+        timestamp=None,
+    )
+    expected = select_canonical_row((little_endian, big_endian))
+    assert expected["description"] == "a-1"
+    expected_raw_geometry = expected["geometry"]
+    assert isinstance(expected_raw_geometry, bytes | bytearray | memoryview)
+    expected_geometry = to_wkb(from_wkb(bytes(expected_raw_geometry)), byte_order=1)
+    expected_selection = (
+        expected["description"],
+        expected["area_m2"],
+        expected_geometry,
+        canonical_rows._row_fingerprint(expected),
+    )
+
+    first = tmp_path / "first.parquet"
+    second = tmp_path / "second.parquet"
+    write_geoparquet([little_endian], first)
+    write_geoparquet([big_endian], second)
+
+    def selected_parquet(paths: tuple[Path, Path]) -> tuple[object, ...]:
+        connection = duckdb.connect()
+        try:
+            _canonical_relation(connection, paths)
+            row = connection.execute(
+                "SELECT description, area_m2, geometry, "  # noqa: S608 - shared canonical SQL policy
+                f"{canonical_rows._full_row_fingerprint_sql()} "
+                "FROM deduplicated WHERE osm_id = 77"
+            ).fetchone()
+        finally:
+            connection.close()
+        assert row is not None
+        return row[0], row[1], bytes(row[2]), row[3]
+
+    def selected_stats(paths: tuple[Path, Path]) -> tuple[object, ...]:
+        connection = duckdb.connect()
+        try:
+            stats_module._create_feature_table(connection)
+            for path in paths:
+                reader = pq.ParquetFile(path)
+                for batch in reader.iter_batches(columns=stats_module._FEATURE_COLUMNS):
+                    stats_module._insert_batch(connection, batch, path.name)
+            stats_module._create_unique_feature_view(connection)
+            row = connection.execute(
+                "SELECT description, area_m2, geometry, "  # noqa: S608 - shared canonical SQL policy
+                f"{canonical_rows._full_row_fingerprint_sql(key_value_columns_are_maps=True)} "
+                "FROM features WHERE osm_id = 77"
+            ).fetchone()
+        finally:
+            connection.close()
+        assert row is not None
+        return row[0], row[1], bytes(row[2]), row[3]
+
+    for paths in ((first, second), (second, first)):
+        assert (
+            select_canonical_row(
+                (little_endian, big_endian)
+                if paths == (first, second)
+                else (big_endian, little_endian)
+            )["description"]
+            == expected["description"]
+        )
+        assert selected_parquet(paths) == expected_selection
+        assert selected_stats(paths) == expected_selection
 
 
 def test_python_and_sql_selectors_choose_the_same_persisted_payload(

@@ -27,6 +27,7 @@ from osm_polygon_description_tag.dataset import canonical_rows as _canonical_row
 from osm_polygon_description_tag.dataset.canonical_rows import (
     CANONICAL_ROW_POLICY_SHA256,
     CANONICAL_ROW_POLICY_VERSION,
+    canonical_geometry_wkb_sql,
     canonical_rows_sql,
     select_canonical_row,
 )
@@ -223,7 +224,8 @@ def _resume_staged(
 def _canonical_relation(connection: duckdb.DuckDBPyConnection, parquets: Sequence[Path]) -> None:
     paths = ", ".join(_sql_literal(str(path)) for path in parquets)
     relation = (
-        "(SELECT * EXCLUDE (geometry), ST_AsWKB(geometry) AS geometry "
+        "(SELECT * EXCLUDE (geometry), "
+        f"{canonical_geometry_wkb_sql('geometry', input_is_geometry=True)} AS geometry "
         f"FROM read_parquet([{paths}]))"
     )
     canonical_query = canonical_rows_sql(relation, SCHEMA.names)
