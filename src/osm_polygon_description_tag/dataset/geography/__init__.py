@@ -2,14 +2,14 @@
 
 This subpackage produces the deterministic H3 hexagon density map of the
 description-tagged polygons and integrates it as a dataset-card artifact and
-a publication asset. The map counts every dataset row exactly once
-(preserving regional overlap semantics), uses H3 resolution 3, and uses a
+a publication asset. The map counts each globally unique ``(osm_type,
+osm_id)`` identity exactly once, uses H3 resolution 3, and uses a
 logarithmic colour scale so sparse and dense areas remain visible.
 
 It also produces the deterministic area distribution histogram that replaces
-the per-stat table on the dataset card. The histogram buckets every row's
-``area_m2`` into fixed logarithmic bins so it stays small, readable, and
-byte-identical across runs.
+the per-stat table on the dataset card. The histogram buckets each unique
+identity's ``area_m2`` into fixed logarithmic bins so it stays small,
+readable, and byte-identical across runs.
 
 Public orchestration helpers are re-exported below for callers that want a
 single import path.

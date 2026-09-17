@@ -188,6 +188,9 @@ def test_validated_bbox_rejects_wrong_length_non_numeric_and_nonfinite_values(
 def test_summarize_spatial_batch_rejects_missing_geometry() -> None:
     batch = pa.record_batch(
         [
+            pa.array(["region.parquet"]),
+            pa.array(["way"]),
+            pa.array([42], type=pa.int64()),
             pa.array(["Polygon"]),
             pa.array([1.0], type=pa.float64()),
             pa.array([0.0], type=pa.float64()),
@@ -376,9 +379,8 @@ def test_insert_batch_registers_and_unregisters_the_sql_batch_name() -> None:
         stats_module._insert_batch(connection, batch, "region.parquet")
 
     connection.register.assert_called_once_with("batch", batch)
-    query, parameters = connection.execute.call_args.args
+    (query,) = connection.execute.call_args.args
     assert "FROM batch" in query
-    assert parameters == ["region.parquet"]
     connection.unregister.assert_called_once_with("batch")
 
 

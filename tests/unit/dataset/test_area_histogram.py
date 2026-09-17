@@ -58,10 +58,16 @@ from tests.helpers.dataset import frozen_clock as _frozen_clock
 from tests.helpers.dataset import write_reporting_fixture as _populate_dataset
 
 
-def _write_parquet_with_areas(directory: Path, name: str, areas: list[float]) -> Path:
+def _write_parquet_with_areas(
+    directory: Path,
+    name: str,
+    areas: list[float],
+    *,
+    id_start: int = 1,
+) -> Path:
     """Write schema-valid GeoParquet rows with controlled area values."""
     records: list[dict[str, object]] = []
-    for index, area in enumerate(areas, start=1):
+    for index, area in enumerate(areas, start=id_start):
         record = make_record_dict(
             Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
             {"description": "area"},
@@ -82,11 +88,16 @@ def _make_finalized_area_histogram_data_root(tmp_path: Path, files: dict[str, li
     (data_root / "data").mkdir(parents=True)
     (data_root / "manifests").mkdir(parents=True)
     source_root.mkdir(exist_ok=True)
-    for stem, areas in files.items():
+    for file_index, (stem, areas) in enumerate(files.items()):
         source = source_root / f"{stem}.osm.pbf"
         source.write_bytes(stem.encode("utf-8"))
         output = data_root / "data" / f"{stem}.parquet"
-        _write_parquet_with_areas(data_root / "data", stem, areas)
+        _write_parquet_with_areas(
+            data_root / "data",
+            stem,
+            areas,
+            id_start=file_index * 10_000 + 1,
+        )
         write_manifest(
             Manifest(
                 manifest_schema_version=2,
@@ -239,28 +250,21 @@ def test_aggregate_area_histogram_reads_only_area_column_with_requested_batch_si
     tmp_path: Path, batch_size: int | None
 ) -> None:
     data_root = tmp_path / "generated"
-    parquet_path = data_root / "data" / "region.parquet"
     batch = pa.record_batch([pa.array([1.0])], names=["area_m2"])
-    reader = Mock()
-    reader.iter_batches.return_value = [batch]
-    seen_directory: list[Path] = []
-
-    def sorted_inputs(directory: Path) -> list[Path]:
-        seen_directory.append(directory)
-        return [parquet_path]
+    unique_rows = Mock(return_value=[batch])
 
     with (
         patch("osm_polygon_description_tag.dataset.storage.validate_finalized_artifacts_strict"),
-        patch.object(area_histogram_module, "sorted_parquets", side_effect=sorted_inputs),
-        patch.object(area_histogram_module.pq, "ParquetFile", return_value=reader),
+        patch.object(area_histogram_module, "iter_unique_parquet_batches", unique_rows),
     ):
         kwargs = {} if batch_size is None else {"batch_size": batch_size}
         counts = aggregate_area_histogram(data_root, **kwargs)
 
-    assert seen_directory == [data_root / "data"]
     expected_batch_size = 8192 if batch_size is None else batch_size
-    reader.iter_batches.assert_called_once_with(
-        columns=("area_m2",), batch_size=expected_batch_size
+    unique_rows.assert_called_once_with(
+        data_root,
+        columns=("area_m2",),
+        batch_size=expected_batch_size,
     )
     assert counts["1-10 m²"] == 1
 
@@ -269,15 +273,12 @@ def test_aggregate_area_histogram_skips_null_values_in_a_streamed_batch(
     tmp_path: Path,
 ) -> None:
     data_root = tmp_path / "generated"
-    parquet_path = data_root / "data" / "region.parquet"
     batch = pa.record_batch([pa.array([None, 1.0], type=pa.float64())], names=["area_m2"])
-    reader = Mock()
-    reader.iter_batches.return_value = [batch]
+    unique_rows = Mock(return_value=[batch])
 
     with (
         patch("osm_polygon_description_tag.dataset.storage.validate_finalized_artifacts_strict"),
-        patch.object(area_histogram_module, "sorted_parquets", return_value=[parquet_path]),
-        patch.object(area_histogram_module.pq, "ParquetFile", return_value=reader),
+        patch.object(area_histogram_module, "iter_unique_parquet_batches", unique_rows),
     ):
         counts = aggregate_area_histogram(data_root)
 

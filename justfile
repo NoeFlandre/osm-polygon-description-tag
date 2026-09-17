@@ -53,6 +53,21 @@ mutation: mutation-contexts
         --output reports/mutation-summary.json \
         --minimum-score 100
 
+# Run a strict mutation gate for the exact source lines and tests changed by a
+# PR. The scoped runner uses only the targeted test set; an empty test file
+# falls back to the configured repository-wide test root.
+mutation-scope scope_file test_scope_file:
+    test -f "{{scope_file}}"
+    test -f "{{test_scope_file}}"
+    mkdir -p reports data-root/.tmp
+    uv run python -m scripts.run_mutation_gate --max-children 8 \
+        --changed-lines-file "{{scope_file}}" \
+        --test-selection-file "{{test_scope_file}}"
+    uv run python scripts/check_mutation_score.py \
+        --mutants-root mutants \
+        --output reports/mutation-summary.json \
+        --minimum-score 100
+
 # Compute and validate the dataset card and statistics report without uploading.
 release-stats-dry-run:
     uv run osm-polygon-description-tag release-stats \

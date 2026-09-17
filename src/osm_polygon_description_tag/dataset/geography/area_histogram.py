@@ -16,11 +16,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Final
 
-import pyarrow.parquet as pq
-
-from osm_polygon_description_tag.dataset.geography.parquet_inputs import (
-    sorted_parquets,
-)
+from osm_polygon_description_tag.dataset.unique_rows import iter_unique_parquet_batches
 
 _AREA_HISTOGRAM_SCHEMA_VERSION: Final[int] = 1
 
@@ -81,13 +77,13 @@ def aggregate_area_histogram(
     *,
     batch_size: int = 8192,
 ) -> dict[str, int]:
-    """Bucket every ``area_m2`` value into the fixed logarithmic buckets.
+    """Bucket every unique OSM identity's ``area_m2`` into fixed buckets.
 
-    Each finalized Parquet under ``data/`` contributes its rows exactly
-    once. The histogram is keyed by :data:`AREA_BUCKET_LABELS` so callers
-    never see a partial key set. The function never materialises the
-    full dataset: only the ``area_m2`` column is read from each Parquet
-    via :meth:`ParquetFile.iter_batches`.
+    The shared deterministic unique-row view ensures a cross-file OSM
+    identity contributes exactly once. The histogram is keyed by
+    :data:`AREA_BUCKET_LABELS` so callers never see a partial key set. The
+    function never materialises the full dataset: only the ``area_m2`` column
+    is streamed from DuckDB-backed batches.
 
     Parquet/manifest identity and GeoParquet payloads are validated via
     :func:`osm_polygon_description_tag.dataset.storage.validate_finalized_artifacts_strict`
@@ -100,14 +96,15 @@ def aggregate_area_histogram(
 
     validate_finalized_artifacts_strict(data_root)
     counts: list[int] = [0] * AREA_BUCKET_COUNT
-    for parquet_path in sorted_parquets(data_root / "data"):
-        reader = pq.ParquetFile(parquet_path)
-        for batch in reader.iter_batches(columns=("area_m2",), batch_size=batch_size):
-            column = batch.column("area_m2").to_pylist()
-            for value in column:
-                if value is None:
-                    continue
-                counts[_bucket_index(float(value))] += 1
+    for batch in iter_unique_parquet_batches(
+        data_root,
+        columns=("area_m2",),
+        batch_size=batch_size,
+    ):
+        for value in batch.column("area_m2").to_pylist():
+            if value is None:
+                continue
+            counts[_bucket_index(float(value))] += 1
     # pragma: no mutate start - the fixed label and count sequences have equal length
     return dict(zip(AREA_BUCKET_LABELS, counts, strict=False))
     # pragma: no mutate end

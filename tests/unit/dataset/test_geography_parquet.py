@@ -2,10 +2,9 @@
 
 These tests prove the streaming aggregation:
 
-* streams geometry WKB in batches via ``pq.ParquetFile.iter_batches`` and
-  never calls ``pq.read_table`` for the complete dataset;
-* counts every row exactly once, preserving duplicate OSM objects from
-  different files as separate dataset rows (no global deduplication);
+* streams geometry WKB in bounded batches and never calls ``pq.read_table``
+  for the complete dataset;
+* counts each globally unique ``(osm_type, osm_id)`` identity exactly once;
 * rejects malformed WKB, invalid geometry, null geometry, non-finite
   coordinates, and out-of-range coordinates with a descriptive error;
 * aggregates multiple Parquet files deterministically and emits sorted
@@ -19,7 +18,7 @@ import math
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import Mock, call, patch
+from unittest.mock import patch
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -132,8 +131,8 @@ def test_aggregate_h3_density_counts_every_row(tmp_path: Path) -> None:
     assert list(counts.keys()) == sorted(counts.keys())
 
 
-def test_aggregate_h3_density_preserves_regional_overlap(tmp_path: Path) -> None:
-    """The same OSM object across two files is counted twice (no dedup)."""
+def test_aggregate_h3_density_deduplicates_regional_overlap(tmp_path: Path) -> None:
+    """The same OSM object across two files is counted once."""
     data_root = tmp_path / "generated"
     source_root = tmp_path / "raw"
     (data_root / "data").mkdir(parents=True)
@@ -166,7 +165,7 @@ def test_aggregate_h3_density_preserves_regional_overlap(tmp_path: Path) -> None
             data_root / "manifests" / f"{stem}.manifest.json",
         )
     counts = aggregate_h3_density(data_root)
-    assert sum(counts.values()) == 2
+    assert sum(counts.values()) == 1
 
 
 def test_aggregate_h3_density_is_deterministic(tmp_path: Path) -> None:
@@ -309,7 +308,7 @@ def test_collect_h3_counts_forwards_exact_resolution_to_assignment(
 # ---------------------------------------------------------------------------
 
 
-def test_aggregate_uses_iter_batches_not_read_table(
+def test_aggregate_uses_unique_batches_not_read_table(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The aggregator must never call ``pq.read_table`` for the full dataset."""
@@ -319,8 +318,8 @@ def test_aggregate_uses_iter_batches_not_read_table(
     real_read_table = pq.read_table
 
     def guarded_read_table(*args: Any, **kwargs: Any) -> pa.Table:
-        # The aggregator must only open a Parquet via ``ParquetFile``. Any
-        # call to ``read_table`` is a contract violation.
+        # The aggregator must never materialise a complete table. Any call
+        # to ``read_table`` is a contract violation.
         forbidden_calls.append((args, kwargs))
         return real_read_table(*args, **kwargs)
 
@@ -332,19 +331,25 @@ def test_aggregate_uses_iter_batches_not_read_table(
 def test_aggregate_uses_batched_reads_with_pruned_columns(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Only the required columns are read, in batched iter_batches() calls."""
+    """Only the required columns are read through bounded unique-row batches."""
     data_root = _plant_two_parquets(tmp_path)
-    observed: list[tuple[Path, list[str] | None, int | None]] = []
-    real_iter_batches = pq.ParquetFile.iter_batches
+    observed: list[tuple[Path, tuple[str, ...], int]] = []
+    real_iter_unique = parquet_inputs_module.iter_unique_parquet_batches
 
-    def guarded_iter_batches(self: pq.ParquetFile, *args: Any, **kwargs: Any) -> Any:
-        observed.append((Path(str(self)), kwargs.get("columns"), kwargs.get("batch_size")))
-        return real_iter_batches(self, *args, **kwargs)
+    def guarded_iter_unique(
+        root: Path,
+        *,
+        columns: tuple[str, ...],
+        batch_size: int,
+    ) -> Any:
+        observed.append((root, columns, batch_size))
+        return real_iter_unique(root, columns=columns, batch_size=batch_size)
 
-    monkeypatch.setattr(pq.ParquetFile, "iter_batches", guarded_iter_batches)
+    monkeypatch.setattr(parquet_inputs_module, "iter_unique_parquet_batches", guarded_iter_unique)
     aggregate_h3_density(data_root)
-    assert observed, "iter_batches must be invoked"
-    for _path, columns, batch_size in observed:
+    assert observed, "unique-row batches must be invoked"
+    for root, columns, batch_size in observed:
+        assert root == data_root
         assert set(columns or set()) <= set(PARQUET_INPUT_COLUMNS)
         assert batch_size is not None and batch_size > 0
 
@@ -622,14 +627,15 @@ def test_iter_centroids_forwards_exact_streaming_contract(
     data_root = tmp_path / "generated"
     data_dir = data_root / "data"
     parquet_path = data_dir / "region.parquet"
-    batch = Mock()
-    columns = {
-        "geometry": Mock(to_pylist=Mock(return_value=[b"wkb"])),
-        "osm_id": Mock(to_pylist=Mock(return_value=[42])),
-    }
-    batch.column.side_effect = columns.__getitem__
-    reader = Mock()
-    reader.iter_batches.return_value = [batch]
+    batch = pa.record_batch(
+        [
+            pa.array(["region.osm.pbf"]),
+            pa.array(["way"]),
+            pa.array([42], type=pa.int64()),
+            pa.array([b"wkb"], type=pa.binary()),
+        ],
+        names=PARQUET_INPUT_COLUMNS,
+    )
 
     with (
         patch.object(
@@ -642,7 +648,11 @@ def test_iter_centroids_forwards_exact_streaming_contract(
             "sorted_parquets",
             return_value=[parquet_path],
         ) as sorted_paths,
-        patch.object(parquet_inputs_module.pq, "ParquetFile", return_value=reader) as parquet_file,
+        patch.object(
+            parquet_inputs_module,
+            "iter_unique_parquet_batches",
+            return_value=[batch],
+        ) as unique_rows,
         patch.object(
             parquet_inputs_module,
             "_geometry_centroid",
@@ -655,9 +665,11 @@ def test_iter_centroids_forwards_exact_streaming_contract(
     assert rows == [(parquet_path, 2.5, 1.5)]
     require.assert_called_once_with(data_root / "data", label="data")
     sorted_paths.assert_called_once_with(data_dir)
-    parquet_file.assert_called_once_with(parquet_path)
-    reader.iter_batches.assert_called_once_with(columns=list(PARQUET_INPUT_COLUMNS), batch_size=17)
-    batch.column.assert_has_calls([call("geometry"), call("osm_id")])
+    unique_rows.assert_called_once_with(
+        data_root,
+        columns=PARQUET_INPUT_COLUMNS,
+        batch_size=17,
+    )
     centroid.assert_called_once_with(b"wkb")
     validate.assert_called_once_with(1.5, 2.5)
 
@@ -668,19 +680,24 @@ def test_iter_centroids_reports_null_geometry_with_source_identity(
     data_root = tmp_path / "generated"
     data_dir = data_root / "data"
     parquet_path = data_dir / "region.parquet"
-    batch = Mock()
-    columns = {
-        "geometry": Mock(to_pylist=Mock(return_value=[None])),
-        "osm_id": Mock(to_pylist=Mock(return_value=[42])),
-    }
-    batch.column.side_effect = columns.__getitem__
-    reader = Mock()
-    reader.iter_batches.return_value = [batch]
+    batch = pa.record_batch(
+        [
+            pa.array(["region.osm.pbf"]),
+            pa.array(["way"]),
+            pa.array([42], type=pa.int64()),
+            pa.array([None], type=pa.binary()),
+        ],
+        names=PARQUET_INPUT_COLUMNS,
+    )
     monkeypatch.setattr(
         parquet_inputs_module, "require_directory", lambda *_args, **_kwargs: data_dir
     )
     monkeypatch.setattr(parquet_inputs_module, "sorted_parquets", lambda _directory: [parquet_path])
-    monkeypatch.setattr(parquet_inputs_module.pq, "ParquetFile", lambda _path: reader)
+    monkeypatch.setattr(
+        parquet_inputs_module,
+        "iter_unique_parquet_batches",
+        lambda *_args, **_kwargs: iter((batch,)),
+    )
 
     with pytest.raises(H3AggregationError) as error:
         list(iter_centroids(data_root))
@@ -689,15 +706,14 @@ def test_iter_centroids_reports_null_geometry_with_source_identity(
 
 
 # ---------------------------------------------------------------------------
-# Map total equals dataset row count
+# Map total equals unique polygon count
 # ---------------------------------------------------------------------------
 
 
-def test_map_total_equals_validated_row_count(tmp_path: Path) -> None:
+def test_map_total_equals_unique_polygon_count(tmp_path: Path) -> None:
     data_root = _plant_two_parquets(tmp_path)
     counts = collect_h3_counts(data_root)
-    # The total number of map counts must equal the total number of dataset
-    # rows (one row per parquet row, no deduplication).
+    # The total number of map counts must equal the number of unique identities.
     total_parquet_rows = 0
     for path in sorted((data_root / "data").glob("*.parquet")):
         total_parquet_rows += pq.ParquetFile(path).metadata.num_rows

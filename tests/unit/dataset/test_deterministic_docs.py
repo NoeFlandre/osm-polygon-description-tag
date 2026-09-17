@@ -264,7 +264,8 @@ def test_stats_block_is_an_exact_contract_for_non_default_values() -> None:
             "## Polygon surface and geometry",
             "",
             "Computed deterministically from the complete published polygon table: all "
-            "12,345 rows across 6 Parquet files, using only the dataset's area_m2, bbox, "
+            "12,345 globally unique polygons across 6 Parquet files, using only the "
+            "dataset's area_m2, bbox, "
             "and geometry columns. No sampling, truncation, external lookup, or "
             "raw-PBF recomputation is used.",
             "",

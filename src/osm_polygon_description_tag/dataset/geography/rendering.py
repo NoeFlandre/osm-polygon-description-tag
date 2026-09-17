@@ -159,10 +159,10 @@ def render_density_map(
 ) -> RenderResult:
     """Render the H3 density map and atomically write it to ``output_path``.
 
-    The ``cells`` argument maps each H3 cell id to the number of dataset
-    rows whose geometry centroid falls inside that cell. The rendered
-    caption reports the total row count and the number of occupied
-    cells, derived from the aggregation. If ``land_features`` is omitted,
+    The ``cells`` argument maps each H3 cell id to the number of globally
+    unique OSM identities whose geometry centroid falls inside that cell. The
+    rendered caption reports the total unique polygon count and the number of
+    occupied cells, derived from the aggregation. If ``land_features`` is omitted,
     the bundled Natural Earth 110m land reference is loaded. Passing an
     explicit sequence is useful for tests and alternate callers; passing an
     empty sequence intentionally renders ocean only. Identical inputs and

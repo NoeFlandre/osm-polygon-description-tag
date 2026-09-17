@@ -176,7 +176,8 @@ def _render_geometry_stats_section(stats: Mapping[str, Any]) -> list[str]:
         "## Polygon surface and geometry",
         "",
         "Computed deterministically from the complete published polygon table: "
-        f"all {_fmt_int(stats['rows'])} rows across {_fmt_int(stats['output_files'])} "
+        f"all {_fmt_int(stats['rows'])} globally unique polygons across "
+        f"{_fmt_int(stats['output_files'])} "
         "Parquet files, using only the dataset's area_m2, bbox, and geometry columns. "
         "No sampling, truncation, external lookup, or raw-PBF recomputation is used.",
         "",
