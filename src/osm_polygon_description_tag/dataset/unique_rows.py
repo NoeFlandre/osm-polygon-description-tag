@@ -4,24 +4,19 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
 from pathlib import Path
+from typing import Any
 
 import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from osm_polygon_description_tag.dataset.schema import SCHEMA
+from osm_polygon_description_tag.dataset.canonical_rows import (
+    CANONICAL_FINGERPRINT_COLUMNS,
+    CANONICAL_RANK_COLUMNS,
+    canonical_rows_sql,
+)
 
 _BATCH_SIZE = 4096
-_RANK_COLUMNS = (
-    "source_pbf",
-    "osm_type",
-    "osm_id",
-    "version",
-    "timestamp",
-    "description",
-    "geometry",
-)
-_FINGERPRINT_COLUMNS = tuple(SCHEMA.names)
 _REQUIRED_COLUMNS = frozenset(("source_pbf", "osm_type", "osm_id", "geometry"))
 _OPTIONAL_RANK_COLUMN_TYPES = {
     "version": "INTEGER",
@@ -34,38 +29,30 @@ class UniqueRowsError(RuntimeError):
     """Raised when a unique-row view cannot be read safely."""
 
 
+def _require_batch_size(batch_size: int) -> None:
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+
+
+def _validate_input(data_root: Path, validate: bool) -> None:
+    if not validate:
+        return
+    from osm_polygon_description_tag.dataset.storage import validate_finalized_artifacts
+
+    validate_finalized_artifacts(data_root)
+
+
+def _parquet_paths(data_root: Path) -> tuple[Path, ...]:
+    return tuple(sorted((data_root / "data").glob("*.parquet"), key=lambda path: path.name))
+
+
 def unique_rows_sql(relation: str, columns: Sequence[str]) -> str:
     """Return the canonical one-row-per-OSM-identity query for a relation."""
-    selected = tuple(dict.fromkeys(columns))
-    if not selected:
-        raise ValueError("unique-row views require at least one selected column")
-    unknown = set((*selected, *_RANK_COLUMNS)) - set(SCHEMA.names)
-    if unknown:
-        raise ValueError(f"unsupported unique-row columns: {sorted(unknown)}")
-    selected_sql = ", ".join(selected)
-    return f"""
-        SELECT {selected_sql}
-        FROM (
-            SELECT *, ROW_NUMBER() OVER (
-                PARTITION BY osm_type, osm_id
-                ORDER BY version DESC NULLS LAST,
-                         timestamp DESC NULLS LAST,
-                         source_pbf ASC,
-                         {_full_row_fingerprint_sql()} ASC
-            ) AS _unique_rank
-            FROM {relation}
-        ) ranked
-        WHERE _unique_rank = 1
-    """  # noqa: S608 - relation/columns are internal allowlisted SQL fragments
+    return canonical_rows_sql(relation, columns)
 
 
 def _sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
-
-
-def _full_row_fingerprint_sql() -> str:
-    fields = ", ".join(f'"{column}" := "{column}"' for column in _FINGERPRINT_COLUMNS)
-    return f"md5(to_json(struct_pack({fields})))"
 
 
 def _missing_parquet_column_expression(
@@ -128,11 +115,40 @@ def _parquet_select(
 
 
 def _parquet_relation(paths: Sequence[Path], columns: Sequence[str]) -> str:
-    input_columns = tuple(dict.fromkeys((*_RANK_COLUMNS, *_FINGERPRINT_COLUMNS, *columns)))
+    input_columns = tuple(
+        dict.fromkeys((*CANONICAL_RANK_COLUMNS, *CANONICAL_FINGERPRINT_COLUMNS, *columns))
+    )
     required_columns = frozenset((*_REQUIRED_COLUMNS, *columns))
     return " UNION ALL ".join(
         _parquet_select(path, input_columns, required_columns=required_columns) for path in paths
     )
+
+
+def _unique_rows_query(paths: Sequence[Path], columns: Sequence[str]) -> str:
+    return unique_rows_sql(f"({_parquet_relation(paths, columns)})", columns)
+
+
+def _open_unique_rows_connection(data_root: Path):
+    work_root = data_root / ".work" / "duckdb"
+    work_root.mkdir(parents=True, exist_ok=True)
+    connection = duckdb.connect(":memory:")
+    connection.execute("SET temp_directory = ?", [str(work_root)])
+    return connection
+
+
+def _read_unique_rows(
+    connection: Any,
+    query: str,
+    batch_size: int,
+    data_root: Path,
+) -> Iterator[pa.RecordBatch]:
+    try:
+        reader = connection.execute(query).to_arrow_reader(batch_size)
+        yield from reader
+    except duckdb.Error as error:
+        raise UniqueRowsError(
+            f"cannot read unique Parquet rows under {data_root}: {error}"
+        ) from error
 
 
 def iter_unique_parquet_batches(
@@ -148,27 +164,15 @@ def iter_unique_parquet_batches(
     requested columns plus the identity/ranking columns are read, and DuckDB's
     temp directory keeps the view disk-backed for large datasets.
     """
-    if batch_size <= 0:
-        raise ValueError("batch_size must be positive")
-    if validate:
-        from osm_polygon_description_tag.dataset.storage import validate_finalized_artifacts
-
-        validate_finalized_artifacts(data_root)
-    paths = tuple(sorted((data_root / "data").glob("*.parquet"), key=lambda path: path.name))
+    _require_batch_size(batch_size)
+    _validate_input(data_root, validate)
+    paths = _parquet_paths(data_root)
     if not paths:
         return
-    query = unique_rows_sql(f"({_parquet_relation(paths, columns)})", columns)
-    work_root = data_root / ".work" / "duckdb"
-    work_root.mkdir(parents=True, exist_ok=True)
-    connection = duckdb.connect(":memory:")
-    connection.execute("SET temp_directory = ?", [str(work_root)])
+    query = _unique_rows_query(paths, columns)
+    connection = _open_unique_rows_connection(data_root)
     try:
-        reader = connection.execute(query).to_arrow_reader(batch_size)
-        yield from reader
-    except duckdb.Error as error:
-        raise UniqueRowsError(
-            f"cannot read unique Parquet rows under {data_root}: {error}"
-        ) from error
+        yield from _read_unique_rows(connection, query, batch_size, data_root)
     finally:
         connection.close()
 

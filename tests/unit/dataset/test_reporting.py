@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from shapely.geometry import MultiPolygon, Polygon
 
+from osm_polygon_description_tag.dataset.canonical_rows import select_canonical_row
 from osm_polygon_description_tag.dataset.geography import (
     aggregate_area_histogram,
     aggregate_h3_density,
@@ -198,10 +199,16 @@ def test_statistics_media_and_card_use_one_canonical_row_per_osm_identity(
     assert stats["globally_unique_polygons"] == 2
     assert stats["manifest_duplicate_rows"] == 0
     assert "| Regional/raw polygon rows | 3 |" in card
-    assert "| Globally unique polygons | 2 |" in card
+    assert (
+        "| Canonical globally unique `(osm_type, osm_id)` polygons with successfully "
+        "extracted trimmed non-empty description text | 2 |"
+    ) in card
     assert "| Regional-overlap duplicate rows | 1 |" in card
     assert "| Manifest duplicate rows rejected | 0 |" in card
-    assert "| Globally unique polygons measured | 2 |" in card
+    assert (
+        "| Canonical globally unique `(osm_type, osm_id)` polygons with successfully "
+        "extracted trimmed non-empty description text | 2 |"
+    ) in card
 
 
 def test_unique_row_selection_is_stable_when_equal_ranked_input_order_reverses(
@@ -213,8 +220,13 @@ def test_unique_row_selection_is_stable_when_equal_ranked_input_order_reverses(
         osm_id=77,
         source_pbf="region.osm.pbf",
     )
-    second = dict(first)
-    second["area_m2"] = float(first["area_m2"]) + 1.0
+    second = make_record_dict(
+        Polygon([(10, 10), (10, 11), (11, 11), (11, 10)]),
+        {"description": "same"},
+        osm_id=77,
+        source_pbf="region.osm.pbf",
+    )
+    second["version"] = int(first["version"]) + 1
 
     def selected_rows(name: str, records: list[dict[str, object]]) -> list[dict[str, object]]:
         data_root = tmp_path / name / "generated"
@@ -228,16 +240,40 @@ def test_unique_row_selection_is_stable_when_equal_ranked_input_order_reverses(
             row
             for batch in iter_unique_parquet_batches(
                 data_root,
-                columns=("osm_type", "osm_id", "area_m2", "geometry"),
+                columns=(
+                    "osm_type",
+                    "osm_id",
+                    "description",
+                    "area_m2",
+                    "bbox_min_x",
+                    "bbox_min_y",
+                    "bbox_max_x",
+                    "bbox_max_y",
+                    "geometry",
+                ),
             )
             for row in batch.to_pylist()
         ]
 
     forward = selected_rows("forward", [first, second])
     reverse = selected_rows("reverse", [second, first])
+    expected = select_canonical_row((first, second))
 
     assert forward == reverse
     assert forward[0]["osm_id"] == 77
+    assert forward[0]["description"] == expected["description"]
+    assert forward[0]["area_m2"] == pytest.approx(expected["area_m2"])
+    assert (
+        forward[0]["bbox_min_x"],
+        forward[0]["bbox_min_y"],
+        forward[0]["bbox_max_x"],
+        forward[0]["bbox_max_y"],
+    ) == (
+        expected["bbox_min_x"],
+        expected["bbox_min_y"],
+        expected["bbox_max_x"],
+        expected["bbox_max_y"],
+    )
 
 
 def test_collect_stats_separates_base_and_localized_description_words(

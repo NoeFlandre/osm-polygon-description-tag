@@ -18,7 +18,10 @@ from typing import Final
 H3_MAP_START_MARKER: Final[str] = "<!-- GENERATED:H3_MAP:START -->"
 H3_MAP_END_MARKER: Final[str] = "<!-- GENERATED:H3_MAP:END -->"
 H3_MAP_ASSET_RELATIVE_PATH: Final[str] = "assets/description_polygon_density.png"
-H3_MAP_TITLE: Final[str] = "H3 density of description-tagged polygons"
+H3_MAP_TITLE: Final[str] = (
+    "H3 density of canonical globally unique `(osm_type, osm_id)` polygons "
+    "with successfully extracted trimmed non-empty description text"
+)
 
 _MARKER_PATTERN = re.compile(
     rf"({re.escape(H3_MAP_START_MARKER)}\r?\n).*?"

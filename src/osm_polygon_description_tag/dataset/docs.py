@@ -189,7 +189,9 @@ def _render_geometry_stats_section(stats: Mapping[str, Any]) -> list[str]:
         "## Polygon surface and geometry",
         "",
         "Computed deterministically from the complete published polygon table: "
-        f"all {_fmt_int(globally_unique)} globally unique polygons from "
+        f"all {_fmt_int(globally_unique)} canonical globally unique "
+        "`(osm_type, osm_id)` polygons with successfully extracted trimmed "
+        "non-empty description text from "
         f"{_fmt_int(regional_rows)} regional/raw rows across "
         f"{_fmt_int(stats['output_files'])} "
         "Parquet files, using only the dataset's area_m2, bbox, and geometry columns. "
@@ -198,7 +200,9 @@ def _render_geometry_stats_section(stats: Mapping[str, Any]) -> list[str]:
         "",
         "| Metric | Value |",
         "| --- | ---: |",
-        f"| Globally unique polygons measured | {_fmt_int(globally_unique)} |",
+        f"| Canonical globally unique `(osm_type, osm_id)` polygons with "
+        f"successfully extracted trimmed non-empty description text | "
+        f"{_fmt_int(globally_unique)} |",
         "| Surface area (total / mean) | "
         f"{_fmt_area(stats.get('area_m2_total_m2'))} / "
         f"{_fmt_area(stats.get('area_m2_mean_m2'))} |",
@@ -239,7 +243,9 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
         "| Metric | Value |",
         "| --- | --- |",
         f"| Regional/raw polygon rows | {_fmt_int(regional_rows)} |",
-        f"| Globally unique polygons | {_fmt_int(globally_unique)} |",
+        f"| Canonical globally unique `(osm_type, osm_id)` polygons with "
+        f"successfully extracted trimmed non-empty description text | "
+        f"{_fmt_int(globally_unique)} |",
         f"| Regional-overlap duplicate rows | {_fmt_int(overlap_duplicates)} |",
         f"| Parquet files | {_fmt_int(stats['output_files'])} |",
         f"| Download size | {_fmt_bytes(stats['output_bytes_total'])} |",
@@ -287,7 +293,9 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
             "",
             "Area buckets span <1 m² to >=100B m² on a logarithmic scale; "
             "each bar shows the number of polygons in that bucket "
-            f"(total {_fmt_int(globally_unique)} globally unique polygons).",
+            f"(total {_fmt_int(globally_unique)} canonical globally unique "
+            "`(osm_type, osm_id)` polygons with successfully extracted trimmed "
+            "non-empty description text).",
             "",
         ]
     )
@@ -415,44 +423,59 @@ def _newline_for(text: str) -> str:
     return "\r\n" if "\r\n" in text else "\n"
 
 
+def _generated_block_separator(readme: str, newline: str) -> str:
+    if not readme:
+        return ""
+    return newline if readme.endswith(newline) else newline * 2
+
+
 def _append_generated_block(readme: str, block: str, newline: str) -> str:
     """Append a generated block with the card's existing separator style."""
-    separator = "" if not readme else (newline if readme.endswith(newline) else newline * 2)
-    return readme + separator + block
+    return readme + _generated_block_separator(readme, newline) + block
 
 
-def _insert_after_front_matter(readme: str, block: str, newline: str) -> str | None:
-    """Insert a generated block immediately after complete YAML front matter."""
+def _front_matter_end(readme: str) -> int | None:
     opening = _FRONT_MATTER_OPEN.match(readme)
     if opening is None:
         return None
     closing = _FRONT_MATTER_CLOSE.search(readme, opening.end())
     if closing is None:
         raise ReportingError("existing README has unterminated YAML front matter")
-    position = closing.end()
-    separator = "" if readme[position - 1 : position] in ("\n", "\r") else newline
+
+    return closing.end()
+
+
+def _front_matter_separator(readme: str, position: int, newline: str) -> str:
+    if readme[position - 1 : position] in ("\n", "\r"):
+        return ""
+    return newline
+
+
+def _insert_after_front_matter(readme: str, block: str, newline: str) -> str | None:
+    """Insert a generated block immediately after complete YAML front matter."""
+    position = _front_matter_end(readme)
+    if position is None:
+        return None
+
+    separator = _front_matter_separator(readme, position, newline)
     return readme[:position] + separator + block + readme[position:]
 
 
 def _insert_stats_block(readme: str, block: str, newline: str) -> str:
     """Insert a new stats block without changing any existing card bytes."""
     inserted = _insert_after_front_matter(readme, block, newline)
-    if inserted is not None:
-        return inserted
-    return _append_generated_block(readme, block, newline)
+    return inserted if inserted is not None else _append_generated_block(readme, block, newline)
 
 
-def _update_stats_block(readme: str, stats: dict[str, Any], stats_sha256: str) -> str:
-    """Replace the generated stats block, or insert one into a card without it."""
+def _stats_marker_count(readme: str) -> int:
     starts = readme.count(_STATS_START_MARKER)
     ends = readme.count(_STATS_END_MARKER)
     if starts != ends or starts > 1:
         raise ReportingError("existing README has malformed generated stats markers")
-    newline = _newline_for(readme)
-    block = _render_stats_block(stats, stats_sha256).replace("\n", newline)
-    if starts == 0:
-        marker_block = f"{_STATS_START_MARKER}{newline}{block}{_STATS_END_MARKER}{newline}"
-        return _insert_stats_block(readme, marker_block, newline)
+    return starts
+
+
+def _replace_stats_block(readme: str, block: str) -> str:
     if _GENERATED_PATTERN.search(readme) is None:
         raise ReportingError("existing README has malformed generated stats markers")
     return _GENERATED_PATTERN.sub(
@@ -460,15 +483,29 @@ def _update_stats_block(readme: str, stats: dict[str, Any], stats_sha256: str) -
     )
 
 
+def _update_stats_block(readme: str, stats: dict[str, Any], stats_sha256: str) -> str:
+    """Replace the generated stats block, or insert one into a card without it."""
+    starts = _stats_marker_count(readme)
+    newline = _newline_for(readme)
+    block = _render_stats_block(stats, stats_sha256).replace("\n", newline)
+    if starts == 0:
+        marker_block = f"{_STATS_START_MARKER}{newline}{block}{_STATS_END_MARKER}{newline}"
+        return _insert_stats_block(readme, marker_block, newline)
+    return _replace_stats_block(readme, block)
+
+
 def card_has_stats_block(card: str) -> bool:
     """Report whether a dataset card already carries the generated stats block."""
     return _GENERATED_PATTERN.search(card) is not None
 
 
+def _map_marker_counts(readme: str) -> tuple[int, int]:
+    return readme.count(H3_MAP_START_MARKER), readme.count(H3_MAP_END_MARKER)
+
+
 def _update_map_block(readme: str, block_body: str) -> str:
     """Insert or refresh the map block while leaving malformed cards untouched."""
-    h3_starts = readme.count(H3_MAP_START_MARKER)
-    h3_ends = readme.count(H3_MAP_END_MARKER)
+    h3_starts, h3_ends = _map_marker_counts(readme)
     if h3_starts == 0 and h3_ends == 0:
         return insert_map_block(readme, block_body)
     if h3_starts == 1 and h3_ends == 1:

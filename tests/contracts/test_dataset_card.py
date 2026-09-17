@@ -36,6 +36,9 @@ def test_template_contains_required_handwritten_sections() -> None:
     assert "language code" in text.lower() or "language" in text.lower()
     assert "Trackio" in text
     assert "osm-polygon-description-tag-trackio" in text
+    assert "canonical globally unique" in text
+    assert "`(osm_type, osm_id)` polygons" in text
+    assert "successfully extracted trimmed non-empty description text" in text
     hero_markdown = "![OSM Polygon Description Tag dataset hero](assets/dataset-card-hero.png)"
     assert hero_markdown in text
     assert text.index(hero_markdown) < text.index("# OSM Polygon Description Tag")

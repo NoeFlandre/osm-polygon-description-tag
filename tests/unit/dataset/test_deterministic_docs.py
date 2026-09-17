@@ -228,7 +228,8 @@ def test_stats_block_is_an_exact_contract_for_non_default_values() -> None:
             "| Metric | Value |",
             "| --- | --- |",
             "| Regional/raw polygon rows | 12,352 |",
-            "| Globally unique polygons | 12,345 |",
+            "| Canonical globally unique `(osm_type, osm_id)` polygons with successfully "
+            "extracted trimmed non-empty description text | 12,345 |",
             "| Regional-overlap duplicate rows | 7 |",
             "| Parquet files | 6 |",
             "| Download size | 1.5 KiB |",
@@ -261,7 +262,8 @@ def test_stats_block_is_an_exact_contract_for_non_default_values() -> None:
             "",
             "Area buckets span <1 m² to >=100B m² on a logarithmic scale; "
             "each bar shows the number of polygons in that bucket (total 12,345 "
-            "globally unique polygons).",
+            "canonical globally unique `(osm_type, osm_id)` polygons with "
+            "successfully extracted trimmed non-empty description text).",
             "",
             "**OSM object timestamps (UTC):** 2020-01-01T00:00:00Z to 2026-01-01T00:00:00Z",
             "",
@@ -271,7 +273,9 @@ def test_stats_block_is_an_exact_contract_for_non_default_values() -> None:
             "## Polygon surface and geometry",
             "",
             "Computed deterministically from the complete published polygon table: all "
-            "12,345 globally unique polygons from 12,352 regional/raw rows across 6 "
+            "12,345 canonical globally unique `(osm_type, osm_id)` polygons with "
+            "successfully extracted trimmed non-empty description text from 12,352 "
+            "regional/raw rows across 6 "
             "Parquet files, using only the "
             "dataset's area_m2, bbox, "
             "and geometry columns. 7 regional-overlap duplicate rows are excluded. No "
@@ -279,7 +283,8 @@ def test_stats_block_is_an_exact_contract_for_non_default_values() -> None:
             "",
             "| Metric | Value |",
             "| --- | ---: |",
-            "| Globally unique polygons measured | 12,345 |",
+            "| Canonical globally unique `(osm_type, osm_id)` polygons with successfully "
+            "extracted trimmed non-empty description text | 12,345 |",
             "| Surface area (total / mean) | 1.0 km² / 80.0 m² |",
             "| Smallest / largest area | 0.5 m² / 2.0 km² |",
             "| Area p25 / median / p75 | 10.0 m² / 50.0 m² / 100.0 m² |",

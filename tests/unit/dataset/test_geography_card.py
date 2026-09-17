@@ -58,7 +58,7 @@ def _populate_dataset(data_root: Path, source_root: Path) -> None:
 
 def _stub_map_block() -> str:
     """Return a deterministic map body (no markers) for unit tests."""
-    return f"![H3 density of description-tagged polygons]({H3_MAP_ASSET_RELATIVE_PATH})\n"
+    return f"![{H3_MAP_TITLE}]({H3_MAP_ASSET_RELATIVE_PATH})\n"
 
 
 # ---------------------------------------------------------------------------

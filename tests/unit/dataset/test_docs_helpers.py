@@ -345,6 +345,33 @@ def test_insert_after_front_matter_preserves_existing_front_matter() -> None:
     assert docs_module._insert_after_front_matter("body", "block", "\n") is None
 
 
+def test_insert_after_front_matter_rejects_unterminated_front_matter() -> None:
+    with pytest.raises(docs_module.ReportingError, match="unterminated"):
+        docs_module._insert_after_front_matter("---\ntitle: Dataset\nbody", "block", "\n")
+
+
+def test_insert_after_front_matter_adds_separator_at_end_of_front_matter() -> None:
+    readme = "---\ntitle: Dataset\n---"
+
+    assert docs_module._insert_after_front_matter(readme, "block", "\n") == (
+        "---\ntitle: Dataset\n---\nblock"
+    )
+
+
+def test_front_matter_separator_accepts_a_carriage_return_boundary() -> None:
+    assert docs_module._front_matter_separator("prefix\r", len("prefix\r"), "\r\n") == ""
+
+
+def test_update_stats_block_converts_generated_lf_to_card_crlf() -> None:
+    readme = "card\r\n"
+
+    with patch.object(docs_module, "_render_stats_block", return_value="line one\nline two"):
+        updated = docs_module._update_stats_block(readme, {}, "hash")
+
+    assert "line one\r\nline two" in updated
+    assert "line one\nline two" not in updated
+
+
 def test_update_map_block_handles_absent_complete_and_malformed_markers() -> None:
     stats_card = "<!-- GENERATED:STATS:START -->\nbody\n<!-- GENERATED:STATS:END -->\n"
     inserted = docs_module._update_map_block(stats_card, "![map](map.png)")

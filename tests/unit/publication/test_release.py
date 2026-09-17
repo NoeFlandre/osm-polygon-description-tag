@@ -7,10 +7,12 @@ assets, verify the remote revision, and stay byte-stable across runs.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 
+from osm_polygon_description_tag.dataset.geography import H3_MAP_TITLE
 from osm_polygon_description_tag.publication import (
     REPO_ID,
     PublicationError,
@@ -117,6 +119,17 @@ def _replace_stats_marker_block(readme: str, replacement: str) -> str:
 
 def _without_stats_marker_block(readme: str) -> str:
     return _replace_stats_marker_block(readme, "")
+
+
+_H3_MAP_BLOCK_PATTERN = re.compile(
+    r"<!-- GENERATED:H3_MAP:START -->[^\n]*\n.*?<!-- GENERATED:H3_MAP:END -->\n",
+    re.DOTALL,
+)
+
+
+def _without_generated_map_and_stats(readme: str) -> str:
+    without_stats = _without_stats_marker_block(readme)
+    return _H3_MAP_BLOCK_PATTERN.sub("", without_stats, count=1)
 
 
 def test_dry_run_computes_plan_without_uploading(workspace: Path) -> None:
@@ -352,7 +365,8 @@ def test_release_restores_pre_regression_card_without_losing_content(
     _release(workspace)
 
     updated = (workspace / "README.md").read_text(encoding="utf-8")
-    assert _without_stats_marker_block(updated) == _without_stats_marker_block(golden)
+    assert H3_MAP_TITLE in updated
+    assert _without_generated_map_and_stats(updated) == _without_generated_map_and_stats(golden)
 
     stats_start = updated.index("<!-- GENERATED:STATS:START -->")
     stats_end = updated.index("<!-- GENERATED:STATS:END -->", stats_start)
@@ -363,7 +377,10 @@ def test_release_restores_pre_regression_card_without_losing_content(
         "<!-- schema_version: ",
         "## Dataset at a glance",
         "| Regional/raw polygon rows | 3 |",
-        "| Globally unique polygons | 3 |",
+        (
+            "| Canonical globally unique `(osm_type, osm_id)` polygons with "
+            "successfully extracted trimmed non-empty description text | 3 |"
+        ),
         "| Regional-overlap duplicate rows | 0 |",
         "| Manifest duplicate rows rejected | 0 |",
         "| Parquet files | 2 |",
@@ -380,7 +397,10 @@ def test_release_restores_pre_regression_card_without_losing_content(
             "and per-file SHA-256 provenance are available in [`stats.json`](stats.json)."
         ),
         "## Polygon surface and geometry",
-        "| Globally unique polygons measured | 3 |",
+        (
+            "| Canonical globally unique `(osm_type, osm_id)` polygons with "
+            "successfully extracted trimmed non-empty description text | 3 |"
+        ),
         "| Polygon / MultiPolygon rows | 2 / 1 |",
     ):
         assert expected in generated_stats

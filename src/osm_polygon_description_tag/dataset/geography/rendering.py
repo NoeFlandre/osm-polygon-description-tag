@@ -34,6 +34,7 @@ from osm_polygon_description_tag.dataset.geography.basemap import (
     draw_landmasses,
     load_land_basemap,
 )
+from osm_polygon_description_tag.dataset.geography.card import H3_MAP_TITLE
 from osm_polygon_description_tag.dataset.geography.h3_policy import (
     cell_rings,
 )
@@ -60,10 +61,8 @@ _COLORBAR_FRACTION: Final[float] = 0.025
 _COLORBAR_PAD: Final[float] = 0.02
 
 # Caption templates.
-_TITLE: Final[str] = "H3 Density of Description-Tagged Polygons"
-_NO_DATA_CAPTION: Final[str] = (
-    "H3 density of description-tagged polygons. 0 polygons across 0 H3 cells (no data)."
-)
+_TITLE: Final[str] = H3_MAP_TITLE
+_NO_DATA_CAPTION: Final[str] = f"{H3_MAP_TITLE}. 0 polygons across 0 H3 cells (no data)."
 
 
 @dataclass(frozen=True)
@@ -114,7 +113,7 @@ def _build_caption(
     if total_rows == 0 or occupied_cells == 0:
         return _NO_DATA_CAPTION
     return (
-        "H3 density of description-tagged polygons. "
+        f"{H3_MAP_TITLE}. "
         f"Each globally deduplicated OSM identity is counted exactly once. "
         f"{total_rows:,} polygons across {occupied_cells:,} H3 cells at "
         "resolution 3 on a logarithmic colour scale."
