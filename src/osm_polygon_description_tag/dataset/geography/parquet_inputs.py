@@ -11,9 +11,9 @@ number of H3 cells observed, not the total number of rows.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from shapely import from_wkb
 from shapely.errors import ShapelyError
@@ -114,6 +114,40 @@ def _validate_centroid(point: BaseGeometry) -> None:
         raise H3AggregationError("could not derive a finite centroid")
 
 
+def _source_paths(data_dir: Path) -> dict[str, Path]:
+    return {
+        f"{parquet_path.stem}.osm.pbf": parquet_path for parquet_path in sorted_parquets(data_dir)
+    }
+
+
+def _centroid_row(
+    wkb: bytes | None,
+    osm_id: object,
+    source_name: object,
+    source_paths: Mapping[str, Path],
+) -> tuple[Path, float, float]:
+    parquet_path = source_paths.get(str(source_name), Path(str(source_name)))
+    centroid = _geometry_centroid(wkb)
+    if centroid is None:
+        raise H3AggregationError(f"null geometry at {parquet_path} (osm_id={osm_id!r})")
+    lon, lat = centroid
+    # Validate before H3 assignment for a clean error message.
+    validate_coordinate(lat, lon)
+    return parquet_path, lon, lat
+
+
+def _iter_centroid_batch(
+    batch: Any, source_paths: Mapping[str, Path]
+) -> Iterator[tuple[Path, float, float]]:
+    for wkb, osm_id, source_name in zip(
+        batch.column("geometry").to_pylist(),
+        batch.column("osm_id").to_pylist(),
+        batch.column("source_pbf").to_pylist(),
+        strict=True,
+    ):
+        yield _centroid_row(wkb, osm_id, source_name, source_paths)
+
+
 def iter_centroids(
     data_root: Path, *, batch_size: int = BATCH_SIZE
 ) -> Iterator[tuple[Path, float, float]]:
@@ -124,9 +158,7 @@ def iter_centroids(
     is deterministic when ``data_root`` contains a fixed sorted set of files.
     """
     data_dir = require_directory(data_root / "data", label="data")
-    source_paths = {
-        f"{parquet_path.stem}.osm.pbf": parquet_path for parquet_path in sorted_parquets(data_dir)
-    }
+    source_paths = _source_paths(data_dir)
     try:
         batches = iter_unique_parquet_batches(
             data_root,
@@ -134,19 +166,7 @@ def iter_centroids(
             batch_size=batch_size,
         )
         for batch in batches:
-            wkb_column = batch.column("geometry").to_pylist()
-            osm_id_column = batch.column("osm_id").to_pylist()
-            source_column = batch.column("source_pbf").to_pylist()
-            for index, (wkb, source_name) in enumerate(zip(wkb_column, source_column, strict=True)):
-                osm_id = osm_id_column[index]
-                centroid = _geometry_centroid(wkb)
-                parquet_path = source_paths.get(str(source_name), Path(str(source_name)))
-                if centroid is None:
-                    raise H3AggregationError(f"null geometry at {parquet_path} (osm_id={osm_id!r})")
-                lon, lat = centroid
-                # Validate before H3 assignment for a clean error message.
-                validate_coordinate(lat, lon)
-                yield parquet_path, lon, lat
+            yield from _iter_centroid_batch(batch, source_paths)
     except UniqueRowsError as error:
         raise H3AggregationError(str(error)) from error
 

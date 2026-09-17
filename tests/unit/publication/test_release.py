@@ -362,7 +362,10 @@ def test_release_restores_pre_regression_card_without_losing_content(
         "<!-- stats_schema_version: ",
         "<!-- schema_version: ",
         "## Dataset at a glance",
-        "| Polygons | 3 |",
+        "| Regional/raw polygon rows | 3 |",
+        "| Globally unique polygons | 3 |",
+        "| Regional-overlap duplicate rows | 0 |",
+        "| Manifest duplicate rows rejected | 0 |",
         "| Parquet files | 2 |",
         "## Description coverage",
         "| Localized descriptions | 3 |",
@@ -377,7 +380,7 @@ def test_release_restores_pre_regression_card_without_losing_content(
             "and per-file SHA-256 provenance are available in [`stats.json`](stats.json)."
         ),
         "## Polygon surface and geometry",
-        "| Polygons measured | 3 |",
+        "| Globally unique polygons measured | 3 |",
         "| Polygon / MultiPolygon rows | 2 / 1 |",
     ):
         assert expected in generated_stats

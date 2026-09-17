@@ -167,23 +167,38 @@ def _fmt_bbox(value: object) -> str:
     return f"lon {min_x:.4f}° to {max_x:.4f}°, lat {min_y:.4f}° to {max_y:.4f}°"
 
 
+def _polygon_count_metrics(stats: Mapping[str, Any]) -> tuple[int, int, int, int]:
+    globally_unique = int(stats.get("globally_unique_polygons", stats.get("rows", 0)))
+    overlap_duplicates = int(stats.get("regional_overlap_duplicate_rows", 0))
+    regional_rows = int(stats.get("regional_rows", globally_unique + overlap_duplicates))
+    manifest_duplicates = int(
+        stats.get("manifest_duplicate_rows", stats.get("deduplicated_rows", 0))
+    )
+    return regional_rows, globally_unique, overlap_duplicates, manifest_duplicates
+
+
 def _render_geometry_stats_section(stats: Mapping[str, Any]) -> list[str]:
     """Render the additive geometry statistics section."""
     geometry_types = stats.get("geometry_types", {})
     if not isinstance(geometry_types, Mapping):
         geometry_types = {}
+    regional_rows, globally_unique, overlap_duplicates, _manifest_duplicates = (
+        _polygon_count_metrics(stats)
+    )
     return [
         "## Polygon surface and geometry",
         "",
         "Computed deterministically from the complete published polygon table: "
-        f"all {_fmt_int(stats['rows'])} globally unique polygons across "
+        f"all {_fmt_int(globally_unique)} globally unique polygons from "
+        f"{_fmt_int(regional_rows)} regional/raw rows across "
         f"{_fmt_int(stats['output_files'])} "
         "Parquet files, using only the dataset's area_m2, bbox, and geometry columns. "
+        f"{_fmt_int(overlap_duplicates)} regional-overlap duplicate rows are excluded. "
         "No sampling, truncation, external lookup, or raw-PBF recomputation is used.",
         "",
         "| Metric | Value |",
         "| --- | ---: |",
-        f"| Polygons measured | {_fmt_int(stats['rows'])} |",
+        f"| Globally unique polygons measured | {_fmt_int(globally_unique)} |",
         "| Surface area (total / mean) | "
         f"{_fmt_area(stats.get('area_m2_total_m2'))} / "
         f"{_fmt_area(stats.get('area_m2_mean_m2'))} |",
@@ -211,6 +226,9 @@ def _render_geometry_stats_section(stats: Mapping[str, Any]) -> list[str]:
 
 
 def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
+    regional_rows, globally_unique, overlap_duplicates, manifest_duplicates = (
+        _polygon_count_metrics(stats)
+    )
     lines: list[str] = [
         f"<!-- stats_sha256: {stats_sha256} -->",
         f"<!-- stats_schema_version: {stats['stats_schema_version']} -->",
@@ -220,10 +238,12 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
         "",
         "| Metric | Value |",
         "| --- | --- |",
-        f"| Polygons | {_fmt_int(stats['rows'])} |",
+        f"| Regional/raw polygon rows | {_fmt_int(regional_rows)} |",
+        f"| Globally unique polygons | {_fmt_int(globally_unique)} |",
+        f"| Regional-overlap duplicate rows | {_fmt_int(overlap_duplicates)} |",
         f"| Parquet files | {_fmt_int(stats['output_files'])} |",
         f"| Download size | {_fmt_bytes(stats['output_bytes_total'])} |",
-        f"| Duplicate rows removed | {_fmt_int(stats['deduplicated_rows'])} |",
+        f"| Manifest duplicate rows rejected | {_fmt_int(manifest_duplicates)} |",
         f"| Closed ways | {_fmt_int(stats['osm_types'].get('way', 0))} |",
         f"| Relations | {_fmt_int(stats['osm_types'].get('relation', 0))} |",
         f"| Polygon geometries | {_fmt_int(stats['geometry_types'].get('Polygon', 0))} |",
@@ -267,7 +287,7 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
             "",
             "Area buckets span <1 m² to >=100B m² on a logarithmic scale; "
             "each bar shows the number of polygons in that bucket "
-            f"(total {_fmt_int(stats['rows'])}).",
+            f"(total {_fmt_int(globally_unique)} globally unique polygons).",
             "",
         ]
     )

@@ -19,6 +19,7 @@ from osm_polygon_description_tag.dataset.stats import (
     _new_connection,
     _validate_artifact,
 )
+from osm_polygon_description_tag.dataset.unique_rows import iter_unique_parquet_batches
 from tests.conftest import make_record_dict
 from tests.helpers.dataset import write_finalized_dataset, write_reporting_fixture
 
@@ -113,8 +114,11 @@ def test_collect_stats_aggregates_from_validated_artifacts(tmp_path: Path) -> No
     assert stats["output_files"] == 2
     assert stats["rows"] == 3
     assert stats["unique_osm_objects"] == 3
+    assert stats["regional_rows"] == 3
+    assert stats["globally_unique_polygons"] == 3
     assert stats["regional_overlap_duplicate_rows"] == 0
     assert stats["regional_overlap_duplicate_rate"] == 0.0
+    assert stats["manifest_duplicate_rows"] == 0
     assert stats["osm_types"] == {"relation": 1, "way": 2}
     assert stats["geometry_types"] == {"MultiPolygon": 1, "Polygon": 2}
     assert stats["description_suffixes"] == {"en": 2, "pt-BR": 1}
@@ -190,8 +194,50 @@ def test_statistics_media_and_card_use_one_canonical_row_per_osm_identity(
     assert area_counts["10-100 m²"] == 1
     assert area_counts["1k-10k m²"] == 1
     assert generated["rows"] == 2
-    assert "| Polygons | 2 |" in card
-    assert "| Polygons measured | 2 |" in card
+    assert stats["regional_rows"] == 3
+    assert stats["globally_unique_polygons"] == 2
+    assert stats["manifest_duplicate_rows"] == 0
+    assert "| Regional/raw polygon rows | 3 |" in card
+    assert "| Globally unique polygons | 2 |" in card
+    assert "| Regional-overlap duplicate rows | 1 |" in card
+    assert "| Manifest duplicate rows rejected | 0 |" in card
+    assert "| Globally unique polygons measured | 2 |" in card
+
+
+def test_unique_row_selection_is_stable_when_equal_ranked_input_order_reverses(
+    tmp_path: Path,
+) -> None:
+    first = make_record_dict(
+        Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+        {"description": "same"},
+        osm_id=77,
+        source_pbf="region.osm.pbf",
+    )
+    second = dict(first)
+    second["area_m2"] = float(first["area_m2"]) + 1.0
+
+    def selected_rows(name: str, records: list[dict[str, object]]) -> list[dict[str, object]]:
+        data_root = tmp_path / name / "generated"
+        source_root = tmp_path / name / "raw"
+        write_finalized_dataset(
+            data_root,
+            source_root,
+            {"region-a": [records[0]], "region-b": [records[1]]},
+        )
+        return [
+            row
+            for batch in iter_unique_parquet_batches(
+                data_root,
+                columns=("osm_type", "osm_id", "area_m2", "geometry"),
+            )
+            for row in batch.to_pylist()
+        ]
+
+    forward = selected_rows("forward", [first, second])
+    reverse = selected_rows("reverse", [second, first])
+
+    assert forward == reverse
+    assert forward[0]["osm_id"] == 77
 
 
 def test_collect_stats_separates_base_and_localized_description_words(

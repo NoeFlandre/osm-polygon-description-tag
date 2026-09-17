@@ -21,6 +21,8 @@ _RANK_COLUMNS = (
     "description",
     "geometry",
 )
+_FINGERPRINT_COLUMNS = tuple(SCHEMA.names)
+_REQUIRED_COLUMNS = frozenset(("source_pbf", "osm_type", "osm_id", "geometry"))
 _OPTIONAL_RANK_COLUMN_TYPES = {
     "version": "INTEGER",
     "timestamp": "TIMESTAMP",
@@ -49,13 +51,7 @@ def unique_rows_sql(relation: str, columns: Sequence[str]) -> str:
                 ORDER BY version DESC NULLS LAST,
                          timestamp DESC NULLS LAST,
                          source_pbf ASC,
-                         md5(concat_ws('|',
-                             coalesce(cast(version AS VARCHAR), ''),
-                             coalesce(cast(timestamp AS VARCHAR), ''),
-                             source_pbf,
-                             coalesce(description, ''),
-                             hex(geometry)
-                         )) ASC
+                         {_full_row_fingerprint_sql()} ASC
             ) AS _unique_rank
             FROM {relation}
         ) ranked
@@ -67,32 +63,76 @@ def _sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def _parquet_relation(paths: Sequence[Path], columns: Sequence[str]) -> str:
-    input_columns = tuple(dict.fromkeys((*_RANK_COLUMNS, *columns)))
-    selects: list[str] = []
-    for path in paths:
-        schema = pq.ParquetFile(path).schema_arrow
-        available = set(schema.names)
-        has_geo_metadata = bool(schema.metadata and b"geo" in schema.metadata)
-        expressions: list[str] = []
-        for column in input_columns:
-            if column in available:
-                if column == "geometry" and has_geo_metadata:
-                    expressions.append("ST_AsWKB(geometry) AS geometry")
-                else:
-                    expressions.append(column)
-                continue
-            sql_type = _OPTIONAL_RANK_COLUMN_TYPES.get(column)
-            if sql_type is None:
-                raise UniqueRowsError(f"missing unique-row column {column!r} in {path}")
-            expressions.append(f"CAST(NULL AS {sql_type}) AS {column}")
-        parquet_literal = _sql_literal(str(path))
-        select_sql = (
-            f"SELECT {', '.join(expressions)} "  # noqa: S608 - internal SQL fragments
-            f"FROM read_parquet({parquet_literal})"
+def _full_row_fingerprint_sql() -> str:
+    fields = ", ".join(f'"{column}" := "{column}"' for column in _FINGERPRINT_COLUMNS)
+    return f"md5(to_json(struct_pack({fields})))"
+
+
+def _missing_parquet_column_expression(
+    column: str,
+    *,
+    path: Path,
+    required_columns: frozenset[str],
+) -> str:
+    sql_type = _OPTIONAL_RANK_COLUMN_TYPES.get(column)
+    if sql_type is not None:
+        return f"CAST(NULL AS {sql_type}) AS {column}"
+    if column in required_columns:
+        raise UniqueRowsError(f"missing unique-row column {column!r} in {path}")
+    return f"NULL AS {column}"
+
+
+def _parquet_column_expression(
+    column: str,
+    available: set[str],
+    *,
+    has_geo_metadata: bool,
+    path: Path,
+    required_columns: frozenset[str] = _REQUIRED_COLUMNS,
+) -> str:
+    if column not in available:
+        return _missing_parquet_column_expression(
+            column,
+            path=path,
+            required_columns=required_columns,
         )
-        selects.append(select_sql)
-    return " UNION ALL ".join(selects)
+    if column == "geometry" and has_geo_metadata:
+        return "ST_AsWKB(geometry) AS geometry"
+    return column
+
+
+def _parquet_select(
+    path: Path,
+    input_columns: Sequence[str],
+    *,
+    required_columns: frozenset[str] = _REQUIRED_COLUMNS,
+) -> str:
+    schema = pq.ParquetFile(path).schema_arrow
+    available = set(schema.names)
+    has_geo_metadata = bool(schema.metadata and b"geo" in schema.metadata)
+    expressions = [
+        _parquet_column_expression(
+            column,
+            available,
+            has_geo_metadata=has_geo_metadata,
+            path=path,
+            required_columns=required_columns,
+        )
+        for column in input_columns
+    ]
+    parquet_literal = _sql_literal(str(path))
+    return (
+        f"SELECT {', '.join(expressions)} "  # noqa: S608 - internal SQL fragments
+        f"FROM read_parquet({parquet_literal})"
+    )
+
+
+def _parquet_relation(paths: Sequence[Path], columns: Sequence[str]) -> str:
+    input_columns = tuple(dict.fromkeys((*_RANK_COLUMNS, *_FINGERPRINT_COLUMNS, *columns)))
+    required_columns = frozenset((*_REQUIRED_COLUMNS, *columns))
+    return " UNION ALL ".join(
+        _parquet_select(path, input_columns, required_columns=required_columns) for path in paths
+    )
 
 
 def iter_unique_parquet_batches(

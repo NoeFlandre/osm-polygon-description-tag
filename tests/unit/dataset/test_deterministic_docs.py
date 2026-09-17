@@ -186,6 +186,10 @@ def test_stats_block_is_an_exact_contract_for_non_default_values() -> None:
         "output_files": 6,
         "output_bytes_total": 1_536,
         "deduplicated_rows": 7,
+        "regional_rows": 12_352,
+        "globally_unique_polygons": 12_345,
+        "regional_overlap_duplicate_rows": 7,
+        "manifest_duplicate_rows": 3,
         "osm_types": {"way": 1_234, "relation": 56},
         "geometry_types": {"Polygon": 1_200, "MultiPolygon": 90},
         "area_m2_total_m2": 1_000_000.0,
@@ -223,10 +227,12 @@ def test_stats_block_is_an_exact_contract_for_non_default_values() -> None:
             "",
             "| Metric | Value |",
             "| --- | --- |",
-            "| Polygons | 12,345 |",
+            "| Regional/raw polygon rows | 12,352 |",
+            "| Globally unique polygons | 12,345 |",
+            "| Regional-overlap duplicate rows | 7 |",
             "| Parquet files | 6 |",
             "| Download size | 1.5 KiB |",
-            "| Duplicate rows removed | 7 |",
+            "| Manifest duplicate rows rejected | 3 |",
             "| Closed ways | 1,234 |",
             "| Relations | 56 |",
             "| Polygon geometries | 1,200 |",
@@ -254,7 +260,8 @@ def test_stats_block_is_an_exact_contract_for_non_default_values() -> None:
             "![Area distribution of description-tagged polygons](assets/area_distribution.png)",
             "",
             "Area buckets span <1 m² to >=100B m² on a logarithmic scale; "
-            "each bar shows the number of polygons in that bucket (total 12,345).",
+            "each bar shows the number of polygons in that bucket (total 12,345 "
+            "globally unique polygons).",
             "",
             "**OSM object timestamps (UTC):** 2020-01-01T00:00:00Z to 2026-01-01T00:00:00Z",
             "",
@@ -264,14 +271,15 @@ def test_stats_block_is_an_exact_contract_for_non_default_values() -> None:
             "## Polygon surface and geometry",
             "",
             "Computed deterministically from the complete published polygon table: all "
-            "12,345 globally unique polygons across 6 Parquet files, using only the "
+            "12,345 globally unique polygons from 12,352 regional/raw rows across 6 "
+            "Parquet files, using only the "
             "dataset's area_m2, bbox, "
-            "and geometry columns. No sampling, truncation, external lookup, or "
-            "raw-PBF recomputation is used.",
+            "and geometry columns. 7 regional-overlap duplicate rows are excluded. No "
+            "sampling, truncation, external lookup, or raw-PBF recomputation is used.",
             "",
             "| Metric | Value |",
             "| --- | ---: |",
-            "| Polygons measured | 12,345 |",
+            "| Globally unique polygons measured | 12,345 |",
             "| Surface area (total / mean) | 1.0 km² / 80.0 m² |",
             "| Smallest / largest area | 0.5 m² / 2.0 km² |",
             "| Area p25 / median / p75 | 10.0 m² / 50.0 m² / 100.0 m² |",

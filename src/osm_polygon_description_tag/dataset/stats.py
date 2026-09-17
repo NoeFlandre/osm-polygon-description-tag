@@ -36,7 +36,7 @@ from osm_polygon_description_tag.dataset.manifest import (
     output_identity_for,
     read_manifest,
 )
-from osm_polygon_description_tag.dataset.schema import SCHEMA_VERSION
+from osm_polygon_description_tag.dataset.schema import SCHEMA, SCHEMA_VERSION
 from osm_polygon_description_tag.dataset.unique_rows import (
     iter_unique_parquet_batches,
     unique_rows_sql,
@@ -45,24 +45,7 @@ from osm_polygon_description_tag.runtime.time import utc_now_iso
 
 STATS_SCHEMA_VERSION = 7
 _QUANTILE_PROBABILITIES = [0.25, 0.5, 0.75]
-_FEATURE_COLUMNS = [
-    "source_pbf",
-    "osm_type",
-    "osm_id",
-    "version",
-    "geometry_type",
-    "area_m2",
-    "timestamp",
-    "name",
-    "localized_names",
-    "description",
-    "localized_descriptions",
-    "bbox_min_x",
-    "bbox_min_y",
-    "bbox_max_x",
-    "bbox_max_y",
-    "geometry",
-]
+_FEATURE_COLUMNS = list(SCHEMA.names)
 _SPATIAL_COLUMNS = [
     "source_pbf",
     "osm_type",
@@ -270,14 +253,17 @@ def _create_feature_table(connection: duckdb.DuckDBPyConnection) -> None:
             source_pbf VARCHAR NOT NULL,
             osm_type VARCHAR NOT NULL,
             osm_id BIGINT NOT NULL,
+            osm_url VARCHAR NOT NULL,
             version INTEGER,
-            geometry_type VARCHAR NOT NULL,
-            area_m2 DOUBLE NOT NULL,
+            changeset BIGINT,
             timestamp TIMESTAMP,
             name VARCHAR,
             localized_names MAP(VARCHAR, VARCHAR) NOT NULL,
             description VARCHAR,
             localized_descriptions MAP(VARCHAR, VARCHAR) NOT NULL,
+            tags MAP(VARCHAR, VARCHAR) NOT NULL,
+            geometry_type VARCHAR NOT NULL,
+            area_m2 DOUBLE NOT NULL,
             bbox_min_x DOUBLE NOT NULL,
             bbox_min_y DOUBLE NOT NULL,
             bbox_max_x DOUBLE NOT NULL,
@@ -301,6 +287,7 @@ def _insert_batch(
 ) -> None:
     localized_names_sql = _map_sql_expression(batch, "localized_names")
     localized_descriptions_sql = _map_sql_expression(batch, "localized_descriptions")
+    tags_sql = _map_sql_expression(batch, "tags")
     connection.register("batch", batch)
     try:
         connection.execute(
@@ -310,9 +297,9 @@ def _insert_batch(
                 source_pbf,
                 osm_type,
                 osm_id,
+                osm_url,
                 version,
-                geometry_type,
-                area_m2,
+                changeset,
                 timestamp,
                 name,
                 CASE WHEN {localized_names_sql} IS NULL
@@ -320,6 +307,10 @@ def _insert_batch(
                 description,
                 CASE WHEN {localized_descriptions_sql} IS NULL
                      THEN MAP() ELSE {localized_descriptions_sql} END,
+                CASE WHEN {tags_sql} IS NULL
+                     THEN MAP() ELSE {tags_sql} END,
+                geometry_type,
+                area_m2,
                 bbox_min_x,
                 bbox_min_y,
                 bbox_max_x,
@@ -753,11 +744,14 @@ def _build_stats_payload(
         duplicate_rows = feature_summary.rows - feature_summary.unique_osm_objects
     else:
         duplicate_rows = raw_rows - feature_summary.rows
+    manifest_duplicate_rows = manifest_summary.rejections.get("duplicate_osm_object", 0)
     return {
         "stats_schema_version": STATS_SCHEMA_VERSION,
         "schema_version": SCHEMA_VERSION,
         "output_files": len(manifest_summary.files),
         "rows": feature_summary.rows,
+        "regional_rows": raw_rows,
+        "globally_unique_polygons": feature_summary.unique_osm_objects,
         "unique_osm_objects": feature_summary.unique_osm_objects,
         "regional_overlap_duplicate_rows": duplicate_rows,
         "regional_overlap_duplicate_rate": (duplicate_rows / raw_rows if raw_rows else 0.0),
@@ -777,7 +771,8 @@ def _build_stats_payload(
         "base_name_rows": feature_summary.base_name_rows,
         "localized_name_rows": feature_summary.localized_name_rows,
         "rejections": manifest_summary.rejections,
-        "deduplicated_rows": manifest_summary.rejections.get("duplicate_osm_object", 0),
+        "deduplicated_rows": duplicate_rows,
+        "manifest_duplicate_rows": manifest_duplicate_rows,
         "source_bytes_total": manifest_summary.source_bytes_total,
         "output_bytes_total": manifest_summary.output_bytes_total,
         "area_m2_count": feature_summary.rows,
