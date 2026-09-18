@@ -349,18 +349,33 @@ def _validate_geometry_type(state: _ValidationState, geometry_type: str) -> None
     state.actual_types.add(geometry_type)
 
 
+def _validate_successful_text(
+    value: str,
+    *,
+    empty_message: str,
+    trimmed_message: str,
+) -> None:
+    if not is_nonempty_text(value):
+        raise StorageError(empty_message)
+    if not is_trimmed_nonempty_text(value):
+        raise StorageError(trimmed_message)
+
+
 def _validate_base_description(
     description: object,
     *,
     require_successful_text: bool = True,
 ) -> None:
-    if description is not None:
-        if not isinstance(description, str):
-            raise StorageError("description must be a string")
-        if require_successful_text and not is_nonempty_text(description):
-            raise StorageError("description text must be non-empty")
-        if require_successful_text and not is_trimmed_nonempty_text(description):
-            raise StorageError("description text must be trimmed")
+    if description is None:
+        return
+    if not isinstance(description, str):
+        raise StorageError("description must be a string")
+    if require_successful_text:
+        _validate_successful_text(
+            description,
+            empty_message="description text must be non-empty",
+            trimmed_message="description text must be trimmed",
+        )
 
 
 def _localized_description_entries(value: object) -> Sequence[object]:
@@ -384,10 +399,12 @@ def _validate_localized_value(
 ) -> None:
     if not isinstance(value, str):
         raise StorageError("localized description value must be non-empty text")
-    if require_successful_text and not is_nonempty_text(value):
-        raise StorageError("localized description value must be non-empty text")
-    if require_successful_text and not is_trimmed_nonempty_text(value):
-        raise StorageError("localized description value must be trimmed")
+    if require_successful_text:
+        _validate_successful_text(
+            value,
+            empty_message="localized description value must be non-empty text",
+            trimmed_message="localized description value must be trimmed",
+        )
 
 
 def _validate_localized_entry(
