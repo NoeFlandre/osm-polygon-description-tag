@@ -653,11 +653,17 @@ def test_sharded_mutation_gate_keeps_the_full_strictness() -> None:
     """Sharding may split which modules are mutated, never how strict the gate is."""
     justfile = (PROJECT_ROOT / "justfile").read_text(encoding="utf-8")
     workflow = (PROJECT_ROOT / ".github" / "workflows" / "quality.yml").read_text(encoding="utf-8")
-    shard_recipe = justfile.split("mutation-shard scope_file:", 1)[1].split("\n\n", 1)[0]
+    shard_recipe = justfile.split("mutation-shard scope_file mutate_file:", 1)[1].split("\n\n", 1)[
+        0
+    ]
 
     assert "--only-mutate-file" in shard_recipe
     assert "--minimum-score 100" in shard_recipe
     assert "--changed-lines-file" not in shard_recipe
+    # Mutation runs over the superset that carries the probe's canary; scoring
+    # stays on the shard's own files so the shards remain a clean partition.
+    assert '--only-mutate-file "{{mutate_file}}"' in shard_recipe
+    assert '--scope-file "{{scope_file}}"' in shard_recipe
 
     shard_count = int(workflow.split('MUTATION_SHARD_COUNT: "', 1)[1].split('"', 1)[0])
     matrix = workflow.split("shard: [", 1)[1].split("]", 1)[0]

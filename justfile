@@ -57,12 +57,18 @@ mutation: mutation-contexts
 # only splits which modules are mutated; each shard still requires a 100% score,
 # so the shards together are exactly the all-source gate. This keeps the main
 # push gate inside a sane CI wall-clock budget instead of being cancelled.
-mutation-shard scope_file: mutation-contexts
+#
+# ``mutate_file`` also carries the canary module that mutmut's forced-fail probe
+# needs, so it is a superset of ``scope_file``. Scoring uses ``scope_file`` only,
+# which keeps the shards a clean partition: the canary is scored by the one
+# shard that owns it.
+mutation-shard scope_file mutate_file: mutation-contexts
     test -f "{{scope_file}}"
+    test -f "{{mutate_file}}"
     mkdir -p reports data-root/.tmp
     uv run python -m scripts.run_mutation_gate --max-children 8 \
         --coverage-file data-root/.tmp/.coverage-ctx \
-        --only-mutate-file "{{scope_file}}"
+        --only-mutate-file "{{mutate_file}}"
     uv run python scripts/check_mutation_score.py \
         --mutants-root mutants \
         --scope-file "{{scope_file}}" \
