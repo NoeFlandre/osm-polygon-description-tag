@@ -65,6 +65,7 @@ mutation-shard scope_file: mutation-contexts
         --only-mutate-file "{{scope_file}}"
     uv run python scripts/check_mutation_score.py \
         --mutants-root mutants \
+        --scope-file "{{scope_file}}" \
         --output reports/mutation-summary.json \
         --minimum-score 100
 
