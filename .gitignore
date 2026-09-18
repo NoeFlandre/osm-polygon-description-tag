@@ -15,3 +15,6 @@ dist/
 mutants/
 reports/
 site/
+
+# Matplotlib drops a font cache here when MPLCONFIGDIR is unset.
+.mplconfig/
