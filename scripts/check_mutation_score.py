@@ -56,11 +56,30 @@ def build_report(stats: dict[str, Any], minimum_score: float) -> dict[str, Any]:
     }
 
 
+def scoped_metadata_paths(mutants_root: Path, scope_file: Path | None) -> list[Path]:
+    """Return the mutmut result files to score.
+
+    A sharded run only executes the mutants of the sources in its shard, so it
+    must score exactly those. Scoring the whole tree would count another
+    shard's untouched mutants as unkilled.
+    """
+    if scope_file is None:
+        return sorted(mutants_root.glob("src/**/*.py.meta"))
+    sources = [
+        line.strip() for line in scope_file.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
+    paths = [mutants_root / f"{source}.meta" for source in sources]
+    return sorted(path for path in paths if path.is_file())
+
+
 def build_metadata_report(
-    mutants_root: Path, patterns: list[str], minimum_score: float
+    mutants_root: Path,
+    patterns: list[str],
+    minimum_score: float,
+    scope_file: Path | None = None,
 ) -> dict[str, Any]:
     stats = {"killed": 0, "total": 0}
-    for metadata_path in sorted(mutants_root.glob("src/**/*.py.meta")):
+    for metadata_path in scoped_metadata_paths(mutants_root, scope_file):
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         for mutant_name, exit_code in sorted(metadata.get("exit_code_by_key", {}).items()):
             if patterns and not any(fnmatch.fnmatch(mutant_name, pattern) for pattern in patterns):
@@ -79,6 +98,12 @@ def _parse_args() -> argparse.Namespace:
     source.add_argument("--stats-json", type=Path)
     source.add_argument("--mutants-root", type=Path)
     parser.add_argument("--pattern", action="append", default=[])
+    parser.add_argument(
+        "--scope-file",
+        type=Path,
+        metavar="FILE",
+        help="newline-delimited source paths; only their mutants are scored",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--minimum-score", type=float, default=90.0)
     return parser.parse_args()
@@ -91,7 +116,12 @@ def main() -> None:
             json.loads(args.stats_json.read_text(encoding="utf-8")), args.minimum_score
         )
     else:
-        report = build_metadata_report(args.mutants_root, args.pattern, args.minimum_score)
+        report = build_metadata_report(
+            args.mutants_root,
+            args.pattern,
+            args.minimum_score,
+            scope_file=args.scope_file,
+        )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",

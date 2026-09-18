@@ -12,7 +12,7 @@ from typing import ClassVar
 import pytest
 from packaging.requirements import Requirement
 
-from scripts import run_mutation_gate
+from scripts import check_mutation_score, run_mutation_gate
 from scripts.coverage_associations import (
     associations_for_file,
     mangled_names,
@@ -597,6 +597,56 @@ def test_quality_recipes_and_required_mutation_gate_are_publicly_wired() -> None
     assert "reports/crap.json" in workflow
     assert "actions/upload-artifact" in workflow
     assert project["tool"]["mutmut"]["pytest_add_cli_args_test_selection"] == ["tests"]
+
+
+def _write_meta(root: Path, source: str, exit_codes: dict[str, int]) -> None:
+    path = root / f"{source}.meta"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"exit_code_by_key": exit_codes}), encoding="utf-8")
+
+
+def test_a_shard_scores_only_its_own_sources(tmp_path: Path) -> None:
+    """A shard must not be judged on mutants another shard is responsible for."""
+    mutants_root = tmp_path / "mutants"
+    _write_meta(mutants_root, "src/pkg/mine.py", {"pkg.mine.x_a__mutmut_1": 1})
+    # A mutant another shard owns, never executed here, so recorded as survived.
+    _write_meta(mutants_root, "src/pkg/theirs.py", {"pkg.theirs.x_b__mutmut_1": 0})
+
+    scope = tmp_path / "shard.txt"
+    scope.write_text("src/pkg/mine.py\n", encoding="utf-8")
+
+    scoped = check_mutation_score.build_metadata_report(mutants_root, [], 100.0, scope_file=scope)
+    whole_tree = check_mutation_score.build_metadata_report(mutants_root, [], 100.0)
+
+    assert scoped["total"] == 1
+    assert scoped["mutation_score_percent"] == 100.0
+    assert scoped["passed"] is True
+    # Without the scope the other shard's untouched mutant drags the score down.
+    assert whole_tree["total"] == 2
+    assert whole_tree["passed"] is False
+
+
+def test_shard_scopes_together_cover_every_mutant(tmp_path: Path) -> None:
+    """The shards must partition scoring, so nothing is scored twice or missed."""
+    mutants_root = tmp_path / "mutants"
+    sources = [f"src/pkg/mod{index}.py" for index in range(5)]
+    for index, source in enumerate(sources):
+        _write_meta(mutants_root, source, {f"pkg.mod{index}.x_f__mutmut_1": 1})
+
+    shard_totals = 0
+    for shard in range(2):
+        scope = tmp_path / f"shard-{shard}.txt"
+        scope.write_text(
+            "".join(f"{source}\n" for i, source in enumerate(sources) if i % 2 == shard),
+            encoding="utf-8",
+        )
+        shard_totals += check_mutation_score.build_metadata_report(
+            mutants_root, [], 100.0, scope_file=scope
+        )["total"]
+
+    assert (
+        shard_totals == check_mutation_score.build_metadata_report(mutants_root, [], 100.0)["total"]
+    )
 
 
 def test_sharded_mutation_gate_keeps_the_full_strictness() -> None:
