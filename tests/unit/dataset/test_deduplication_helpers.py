@@ -45,6 +45,7 @@ from osm_polygon_description_tag.dataset.deduplication import (
     _staged_input_drift_names,
     _state_payload,
     _validated_parquets,
+    _verify_staged_inputs,
     _write_state,
     deduplicate_dataset,
     select_canonical_row,
@@ -424,6 +425,30 @@ def test_staged_input_drift_names_reports_missing_and_extra_inputs() -> None:
         {"a.parquet": "old"},
         {},
     ) == ("a.parquet",)
+
+
+def test_verify_staged_inputs_reports_all_drifted_names_in_order(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / "data").mkdir()
+    monkeypatch.setattr(
+        dedup_module,
+        "_input_hashes",
+        lambda _paths: {"b.parquet": "new-b", "a.parquet": "new-a"},
+    )
+
+    with pytest.raises(DeduplicationError) as error:
+        _verify_staged_inputs(
+            tmp_path,
+            {
+                "inputs": {"a.parquet": "old-a", "b.parquet": "old-b"},
+                "files": [],
+            },
+        )
+
+    assert str(error.value) == (
+        "staged deduplication inputs changed; refusing to resume: a.parquet, b.parquet"
+    )
 
 
 def test_validated_parquets_returns_empty_for_missing_or_empty_data_directory(
