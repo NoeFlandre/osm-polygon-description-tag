@@ -275,21 +275,34 @@ jobs:
         env:
           MUTATION_SHARD: ${{ matrix.shard }}
         run: |
-          python3 - <<'PY' | tee "$RUNNER_TEMP/mutation-shard.txt"
+          python3 - <<'PY'
           import os
           import pathlib
+
+          # mutmut's forced-fail probe runs tests/unit/test_mutation_surface.py,
+          # so every shard has to mutate something those tests reach. The canary
+          # is mutated by all shards but scored only by the shard that owns it,
+          # which keeps the scoring a clean partition of the source tree.
+          CANARY = "src/osm_polygon_description_tag/dataset/text.py"
 
           roots = (pathlib.Path("src"), pathlib.Path("scripts"))
           files = sorted(str(path) for root in roots for path in root.rglob("*.py"))
           count = int(os.environ["MUTATION_SHARD_COUNT"])
           index = int(os.environ["MUTATION_SHARD"])
-          for position, name in enumerate(files):
-              if position % count == index:
-                  print(name)
+          shard = [f for position, f in enumerate(files) if position % count == index]
+
+          temp = pathlib.Path(os.environ["RUNNER_TEMP"])
+          temp.joinpath("mutation-shard.txt").write_text("".join(f"{f}\n" for f in shard))
+          mutate = shard if CANARY in shard else [*shard, CANARY]
+          temp.joinpath("mutation-mutate.txt").write_text("".join(f"{f}\n" for f in sorted(mutate)))
+          print(f"scored: {len(shard)} files; mutated: {len(mutate)} files")
           PY
 
       - name: Run the sharded all-source mutation gate
-        run: just mutation-shard "$RUNNER_TEMP/mutation-shard.txt"
+        run: >-
+          just mutation-shard
+          "$RUNNER_TEMP/mutation-shard.txt"
+          "$RUNNER_TEMP/mutation-mutate.txt"
 
       - name: Upload mutation report
         if: always()
