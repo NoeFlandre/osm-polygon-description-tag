@@ -244,17 +244,36 @@ def test_a_row_that_cannot_be_repaired_is_reported(tmp_path: Path) -> None:
         migrate_dataset_text(data_root)
 
 
-def test_the_temporary_file_is_removed_when_the_rewrite_fails(tmp_path: Path) -> None:
+def test_the_temporary_file_is_removed_when_the_rewrite_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     data_root, parquet, _ = _prepare(tmp_path, [_row(1, "Trailing space ")])
+    monkeypatch.setattr(text_migration, "_rewrite_parquet_text", _failing_writer)
 
     with pytest.raises(TextMigrationError):
-        text_migration._migrate_parquet_text(parquet, _failing_writer)
+        text_migration._migrate_parquet_text(parquet)
 
     assert list(parquet.parent.glob(".*.tmp")) == []
 
 
-def _failing_writer(*_args: object, **_kwargs: object) -> None:
+def _failing_writer(*_args: object, **_kwargs: object) -> int:
     raise OSError("disk full")
+
+
+def test_a_non_sequence_localized_container_yields_no_entries() -> None:
+    assert text_migration._canonical_localized(None) == []
+    assert text_migration._canonical_localized("not a sequence") == []
+
+
+def test_a_malformed_localized_entry_is_dropped() -> None:
+    entries = [
+        "not a mapping",
+        {"key": 7, "value": "numeric key"},
+        {"key": "fr", "value": None},
+        {"key": "de", "value": " Beschreibung "},
+    ]
+
+    assert text_migration._canonical_localized(entries) == [{"key": "de", "value": "Beschreibung"}]
 
 
 def test_concurrent_and_sequential_runs_agree(tmp_path: Path) -> None:

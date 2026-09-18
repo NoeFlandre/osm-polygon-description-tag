@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import closing
 from dataclasses import replace
@@ -58,19 +58,23 @@ class TextMigrationError(RuntimeError):
     """Raised when a legacy artifact's text cannot be repaired safely."""
 
 
+def _canonical_entry(item: object) -> dict[str, str] | None:
+    """Return one trimmed localized entry, or ``None`` when it carries no text."""
+    if not isinstance(item, dict):
+        return None
+    key = item.get("key")
+    trimmed = trimmed_nonempty_text(item.get("value"))
+    if not isinstance(key, str) or trimmed is None:
+        return None
+    return {"key": key, "value": trimmed}
+
+
 def _canonical_localized(value: object) -> list[dict[str, str]]:
     """Return localized entries with trimmed values, dropping blank ones."""
     if not isinstance(value, Sequence) or isinstance(value, str | bytes):
         return []
-    entries: list[dict[str, str]] = []
-    for item in cast(Sequence[object], value):
-        if not isinstance(item, dict):
-            continue
-        key = item.get("key")
-        trimmed = trimmed_nonempty_text(item.get("value"))
-        if isinstance(key, str) and trimmed is not None:
-            entries.append({"key": key, "value": trimmed})
-    return entries
+    candidates = (_canonical_entry(item) for item in cast(Sequence[object], value))
+    return [entry for entry in candidates if entry is not None]
 
 
 def _canonical_row(row: dict[str, object]) -> dict[str, object] | None:
@@ -195,20 +199,16 @@ def _promote_migrated_parquet(temporary: Path, target: Path) -> None:
     _fsync_dir(target.parent)
 
 
-def _migrate_parquet_text(
-    path: Path,
-    rewrite: Callable[..., int] | None = None,
-) -> int | None:
+def _migrate_parquet_text(path: Path) -> int | None:
     """Repair one artifact, returning dropped rows, or ``None`` when clean."""
     if not _requires_text_migration(path):
         return None
 
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    writer = rewrite if rewrite is not None else _rewrite_parquet_text
     try:
         with closing(pq.ParquetFile(path)) as reader:
             metadata = SCHEMA.with_metadata(reader.schema_arrow.metadata or {})
-            dropped = writer(reader, temporary, metadata)
+            dropped = _rewrite_parquet_text(reader, temporary, metadata)
         _promote_migrated_parquet(temporary, path)
         return dropped
     except (OSError, pa.ArrowException, StorageError) as error:
@@ -284,7 +284,7 @@ def migrate_dataset_text(data_root: Path, *, max_workers: int | None = None) -> 
         _artifact_pair(parquet, data_root)
         for parquet in sorted(data_dir.glob("*.parquet"), key=lambda path: path.name)
     ]
-    if max_workers is not None and max_workers > 1 and len(pairs) > 1:
+    if max_workers is not None and max_workers > 1:
         return _migrate_concurrently(pairs, max_workers)
     return sum(_migrate_one_artifact(parquet, manifest) for parquet, manifest in pairs)
 
