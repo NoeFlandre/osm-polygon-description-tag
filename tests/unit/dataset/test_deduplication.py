@@ -411,5 +411,9 @@ def test_deduplicate_dataset_refuses_staged_resume_after_input_drift(tmp_path: P
     untouched = data_root / "data" / "b.parquet"
     untouched.write_bytes(untouched.read_bytes() + b"drift")
 
-    with pytest.raises(DeduplicationError, match="staged deduplication inputs changed"):
+    with pytest.raises(DeduplicationError) as error:
         deduplicate_dataset(data_root)
+
+    assert str(error.value) == (
+        "staged deduplication inputs changed; refusing to resume: b.parquet"
+    )

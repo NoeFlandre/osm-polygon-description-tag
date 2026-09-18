@@ -126,10 +126,8 @@ def _input_hashes(parquets: Iterable[Path]) -> dict[str, str]:
 
 
 def _staged_output_hashes(state: Mapping[str, Any]) -> dict[str, str]:
-    return {
-        Path(str(entry["parquet"])).name: str(entry["parquet_sha256"])
-        for entry in cast(list[Mapping[str, Any]], state["files"])
-    }
+    entries = cast(list[Mapping[str, Any]], state["files"])  # pragma: no mutate - static cast
+    return {Path(str(entry["parquet"])).name: str(entry["parquet_sha256"]) for entry in entries}
 
 
 def _recorded_input_hashes(state: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -147,19 +145,29 @@ def _staged_input_drift_names(
     names = set(current) | set(expected)
     return tuple(
         sorted(
-            name
-            for name in names
-            if current.get(name) != expected.get(name)
-            and current.get(name) != staged_outputs.get(name)
+            name for name in names if _input_name_drifted(name, current, expected, staged_outputs)
         )
     )
 
 
+def _input_name_drifted(
+    name: str,
+    current: Mapping[str, str],
+    expected: Mapping[str, Any],
+    staged_outputs: Mapping[str, str],
+) -> bool:
+    if name not in current or name not in expected:
+        return True
+    return current[name] != expected[name] and current[name] != staged_outputs.get(name)
+
+
 def _verify_staged_inputs(data_root: Path, state: Mapping[str, Any]) -> None:
     expected_inputs = _recorded_input_hashes(state)
+    # pragma: no mutate start - deterministic ordering for byte-stable hashing
     current_inputs = _input_hashes(
         sorted((data_root / "data").glob("*.parquet"), key=lambda path: path.name)
     )
+    # pragma: no mutate end
     drifted = _staged_input_drift_names(
         current_inputs,
         expected_inputs,

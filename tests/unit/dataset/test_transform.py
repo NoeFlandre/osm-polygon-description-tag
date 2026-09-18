@@ -122,7 +122,7 @@ def test_localized_items_filter_exact_nonempty_keys() -> None:
     tags = {
         "description": "base",
         "description:": "empty suffix",
-        "description:en": "English",
+        "description:en": " English ",
         "description:fr": "   ",
         "description:pt-BR": "Português",
         "description_extra": "not a match",

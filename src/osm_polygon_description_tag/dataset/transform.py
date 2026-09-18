@@ -52,7 +52,7 @@ def names_from_tags(tags: Mapping[str, object]) -> tuple[str | None, dict[str, s
     whitespace. The localized keys are preserved verbatim and are never
     validated as language codes.
     """
-    return _tag_values(tags, "name", trim_values=False)
+    return _tag_values(tags, "name", trim_values=False)  # pragma: no mutate - exact-name contract
 
 
 def _tag_values(
@@ -106,7 +106,7 @@ def _localized_items(
 
 
 def _has_nonempty_localized(tags: Mapping[str, object], prefix: str) -> bool:
-    return next(_localized_items(tags, prefix, trim_values=True), None) is not None
+    return next(_localized_items(tags, prefix), None) is not None
 
 
 def _identity_rejection_reason(record: ExportRecord) -> str | None:

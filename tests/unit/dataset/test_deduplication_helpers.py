@@ -35,12 +35,14 @@ from osm_polygon_description_tag.dataset.deduplication import (
     _promote_staged,
     _read_manifests,
     _read_state,
+    _recorded_input_hashes,
     _resume_staged,
     _rows_for_source,
     _skipped_result,
     _sql_literal,
     _stage_changes,
     _stage_source,
+    _staged_input_drift_names,
     _state_payload,
     _validated_parquets,
     _write_state,
@@ -389,6 +391,39 @@ def test_read_state_rejects_invalid_or_non_object_payloads(tmp_path: Path, conte
 
     with pytest.raises(DeduplicationError, match="deduplication state"):
         _read_state(path)
+
+
+def test_recorded_input_hashes_requires_a_mapping_with_a_stable_error() -> None:
+    with pytest.raises(DeduplicationError) as error:
+        _recorded_input_hashes({})
+
+    assert str(error.value) == "staged deduplication state is missing input identities"
+
+
+def test_staged_input_drift_names_reports_missing_and_extra_inputs() -> None:
+    assert _staged_input_drift_names(
+        {"a.parquet": "a"},
+        {"a.parquet": "a", "b.parquet": "b"},
+        {},
+    ) == ("b.parquet",)
+    assert _staged_input_drift_names(
+        {"a.parquet": "a", "b.parquet": "b"},
+        {"a.parquet": "a"},
+        {},
+    ) == ("b.parquet",)
+    assert (
+        _staged_input_drift_names(
+            {"a.parquet": "new"},
+            {"a.parquet": "old"},
+            {"a.parquet": "new"},
+        )
+        == ()
+    )
+    assert _staged_input_drift_names(
+        {"a.parquet": "new"},
+        {"a.parquet": "old"},
+        {},
+    ) == ("a.parquet",)
 
 
 def test_validated_parquets_returns_empty_for_missing_or_empty_data_directory(
