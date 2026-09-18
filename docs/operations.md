@@ -67,6 +67,31 @@ is refused and the staged state is preserved for safe recovery. A completed
 deduplication state is reused when all input output identities and the policy
 hash still match.
 
+## Legacy text repair
+
+Artifacts built before the successful-text contract stored description values
+exactly as OpenStreetMap held them, including leading and trailing whitespace.
+The final-artifact contract requires the canonical trimmed form, so
+`publish-plan` refuses such an artifact with `description text must be
+trimmed`.
+
+`migrate-text` repairs them in place without reading raw PBFs:
+
+```bash
+uv run osm-polygon-description-tag migrate-text
+```
+
+It applies the same normalization the current build path applies, so a
+migrated artifact matches what a rebuild would produce for this defect. A
+value that is only whitespace carries no text and is dropped; a row left
+without any description text is excluded and recorded under the existing
+`no_nonempty_description` reason. Each Parquet is promoted before its manifest
+is updated, so an interrupted run resumes safely, and an artifact that is
+already canonical is left byte-identical.
+
+Run `generate-card` afterwards so `stats.json` and the card reflect the
+repaired rows.
+
 ## Logs and diagnostics
 
 Events are written to:

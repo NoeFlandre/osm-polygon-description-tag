@@ -19,6 +19,7 @@ surface.
 | `validate` | Validate Parquet files and manifests | Read-only apart from bounded local work files |
 | `generate-card` | Recompute `stats.json` and `README.md` | Atomically writes changed metadata |
 | `migrate-schema` | Upgrade legacy Arrow-map Parquets to Hub-viewable key/value lists | Atomically rewrites existing data files; never reads raw PBFs |
+| `migrate-text` | Repair legacy untrimmed description text to its canonical form | Atomically rewrites affected data files and manifests; never reads raw PBFs |
 | `trackio-snapshot` | Log the completed dataset snapshot to Trackio | Writes local Trackio state and refreshes the public static dashboard |
 | `publish-plan` | Show the exact upload plan identity | Read-only |
 
@@ -30,6 +31,7 @@ uv run osm-polygon-description-tag build-one japan-latest.osm.pbf
 uv run osm-polygon-description-tag validate
 uv run osm-polygon-description-tag generate-card
 uv run osm-polygon-description-tag migrate-schema
+uv run osm-polygon-description-tag migrate-text
 uv run osm-polygon-description-tag trackio-snapshot
 uv run osm-polygon-description-tag publish-plan
 ```
