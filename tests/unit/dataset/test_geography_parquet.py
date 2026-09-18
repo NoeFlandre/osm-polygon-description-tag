@@ -333,7 +333,7 @@ def test_aggregate_uses_batched_reads_with_pruned_columns(
 ) -> None:
     """Only the required columns are read through bounded unique-row batches."""
     data_root = _plant_two_parquets(tmp_path)
-    observed: list[tuple[Path, tuple[str, ...], int]] = []
+    observed: list[tuple[Path, tuple[str, ...], int, bool]] = []
     real_iter_unique = parquet_inputs_module.iter_unique_parquet_batches
 
     def guarded_iter_unique(
@@ -341,14 +341,24 @@ def test_aggregate_uses_batched_reads_with_pruned_columns(
         *,
         columns: tuple[str, ...],
         batch_size: int,
+        require_successful_text: bool,
     ) -> Any:
-        observed.append((root, columns, batch_size))
-        return real_iter_unique(root, columns=columns, batch_size=batch_size)
+        observed.append((root, columns, batch_size, require_successful_text))
+        return real_iter_unique(
+            root,
+            columns=columns,
+            batch_size=batch_size,
+            require_successful_text=require_successful_text,
+        )
 
     monkeypatch.setattr(parquet_inputs_module, "iter_unique_parquet_batches", guarded_iter_unique)
     aggregate_h3_density(data_root)
     assert observed, "unique-row batches must be invoked"
-    for root, columns, batch_size in observed:
+    assert [require_text for _root, _columns, _batch_size, require_text in observed] == [
+        False,
+        True,
+    ]
+    for root, columns, batch_size, _require_text in observed:
         assert root == data_root
         assert set(columns or set()) <= set(PARQUET_INPUT_COLUMNS)
         assert batch_size is not None and batch_size > 0
@@ -669,6 +679,7 @@ def test_iter_centroids_forwards_exact_streaming_contract(
         data_root,
         columns=PARQUET_INPUT_COLUMNS,
         batch_size=17,
+        require_successful_text=True,
     )
     centroid.assert_called_once_with(b"wkb")
     validate.assert_called_once_with(1.5, 2.5)

@@ -41,7 +41,11 @@ from osm_polygon_description_tag.dataset.schema import (
     geo_metadata,
     mapping_to_pairs,
 )
-from osm_polygon_description_tag.dataset.text import is_nonempty_text
+from osm_polygon_description_tag.dataset.text import (
+    has_successful_description_text,
+    is_nonempty_text,
+    is_trimmed_nonempty_text,
+)
 
 _DICTIONARY_COLUMNS = ["source_pbf", "osm_type", "geometry_type"]
 _VALID_GEOMETRY_TYPES = {"Polygon", "MultiPolygon"}
@@ -345,12 +349,33 @@ def _validate_geometry_type(state: _ValidationState, geometry_type: str) -> None
     state.actual_types.add(geometry_type)
 
 
-def _validate_base_description(description: object) -> None:
-    if description is not None:
-        if not isinstance(description, str):
-            raise StorageError("description must be a string")
-        if not is_nonempty_text(description):
-            raise StorageError("description text must be non-empty")
+def _validate_successful_text(
+    value: str,
+    *,
+    empty_message: str,
+    trimmed_message: str,
+) -> None:
+    if not is_nonempty_text(value):
+        raise StorageError(empty_message)
+    if not is_trimmed_nonempty_text(value):
+        raise StorageError(trimmed_message)
+
+
+def _validate_base_description(
+    description: object,
+    *,
+    require_successful_text: bool = True,
+) -> None:
+    if description is None:
+        return
+    if not isinstance(description, str):
+        raise StorageError("description must be a string")
+    if require_successful_text:
+        _validate_successful_text(
+            description,
+            empty_message="description text must be non-empty",
+            trimmed_message="description text must be trimmed",
+        )
 
 
 def _localized_description_entries(value: object) -> Sequence[object]:
@@ -359,34 +384,80 @@ def _localized_description_entries(value: object) -> Sequence[object]:
     return cast(Sequence[object], value)
 
 
-def _validate_localized_entry(entry: object, seen_keys: set[str]) -> None:
-    if not isinstance(entry, Mapping):
-        raise StorageError("localized description entry is malformed")
-    key = entry.get("key")
+def _validate_localized_key(key: object, seen_keys: set[str]) -> str:
     if not isinstance(key, str):
         raise StorageError("localized description key is malformed")
     if key in seen_keys:
         raise StorageError(f"duplicate localized description key: {key!r}")
-    value = entry.get("value")
-    if not is_nonempty_text(value):
+    return key
+
+
+def _validate_localized_value(
+    value: object,
+    *,
+    require_successful_text: bool = True,
+) -> None:
+    if value is None and not require_successful_text:
+        return
+    if not isinstance(value, str):
         raise StorageError("localized description value must be non-empty text")
+    if require_successful_text:
+        _validate_successful_text(
+            value,
+            empty_message="localized description value must be non-empty text",
+            trimmed_message="localized description value must be trimmed",
+        )
+
+
+def _validate_localized_entry(
+    entry: object,
+    seen_keys: set[str],
+    *,
+    require_successful_text: bool = True,
+) -> None:
+    if not isinstance(entry, Mapping):
+        raise StorageError("localized description entry is malformed")
+    key = _validate_localized_key(entry.get("key"), seen_keys)
+    _validate_localized_value(
+        entry.get("value"),
+        require_successful_text=require_successful_text,
+    )
     seen_keys.add(key)
 
 
-def _validate_localized_descriptions(value: object) -> int:
+def _validate_localized_descriptions(
+    value: object,
+    *,
+    require_successful_text: bool = True,
+) -> int:
     entries = _localized_description_entries(value)
     seen_keys: set[str] = set()
     for entry in entries:
-        _validate_localized_entry(entry, seen_keys)
+        _validate_localized_entry(
+            entry,
+            seen_keys,
+            require_successful_text=require_successful_text,
+        )
     return len(seen_keys)
 
 
-def _validate_description_values(description: object, localized_descriptions: object) -> None:
+def _validate_description_values(
+    description: object,
+    localized_descriptions: object,
+    *,
+    require_successful_text: bool = True,
+) -> None:
     """Enforce the final-artifact successful non-empty-text invariant."""
-    _validate_base_description(description)
-    localized_count = _validate_localized_descriptions(localized_descriptions)
+    _validate_base_description(description, require_successful_text=require_successful_text)
+    _validate_localized_descriptions(
+        localized_descriptions,
+        require_successful_text=require_successful_text,
+    )
 
-    if description is None and localized_count == 0:
+    if require_successful_text and not has_successful_description_text(
+        description,
+        localized_descriptions,
+    ):
         raise StorageError("at least one non-empty description text is required")
 
 
@@ -436,13 +507,21 @@ def _decode_geometry(geometry: bytes):
         raise StorageError(f"undecodable WKB geometry: {error}") from error
 
 
-def _validate_row(columns: Mapping[str, list[Any]], index: int, state: _ValidationState) -> None:
+def _validate_row(
+    columns: Mapping[str, list[Any]],
+    index: int,
+    state: _ValidationState,
+    *,
+    require_successful_text: bool = True,
+) -> None:
     osm_type = columns["osm_type"][index]
     osm_id = columns["osm_id"][index]
     state.uniqueness.check_and_add(osm_type, osm_id)
     _validate_source(state, columns["source_pbf"][index])
     _validate_description_values(
-        columns["description"][index], columns["localized_descriptions"][index]
+        columns["description"][index],
+        columns["localized_descriptions"][index],
+        require_successful_text=require_successful_text,
     )
     geometry_type = columns["geometry_type"][index]
     _validate_geometry_type(state, geometry_type)
@@ -460,10 +539,20 @@ def _validate_row(columns: Mapping[str, list[Any]], index: int, state: _Validati
     state.row_count += 1
 
 
-def _validate_batch(batch: pa.RecordBatch, state: _ValidationState) -> None:
+def _validate_batch(
+    batch: pa.RecordBatch,
+    state: _ValidationState,
+    *,
+    require_successful_text: bool = True,
+) -> None:
     columns = _batch_columns(batch)
     for index in range(batch.num_rows):
-        _validate_row(columns, index, state)
+        _validate_row(
+            columns,
+            index,
+            state,
+            require_successful_text=require_successful_text,
+        )
 
 
 def _validate_metadata_extent(
@@ -489,8 +578,15 @@ def _validate_metadata_bbox(state: _ValidationState, meta_bbox: object) -> None:
             raise StorageError(f"bbox mismatch: actual {actual_bbox} != metadata {expected_bbox}")
 
 
-def validate_geoparquet(path: Path) -> int:
-    """Validate a finalized GeoParquet file in batches and return its row count."""
+def validate_geoparquet(path: Path, *, require_successful_text: bool = True) -> int:
+    """Validate a GeoParquet file in batches and return its row count.
+
+    Strict validation requires every persisted row to contain successful,
+    trimmed, non-empty description text. Reporting and metadata-only release
+    paths may set ``require_successful_text=False`` for legacy artifacts: the
+    file's schema, geometry, identity, and text value types remain validated,
+    while the shared SQL population predicate excludes rejected text rows.
+    """
     if not path.is_file():
         raise StorageError(f"missing parquet: {path}")
     try:
@@ -506,7 +602,11 @@ def validate_geoparquet(path: Path) -> int:
         )
         try:
             for batch in pf.iter_batches(columns=_VALIDATION_COLUMNS):
-                _validate_batch(batch, state)
+                _validate_batch(
+                    batch,
+                    state,
+                    require_successful_text=require_successful_text,
+                )
         finally:
             state.uniqueness.close()
         _validate_metadata_extent(state, meta_types, meta_bbox)

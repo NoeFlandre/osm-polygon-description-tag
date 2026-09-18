@@ -22,6 +22,29 @@ H3_MAP_TITLE: Final[str] = (
     "H3 density of canonical globally unique `(osm_type, osm_id)` polygons "
     "with successfully extracted trimmed non-empty description text"
 )
+H3_MAP_OVERLAP_CAPTION: Final[str] = (
+    "Regional overlap duplicates were removed globally; this is not a count of regional rows."
+)
+H3_MAP_DESCRIPTION: Final[str] = (
+    "Hexbin density of every canonical globally unique `(osm_type, osm_id)` polygon\n"
+    "with successfully extracted trimmed non-empty description text at H3 resolution\n"
+    "3, drawn from each canonical row's geometry centroid on a logarithmic scale.\n"
+    "Regional overlap duplicates are removed globally; this is not a count of\n"
+    "regional rows. Lighter cells contain more polygons."
+)
+
+# These are the two map paragraphs shipped by earlier card revisions. They
+# are recognized exactly so a release can correct stale contract wording while
+# leaving all unrelated handwritten card content untouched.
+_LEGACY_MAP_DESCRIPTIONS: Final[tuple[str, ...]] = (
+    "Hexbin density of every canonical globally unique `(osm_type, osm_id)` polygon\n"
+    "with successfully extracted trimmed non-empty description text at H3 resolution\n"
+    "3, drawn from each row's geometry centroid on a logarithmic scale. Lighter\n"
+    "cells contain more polygons.",
+    "Hexbin density of every described polygon at H3 resolution 3, drawn from each\n"
+    "row's geometry centroid on a logarithmic scale. Lighter cells contain more\n"
+    "polygons.",
+)
 
 _MARKER_PATTERN = re.compile(
     rf"({re.escape(H3_MAP_START_MARKER)}\r?\n).*?"
@@ -62,6 +85,21 @@ def render_map_block() -> str:
         f"![{H3_MAP_TITLE}]({H3_MAP_ASSET_RELATIVE_PATH})\n"
         f"{H3_MAP_END_MARKER}\n"
     )
+
+
+def normalize_map_prose(text: str) -> str:
+    """Update only known legacy map prose to the current contract wording."""
+    newline = _newline_for(text)
+    # pragma: no mutate start - this fixed prose contains no sentinel text
+    canonical = H3_MAP_DESCRIPTION.replace("\n", newline)
+    # pragma: no mutate end
+    for legacy in _LEGACY_MAP_DESCRIPTIONS:
+        # pragma: no mutate start - the fixed legacy paragraphs contain no sentinel text
+        legacy_with_newline = legacy.replace("\n", newline)
+        # pragma: no mutate end
+        if legacy_with_newline in text:
+            return text.replace(legacy_with_newline, canonical, 1)
+    return text
 
 
 def install_map_block(template: str, block_body: str) -> str:
@@ -165,11 +203,14 @@ def _atomic_write_template(template_path: Path, new_text: str) -> None:
 
 __all__ = [
     "H3_MAP_ASSET_RELATIVE_PATH",
+    "H3_MAP_DESCRIPTION",
     "H3_MAP_END_MARKER",
+    "H3_MAP_OVERLAP_CAPTION",
     "H3_MAP_START_MARKER",
     "H3_MAP_TITLE",
     "insert_map_block",
     "install_map_block",
+    "normalize_map_prose",
     "render_map_block",
     "write_map_block_marker_to_template",
 ]

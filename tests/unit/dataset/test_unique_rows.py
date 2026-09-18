@@ -4,11 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
+from shapely import to_wkb
 from shapely.geometry import Polygon
 
 import osm_polygon_description_tag.dataset.unique_rows as unique_rows
+from osm_polygon_description_tag.dataset.canonical_rows import (
+    canonical_geometry_wkb,
+    select_canonical_row,
+)
 from tests.conftest import make_record_dict
 from tests.helpers.dataset import write_finalized_dataset
 
@@ -54,6 +60,58 @@ def test_parquet_column_expression_handles_non_geospatial_and_optional_columns(
         )
         == expected
     )
+
+
+@pytest.mark.parametrize(
+    ("column", "expected"),
+    [
+        (
+            "localized_names",
+            "CAST([] AS STRUCT(key VARCHAR, value VARCHAR)[]) AS localized_names",
+        ),
+        (
+            "localized_descriptions",
+            "CAST([] AS STRUCT(key VARCHAR, value VARCHAR)[]) AS localized_descriptions",
+        ),
+        ("tags", "CAST([] AS STRUCT(key VARCHAR, value VARCHAR)[]) AS tags"),
+    ],
+)
+def test_missing_mapping_columns_use_typed_empty_lists(column: str, expected: str) -> None:
+    assert (
+        unique_rows._missing_parquet_column_expression(
+            column,
+            path=Path("region.parquet"),
+            required_columns=frozenset(),
+        )
+        == expected
+    )
+
+
+def test_missing_requested_mapping_column_is_rejected() -> None:
+    with pytest.raises(unique_rows.UniqueRowsError, match="missing unique-row column 'tags'"):
+        unique_rows._parquet_column_expression(
+            "tags",
+            set(),
+            has_geo_metadata=False,
+            path=Path("region.parquet"),
+            required_columns=frozenset({"tags"}),
+        )
+
+
+def test_unique_rows_sql_requires_text_only_when_opted_in() -> None:
+    columns = ("osm_type", "osm_id", "description", "localized_descriptions")
+    without_text_filter = unique_rows.unique_rows_sql(
+        "all_features", columns, key_value_columns_are_maps=True
+    )
+    with_text_filter = unique_rows.unique_rows_sql(
+        "all_features",
+        columns,
+        key_value_columns_are_maps=True,
+        require_successful_text=True,
+    )
+
+    assert "WHERE (description IS NOT NULL" not in without_text_filter
+    assert "WHERE (description IS NOT NULL" in with_text_filter
 
 
 def test_parquet_column_expression_rejects_missing_required_column() -> None:
@@ -284,6 +342,100 @@ def test_iter_unique_parquet_batches_yields_the_selected_payload_row(
             "geometry": second["geometry"],
         }
     ]
+
+
+def test_unique_selection_is_order_independent_for_equal_rank_opposite_endian_rows(
+    tmp_path: Path,
+) -> None:
+    geometry = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
+    first = make_record_dict(
+        geometry,
+        {"description": "z payload"},
+        osm_id=77,
+        source_pbf="overlap.osm.pbf",
+    )
+    second = make_record_dict(
+        geometry,
+        {"description": "a payload"},
+        osm_id=77,
+        source_pbf="overlap.osm.pbf",
+    )
+    second["geometry"] = to_wkb(geometry, byte_order=0, output_dimension=2)
+    second["version"] = first["version"]
+    second["timestamp"] = first["timestamp"]
+
+    def selected(name: str, records: list[dict[str, object]]) -> list[dict[str, object]]:
+        data_root = tmp_path / name / "generated"
+        write_finalized_dataset(
+            data_root,
+            tmp_path / name / "raw",
+            {"region-a": [records[0]], "region-b": [records[1]]},
+        )
+        return [
+            row
+            for batch in unique_rows.iter_unique_parquet_batches(
+                data_root,
+                columns=(
+                    "osm_type",
+                    "osm_id",
+                    "description",
+                    "area_m2",
+                    "bbox_min_x",
+                    "bbox_min_y",
+                    "bbox_max_x",
+                    "bbox_max_y",
+                    "geometry",
+                ),
+            )
+            for row in batch.to_pylist()
+        ]
+
+    forward = selected("forward", [first, second])
+    reverse = selected("reverse", [second, first])
+    expected = select_canonical_row((first, second))
+
+    assert forward == reverse
+    assert forward == [
+        {
+            **{key: expected[key] for key in forward[0] if key != "geometry"},
+            "geometry": canonical_geometry_wkb(expected["geometry"]),
+        }
+    ]
+
+
+def test_text_filter_runs_before_canonical_ranking(tmp_path: Path) -> None:
+    geometry = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
+    valid = make_record_dict(
+        geometry,
+        {"description": "valid lower-ranked text"},
+        osm_id=88,
+        source_pbf="valid.osm.pbf",
+    )
+    invalid = dict(valid, description="   ", version=int(valid["version"]) + 1)
+    invalid["localized_descriptions"] = {}
+    data_root = tmp_path / "dataset"
+
+    with patch(
+        "osm_polygon_description_tag.dataset.storage.validate_geoparquet",
+        return_value=1,
+    ):
+        write_finalized_dataset(
+            data_root,
+            tmp_path / "raw",
+            {"a": [invalid], "b": [valid]},
+        )
+
+    rows = [
+        row
+        for batch in unique_rows.iter_unique_parquet_batches(
+            data_root,
+            columns=("osm_type", "osm_id", "description"),
+            require_successful_text=True,
+        )
+        for row in batch.to_pylist()
+    ]
+
+    assert rows == [{"osm_type": "way", "osm_id": 88, "description": "valid lower-ranked text"}]
 
 
 def test_iter_unique_parquet_batches_wraps_duckdb_errors(

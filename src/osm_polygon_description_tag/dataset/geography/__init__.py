@@ -32,11 +32,14 @@ from osm_polygon_description_tag.dataset.geography.area_rendering import (
 )
 from osm_polygon_description_tag.dataset.geography.card import (
     H3_MAP_ASSET_RELATIVE_PATH,
+    H3_MAP_DESCRIPTION,
     H3_MAP_END_MARKER,
+    H3_MAP_OVERLAP_CAPTION,
     H3_MAP_START_MARKER,
     H3_MAP_TITLE,
     insert_map_block,
     install_map_block,
+    normalize_map_prose,
     render_map_block,
 )
 from osm_polygon_description_tag.dataset.geography.h3_policy import (
@@ -65,7 +68,9 @@ __all__ = [
     "AREA_HISTOGRAM_RENDER_VERSION",
     "DEFAULT_H3_RESOLUTION",
     "H3_MAP_ASSET_RELATIVE_PATH",
+    "H3_MAP_DESCRIPTION",
     "H3_MAP_END_MARKER",
+    "H3_MAP_OVERLAP_CAPTION",
     "H3_MAP_START_MARKER",
     "H3_MAP_TITLE",
     "PARQUET_INPUT_COLUMNS",
@@ -82,6 +87,7 @@ __all__ = [
     "insert_map_block",
     "install_map_block",
     "iter_centroids",
+    "normalize_map_prose",
     "render_area_histogram",
     "render_density_map",
     "render_map_block",

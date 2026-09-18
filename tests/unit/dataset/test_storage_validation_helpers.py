@@ -34,6 +34,7 @@ from osm_polygon_description_tag.dataset.storage import (
     _stream_rewrite_with_metadata,
     _UniquenessIndex,
     _validate_area,
+    _validate_batch,
     _validate_bbox,
     _validate_description_values,
     _validate_geo_metadata_header,
@@ -209,8 +210,72 @@ def test_validate_description_values_rejects_blank_malformed_or_duplicate_values
 
 @given(st.text(alphabet=st.characters(whitelist_categories=("L", "N")), min_size=1))
 def test_validate_description_values_accepts_trimmed_nonempty_text(value: str) -> None:
-    _validate_description_values(f" \t{value}\n", [])
-    _validate_description_values(None, [{"key": "en", "value": f" {value} "}])
+    _validate_description_values(value, [])
+    _validate_description_values(None, [{"key": "en", "value": value}])
+
+
+@pytest.mark.parametrize(
+    ("description", "localized"),
+    [
+        (" padded ", []),
+        (None, [{"key": "en", "value": " padded "}]),
+    ],
+)
+def test_validate_description_values_rejects_untrimmed_final_text(
+    description: object, localized: object
+) -> None:
+    with pytest.raises(StorageError, match="trimmed"):
+        _validate_description_values(description, localized)
+
+
+def test_legacy_validation_mode_is_forwarded_through_every_text_validator(
+    tmp_path: Path,
+    way_record_dict: dict[str, object],
+) -> None:
+    legacy_record = dict(way_record_dict)
+    legacy_record["description"] = " padded base "
+    legacy_record["localized_descriptions"] = [{"key": "en", "value": " padded local "}]
+    batch = pa.RecordBatch.from_pylist([legacy_record])
+
+    with _UniquenessIndex(work_root=tmp_path / "work") as uniqueness:
+        state = _ValidationState(uniqueness=uniqueness)
+        _validate_batch(batch, state, require_successful_text=False)
+
+    assert state.row_count == 1
+
+
+def test_legacy_validation_mode_accepts_schema_nullable_localized_values() -> None:
+    _validate_description_values(
+        "valid base",
+        [{"key": "en", "value": None}],
+        require_successful_text=False,
+    )
+
+
+def test_text_validation_helpers_are_strict_by_default(
+    tmp_path: Path,
+    way_record_dict: dict[str, object],
+) -> None:
+    legacy_record = dict(way_record_dict)
+    legacy_record["description"] = " padded base "
+    legacy_record["localized_descriptions"] = [{"key": "en", "value": " padded local "}]
+    columns = _columns(legacy_record)
+    batch = pa.RecordBatch.from_pylist([legacy_record])
+
+    with pytest.raises(StorageError, match="trimmed"):
+        storage._validate_localized_descriptions(columns["localized_descriptions"][0])
+
+    with (
+        _UniquenessIndex(work_root=tmp_path / "row-work") as uniqueness,
+        pytest.raises(StorageError, match="trimmed"),
+    ):
+        _validate_row(columns, 0, _ValidationState(uniqueness=uniqueness))
+
+    with (
+        _UniquenessIndex(work_root=tmp_path / "batch-work") as uniqueness,
+        pytest.raises(StorageError, match="trimmed"),
+    ):
+        _validate_batch(batch, _ValidationState(uniqueness=uniqueness))
 
 
 @pytest.mark.parametrize(
@@ -227,6 +292,16 @@ def test_validate_base_description_preserves_exact_error_messages(
         storage._validate_base_description(description)
 
     assert str(error.value) == message
+
+
+def test_validate_trimmed_description_errors_preserve_exact_messages() -> None:
+    with pytest.raises(StorageError) as base_error:
+        storage._validate_base_description(" padded ")
+    assert str(base_error.value) == "description text must be trimmed"
+
+    with pytest.raises(StorageError) as localized_error:
+        storage._validate_localized_value(" padded ")
+    assert str(localized_error.value) == "localized description value must be trimmed"
 
 
 @pytest.mark.parametrize(
@@ -697,6 +772,20 @@ def test_validate_geoparquet_uses_empty_metadata_defaults_and_exact_validation_i
     index_factory.assert_called_once_with(work_root=data_root / ".work" / "validation")
     parquet_file.iter_batches.assert_called_once_with(columns=storage._VALIDATION_COLUMNS)
     uniqueness.close.assert_called_once_with()
+
+
+def test_validate_geoparquet_can_allow_source_text_rejections(
+    tmp_path: Path,
+    way_record_dict: dict[str, object],
+) -> None:
+    record = dict(way_record_dict, description="  legacy whitespace  ")
+    target = tmp_path / "data" / "legacy.parquet"
+
+    write_geoparquet(iter([record]), target, validator=lambda _path: 1)
+
+    with pytest.raises(StorageError, match="description text must be trimmed"):
+        storage.validate_geoparquet(target)
+    assert storage.validate_geoparquet(target, require_successful_text=False) == 1
 
 
 def test_fsync_dir_uses_the_owned_directory_and_closes_the_fd(

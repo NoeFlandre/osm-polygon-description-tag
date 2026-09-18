@@ -96,19 +96,34 @@ def _require_matching_parquet(manifest: Manifest, manifest_path: Path, parquet_p
         raise PublicationError(f"manifest output identity does not match parquet: {manifest_path}")
 
 
-def _validate_publication_parquet(parquet_path: Path) -> None:
+def _validate_publication_parquet(
+    parquet_path: Path,
+    *,
+    require_successful_text: bool = True,
+) -> None:
     try:
-        validate_geoparquet(parquet_path)
+        if require_successful_text:
+            validate_geoparquet(parquet_path)
+        else:
+            validate_geoparquet(parquet_path, require_successful_text=False)
     except StorageError as error:
         raise PublicationError(f"parquet fails validation for publication: {error}") from error
 
 
-def _validate_manifest(manifest_path: Path, parquet_path: Path) -> None:
+def _validate_manifest(
+    manifest_path: Path,
+    parquet_path: Path,
+    *,
+    require_successful_text: bool = True,
+) -> None:
     """Reject empty or placeholder manifests and require output identity match."""
     manifest = _read_manifest_for_publication(manifest_path)
     _require_supported_manifest_version(manifest)
     _require_matching_parquet(manifest, manifest_path, parquet_path)
-    _validate_publication_parquet(parquet_path)
+    if require_successful_text:
+        _validate_publication_parquet(parquet_path)
+    else:
+        _validate_publication_parquet(parquet_path, require_successful_text=False)
 
 
 def _validate_asset_entry(entry: Path) -> UploadItem:
@@ -288,14 +303,25 @@ def _validate_data_entry(path: Path) -> UploadItem:
     return _build_item(path, f"data/{path.name}")
 
 
-def _collect_data_items(data_root: Path) -> list[UploadItem]:
+def _collect_data_items(
+    data_root: Path,
+    *,
+    require_successful_text: bool = True,
+) -> list[UploadItem]:
     data_dir = data_root / "data"
     if not data_dir.is_dir():
         return []
     items: list[UploadItem] = []
     for path in sorted(data_dir.iterdir(), key=lambda entry: entry.name):  # pragma: no mutate
         items.append(_validate_data_entry(path))
-        _validate_manifest(_manifest_path_for(path.name, data_root), path)
+        if require_successful_text:
+            _validate_manifest(_manifest_path_for(path.name, data_root), path)
+        else:
+            _validate_manifest(
+                _manifest_path_for(path.name, data_root),
+                path,
+                require_successful_text=False,
+            )
     return items
 
 

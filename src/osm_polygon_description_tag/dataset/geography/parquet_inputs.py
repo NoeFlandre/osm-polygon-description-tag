@@ -148,6 +148,29 @@ def _iter_centroid_batch(
         yield _centroid_row(wkb, osm_id, source_name, source_paths)
 
 
+def _validate_unique_centroids(data_root: Path, source_paths: Mapping[str, Path]) -> None:
+    """Validate geometry and coordinates before the text population filter.
+
+    The map population is text-aware, but malformed geometry must not become
+    invisible merely because its row is ineligible for that population. This
+    bounded preflight preserves the H3 module's historical geometry errors;
+    the subsequent iterator still performs the text-aware canonical read used
+    for counts.
+    """
+    try:
+        batches = iter_unique_parquet_batches(
+            data_root,
+            columns=PARQUET_INPUT_COLUMNS,
+            batch_size=BATCH_SIZE,
+            require_successful_text=False,
+        )
+        for batch in batches:
+            for _ in _iter_centroid_batch(batch, source_paths):
+                pass
+    except UniqueRowsError as error:
+        raise H3AggregationError(str(error)) from error
+
+
 def iter_centroids(
     data_root: Path, *, batch_size: int = BATCH_SIZE
 ) -> Iterator[tuple[Path, float, float]]:
@@ -164,6 +187,7 @@ def iter_centroids(
             data_root,
             columns=PARQUET_INPUT_COLUMNS,
             batch_size=batch_size,
+            require_successful_text=True,
         )
         for batch in batches:
             yield from _iter_centroid_batch(batch, source_paths)
@@ -198,6 +222,7 @@ def collect_h3_counts(
 
     counts: dict[str, int] = {}
     resolution = DEFAULT_H3_RESOLUTION if h3_resolution is None else h3_resolution
+    _validate_unique_centroids(data_root, _source_paths(data_root / "data"))
     for _path, lon, lat in iter_centroids(data_root):
         cell = assign_h3_cell(lat, lon, resolution=resolution)
         counts[cell] = counts.get(cell, 0) + 1

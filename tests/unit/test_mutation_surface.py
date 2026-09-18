@@ -21,6 +21,7 @@ import osm_polygon_description_tag.cli as cli
 import osm_polygon_description_tag.runtime.presentation as presentation
 import osm_polygon_description_tag.workflow.orchestrator as orchestrator
 from osm_polygon_description_tag.dataset.manifest import _empty_policy_hash
+from osm_polygon_description_tag.dataset.text import trimmed_nonempty_text
 from osm_polygon_description_tag.publication.models import PublishRetry
 
 
@@ -70,6 +71,10 @@ def test_cli_print_json_is_sorted_and_indented(capsys: pytest.CaptureFixture[str
     assert capsys.readouterr().out == (
         '{\n  "a": {\n    "value": "café",\n    "é": true\n  },\n  "z": 1\n}\n'
     )
+
+
+def test_shared_text_contract_is_on_the_mutation_surface() -> None:
+    assert trimmed_nonempty_text("  description  ") == "description"
 
 
 def test_cli_invoke_calls_handler_and_translates_keyboard_interrupt() -> None:

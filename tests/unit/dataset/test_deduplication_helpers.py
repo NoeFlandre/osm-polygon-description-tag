@@ -35,14 +35,17 @@ from osm_polygon_description_tag.dataset.deduplication import (
     _promote_staged,
     _read_manifests,
     _read_state,
+    _recorded_input_hashes,
     _resume_staged,
     _rows_for_source,
     _skipped_result,
     _sql_literal,
     _stage_changes,
     _stage_source,
+    _staged_input_drift_names,
     _state_payload,
     _validated_parquets,
+    _verify_staged_inputs,
     _write_state,
     deduplicate_dataset,
     select_canonical_row,
@@ -389,6 +392,63 @@ def test_read_state_rejects_invalid_or_non_object_payloads(tmp_path: Path, conte
 
     with pytest.raises(DeduplicationError, match="deduplication state"):
         _read_state(path)
+
+
+def test_recorded_input_hashes_requires_a_mapping_with_a_stable_error() -> None:
+    with pytest.raises(DeduplicationError) as error:
+        _recorded_input_hashes({})
+
+    assert str(error.value) == "staged deduplication state is missing input identities"
+
+
+def test_staged_input_drift_names_reports_missing_and_extra_inputs() -> None:
+    assert _staged_input_drift_names(
+        {"a.parquet": "a"},
+        {"a.parquet": "a", "b.parquet": "b"},
+        {},
+    ) == ("b.parquet",)
+    assert _staged_input_drift_names(
+        {"a.parquet": "a", "b.parquet": "b"},
+        {"a.parquet": "a"},
+        {},
+    ) == ("b.parquet",)
+    assert (
+        _staged_input_drift_names(
+            {"a.parquet": "new"},
+            {"a.parquet": "old"},
+            {"a.parquet": "new"},
+        )
+        == ()
+    )
+    assert _staged_input_drift_names(
+        {"a.parquet": "new"},
+        {"a.parquet": "old"},
+        {},
+    ) == ("a.parquet",)
+
+
+def test_verify_staged_inputs_reports_all_drifted_names_in_order(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / "data").mkdir()
+    monkeypatch.setattr(
+        dedup_module,
+        "_input_hashes",
+        lambda _paths: {"b.parquet": "new-b", "a.parquet": "new-a"},
+    )
+
+    with pytest.raises(DeduplicationError) as error:
+        _verify_staged_inputs(
+            tmp_path,
+            {
+                "inputs": {"a.parquet": "old-a", "b.parquet": "old-b"},
+                "files": [],
+            },
+        )
+
+    assert str(error.value) == (
+        "staged deduplication inputs changed; refusing to resume: a.parquet, b.parquet"
+    )
 
 
 def test_validated_parquets_returns_empty_for_missing_or_empty_data_directory(
@@ -812,10 +872,11 @@ def test_resume_staged_promotes_state_and_returns_deduplicated_result(
     state = {
         "status": "staged",
         "stage_dir": ".work/dedup/token",
+        "inputs": {"a.parquet": "input-sha"},
         "input_rows": 8,
         "output_rows": 6,
         "duplicate_rows": 2,
-        "files": [{"parquet": "data/a.parquet"}],
+        "files": [{"parquet": "data/a.parquet", "parquet_sha256": "output-sha"}],
     }
     calls: list[tuple[Path, Mapping[str, object], object]] = []
     writes: list[tuple[Path, dict[str, object]]] = []
@@ -849,7 +910,7 @@ def test_resume_staged_promotes_state_and_returns_deduplicated_result(
     assert writes[0][1]["status"] == "complete"
     assert "stage_dir" not in writes[0][1]
     assert writes[0][1]["outputs"] == {"a.parquet": "output-sha"}
-    assert hashed_paths == [output]
+    assert hashed_paths == [output, output]
     assert result == DeduplicationResult("deduplicated", 8, 6, 2, 1)
 
 
@@ -861,13 +922,19 @@ def test_resume_staged_accepts_state_without_a_stage_directory(
     output.parent.mkdir(parents=True)
     output.write_bytes(b"output")
     state = {
+        "inputs": {"a.parquet": "input-sha"},
         "input_rows": 2,
         "output_rows": 1,
         "duplicate_rows": 1,
-        "files": [{"parquet": "data/a.parquet"}],
+        "files": [{"parquet": "data/a.parquet", "parquet_sha256": "output-sha"}],
     }
     writes: list[dict[str, object]] = []
     monkeypatch.setattr(dedup_module, "_promote_staged", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        dedup_module,
+        "_input_hashes",
+        lambda _paths: {"a.parquet": "output-sha"},
+    )
     monkeypatch.setattr(
         dedup_module,
         "_write_state",

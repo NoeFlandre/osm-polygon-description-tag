@@ -4,15 +4,20 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 import pytest
 from shapely.geometry import Polygon
 
 import osm_polygon_description_tag.dataset.deduplication as dedup_module
-from osm_polygon_description_tag.dataset.canonical_rows import CANONICAL_FINGERPRINT_COLUMNS
+from osm_polygon_description_tag.dataset.canonical_rows import (
+    CANONICAL_FINGERPRINT_COLUMNS,
+    canonical_rows_sql,
+)
 from osm_polygon_description_tag.dataset.deduplication import (
     DEDUPLICATION_POLICY_SHA256,
     DUPLICATE_REJECTION_REASON,
+    DeduplicationError,
     _complete_state_matches,
     _parse_timestamp,
     _row_fingerprint,
@@ -132,6 +137,47 @@ def test_select_canonical_row_uses_empty_source_name_for_missing_source() -> Non
     explicit_source = {"version": 1, "timestamp": None, "source_pbf": "A.osm.pbf"}
 
     assert select_canonical_row([explicit_source, missing_source]) is missing_source
+
+
+def test_text_aware_canonical_selection_filters_invalid_higher_ranked_rows() -> None:
+    valid = {
+        "osm_type": "way",
+        "osm_id": 1,
+        "version": 1,
+        "timestamp": None,
+        "source_pbf": "region.osm.pbf",
+        "description": "valid",
+        "localized_descriptions": [],
+    }
+    invalid = dict(valid, version=2, description=" ")
+
+    assert select_canonical_row([invalid, valid], require_successful_text=True) is valid
+
+
+def test_canonical_rows_sql_filters_before_ranking_and_keeps_default_unfiltered() -> None:
+    columns = ("osm_type", "osm_id", "description", "localized_descriptions")
+    unfiltered = canonical_rows_sql("all_features", columns, key_value_columns_are_maps=True)
+    filtered = canonical_rows_sql(
+        "all_features",
+        columns,
+        key_value_columns_are_maps=True,
+        require_successful_text=True,
+    )
+
+    assert "WHERE (description IS NOT NULL" not in unfiltered
+    assert "\n            \n        ) ranked" in unfiltered
+    assert "WHERE (description IS NOT NULL" in filtered
+    assert "FROM all_features\n            WHERE (description IS NOT NULL" in filtered
+
+
+def test_deduplication_relation_requires_text_aware_canonical_selection() -> None:
+    connection = Mock()
+    with patch.object(dedup_module, "canonical_rows_sql", return_value="SELECT 1") as builder:
+        dedup_module._canonical_relation(connection, [Path("a.parquet")])
+
+    builder.assert_called_once()
+    assert builder.call_args.kwargs["require_successful_text"] is True
+    connection.execute.assert_called_once_with("CREATE TEMP TABLE deduplicated AS SELECT 1")
 
 
 def test_canonical_tie_break_and_fingerprint_ignore_source_filename() -> None:
@@ -337,3 +383,37 @@ def test_deduplicate_dataset_resumes_after_promotion_interrupt(tmp_path: Path) -
     resumed = deduplicate_dataset(data_root)
     assert resumed.status == "deduplicated"
     assert resumed.output_rows == 1
+
+
+def test_deduplicate_dataset_refuses_staged_resume_after_input_drift(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    (data_root / "data").mkdir(parents=True)
+    (data_root / "manifests").mkdir()
+    source_root.mkdir()
+    first = make_record_dict(
+        Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+        {"description": "one"},
+        osm_id=1,
+        source_pbf="a.osm.pbf",
+    )
+    duplicate = dict(first, source_pbf="b.osm.pbf", version=2)
+    _write_source(data_root, source_root, "a", [first])
+    _write_source(data_root, source_root, "b", [duplicate])
+
+    def interrupt(count: int) -> None:
+        if count == 1:
+            raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        deduplicate_dataset(data_root, promotion_hook=interrupt)
+
+    untouched = data_root / "data" / "b.parquet"
+    untouched.write_bytes(untouched.read_bytes() + b"drift")
+
+    with pytest.raises(DeduplicationError) as error:
+        deduplicate_dataset(data_root)
+
+    assert str(error.value) == (
+        "staged deduplication inputs changed; refusing to resume: b.parquet"
+    )

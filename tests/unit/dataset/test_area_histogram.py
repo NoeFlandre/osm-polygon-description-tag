@@ -265,6 +265,7 @@ def test_aggregate_area_histogram_reads_only_area_column_with_requested_batch_si
         data_root,
         columns=("area_m2",),
         batch_size=expected_batch_size,
+        require_successful_text=True,
     )
     assert counts["1-10 m²"] == 1
 
@@ -358,7 +359,7 @@ def test_area_histogram_input_sha256_is_stable_under_key_reordering() -> None:
 def test_area_histogram_input_sha256_uses_canonical_utf8_json() -> None:
     mapping = {"é.parquet": "sha-é"}
     payload = {
-        "cache_schema_version": 1,
+        "cache_schema_version": 2,
         "render_version": AREA_HISTOGRAM_RENDER_VERSION,
         "files": [{"parquet": "é.parquet", "output_sha256": "sha-é"}],
     }
@@ -819,7 +820,7 @@ def test_generate_dataset_docs_recomputes_histogram_when_parquet_changes(
     render_calls: list[Path] = []
     identity_iter = iter(["identity-v1", "identity-v2"])
 
-    def fake_aggregate(root: Path) -> dict[str, int]:
+    def fake_aggregate(root: Path, **_kwargs: object) -> dict[str, int]:
         aggregate_calls.append(root)
         return dict.fromkeys(AREA_BUCKET_LABELS, 1)
 

@@ -18,7 +18,8 @@ configs:
 
 # OSM Polygon Description Tag
 
-OpenStreetMap polygons with a non-empty `description` or
+OpenStreetMap polygons with a successfully extracted trimmed non-empty
+`description` or
 `description:<suffix>` tag, published as one GeoParquet file per regional PBF
 extract. Every row retains the complete original tag map, full Polygon or
 MultiPolygon geometry, WGS84 geodesic area, bounding box, and OSM provenance.
@@ -36,8 +37,9 @@ separately.
 
 Hexbin density of every canonical globally unique `(osm_type, osm_id)` polygon
 with successfully extracted trimmed non-empty description text at H3 resolution
-3, drawn from each row's geometry centroid on a logarithmic scale. Lighter
-cells contain more polygons.
+3, drawn from each canonical row's geometry centroid on a logarithmic scale.
+Regional overlap duplicates are removed globally; this is not a count of
+regional rows. Lighter cells contain more polygons.
 <!-- GENERATED:STATS:START -->
 <!-- GENERATED:STATS:END -->
 
@@ -61,11 +63,15 @@ cells contain more polygons.
 
 - Tagged closed ways that OSM classifies as areas, excluding `area=no`.
 - Successfully assembled `type=multipolygon` and `type=boundary` relations.
-- Exact base and localized descriptions and names.
+- Exact base and localized descriptions and names; retained description values
+  are trimmed, non-null strings and at least one valid description value is
+  required per row.
 - Complete original OSM tags, full WKB geometry, `area_m2`, and bounding boxes.
 
-Nodes, open ways, undescribed features, and failed polygon assemblies are not
-included. Cross-region duplicates are removed globally before publication.
+Nodes, open ways, undescribed features, malformed/blank description values,
+and failed polygon assemblies are not included. Cross-region duplicates are
+removed globally before publication; source-level exclusions remain in the
+manifest rejection counts.
 
 ## Schema
 
@@ -98,10 +104,12 @@ gdf = gpd.read_parquet("data/<region>-latest.parquet")
 ## Methodology
 
 `osmium export` applies standard OSM area handling and emits polygon geometry
-only. The pipeline retains features with at least one exact non-empty
-description tag, computes geodesic WGS84 area with holes and multipolygon
-components included, validates GeoParquet and manifest identities, and writes
-artifacts atomically.
+only. The pipeline retains features with at least one successfully extracted
+trimmed non-empty description tag, computes geodesic WGS84 area with holes and
+multipolygon components included, validates GeoParquet and manifest
+identities, and writes artifacts atomically. Global statistics and the map use
+one deterministic canonical row per `(osm_type, osm_id)`; regional rows,
+overlap duplicates, and source rejection categories are reported separately.
 
 All displayed statistics are generated from validated Parquet files and their
 matching manifests. No counts are handwritten.

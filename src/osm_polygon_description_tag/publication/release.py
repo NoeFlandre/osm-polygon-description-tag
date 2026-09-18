@@ -99,9 +99,14 @@ def validate_published_inventory(data_root: Path) -> int:
     """Validate every published Parquet against its manifest; return the file count.
 
     An empty or missing ``data/`` directory is refused: a release must never
-    publish statistics computed over nothing.
+    publish statistics computed over nothing. Legacy source artifacts may
+    contain rows rejected by the final text predicate; those rows remain in
+    the inventory but are excluded from release statistics and media.
     """
-    return sum(item.relative_path.startswith("data/") for item in _published_inventory(data_root))
+    return sum(
+        item.relative_path.startswith("data/")
+        for item in _published_inventory(data_root, require_successful_text=False)
+    )
 
 
 def _require_real_directory(path: Path, message: str) -> None:
@@ -115,10 +120,20 @@ def _require_nonempty_inventory(items: list[UploadItem], path: Path) -> list[Upl
     return items
 
 
-def _published_inventory(data_root: Path) -> tuple[UploadItem, ...]:
+def _published_inventory(
+    data_root: Path,
+    *,
+    require_successful_text: bool = True,
+) -> tuple[UploadItem, ...]:
     data_dir = data_root / "data"
     _require_real_directory(data_dir, "published data directory missing")
-    data_items = _require_nonempty_inventory(_collect_data_items(data_root), data_dir)
+    data_items = _require_nonempty_inventory(
+        _collect_data_items(
+            data_root,
+            require_successful_text=require_successful_text,
+        ),
+        data_dir,
+    )
     manifests_dir = data_root / "manifests"
     _require_real_directory(manifests_dir, "published manifest directory missing")
     manifest_items = _collect_manifest_items(data_root)
@@ -224,7 +239,7 @@ def _prepare_remote_release(
 ) -> _RemoteReleaseContext:
     resolved_verifier = build_default_hub_verifier() if verifier is None else verifier
     inventory_verifier = _require_inventory_verifier(resolved_verifier)
-    inventory = _published_inventory(data_root)
+    inventory = _published_inventory(data_root, require_successful_text=False)
     data_revision = inventory_verifier(repo_id, inventory)
     if not data_revision:
         raise PublicationError("hub inventory verification returned an empty revision")
@@ -242,7 +257,7 @@ def _compute_release_artifacts(
         preserve_existing=True,
     )
     plan = _build_metadata_only_upload_plan(data_root)
-    inventory = _published_inventory(data_root)
+    inventory = _published_inventory(data_root, require_successful_text=False)
     return stats, plan, inventory
 
 

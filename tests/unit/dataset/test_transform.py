@@ -26,9 +26,18 @@ def test_descriptions_preserve_base_suffixes_and_values() -> None:
         "name": "Place",
     }
     assert descriptions_from_tags(tags) == (
-        " Base text ",
+        "Base text",
         {"en": "English", "pt-BR": "Português"},
     )
+
+
+def test_descriptions_trim_successful_base_and_localized_values() -> None:
+    tags = {
+        "description": "  Base text  ",
+        "description:en": "\tEnglish\n",
+    }
+
+    assert descriptions_from_tags(tags) == ("Base text", {"en": "English"})
 
 
 def test_descriptions_exclude_empty_suffix_and_missing_base() -> None:
@@ -113,7 +122,7 @@ def test_localized_items_filter_exact_nonempty_keys() -> None:
     tags = {
         "description": "base",
         "description:": "empty suffix",
-        "description:en": "English",
+        "description:en": " English ",
         "description:fr": "   ",
         "description:pt-BR": "Português",
         "description_extra": "not a match",

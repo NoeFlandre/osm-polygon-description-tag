@@ -10,6 +10,10 @@ from datetime import UTC, datetime
 from shapely import from_wkb, to_wkb
 
 from osm_polygon_description_tag.dataset.schema import KEY_VALUE_COLUMNS, SCHEMA, mapping_to_pairs
+from osm_polygon_description_tag.dataset.text import (
+    description_row_has_successful_text,
+    successful_description_text_sql,
+)
 
 CANONICAL_ROW_POLICY_VERSION = 4
 _POLICY_TEXT = (
@@ -91,12 +95,25 @@ def _row_fingerprint(row: Mapping[str, object]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def select_canonical_row(rows: Sequence[Mapping[str, object]]) -> Mapping[str, object]:
-    """Select the stable canonical row for one OSM identity group."""
-    if not rows:
+def select_canonical_row(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    require_successful_text: bool = False,
+) -> Mapping[str, object]:
+    """Select the stable canonical row for one OSM identity group.
+
+    Text-aware callers filter before ranking, matching the SQL view's
+    ``require_successful_text`` behavior.
+    """
+    candidates = (
+        tuple(row for row in rows if description_row_has_successful_text(row))
+        if require_successful_text
+        else rows
+    )
+    if not candidates:
         raise ValueError("cannot select a canonical row from an empty group")
     return min(
-        rows,
+        candidates,
         key=lambda row: (
             -_version(row.get("version")),
             -_timestamp_rank(row.get("timestamp")),
@@ -140,8 +157,14 @@ def canonical_rows_sql(
     columns: Sequence[str],
     *,
     key_value_columns_are_maps: bool = False,
+    require_successful_text: bool = False,
 ) -> str:
-    """Return one canonical row per ``(osm_type, osm_id)`` from a relation."""
+    """Return one canonical row per identity from a relation.
+
+    When ``require_successful_text`` is true, text eligibility is applied
+    before ranking so an invalid higher-ranked duplicate cannot hide a valid
+    lower-ranked row for the same OSM identity.
+    """
     selected = tuple(dict.fromkeys(columns))
     if not selected:
         raise ValueError("unique-row views require at least one selected column")
@@ -150,6 +173,11 @@ def canonical_rows_sql(
         raise ValueError(f"unsupported unique-row columns: {sorted(unknown)}")
     selected_sql = ", ".join(selected)
     canonical_order = canonical_row_order_sql(key_value_columns_are_maps=key_value_columns_are_maps)
+    text_filter = ""
+    if require_successful_text:
+        text_filter = "WHERE " + successful_description_text_sql(
+            localized_is_map=key_value_columns_are_maps,
+        )
     return f"""
         SELECT {selected_sql}
         FROM (
@@ -158,6 +186,7 @@ def canonical_rows_sql(
                 ORDER BY {canonical_order}
             ) AS _canonical_rank
             FROM {relation}
+            {text_filter}
         ) ranked
         WHERE _canonical_rank = 1
     """  # noqa: S608 - relation/columns are internal allowlisted SQL fragments

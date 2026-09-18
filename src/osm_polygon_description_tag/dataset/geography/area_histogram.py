@@ -18,7 +18,7 @@ from typing import Any, Final
 
 from osm_polygon_description_tag.dataset.unique_rows import iter_unique_parquet_batches
 
-_AREA_HISTOGRAM_SCHEMA_VERSION: Final[int] = 1
+_AREA_HISTOGRAM_SCHEMA_VERSION: Final[int] = 2
 
 # Logarithmic buckets covering m^2 from 0 to > 10^12 (the largest
 # polygons in the dataset are country-sized, ~10^12 m^2). The bucket
@@ -76,6 +76,7 @@ def aggregate_area_histogram(
     data_root: Path,
     *,
     batch_size: int = 8192,
+    require_successful_text: bool = True,
 ) -> dict[str, int]:
     """Bucket every unique OSM identity's ``area_m2`` into fixed buckets.
 
@@ -85,21 +86,29 @@ def aggregate_area_histogram(
     function never materialises the full dataset: only the ``area_m2`` column
     is streamed from DuckDB-backed batches.
 
-    Parquet/manifest identity and GeoParquet payloads are validated via
-    :func:`osm_polygon_description_tag.dataset.storage.validate_finalized_artifacts_strict`
-    before streaming so mismatched, stale, or corrupt pairs cannot be
-    observed as a partial histogram.
+    Parquet/manifest identity and GeoParquet payloads are validated before
+    streaming so mismatched, stale, or corrupt pairs cannot be observed as a
+    partial histogram. Metadata-only reporting may allow legacy rows rejected
+    by the text predicate while the iterator still uses the strict text
+    population.
 
     An empty data directory yields all-zeros, preserving every label.
     """
-    from osm_polygon_description_tag.dataset.storage import validate_finalized_artifacts_strict
+    from osm_polygon_description_tag.dataset.storage import (
+        validate_finalized_artifacts,
+        validate_finalized_artifacts_strict,
+    )
 
-    validate_finalized_artifacts_strict(data_root)
+    if require_successful_text:
+        validate_finalized_artifacts_strict(data_root)
+    else:
+        validate_finalized_artifacts(data_root)
     counts: list[int] = [0] * AREA_BUCKET_COUNT
     for batch in iter_unique_parquet_batches(
         data_root,
         columns=("area_m2",),
         batch_size=batch_size,
+        require_successful_text=True,
     ):
         for value in batch.column("area_m2").to_pylist():
             if value is None:
