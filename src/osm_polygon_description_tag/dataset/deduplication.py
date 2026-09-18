@@ -228,7 +228,11 @@ def _canonical_relation(connection: duckdb.DuckDBPyConnection, parquets: Sequenc
         f"{canonical_geometry_wkb_sql('geometry', input_is_geometry=True)} AS geometry "
         f"FROM read_parquet([{paths}]))"
     )
-    canonical_query = canonical_rows_sql(relation, SCHEMA.names)
+    canonical_query = canonical_rows_sql(
+        relation,
+        SCHEMA.names,
+        require_successful_text=True,
+    )
     connection.execute(f"CREATE TEMP TABLE deduplicated AS {canonical_query}")
 
 

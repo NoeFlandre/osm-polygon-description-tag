@@ -5,7 +5,7 @@ from osm_polygon_description_tag.dataset import docs, reporting, stats
 
 def test_stats_exposes_its_schema_version_from_the_stats_module() -> None:
     """The stats module owns the version of its machine-readable output."""
-    assert stats.STATS_SCHEMA_VERSION == 7
+    assert stats.STATS_SCHEMA_VERSION == 8
 
 
 def test_docs_generator_is_implemented_by_the_docs_module() -> None:

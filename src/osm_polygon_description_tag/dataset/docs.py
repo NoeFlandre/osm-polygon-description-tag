@@ -12,6 +12,10 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
+from osm_polygon_description_tag.dataset.canonical_rows import (
+    CANONICAL_ROW_POLICY_SHA256,
+    CANONICAL_ROW_POLICY_VERSION,
+)
 from osm_polygon_description_tag.dataset.geography import (
     DEFAULT_H3_RESOLUTION,
     aggregate_h3_density,
@@ -30,13 +34,20 @@ from osm_polygon_description_tag.dataset.geography.card import (
     H3_MAP_TITLE,
     insert_map_block,
     install_map_block,
+    normalize_map_prose,
 )
 from osm_polygon_description_tag.dataset.geography.rendering import render_density_map
 from osm_polygon_description_tag.dataset.manifest import file_sha256
-from osm_polygon_description_tag.dataset.stats import ReportingError, collect_stats, utc_now_iso
+from osm_polygon_description_tag.dataset.stats import (
+    TEXT_REJECTION_REASONS,
+    ReportingError,
+    collect_stats,
+    utc_now_iso,
+)
+from osm_polygon_description_tag.dataset.text import TEXT_CONTRACT_VERSION
 from osm_polygon_description_tag.runtime.resources import dataset_card_hero
 
-_H3_MAP_CACHE_SCHEMA_VERSION = 1
+_H3_MAP_CACHE_SCHEMA_VERSION = 2
 _H3_MAP_RENDER_VERSION = 2
 _AREA_HISTOGRAM_FILENAME = "area_distribution.png"
 _AREA_HISTOGRAM_ASSET_RELATIVE_PATH = f"assets/{_AREA_HISTOGRAM_FILENAME}"
@@ -74,6 +85,9 @@ def _h3_map_input_sha256(stats: Mapping[str, Any]) -> str:
         "cache_schema_version": _H3_MAP_CACHE_SCHEMA_VERSION,
         "render_version": _H3_MAP_RENDER_VERSION,
         "h3_resolution": DEFAULT_H3_RESOLUTION,
+        "canonical_row_policy_version": CANONICAL_ROW_POLICY_VERSION,
+        "canonical_row_policy_sha256": CANONICAL_ROW_POLICY_SHA256,
+        "text_contract_version": TEXT_CONTRACT_VERSION,
         "basemap_sha256": file_sha256(bundled_basemap_path()),
         "files": file_inputs,
     }
@@ -177,6 +191,62 @@ def _polygon_count_metrics(stats: Mapping[str, Any]) -> tuple[int, int, int, int
     return regional_rows, globally_unique, overlap_duplicates, manifest_duplicates
 
 
+def _successful_text_count(stats: Mapping[str, Any], fallback: int) -> int:
+    value = stats.get(
+        "unique_polygons_with_successful_nonempty_text",
+        stats.get("unique_polygons_with_text", fallback),
+    )
+    return int(value)
+
+
+def _render_suffix_section(stats: Mapping[str, Any]) -> list[str]:
+    top_suffixes = sorted(
+        stats["description_suffixes"].items(), key=lambda item: (-item[1], item[0])
+    )[:10]
+    if not top_suffixes:
+        return []
+    lines = [
+        "### Most common localized suffixes",
+        "",
+        "These are exact OSM tag suffixes and are not validated language codes.",
+        "",
+        "| Suffix | Description values |",
+        "| --- | ---: |",
+    ]
+    lines.extend(f"| `{suffix}` | {_fmt_int(count)} |" for suffix, count in top_suffixes)
+    lines.append("")
+    return lines
+
+
+def _render_text_rejection_section(stats: Mapping[str, Any]) -> list[str]:
+    text_rejections = stats.get("text_rejection_counts")
+    if not isinstance(text_rejections, Mapping):
+        text_rejections = {}
+    lines = [
+        "### Text-contract exclusions in source manifests",
+        "",
+        "These counts describe rows rejected before publication; the final "
+        "polygon and area populations contain only trimmed, non-empty text.",
+        "",
+        "| Rejection category | Rows |",
+        "| --- | ---: |",
+    ]
+    for reason in TEXT_REJECTION_REASONS:
+        lines.append(f"| `{reason}` | {_fmt_int(int(text_rejections.get(reason, 0)))} |")
+    lines.append("")
+    return lines
+
+
+def _render_timestamp_section(stats: Mapping[str, Any]) -> list[str]:
+    if not stats["data_min_timestamp_utc"] or not stats["data_max_timestamp_utc"]:
+        return []
+    return [
+        "**OSM object timestamps (UTC):** "
+        f"{stats['data_min_timestamp_utc']} to {stats['data_max_timestamp_utc']}",
+        "",
+    ]
+
+
 def _render_geometry_stats_section(stats: Mapping[str, Any]) -> list[str]:
     """Render the additive geometry statistics section."""
     geometry_types = stats.get("geometry_types", {})
@@ -185,11 +255,12 @@ def _render_geometry_stats_section(stats: Mapping[str, Any]) -> list[str]:
     regional_rows, globally_unique, overlap_duplicates, _manifest_duplicates = (
         _polygon_count_metrics(stats)
     )
+    successful_text = _successful_text_count(stats, globally_unique)
     return [
         "## Polygon surface and geometry",
         "",
         "Computed deterministically from the complete published polygon table: "
-        f"all {_fmt_int(globally_unique)} canonical globally unique "
+        f"all {_fmt_int(successful_text)} canonical globally unique "
         "`(osm_type, osm_id)` polygons with successfully extracted trimmed "
         "non-empty description text from "
         f"{_fmt_int(regional_rows)} regional/raw rows across "
@@ -200,9 +271,11 @@ def _render_geometry_stats_section(stats: Mapping[str, Any]) -> list[str]:
         "",
         "| Metric | Value |",
         "| --- | ---: |",
+        f"| Unique `(osm_type, osm_id)` polygons across regional/raw rows | "
+        f"{_fmt_int(globally_unique)} |",
         f"| Canonical globally unique `(osm_type, osm_id)` polygons with "
         f"successfully extracted trimmed non-empty description text | "
-        f"{_fmt_int(globally_unique)} |",
+        f"{_fmt_int(successful_text)} |",
         "| Surface area (total / mean) | "
         f"{_fmt_area(stats.get('area_m2_total_m2'))} / "
         f"{_fmt_area(stats.get('area_m2_mean_m2'))} |",
@@ -233,6 +306,7 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
     regional_rows, globally_unique, overlap_duplicates, manifest_duplicates = (
         _polygon_count_metrics(stats)
     )
+    successful_text = _successful_text_count(stats, globally_unique)
     lines: list[str] = [
         f"<!-- stats_sha256: {stats_sha256} -->",
         f"<!-- stats_schema_version: {stats['stats_schema_version']} -->",
@@ -243,9 +317,11 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
         "| Metric | Value |",
         "| --- | --- |",
         f"| Regional/raw polygon rows | {_fmt_int(regional_rows)} |",
+        f"| Unique `(osm_type, osm_id)` polygons across regional/raw rows | "
+        f"{_fmt_int(globally_unique)} |",
         f"| Canonical globally unique `(osm_type, osm_id)` polygons with "
         f"successfully extracted trimmed non-empty description text | "
-        f"{_fmt_int(globally_unique)} |",
+        f"{_fmt_int(successful_text)} |",
         f"| Regional-overlap duplicate rows | {_fmt_int(overlap_duplicates)} |",
         f"| Parquet files | {_fmt_int(stats['output_files'])} |",
         f"| Download size | {_fmt_bytes(stats['output_bytes_total'])} |",
@@ -269,22 +345,7 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
         f"{_fmt_median(stats['localized_description_words_median'])} |",
         "",
     ]
-    top_suffixes = sorted(
-        stats["description_suffixes"].items(), key=lambda item: (-item[1], item[0])
-    )[:10]
-    if top_suffixes:
-        lines.extend(
-            [
-                "### Most common localized suffixes",
-                "",
-                "These are exact OSM tag suffixes and are not validated language codes.",
-                "",
-                "| Suffix | Description values |",
-                "| --- | ---: |",
-            ]
-        )
-        lines.extend(f"| `{suffix}` | {_fmt_int(count)} |" for suffix, count in top_suffixes)
-        lines.append("")
+    lines.extend(_render_suffix_section(stats))
     lines.extend(
         [
             "### Area distribution",
@@ -293,20 +354,14 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
             "",
             "Area buckets span <1 m² to >=100B m² on a logarithmic scale; "
             "each bar shows the number of polygons in that bucket "
-            f"(total {_fmt_int(globally_unique)} canonical globally unique "
+            f"(total {_fmt_int(successful_text)} canonical globally unique "
             "`(osm_type, osm_id)` polygons with successfully extracted trimmed "
             "non-empty description text).",
             "",
         ]
     )
-    if stats["data_min_timestamp_utc"] and stats["data_max_timestamp_utc"]:
-        lines.extend(
-            [
-                "**OSM object timestamps (UTC):** "
-                f"{stats['data_min_timestamp_utc']} to {stats['data_max_timestamp_utc']}",
-                "",
-            ]
-        )
+    lines.extend(_render_text_rejection_section(stats))
+    lines.extend(_render_timestamp_section(stats))
     lines.extend(
         [
             "Detailed machine-readable statistics, exact suffix frequencies, rejection counts, "
@@ -507,10 +562,12 @@ def _update_map_block(readme: str, block_body: str) -> str:
     """Insert or refresh the map block while leaving malformed cards untouched."""
     h3_starts, h3_ends = _map_marker_counts(readme)
     if h3_starts == 0 and h3_ends == 0:
-        return insert_map_block(readme, block_body)
-    if h3_starts == 1 and h3_ends == 1:
-        return install_map_block(readme, block_body)
-    return readme
+        updated = insert_map_block(readme, block_body)
+    elif h3_starts == 1 and h3_ends == 1:
+        updated = install_map_block(readme, block_body)
+    else:
+        return readme
+    return normalize_map_prose(updated)
 
 
 def _write_dataset_docs(

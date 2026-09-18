@@ -48,6 +48,9 @@ def test_h3_map_input_hash_defaults_to_no_files_and_uses_canonical_json_options(
         "cache_schema_version": docs_module._H3_MAP_CACHE_SCHEMA_VERSION,
         "render_version": docs_module._H3_MAP_RENDER_VERSION,
         "h3_resolution": docs_module.DEFAULT_H3_RESOLUTION,
+        "canonical_row_policy_version": docs_module.CANONICAL_ROW_POLICY_VERSION,
+        "canonical_row_policy_sha256": docs_module.CANONICAL_ROW_POLICY_SHA256,
+        "text_contract_version": docs_module.TEXT_CONTRACT_VERSION,
         "basemap_sha256": "basemap-sha",
         "files": [],
     }
@@ -292,6 +295,34 @@ def test_render_stats_block_uses_zero_defaults_and_actual_medians() -> None:
     assert "| Polygon geometries | 0 |" in rendered
     assert "| MultiPolygon geometries | 0 |" in rendered
     assert "| Base descriptions | 1 | 3 | 1.5 |" in rendered
+
+
+def test_successful_text_count_uses_current_legacy_and_fallback_keys() -> None:
+    assert (
+        docs_module._successful_text_count(
+            {
+                "unique_polygons_with_successful_nonempty_text": 8,
+                "unique_polygons_with_text": 7,
+            },
+            1,
+        )
+        == 8
+    )
+    assert docs_module._successful_text_count({"unique_polygons_with_text": 7}, 1) == 7
+    assert docs_module._successful_text_count({}, 1) == 1
+
+
+def test_render_text_rejection_section_uses_categories_and_safe_defaults() -> None:
+    rendered = "\n".join(
+        docs_module._render_text_rejection_section(
+            {"text_rejection_counts": {"blank_description": 3}}
+        )
+    )
+
+    assert "| `blank_description` | 3 |" in rendered
+    assert "| `no_description` | 0 |" in rendered
+    malformed = "\n".join(docs_module._render_text_rejection_section({"text_rejection_counts": 3}))
+    assert "| `blank_description` | 0 |" in malformed
 
 
 def test_format_bytes_handles_values_above_the_last_named_unit() -> None:

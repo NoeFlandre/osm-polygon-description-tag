@@ -228,6 +228,7 @@ def test_stats_block_is_an_exact_contract_for_non_default_values() -> None:
             "| Metric | Value |",
             "| --- | --- |",
             "| Regional/raw polygon rows | 12,352 |",
+            "| Unique `(osm_type, osm_id)` polygons across regional/raw rows | 12,345 |",
             "| Canonical globally unique `(osm_type, osm_id)` polygons with successfully "
             "extracted trimmed non-empty description text | 12,345 |",
             "| Regional-overlap duplicate rows | 7 |",
@@ -265,6 +266,20 @@ def test_stats_block_is_an_exact_contract_for_non_default_values() -> None:
             "canonical globally unique `(osm_type, osm_id)` polygons with "
             "successfully extracted trimmed non-empty description text).",
             "",
+            "### Text-contract exclusions in source manifests",
+            "",
+            "These counts describe rows rejected before publication; the final "
+            "polygon and area populations contain only trimmed, non-empty text.",
+            "",
+            "| Rejection category | Rows |",
+            "| --- | ---: |",
+            "| `no_description` | 0 |",
+            "| `missing_description` | 0 |",
+            "| `no_nonempty_description` | 0 |",
+            "| `blank_description` | 0 |",
+            "| `malformed_description` | 0 |",
+            "| `failed_description_extraction` | 0 |",
+            "",
             "**OSM object timestamps (UTC):** 2020-01-01T00:00:00Z to 2026-01-01T00:00:00Z",
             "",
             "Detailed machine-readable statistics, exact suffix frequencies, rejection counts, "
@@ -283,6 +298,7 @@ def test_stats_block_is_an_exact_contract_for_non_default_values() -> None:
             "",
             "| Metric | Value |",
             "| --- | ---: |",
+            "| Unique `(osm_type, osm_id)` polygons across regional/raw rows | 12,345 |",
             "| Canonical globally unique `(osm_type, osm_id)` polygons with successfully "
             "extracted trimmed non-empty description text | 12,345 |",
             "| Surface area (total / mean) | 1.0 km² / 80.0 m² |",
@@ -350,6 +366,9 @@ def test_h3_map_input_hash_is_canonical_and_includes_basemap(
         "cache_schema_version": docs_module._H3_MAP_CACHE_SCHEMA_VERSION,
         "render_version": docs_module._H3_MAP_RENDER_VERSION,
         "h3_resolution": docs_module.DEFAULT_H3_RESOLUTION,
+        "canonical_row_policy_version": docs_module.CANONICAL_ROW_POLICY_VERSION,
+        "canonical_row_policy_sha256": docs_module.CANONICAL_ROW_POLICY_SHA256,
+        "text_contract_version": docs_module.TEXT_CONTRACT_VERSION,
         "basemap_sha256": "basemap-sha",
         "files": [
             {"parquet": "a.parquet", "output_sha256": "a-sha"},

@@ -52,13 +52,15 @@ def unique_rows_sql(
     columns: Sequence[str],
     *,
     key_value_columns_are_maps: bool = False,
+    require_successful_text: bool = False,
 ) -> str:
     """Return the canonical one-row-per-OSM-identity query for a relation."""
-    return canonical_rows_sql(
-        relation,
-        columns,
-        key_value_columns_are_maps=key_value_columns_are_maps,
-    )
+    options: dict[str, bool] = {
+        "key_value_columns_are_maps": key_value_columns_are_maps,
+    }
+    if require_successful_text:
+        options["require_successful_text"] = True
+    return canonical_rows_sql(relation, columns, **options)
 
 
 def _sql_literal(value: str) -> str:
@@ -71,6 +73,8 @@ def _missing_parquet_column_expression(
     path: Path,
     required_columns: frozenset[str],
 ) -> str:
+    if column in {"localized_names", "localized_descriptions", "tags"}:
+        return f"CAST([] AS STRUCT(key VARCHAR, value VARCHAR)[]) AS {column}"
     sql_type = _OPTIONAL_RANK_COLUMN_TYPES.get(column)
     if sql_type is not None:
         return f"CAST(NULL AS {sql_type}) AS {column}"
@@ -137,8 +141,16 @@ def _parquet_relation(paths: Sequence[Path], columns: Sequence[str]) -> str:
     )
 
 
-def _unique_rows_query(paths: Sequence[Path], columns: Sequence[str]) -> str:
-    return unique_rows_sql(f"({_parquet_relation(paths, columns)})", columns)
+def _unique_rows_query(
+    paths: Sequence[Path],
+    columns: Sequence[str],
+    *,
+    require_successful_text: bool = False,
+) -> str:
+    options: dict[str, bool] = {}
+    if require_successful_text:
+        options["require_successful_text"] = True
+    return unique_rows_sql(f"({_parquet_relation(paths, columns)})", columns, **options)
 
 
 def _open_unique_rows_connection(data_root: Path):
@@ -170,19 +182,27 @@ def iter_unique_parquet_batches(
     columns: Sequence[str],
     batch_size: int = _BATCH_SIZE,
     validate: bool = False,
+    require_successful_text: bool = False,
 ) -> Iterator[pa.RecordBatch]:
     """Yield deterministic unique rows from finalized Parquet files.
 
     The ranking matches the repository's global deduplication policy. Only the
     requested columns plus the identity/ranking columns are read, and DuckDB's
     temp directory keeps the view disk-backed for large datasets.
+
+    ``require_successful_text`` filters invalid, blank, and untrimmed text
+    rows before canonical ranking so a rejected duplicate cannot hide a valid
+    text row for the same identity.
     """
     _require_batch_size(batch_size)
     _validate_input(data_root, validate)
     paths = _parquet_paths(data_root)
     if not paths:
         return
-    query = _unique_rows_query(paths, columns)
+    query_options: dict[str, bool] = {}
+    if require_successful_text:
+        query_options["require_successful_text"] = True
+    query = _unique_rows_query(paths, columns, **query_options)
     connection = _open_unique_rows_connection(data_root)
     try:
         yield from _read_unique_rows(connection, query, batch_size, data_root)

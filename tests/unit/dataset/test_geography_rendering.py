@@ -98,6 +98,7 @@ def test_build_caption_distinguishes_no_data_from_populated_data() -> None:
     assert rendering_module._build_caption(1_234, 56) == (
         f"{H3_MAP_TITLE}. "
         "Each globally deduplicated OSM identity is counted exactly once. "
+        "Regional overlap duplicates were removed globally; this is not a count of regional rows. "
         "1,234 polygons across 56 H3 cells at resolution 3 on a logarithmic "
         "colour scale."
     )

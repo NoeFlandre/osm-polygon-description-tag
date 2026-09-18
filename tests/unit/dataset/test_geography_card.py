@@ -23,6 +23,7 @@ import osm_polygon_description_tag.dataset.geography.card as card_module
 from osm_polygon_description_tag._resources import dataset_card_template
 from osm_polygon_description_tag.dataset.geography import (
     H3_MAP_ASSET_RELATIVE_PATH,
+    H3_MAP_DESCRIPTION,
     H3_MAP_END_MARKER,
     H3_MAP_START_MARKER,
     H3_MAP_TITLE,
@@ -159,6 +160,35 @@ def test_render_map_block_uses_relative_asset_path() -> None:
     assert H3_MAP_ASSET_RELATIVE_PATH in block
     assert H3_MAP_START_MARKER in block
     assert H3_MAP_END_MARKER in block
+
+
+def test_normalize_map_prose_updates_known_legacy_wording_only() -> None:
+    legacy = (
+        "Hexbin density of every described polygon at H3 resolution 3, drawn from each\n"
+        "row's geometry centroid on a logarithmic scale. Lighter cells contain more\n"
+        "polygons."
+    )
+    source = f"before\n{legacy}\nafter"
+
+    updated = card_module.normalize_map_prose(source)
+
+    assert updated == f"before\n{H3_MAP_DESCRIPTION}\nafter"
+    assert card_module.normalize_map_prose(updated) == updated
+    assert "before\n" in updated and updated.endswith("\nafter")
+
+
+def test_normalize_map_prose_rewrites_only_the_first_matching_legacy_paragraph() -> None:
+    legacy = (
+        "Hexbin density of every described polygon at H3 resolution 3, drawn from each\n"
+        "row's geometry centroid on a logarithmic scale. Lighter cells contain more\n"
+        "polygons."
+    )
+    source = f"{legacy}\n---\n{legacy}\n---\n{legacy}"
+
+    updated = card_module.normalize_map_prose(source)
+
+    assert updated.count(H3_MAP_DESCRIPTION) == 1
+    assert updated.count(legacy) == 2
 
 
 def test_h3_map_title_is_set() -> None:

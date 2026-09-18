@@ -38,14 +38,23 @@ from osm_polygon_description_tag.dataset.manifest import (
     read_manifest,
 )
 from osm_polygon_description_tag.dataset.schema import SCHEMA, SCHEMA_VERSION
+from osm_polygon_description_tag.dataset.storage import validate_geoparquet
 from osm_polygon_description_tag.dataset.unique_rows import (
     iter_unique_parquet_batches,
     unique_rows_sql,
 )
 from osm_polygon_description_tag.runtime.time import utc_now_iso
 
-STATS_SCHEMA_VERSION = 7
+STATS_SCHEMA_VERSION = 8
 _QUANTILE_PROBABILITIES = [0.25, 0.5, 0.75]
+TEXT_REJECTION_REASONS = (
+    "no_description",
+    "missing_description",
+    "no_nonempty_description",
+    "blank_description",
+    "malformed_description",
+    "failed_description_extraction",
+)
 _FEATURE_COLUMNS = list(SCHEMA.names)
 _SPATIAL_COLUMNS = [
     "source_pbf",
@@ -184,6 +193,7 @@ class _FeatureSummary:
     geometry_holes_total: int = 0
     multipolygon_components_total: int = 0
     raw_rows: int | None = None
+    all_unique_osm_objects: int | None = None
 
 
 @dataclass(frozen=True)
@@ -244,7 +254,10 @@ def _validate_artifact(parquet: Path, manifests_dir: Path) -> _ValidatedArtifact
 def _find_validated_artifacts(data_root: Path) -> tuple[_ValidatedArtifact, ...]:
     data_dir, manifests_dir = _reporting_directories(data_root)
     parquets = _matching_parquets(data_dir, manifests_dir)
-    return tuple(_validate_artifact(parquet, manifests_dir) for parquet in parquets)
+    artifacts = tuple(_validate_artifact(parquet, manifests_dir) for parquet in parquets)
+    for artifact in artifacts:
+        validate_geoparquet(artifact.parquet)
+    return artifacts
 
 
 def _create_feature_table(connection: duckdb.DuckDBPyConnection) -> None:
@@ -282,6 +295,7 @@ def _create_unique_feature_view(connection: duckdb.DuckDBPyConnection) -> None:
             "all_features",
             _FEATURE_COLUMNS,
             key_value_columns_are_maps=True,
+            require_successful_text=True,
         )
     )
 
@@ -354,6 +368,10 @@ def _ordered_counts(connection: duckdb.DuckDBPyConnection, query: str) -> dict[s
 
 
 def _collect_feature_summary(connection: duckdb.DuckDBPyConnection) -> _FeatureSummary:
+    all_unique_osm_objects = _query_int(
+        connection,
+        "SELECT COUNT(*) FROM (SELECT DISTINCT osm_type, osm_id FROM all_features)",
+    )
     rows = _query_int(connection, "SELECT COUNT(*) FROM features")
     unique_osm_objects = _query_int(
         connection,
@@ -423,6 +441,7 @@ def _collect_feature_summary(connection: duckdb.DuckDBPyConnection) -> _FeatureS
         area_max_m2=_quantile_or_none(connection, "area_m2", 1.0),
         data_min_timestamp_utc=min_ts.isoformat() if min_ts else None,
         data_max_timestamp_utc=max_ts.isoformat() if max_ts else None,
+        all_unique_osm_objects=all_unique_osm_objects,
     )
 
 
@@ -669,7 +688,11 @@ def _collect_spatial_summary(artifacts: tuple[_ValidatedArtifact, ...]) -> _Spat
     multipolygon_components_total = 0
 
     row_index = 0
-    for batch in iter_unique_parquet_batches(data_root, columns=_SPATIAL_COLUMNS):
+    for batch in iter_unique_parquet_batches(
+        data_root,
+        columns=_SPATIAL_COLUMNS,
+        require_successful_text=True,
+    ):
         summary = _summarize_spatial_batch(
             batch,
             source_name="unique.parquet",
@@ -741,16 +764,40 @@ def _collect_manifest_summary(
     )
 
 
+def _raw_row_count(feature_summary: _FeatureSummary) -> int:
+    return feature_summary.rows if feature_summary.raw_rows is None else feature_summary.raw_rows
+
+
+def _globally_unique_count(feature_summary: _FeatureSummary) -> int:
+    return (
+        feature_summary.unique_osm_objects
+        if feature_summary.all_unique_osm_objects is None
+        else feature_summary.all_unique_osm_objects
+    )
+
+
+def _text_rejection_counts(manifest_summary: _ManifestSummary) -> dict[str, int]:
+    return {reason: manifest_summary.rejections.get(reason, 0) for reason in TEXT_REJECTION_REASONS}
+
+
+def _overlap_rate(duplicates: int, rows: int) -> float:
+    return duplicates / rows if rows else 0.0
+
+
+def _dataset_bbox_value(feature_summary: _FeatureSummary) -> list[float] | None:
+    return list(feature_summary.dataset_bbox) if feature_summary.dataset_bbox is not None else None
+
+
 def _build_stats_payload(
     feature_summary: _FeatureSummary,
     manifest_summary: _ManifestSummary,
 ) -> dict[str, Any]:
-    raw_rows = feature_summary.raw_rows
-    if raw_rows is None:
-        raw_rows = feature_summary.rows
-        duplicate_rows = feature_summary.rows - feature_summary.unique_osm_objects
-    else:
-        duplicate_rows = raw_rows - feature_summary.rows
+    raw_rows = _raw_row_count(feature_summary)
+    globally_unique = _globally_unique_count(feature_summary)
+    successful_text_unique = feature_summary.rows
+    regional_successful_text_rows = raw_rows
+    duplicate_rows = raw_rows - globally_unique
+    text_rejection_counts = _text_rejection_counts(manifest_summary)
     manifest_duplicate_rows = manifest_summary.rejections.get("duplicate_osm_object", 0)
     return {
         "stats_schema_version": STATS_SCHEMA_VERSION,
@@ -758,10 +805,13 @@ def _build_stats_payload(
         "output_files": len(manifest_summary.files),
         "rows": feature_summary.rows,
         "regional_rows": raw_rows,
-        "globally_unique_polygons": feature_summary.unique_osm_objects,
-        "unique_osm_objects": feature_summary.unique_osm_objects,
+        "regional_rows_with_successful_nonempty_text": regional_successful_text_rows,
+        "globally_unique_polygons": globally_unique,
+        "unique_osm_objects": globally_unique,
+        "unique_polygons_with_successful_nonempty_text": successful_text_unique,
+        "unique_polygons_with_text": successful_text_unique,
         "regional_overlap_duplicate_rows": duplicate_rows,
-        "regional_overlap_duplicate_rate": (duplicate_rows / raw_rows if raw_rows else 0.0),
+        "regional_overlap_duplicate_rate": _overlap_rate(duplicate_rows, raw_rows),
         "emitted_features": manifest_summary.emitted_features,
         "osm_types": feature_summary.osm_types,
         "geometry_types": feature_summary.geometry_types,
@@ -778,11 +828,14 @@ def _build_stats_payload(
         "base_name_rows": feature_summary.base_name_rows,
         "localized_name_rows": feature_summary.localized_name_rows,
         "rejections": manifest_summary.rejections,
+        "text_rejection_counts": text_rejection_counts,
+        "text_rejection_rows": sum(text_rejection_counts.values()),
         "deduplicated_rows": duplicate_rows,
         "manifest_duplicate_rows": manifest_duplicate_rows,
         "source_bytes_total": manifest_summary.source_bytes_total,
         "output_bytes_total": manifest_summary.output_bytes_total,
         "area_m2_count": feature_summary.rows,
+        "area_m2_population": "unique_polygons_with_successfully_extracted_trimmed_nonempty_text",
         "area_m2_total_m2": feature_summary.area_total_m2,
         "area_m2_mean_m2": feature_summary.area_mean_m2,
         "area_m2_min_m2": feature_summary.area_min_m2,
@@ -790,9 +843,7 @@ def _build_stats_payload(
         "area_m2_median_m2": feature_summary.area_median_m2,
         "area_m2_p75_m2": feature_summary.area_p75_m2,
         "area_m2_max_m2": feature_summary.area_max_m2,
-        "dataset_bbox": (
-            list(feature_summary.dataset_bbox) if feature_summary.dataset_bbox is not None else None
-        ),
+        "dataset_bbox": _dataset_bbox_value(feature_summary),
         "geometry_vertices_total": feature_summary.geometry_vertices_total,
         "geometry_rings_total": feature_summary.geometry_rings_total,
         "geometry_holes_total": feature_summary.geometry_holes_total,
@@ -842,6 +893,7 @@ def collect_stats(
 
 __all__ = [
     "STATS_SCHEMA_VERSION",
+    "TEXT_REJECTION_REASONS",
     "ReportingError",
     "collect_stats",
     "utc_now_iso",

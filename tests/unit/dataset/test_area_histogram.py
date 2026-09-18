@@ -265,6 +265,7 @@ def test_aggregate_area_histogram_reads_only_area_column_with_requested_batch_si
         data_root,
         columns=("area_m2",),
         batch_size=expected_batch_size,
+        require_successful_text=True,
     )
     assert counts["1-10 m²"] == 1
 
@@ -358,7 +359,7 @@ def test_area_histogram_input_sha256_is_stable_under_key_reordering() -> None:
 def test_area_histogram_input_sha256_uses_canonical_utf8_json() -> None:
     mapping = {"é.parquet": "sha-é"}
     payload = {
-        "cache_schema_version": 1,
+        "cache_schema_version": 2,
         "render_version": AREA_HISTOGRAM_RENDER_VERSION,
         "files": [{"parquet": "é.parquet", "output_sha256": "sha-é"}],
     }

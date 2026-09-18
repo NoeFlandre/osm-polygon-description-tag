@@ -209,8 +209,22 @@ def test_validate_description_values_rejects_blank_malformed_or_duplicate_values
 
 @given(st.text(alphabet=st.characters(whitelist_categories=("L", "N")), min_size=1))
 def test_validate_description_values_accepts_trimmed_nonempty_text(value: str) -> None:
-    _validate_description_values(f" \t{value}\n", [])
-    _validate_description_values(None, [{"key": "en", "value": f" {value} "}])
+    _validate_description_values(value, [])
+    _validate_description_values(None, [{"key": "en", "value": value}])
+
+
+@pytest.mark.parametrize(
+    ("description", "localized"),
+    [
+        (" padded ", []),
+        (None, [{"key": "en", "value": " padded "}]),
+    ],
+)
+def test_validate_description_values_rejects_untrimmed_final_text(
+    description: object, localized: object
+) -> None:
+    with pytest.raises(StorageError, match="trimmed"):
+        _validate_description_values(description, localized)
 
 
 @pytest.mark.parametrize(
@@ -227,6 +241,16 @@ def test_validate_base_description_preserves_exact_error_messages(
         storage._validate_base_description(description)
 
     assert str(error.value) == message
+
+
+def test_validate_trimmed_description_errors_preserve_exact_messages() -> None:
+    with pytest.raises(StorageError) as base_error:
+        storage._validate_base_description(" padded ")
+    assert str(base_error.value) == "description text must be trimmed"
+
+    with pytest.raises(StorageError) as localized_error:
+        storage._validate_localized_value(" padded ")
+    assert str(localized_error.value) == "localized description value must be trimmed"
 
 
 @pytest.mark.parametrize(

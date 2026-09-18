@@ -26,9 +26,18 @@ def test_descriptions_preserve_base_suffixes_and_values() -> None:
         "name": "Place",
     }
     assert descriptions_from_tags(tags) == (
-        " Base text ",
+        "Base text",
         {"en": "English", "pt-BR": "Português"},
     )
+
+
+def test_descriptions_trim_successful_base_and_localized_values() -> None:
+    tags = {
+        "description": "  Base text  ",
+        "description:en": "\tEnglish\n",
+    }
+
+    assert descriptions_from_tags(tags) == ("Base text", {"en": "English"})
 
 
 def test_descriptions_exclude_empty_suffix_and_missing_base() -> None:

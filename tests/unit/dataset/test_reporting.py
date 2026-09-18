@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from shapely.geometry import MultiPolygon, Polygon
@@ -20,6 +21,7 @@ from osm_polygon_description_tag.dataset.stats import (
     _new_connection,
     _validate_artifact,
 )
+from osm_polygon_description_tag.dataset.storage import StorageError
 from osm_polygon_description_tag.dataset.unique_rows import iter_unique_parquet_batches
 from tests.conftest import make_record_dict
 from tests.helpers.dataset import write_finalized_dataset, write_reporting_fixture
@@ -97,6 +99,7 @@ def test_reporting_feature_phase_matches_public_stats(tmp_path: Path) -> None:
 
     assert summary.rows == 3
     assert summary.unique_osm_objects == 3
+    assert summary.all_unique_osm_objects == 3
     assert summary.osm_types == {"relation": 1, "way": 2}
     assert summary.geometry_types == {"MultiPolygon": 1, "Polygon": 2}
     assert summary.description_suffixes == {"en": 2, "pt-BR": 1}
@@ -116,7 +119,9 @@ def test_collect_stats_aggregates_from_validated_artifacts(tmp_path: Path) -> No
     assert stats["rows"] == 3
     assert stats["unique_osm_objects"] == 3
     assert stats["regional_rows"] == 3
+    assert stats["regional_rows_with_successful_nonempty_text"] == 3
     assert stats["globally_unique_polygons"] == 3
+    assert stats["unique_polygons_with_successful_nonempty_text"] == 3
     assert stats["regional_overlap_duplicate_rows"] == 0
     assert stats["regional_overlap_duplicate_rate"] == 0.0
     assert stats["manifest_duplicate_rows"] == 0
@@ -124,6 +129,8 @@ def test_collect_stats_aggregates_from_validated_artifacts(tmp_path: Path) -> No
     assert stats["geometry_types"] == {"MultiPolygon": 1, "Polygon": 2}
     assert stats["description_suffixes"] == {"en": 2, "pt-BR": 1}
     assert stats["rejections"] == {"no_nonempty_description": 4}
+    assert stats["text_rejection_counts"]["no_nonempty_description"] == 4
+    assert stats["text_rejection_rows"] == 4
     assert stats["emitted_features"] == 7
     assert stats["base_description_rows"] == 0
     assert stats["localized_description_rows"] == 3
@@ -137,7 +144,7 @@ def test_collect_stats_aggregates_from_validated_artifacts(tmp_path: Path) -> No
     assert stats["multipolygon_components_total"] == 1
     assert stats["area_m2_min_m2"] is not None and stats["area_m2_min_m2"] > 0
     assert stats["area_m2_max_m2"] >= stats["area_m2_min_m2"]
-    assert stats["stats_schema_version"] == 7
+    assert stats["stats_schema_version"] == 8
 
 
 def test_statistics_media_and_card_use_one_canonical_row_per_osm_identity(
@@ -185,6 +192,11 @@ def test_statistics_media_and_card_use_one_canonical_row_per_osm_identity(
     assert stats["rows"] == 2
     assert stats["unique_osm_objects"] == 2
     assert stats["regional_overlap_duplicate_rows"] == 1
+    assert stats["regional_rows_with_successful_nonempty_text"] == 3
+    assert stats["unique_polygons_with_successful_nonempty_text"] == 2
+    assert stats["area_m2_population"] == (
+        "unique_polygons_with_successfully_extracted_trimmed_nonempty_text"
+    )
     assert stats["osm_types"] == {"relation": 1, "way": 1}
     assert stats["area_m2_count"] == 2
     assert stats["area_m2_total_m2"] == pytest.approx(1_010.0)
@@ -306,7 +318,7 @@ def test_collect_stats_separates_base_and_localized_description_words(
 
     stats = collect_stats(data_root)
 
-    assert stats["stats_schema_version"] == 7
+    assert stats["stats_schema_version"] == 8
     assert stats["base_description_values"] == 2
     assert stats["base_description_words_total"] == 3
     assert stats["base_description_words_median"] == 1.5
@@ -396,6 +408,33 @@ def test_collect_stats_rejects_stale_output(tmp_path: Path) -> None:
     (data_root / "data" / "region-a.parquet").write_bytes(b"mutated")
 
     with pytest.raises(ValueError, match="stale"):
+        collect_stats(data_root, clock=_frozen_clock)
+
+
+def test_collect_stats_rejects_final_artifact_without_successful_text(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    source_root.mkdir()
+    invalid = make_record_dict(
+        Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+        {"description": "temporary text"},
+        osm_id=91,
+        source_pbf="invalid.osm.pbf",
+    )
+    invalid["description"] = "   "
+    invalid["localized_descriptions"] = {}
+
+    # Build an intentionally invalid fixture without changing the production
+    # writer's normal validation path.
+    with patch(
+        "osm_polygon_description_tag.dataset.storage.validate_geoparquet",
+        return_value=1,
+    ):
+        write_finalized_dataset(data_root, source_root, {"invalid": [invalid]})
+
+    with pytest.raises(StorageError, match="non-empty"):
         collect_stats(data_root, clock=_frozen_clock)
 
 

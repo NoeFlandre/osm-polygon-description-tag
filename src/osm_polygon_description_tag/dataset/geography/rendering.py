@@ -34,7 +34,10 @@ from osm_polygon_description_tag.dataset.geography.basemap import (
     draw_landmasses,
     load_land_basemap,
 )
-from osm_polygon_description_tag.dataset.geography.card import H3_MAP_TITLE
+from osm_polygon_description_tag.dataset.geography.card import (
+    H3_MAP_OVERLAP_CAPTION,
+    H3_MAP_TITLE,
+)
 from osm_polygon_description_tag.dataset.geography.h3_policy import (
     cell_rings,
 )
@@ -62,7 +65,10 @@ _COLORBAR_PAD: Final[float] = 0.02
 
 # Caption templates.
 _TITLE: Final[str] = H3_MAP_TITLE
-_NO_DATA_CAPTION: Final[str] = f"{H3_MAP_TITLE}. 0 polygons across 0 H3 cells (no data)."
+_OVERLAP_CAPTION: Final[str] = H3_MAP_OVERLAP_CAPTION
+_NO_DATA_CAPTION: Final[str] = (
+    f"{H3_MAP_TITLE}. {_OVERLAP_CAPTION} 0 polygons across 0 H3 cells (no data)."
+)
 
 
 @dataclass(frozen=True)
@@ -115,6 +121,7 @@ def _build_caption(
     return (
         f"{H3_MAP_TITLE}. "
         f"Each globally deduplicated OSM identity is counted exactly once. "
+        f"{_OVERLAP_CAPTION} "
         f"{total_rows:,} polygons across {occupied_cells:,} H3 cells at "
         "resolution 3 on a logarithmic colour scale."
     )

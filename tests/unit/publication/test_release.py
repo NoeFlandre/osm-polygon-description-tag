@@ -12,7 +12,11 @@ from pathlib import Path
 
 import pytest
 
-from osm_polygon_description_tag.dataset.geography import H3_MAP_TITLE
+from osm_polygon_description_tag.dataset.geography import (
+    H3_MAP_DESCRIPTION,
+    H3_MAP_TITLE,
+    normalize_map_prose,
+)
 from osm_polygon_description_tag.publication import (
     REPO_ID,
     PublicationError,
@@ -82,7 +86,7 @@ _PRE_REGRESSION_CARD = Path(__file__).parents[2] / "fixtures" / "hf_description_
 _CURRENT_5CAD_STATS_BLOCK = (
     "<!-- GENERATED:STATS:START -->\n"
     "<!-- stats_sha256: e3f23671bb7eaa3a2a15a07629b96730f424ca195e21b8e280fc52b5f303d449 -->\n"
-    "<!-- stats_schema_version: 7 -->\n"
+    "<!-- stats_schema_version: 8 -->\n"
     "\n"
     "## Polygon surface and geometry\n"
     "\n"
@@ -366,7 +370,11 @@ def test_release_restores_pre_regression_card_without_losing_content(
 
     updated = (workspace / "README.md").read_text(encoding="utf-8")
     assert H3_MAP_TITLE in updated
-    assert _without_generated_map_and_stats(updated) == _without_generated_map_and_stats(golden)
+    assert H3_MAP_DESCRIPTION in updated
+    assert "Hexbin density of every described polygon" not in updated
+    assert _without_generated_map_and_stats(updated) == _without_generated_map_and_stats(
+        normalize_map_prose(golden)
+    )
 
     stats_start = updated.index("<!-- GENERATED:STATS:START -->")
     stats_end = updated.index("<!-- GENERATED:STATS:END -->", stats_start)

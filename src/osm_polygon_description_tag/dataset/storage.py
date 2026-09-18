@@ -41,7 +41,11 @@ from osm_polygon_description_tag.dataset.schema import (
     geo_metadata,
     mapping_to_pairs,
 )
-from osm_polygon_description_tag.dataset.text import is_nonempty_text
+from osm_polygon_description_tag.dataset.text import (
+    has_successful_description_text,
+    is_nonempty_text,
+    is_trimmed_nonempty_text,
+)
 
 _DICTIONARY_COLUMNS = ["source_pbf", "osm_type", "geometry_type"]
 _VALID_GEOMETRY_TYPES = {"Polygon", "MultiPolygon"}
@@ -351,6 +355,8 @@ def _validate_base_description(description: object) -> None:
             raise StorageError("description must be a string")
         if not is_nonempty_text(description):
             raise StorageError("description text must be non-empty")
+        if not is_trimmed_nonempty_text(description):
+            raise StorageError("description text must be trimmed")
 
 
 def _localized_description_entries(value: object) -> Sequence[object]:
@@ -359,17 +365,26 @@ def _localized_description_entries(value: object) -> Sequence[object]:
     return cast(Sequence[object], value)
 
 
-def _validate_localized_entry(entry: object, seen_keys: set[str]) -> None:
-    if not isinstance(entry, Mapping):
-        raise StorageError("localized description entry is malformed")
-    key = entry.get("key")
+def _validate_localized_key(key: object, seen_keys: set[str]) -> str:
     if not isinstance(key, str):
         raise StorageError("localized description key is malformed")
     if key in seen_keys:
         raise StorageError(f"duplicate localized description key: {key!r}")
-    value = entry.get("value")
+    return key
+
+
+def _validate_localized_value(value: object) -> None:
     if not is_nonempty_text(value):
         raise StorageError("localized description value must be non-empty text")
+    if not is_trimmed_nonempty_text(value):
+        raise StorageError("localized description value must be trimmed")
+
+
+def _validate_localized_entry(entry: object, seen_keys: set[str]) -> None:
+    if not isinstance(entry, Mapping):
+        raise StorageError("localized description entry is malformed")
+    key = _validate_localized_key(entry.get("key"), seen_keys)
+    _validate_localized_value(entry.get("value"))
     seen_keys.add(key)
 
 
@@ -384,9 +399,9 @@ def _validate_localized_descriptions(value: object) -> int:
 def _validate_description_values(description: object, localized_descriptions: object) -> None:
     """Enforce the final-artifact successful non-empty-text invariant."""
     _validate_base_description(description)
-    localized_count = _validate_localized_descriptions(localized_descriptions)
+    _validate_localized_descriptions(localized_descriptions)
 
-    if description is None and localized_count == 0:
+    if not has_successful_description_text(description, localized_descriptions):
         raise StorageError("at least one non-empty description text is required")
 
 

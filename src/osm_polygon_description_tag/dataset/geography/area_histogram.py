@@ -18,7 +18,7 @@ from typing import Any, Final
 
 from osm_polygon_description_tag.dataset.unique_rows import iter_unique_parquet_batches
 
-_AREA_HISTOGRAM_SCHEMA_VERSION: Final[int] = 1
+_AREA_HISTOGRAM_SCHEMA_VERSION: Final[int] = 2
 
 # Logarithmic buckets covering m^2 from 0 to > 10^12 (the largest
 # polygons in the dataset are country-sized, ~10^12 m^2). The bucket
@@ -100,6 +100,7 @@ def aggregate_area_histogram(
         data_root,
         columns=("area_m2",),
         batch_size=batch_size,
+        require_successful_text=True,
     ):
         for value in batch.column("area_m2").to_pylist():
             if value is None:

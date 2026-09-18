@@ -15,7 +15,10 @@ from shapely.errors import ShapelyError
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import orient
 
-from osm_polygon_description_tag.dataset.text import is_nonempty_text
+from osm_polygon_description_tag.dataset.text import (
+    is_nonempty_text,
+    trimmed_nonempty_text,
+)
 from osm_polygon_description_tag.osm.extraction import ExportRecord
 
 GEOD = Geod(ellps="WGS84")
@@ -61,7 +64,7 @@ def _tag_values(tags: Mapping[str, object], prefix: str) -> tuple[str | None, di
 
 
 def _clean_base_value(value: object) -> str | None:
-    return value if is_nonempty_text(value) else None
+    return trimmed_nonempty_text(value)
 
 
 def _is_nonempty_localized(key: object, value: object, marker: str) -> bool:
@@ -76,8 +79,10 @@ def _is_nonempty_localized(key: object, value: object, marker: str) -> bool:
 def _localized_items(tags: Mapping[str, object], prefix: str) -> Iterator[tuple[str, str]]:
     marker = f"{prefix}:"
     for key, value in tags.items():
-        if _is_nonempty_localized(key, value, marker) and is_nonempty_text(value):
-            yield key.removeprefix(marker), value
+        if _is_nonempty_localized(key, value, marker):
+            trimmed = trimmed_nonempty_text(value)
+            if trimmed is not None:
+                yield key.removeprefix(marker), trimmed
 
 
 def _has_nonempty_localized(tags: Mapping[str, object], prefix: str) -> bool:

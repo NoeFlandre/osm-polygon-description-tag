@@ -2,11 +2,19 @@
 
 ## Inclusion rule
 
-The dataset retains polygonal OSM features with at least one exact, non-empty
-description value:
+The dataset retains polygonal OSM features with at least one successfully
+extracted description value that is a string, is trimmed, and is non-empty
+after trimming:
 
 - `description=*` for a base description;
 - `description:<suffix>=*` for a localized description.
+
+The final artifact boundary is strict: null, blank, malformed, untrimmed, and
+failed-extraction values do not count as text. A malformed localized value or
+localized container makes its row ineligible. The Python predicate is mirrored
+by the DuckDB predicate used by deduplication, statistics, area summaries, and
+map inputs. Source-level exclusions remain visible in manifest rejection
+counts and in the generated `stats.json` text-rejection fields.
 
 Osmium applies the standard area policy with `area_tags: true`, `linear_tags:
 true`, and `--geometry-types polygon`. Closed ways with `area=no`, nodes, open
@@ -62,10 +70,13 @@ The machine-readable report also contains dataset-wide polygon geometry facts:
 `area_m2_p25_m2`, `area_m2_median_m2`, `area_m2_p75_m2`, and
 `area_m2_max_m2`; `dataset_bbox` as `[min_lon, min_lat, max_lon, max_lat]`;
 and total `geometry_vertices_total`, `geometry_rings_total`,
-`geometry_holes_total`, and `multipolygon_components_total`. Area is summed
-from every row; geometry vertices exclude each ring's repeated closing
-coordinate. The same values are rendered in the generated dataset-card
-statistics block.
+`geometry_holes_total`, and `multipolygon_components_total`. The report
+distinguishes `regional_rows`, distinct global identities, overlap duplicate
+rows, and `unique_polygons_with_successful_nonempty_text`. Area statistics use
+only the latter population, recorded explicitly in `area_m2_population`; area
+is never silently summed from regional rows. Geometry vertices exclude each
+ring's repeated closing coordinate. The same values are rendered in the
+generated dataset-card statistics block.
 
 ## Reproducibility
 
@@ -77,8 +88,9 @@ byte-stable write-if-changed behavior.
 
 ## Global identity deduplication
 
-Before publication, the workflow keeps exactly one row for each
-`(osm_type, osm_id)` across all regional extracts. The canonical row is chosen
+Before publication and in every global reporting view, the workflow keeps
+exactly one canonical row for each `(osm_type, osm_id)` across all regional
+extracts. The canonical row is chosen
 by highest OSM `version`, then latest `timestamp`, then lexicographically
 smallest `source_pbf`, with a stable row fingerprint as the final tie-breaker.
 Only affected per-PBF Parquets and manifests are rewritten. The operation is
@@ -98,7 +110,10 @@ The map:
 * uses H3 resolution 3;
 * assigns each polygon to a cell by its Shapely geometry centroid;
 * uses a logarithmic colour scale so sparse and dense areas remain visible;
-* counts every deduplicated dataset row exactly once;
+* counts one canonical row per globally unique `(osm_type, osm_id)` with
+  successfully extracted trimmed non-empty text exactly once;
+* removes regional overlap duplicates globally; it is not a count of regional
+  rows;
 * is uploaded as part of every per-PBF plan and as part of the final
   metadata plan;
 * is included in the publication allowlist under the exact filename
