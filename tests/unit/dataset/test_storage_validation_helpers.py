@@ -244,6 +244,14 @@ def test_legacy_validation_mode_is_forwarded_through_every_text_validator(
     assert state.row_count == 1
 
 
+def test_legacy_validation_mode_accepts_schema_nullable_localized_values() -> None:
+    _validate_description_values(
+        "valid base",
+        [{"key": "en", "value": None}],
+        require_successful_text=False,
+    )
+
+
 def test_text_validation_helpers_are_strict_by_default(
     tmp_path: Path,
     way_record_dict: dict[str, object],

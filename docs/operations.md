@@ -61,8 +61,11 @@ schema, transform, area-policy, and output identities still agree.
 
 If interrupted during deduplication, the staged canonical files remain under
 `.work/dedup/` and the next invocation finishes promotion before continuing to
-publication. A completed deduplication state is reused when all input output
-identities and the policy hash still match.
+publication, provided the current inputs still match the recorded identities
+(or the expected hashes of files already promoted from that stage). Input drift
+is refused and the staged state is preserved for safe recovery. A completed
+deduplication state is reused when all input output identities and the policy
+hash still match.
 
 ## Logs and diagnostics
 

@@ -87,6 +87,17 @@ def test_missing_mapping_columns_use_typed_empty_lists(column: str, expected: st
     )
 
 
+def test_missing_requested_mapping_column_is_rejected() -> None:
+    with pytest.raises(unique_rows.UniqueRowsError, match="missing unique-row column 'tags'"):
+        unique_rows._parquet_column_expression(
+            "tags",
+            set(),
+            has_geo_metadata=False,
+            path=Path("region.parquet"),
+            required_columns=frozenset({"tags"}),
+        )
+
+
 def test_unique_rows_sql_requires_text_only_when_opted_in() -> None:
     columns = ("osm_type", "osm_id", "description", "localized_descriptions")
     without_text_filter = unique_rows.unique_rows_sql(

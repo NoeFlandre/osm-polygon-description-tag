@@ -397,6 +397,8 @@ def _validate_localized_value(
     *,
     require_successful_text: bool = True,
 ) -> None:
+    if value is None and not require_successful_text:
+        return
     if not isinstance(value, str):
         raise StorageError("localized description value must be non-empty text")
     if require_successful_text:

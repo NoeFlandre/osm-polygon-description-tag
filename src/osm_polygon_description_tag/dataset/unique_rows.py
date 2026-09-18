@@ -74,6 +74,8 @@ def _missing_parquet_column_expression(
     required_columns: frozenset[str],
 ) -> str:
     if column in {"localized_names", "localized_descriptions", "tags"}:
+        if column in required_columns:
+            raise UniqueRowsError(f"missing unique-row column {column!r} in {path}")
         return f"CAST([] AS STRUCT(key VARCHAR, value VARCHAR)[]) AS {column}"
     sql_type = _OPTIONAL_RANK_COLUMN_TYPES.get(column)
     if sql_type is not None:

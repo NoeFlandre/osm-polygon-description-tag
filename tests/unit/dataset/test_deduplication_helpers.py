@@ -812,10 +812,11 @@ def test_resume_staged_promotes_state_and_returns_deduplicated_result(
     state = {
         "status": "staged",
         "stage_dir": ".work/dedup/token",
+        "inputs": {"a.parquet": "input-sha"},
         "input_rows": 8,
         "output_rows": 6,
         "duplicate_rows": 2,
-        "files": [{"parquet": "data/a.parquet"}],
+        "files": [{"parquet": "data/a.parquet", "parquet_sha256": "output-sha"}],
     }
     calls: list[tuple[Path, Mapping[str, object], object]] = []
     writes: list[tuple[Path, dict[str, object]]] = []
@@ -849,7 +850,7 @@ def test_resume_staged_promotes_state_and_returns_deduplicated_result(
     assert writes[0][1]["status"] == "complete"
     assert "stage_dir" not in writes[0][1]
     assert writes[0][1]["outputs"] == {"a.parquet": "output-sha"}
-    assert hashed_paths == [output]
+    assert hashed_paths == [output, output]
     assert result == DeduplicationResult("deduplicated", 8, 6, 2, 1)
 
 
@@ -861,13 +862,19 @@ def test_resume_staged_accepts_state_without_a_stage_directory(
     output.parent.mkdir(parents=True)
     output.write_bytes(b"output")
     state = {
+        "inputs": {"a.parquet": "input-sha"},
         "input_rows": 2,
         "output_rows": 1,
         "duplicate_rows": 1,
-        "files": [{"parquet": "data/a.parquet"}],
+        "files": [{"parquet": "data/a.parquet", "parquet_sha256": "output-sha"}],
     }
     writes: list[dict[str, object]] = []
     monkeypatch.setattr(dedup_module, "_promote_staged", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        dedup_module,
+        "_input_hashes",
+        lambda _paths: {"a.parquet": "output-sha"},
+    )
     monkeypatch.setattr(
         dedup_module,
         "_write_state",

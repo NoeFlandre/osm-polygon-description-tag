@@ -117,6 +117,13 @@ def test_names_from_tags_preserves_unusual_suffixes() -> None:
     assert localized == {"zh-Hant-TW": "TW", "en-GB-x-oed": "OXED"}
 
 
+def test_names_from_tags_preserves_exact_whitespace_in_successful_values() -> None:
+    base, localized = names_from_tags({"name": " Park ", "name:en": " English "})
+
+    assert base == " Park "
+    assert localized == {"en": " English "}
+
+
 def test_names_from_tags_rejects_empty_values() -> None:
     base, localized = names_from_tags({"name": "  ", "name:en": "EN", "name:": "bad"})
     assert base is None

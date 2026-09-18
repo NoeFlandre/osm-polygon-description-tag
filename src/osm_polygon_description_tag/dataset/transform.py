@@ -38,33 +38,42 @@ def descriptions_from_tags(
 ) -> tuple[str | None, dict[str, str]]:
     """Return ``(base, localized)`` description values.
 
-    ``base`` is the exact ``description`` value, or ``None`` when missing or
-    whitespace-only. ``localized`` maps every exact ``description:<suffix>``
-    key (excluding the empty suffix) with a non-empty value to its suffix.
-    Suffixes are preserved verbatim and are never validated as language codes.
+    Retained description values are canonicalized with ``str.strip``. The
+    localized keys are preserved verbatim and are never validated as language
+    codes.
     """
-    return _tag_values(tags, "description")
+    return _tag_values(tags, "description", trim_values=True)
 
 
 def names_from_tags(tags: Mapping[str, object]) -> tuple[str | None, dict[str, str]]:
     """Return ``(base, localized)`` name values.
 
-    ``base`` is the exact ``name`` value, or ``None`` when missing or
-    whitespace-only. ``localized`` maps every exact ``name:<suffix>`` key
-    (excluding the empty suffix) with a non-empty value to its suffix.
-    Suffixes are preserved verbatim and are never validated as language codes.
+    Successful name values are preserved exactly, including surrounding
+    whitespace. The localized keys are preserved verbatim and are never
+    validated as language codes.
     """
-    return _tag_values(tags, "name")
+    return _tag_values(tags, "name", trim_values=False)
 
 
-def _tag_values(tags: Mapping[str, object], prefix: str) -> tuple[str | None, dict[str, str]]:
-    base = _clean_base_value(tags.get(prefix))
-    matches = list(_localized_items(tags, prefix))
+def _tag_values(
+    tags: Mapping[str, object],
+    prefix: str,
+    *,
+    trim_values: bool,
+) -> tuple[str | None, dict[str, str]]:
+    base = (
+        _clean_base_value(tags.get(prefix)) if trim_values else _exact_base_value(tags.get(prefix))
+    )
+    matches = list(_localized_items(tags, prefix, trim_values=trim_values))
     return base, dict(sorted(matches)) if matches else {}
 
 
 def _clean_base_value(value: object) -> str | None:
     return trimmed_nonempty_text(value)
+
+
+def _exact_base_value(value: object) -> str | None:
+    return value if is_nonempty_text(value) else None
 
 
 def _is_nonempty_localized(key: object, value: object, marker: str) -> bool:
@@ -76,17 +85,28 @@ def _is_nonempty_localized(key: object, value: object, marker: str) -> bool:
     )
 
 
-def _localized_items(tags: Mapping[str, object], prefix: str) -> Iterator[tuple[str, str]]:
+def _normalized_localized_value(value: object, *, trim_values: bool) -> str | None:
+    if trim_values:
+        return trimmed_nonempty_text(value)
+    return value if is_nonempty_text(value) else None
+
+
+def _localized_items(
+    tags: Mapping[str, object],
+    prefix: str,
+    *,
+    trim_values: bool = True,
+) -> Iterator[tuple[str, str]]:
     marker = f"{prefix}:"
     for key, value in tags.items():
         if _is_nonempty_localized(key, value, marker):
-            trimmed = trimmed_nonempty_text(value)
-            if trimmed is not None:
-                yield key.removeprefix(marker), trimmed
+            normalized = _normalized_localized_value(value, trim_values=trim_values)
+            if normalized is not None:
+                yield key.removeprefix(marker), normalized
 
 
 def _has_nonempty_localized(tags: Mapping[str, object], prefix: str) -> bool:
-    return next(_localized_items(tags, prefix), None) is not None
+    return next(_localized_items(tags, prefix, trim_values=True), None) is not None
 
 
 def _identity_rejection_reason(record: ExportRecord) -> str | None:

@@ -17,6 +17,7 @@ from osm_polygon_description_tag.dataset.canonical_rows import (
 from osm_polygon_description_tag.dataset.deduplication import (
     DEDUPLICATION_POLICY_SHA256,
     DUPLICATE_REJECTION_REASON,
+    DeduplicationError,
     _complete_state_matches,
     _parse_timestamp,
     _row_fingerprint,
@@ -382,3 +383,33 @@ def test_deduplicate_dataset_resumes_after_promotion_interrupt(tmp_path: Path) -
     resumed = deduplicate_dataset(data_root)
     assert resumed.status == "deduplicated"
     assert resumed.output_rows == 1
+
+
+def test_deduplicate_dataset_refuses_staged_resume_after_input_drift(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    (data_root / "data").mkdir(parents=True)
+    (data_root / "manifests").mkdir()
+    source_root.mkdir()
+    first = make_record_dict(
+        Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+        {"description": "one"},
+        osm_id=1,
+        source_pbf="a.osm.pbf",
+    )
+    duplicate = dict(first, source_pbf="b.osm.pbf", version=2)
+    _write_source(data_root, source_root, "a", [first])
+    _write_source(data_root, source_root, "b", [duplicate])
+
+    def interrupt(count: int) -> None:
+        if count == 1:
+            raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        deduplicate_dataset(data_root, promotion_hook=interrupt)
+
+    untouched = data_root / "data" / "b.parquet"
+    untouched.write_bytes(untouched.read_bytes() + b"drift")
+
+    with pytest.raises(DeduplicationError, match="staged deduplication inputs changed"):
+        deduplicate_dataset(data_root)
