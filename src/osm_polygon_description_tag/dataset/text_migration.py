@@ -69,11 +69,16 @@ def _canonical_entry(item: object) -> dict[str, str] | None:
     return {"key": key, "value": trimmed}
 
 
+def _is_entry_sequence(value: object) -> bool:
+    """Return whether a value is a sequence of localized entries."""
+    return isinstance(value, Sequence) and not isinstance(value, str | bytes)
+
+
 def _canonical_localized(value: object) -> list[dict[str, str]]:
     """Return localized entries with trimmed values, dropping blank ones."""
-    if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+    if not _is_entry_sequence(value):
         return []
-    candidates = (_canonical_entry(item) for item in cast(Sequence[object], value))
+    candidates = map(_canonical_entry, cast(Sequence[object], value))
     return [entry for entry in candidates if entry is not None]
 
 

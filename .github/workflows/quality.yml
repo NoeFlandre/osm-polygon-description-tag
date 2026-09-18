@@ -104,11 +104,58 @@ jobs:
       - name: Verify the bundled osmium binary
         run: docker run --rm --entrypoint osmium osm-polygon-description-tag:ci --version
 
-  mutation:
+  risk:
+    # The CRAP budget is a single whole-repository measurement, so it runs once
+    # rather than once per mutation shard.
     runs-on: ubuntu-latest
-    # Main pushes run the exhaustive all-source gate. Pull requests run the
-    # same strict gate over the exact Python source paths changed by the PR.
-    # Both modes require 100% killed mutants and zero unresolved statuses.
+    timeout-minutes: 30
+    needs: quality
+    env:
+      HF_HUB_OFFLINE: "1"
+      HF_DATASETS_OFFLINE: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.16"
+          enable-cache: true
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Install osmium
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y osmium-tool
+
+      - name: Sync locked environment
+        run: uv sync --frozen
+
+      - name: Install just
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y just
+
+      - name: Run all-source CRAP budget gate
+        run: just risk
+
+      - name: Upload CRAP reports
+        if: always()
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: crap-report
+          path: |
+            reports/crap.json
+            reports/crap.md
+          if-no-files-found: error
+
+  mutation-scope:
+    # Pull requests mutate exactly the source lines the PR changed.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: quality
     env:
@@ -143,7 +190,6 @@ jobs:
           sudo apt-get install -y just
 
       - name: Select changed source scope
-        if: github.event_name == 'pull_request'
         run: >-
           git diff --unified=0
           "${{ github.event.pull_request.base.sha }}"
@@ -151,34 +197,91 @@ jobs:
           -- 'src/**/*.py' 'scripts/**/*.py' > "$RUNNER_TEMP/mutation-scope.txt"
 
       - name: Select changed mutation tests
-        if: github.event_name == 'pull_request'
         run: >-
           git diff --name-only
           "${{ github.event.pull_request.base.sha }}"
           "${{ github.event.pull_request.head.sha }}"
           -- 'tests/**/*.py' > "$RUNNER_TEMP/mutation-tests.txt"
 
-      - name: Run all-source CRAP budget gate
-        run: just risk
-
       - name: Run changed-source mutation gate
-        if: github.event_name == 'pull_request'
         run: >-
           just mutation-scope
           "$RUNNER_TEMP/mutation-scope.txt"
           "$RUNNER_TEMP/mutation-tests.txt"
 
-      - name: Run all-source mutation gate
-        if: github.event_name == 'push'
-        run: just mutation
-
-      - name: Upload mutation and CRAP reports
+      - name: Upload mutation report
         if: always()
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: mutation-score
-          path: |
-            reports/crap.json
-            reports/crap.md
-            reports/mutation-summary.json
+          name: mutation-score-scope
+          path: reports/mutation-summary.json
+          if-no-files-found: error
+
+  mutation-all:
+    # Main pushes run the exhaustive all-source gate, split across shards so it
+    # finishes. A single runner took over 90 minutes and was cancelled on every
+    # push, which meant the gate never actually reported. Each shard still
+    # requires a 100% score, so the shards together are the same strict gate.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: quality
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    env:
+      HF_HUB_OFFLINE: "1"
+      HF_DATASETS_OFFLINE: "1"
+      MUTATION_SHARD_COUNT: "8"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.16"
+          enable-cache: true
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Install osmium
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y osmium-tool
+
+      - name: Sync locked environment
+        run: uv sync --frozen
+
+      - name: Install just
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y just
+
+      - name: Select this shard's source files
+        env:
+          MUTATION_SHARD: ${{ matrix.shard }}
+        run: >-
+          python3 -c "
+          import os, pathlib;
+          roots=[pathlib.Path('src'), pathlib.Path('scripts')];
+          files=sorted(str(p) for r in roots for p in r.rglob('*.py'));
+          count=int(os.environ['MUTATION_SHARD_COUNT']);
+          index=int(os.environ['MUTATION_SHARD']);
+          shard=[f for n, f in enumerate(files) if n % count == index];
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'mutation-shard.txt').write_text(
+          chr(10).join(shard) + chr(10));
+          print(chr(10).join(shard))"
+
+      - name: Run the sharded all-source mutation gate
+        run: just mutation-shard "$RUNNER_TEMP/mutation-shard.txt"
+
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: mutation-score-shard-${{ matrix.shard }}
+          path: reports/mutation-summary.json
           if-no-files-found: error
