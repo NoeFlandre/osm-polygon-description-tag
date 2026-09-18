@@ -263,17 +263,19 @@ jobs:
       - name: Select this shard's source files
         env:
           MUTATION_SHARD: ${{ matrix.shard }}
-        run: >-
-          python3 -c "
-          import os, pathlib;
-          roots=[pathlib.Path('src'), pathlib.Path('scripts')];
-          files=sorted(str(p) for r in roots for p in r.rglob('*.py'));
-          count=int(os.environ['MUTATION_SHARD_COUNT']);
-          index=int(os.environ['MUTATION_SHARD']);
-          shard=[f for n, f in enumerate(files) if n % count == index];
-          pathlib.Path(os.environ['RUNNER_TEMP'], 'mutation-shard.txt').write_text(
-          chr(10).join(shard) + chr(10));
-          print(chr(10).join(shard))"
+        run: |
+          python3 - <<'PY' | tee "$RUNNER_TEMP/mutation-shard.txt"
+          import os
+          import pathlib
+
+          roots = (pathlib.Path("src"), pathlib.Path("scripts"))
+          files = sorted(str(path) for root in roots for path in root.rglob("*.py"))
+          count = int(os.environ["MUTATION_SHARD_COUNT"])
+          index = int(os.environ["MUTATION_SHARD"])
+          for position, name in enumerate(files):
+              if position % count == index:
+                  print(name)
+          PY
 
       - name: Run the sharded all-source mutation gate
         run: just mutation-shard "$RUNNER_TEMP/mutation-shard.txt"
