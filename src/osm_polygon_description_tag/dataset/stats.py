@@ -690,7 +690,10 @@ def _collect_spatial_summary(artifacts: tuple[_ValidatedArtifact, ...]) -> _Spat
     if not artifacts:
         return _SpatialSummary(0, 0.0, None, None, 0, 0, 0, 0)
     data_root = artifacts[0].parquet.parent.parent
-    area_total = 0.0
+    # Areas are summed exactly at the end rather than accumulated batch by
+    # batch: a running float total depends on the order the batches arrive in,
+    # which made stats.json differ in its last bits between identical runs.
+    batch_area_totals: list[float] = []
     row_count = 0
     dataset_bbox: tuple[float, float, float, float] | None = None
     vertices_total = 0
@@ -710,7 +713,7 @@ def _collect_spatial_summary(artifacts: tuple[_ValidatedArtifact, ...]) -> _Spat
             row_offset=row_index,
         )
         dataset_bbox = _merge_bboxes(dataset_bbox, summary.dataset_bbox)
-        area_total += summary.area_total_m2
+        batch_area_totals.append(summary.area_total_m2)
         row_count += summary.rows
         row_index += summary.rows
         vertices_total += summary.geometry_vertices_total
@@ -718,6 +721,7 @@ def _collect_spatial_summary(artifacts: tuple[_ValidatedArtifact, ...]) -> _Spat
         holes_total += summary.geometry_holes_total
         multipolygon_components_total += summary.multipolygon_components_total
 
+    area_total = math.fsum(batch_area_totals)
     return _SpatialSummary(
         rows=row_count,
         area_total_m2=area_total,

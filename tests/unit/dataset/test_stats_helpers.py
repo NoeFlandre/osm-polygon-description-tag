@@ -244,6 +244,54 @@ def test_collect_spatial_summary_streams_all_files_and_is_empty_safe(tmp_path: P
     assert summary.multipolygon_components_total == 1
 
 
+def test_spatial_area_total_does_not_depend_on_batch_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A running float total made stats.json differ in its last bits per run.
+
+    The batch stream is not ordered by contract, so the dataset area must be
+    summed exactly rather than accumulated as the batches happen to arrive.
+    """
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    source_root.mkdir()
+    write_reporting_fixture(data_root, source_root)
+    artifacts = stats_module._find_validated_artifacts(data_root)
+
+    # Values chosen so that naive left-to-right accumulation is order-sensitive.
+    areas = (1e16, 1.0, -1e16, 3.0)
+    summaries = [
+        stats_module._SpatialSummary(
+            rows=1,
+            area_total_m2=area,
+            area_mean_m2=area,
+            dataset_bbox=(0.0, 0.0, 1.0, 1.0),
+            geometry_vertices_total=0,
+            geometry_rings_total=0,
+            geometry_holes_total=0,
+            multipolygon_components_total=0,
+        )
+        for area in areas
+    ]
+
+    def collect(order: tuple[int, ...]) -> float:
+        remaining = [summaries[index] for index in order]
+        monkeypatch.setattr(
+            stats_module,
+            "iter_unique_parquet_batches",
+            lambda *_args, **_kwargs: iter(range(len(remaining))),
+        )
+        monkeypatch.setattr(
+            stats_module,
+            "_summarize_spatial_batch",
+            lambda batch, **_kwargs: remaining[batch],
+        )
+        return stats_module._collect_spatial_summary(artifacts).area_total_m2
+
+    assert collect((0, 1, 2, 3)) == collect((2, 3, 0, 1)) == 4.0
+
+
 def test_find_validated_artifacts_uses_explicit_legacy_text_mode(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -53,6 +53,21 @@ mutation: mutation-contexts
         --output reports/mutation-summary.json \
         --minimum-score 100
 
+# Run the all-source mutation gate over one shard of the source tree. Sharding
+# only splits which modules are mutated; each shard still requires a 100% score,
+# so the shards together are exactly the all-source gate. This keeps the main
+# push gate inside a sane CI wall-clock budget instead of being cancelled.
+mutation-shard scope_file: mutation-contexts
+    test -f "{{scope_file}}"
+    mkdir -p reports data-root/.tmp
+    uv run python -m scripts.run_mutation_gate --max-children 8 \
+        --coverage-file data-root/.tmp/.coverage-ctx \
+        --only-mutate-file "{{scope_file}}"
+    uv run python scripts/check_mutation_score.py \
+        --mutants-root mutants \
+        --output reports/mutation-summary.json \
+        --minimum-score 100
+
 # Run a strict mutation gate for the exact source lines and tests changed by a
 # PR. The scoped runner uses only the targeted test set; an empty test file
 # falls back to the configured repository-wide test root.

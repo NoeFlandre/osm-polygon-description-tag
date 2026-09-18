@@ -572,6 +572,7 @@ def test_quality_recipes_and_required_mutation_gate_are_publicly_wired() -> None
     assert "risk:" in justfile
     assert "mutation:" in justfile
     assert "mutation-scope" in justfile
+    assert "mutation-shard" in justfile
     assert "run_mutation_gate" in justfile
     assert "uv run python -m scripts.run_mutation_gate" in justfile
     assert "--changed-lines-file" in justfile
@@ -588,13 +589,29 @@ def test_quality_recipes_and_required_mutation_gate_are_publicly_wired() -> None
     assert "--unified=0" in workflow
     assert "scripts/**/*.py" in workflow
     assert "tests/**/*.py" in workflow
-    assert "mutation:" in workflow
+    assert "mutation-scope:" in workflow
+    assert "mutation-all:" in workflow
     assert "run: just risk" in workflow
-    assert "run: just mutation" in workflow
+    assert "just mutation-shard" in workflow
     assert "mutation-score" in workflow
     assert "reports/crap.json" in workflow
     assert "actions/upload-artifact" in workflow
     assert project["tool"]["mutmut"]["pytest_add_cli_args_test_selection"] == ["tests"]
+
+
+def test_sharded_mutation_gate_keeps_the_full_strictness() -> None:
+    """Sharding may split which modules are mutated, never how strict the gate is."""
+    justfile = (PROJECT_ROOT / "justfile").read_text(encoding="utf-8")
+    workflow = (PROJECT_ROOT / ".github" / "workflows" / "quality.yml").read_text(encoding="utf-8")
+    shard_recipe = justfile.split("mutation-shard scope_file:", 1)[1].split("\n\n", 1)[0]
+
+    assert "--only-mutate-file" in shard_recipe
+    assert "--minimum-score 100" in shard_recipe
+    assert "--changed-lines-file" not in shard_recipe
+
+    shard_count = int(workflow.split('MUTATION_SHARD_COUNT: "', 1)[1].split('"', 1)[0])
+    matrix = workflow.split("shard: [", 1)[1].split("]", 1)[0]
+    assert len([entry for entry in matrix.split(",") if entry.strip()]) == shard_count
 
 
 def test_scoped_mutation_recipe_does_not_collect_all_test_contexts() -> None:
