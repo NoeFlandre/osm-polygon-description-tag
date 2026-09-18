@@ -47,6 +47,10 @@ from osm_polygon_description_tag.dataset.storage import (
     validate_geoparquet,
     write_geoparquet,
 )
+from osm_polygon_description_tag.dataset.text_migration import (
+    TextMigrationError,
+    migrate_dataset_text,
+)
 from osm_polygon_description_tag.dataset.transform import (
     RejectedFeature,
     descriptions_from_tags,
@@ -75,6 +79,7 @@ __all__ = [
     "RunCounts",
     "SourceIdentity",
     "StorageError",
+    "TextMigrationError",
     "collect_stats",
     "current_area_policy_sha256",
     "current_code_revision",
@@ -88,6 +93,7 @@ __all__ = [
     "geodesic_area_m2",
     "is_resumable",
     "migrate_dataset_schema",
+    "migrate_dataset_text",
     "names_from_tags",
     "output_identity_for",
     "read_manifest",

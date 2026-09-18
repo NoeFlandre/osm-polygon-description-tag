@@ -23,6 +23,10 @@ from osm_polygon_description_tag.dataset.manifest import ManifestError
 from osm_polygon_description_tag.dataset.migration import MigrationError, migrate_dataset_schema
 from osm_polygon_description_tag.dataset.reporting import ReportingError, generate_dataset_docs
 from osm_polygon_description_tag.dataset.storage import StorageError, validate_geoparquet
+from osm_polygon_description_tag.dataset.text_migration import (
+    TextMigrationError,
+    migrate_dataset_text,
+)
 from osm_polygon_description_tag.language_cli import language_app
 from osm_polygon_description_tag.observability.trackio import (
     TrackioRecorder,
@@ -200,6 +204,14 @@ def handle_migrate_schema(args: SimpleNamespace) -> int:
     return 0
 
 
+def handle_migrate_text(args: SimpleNamespace) -> int:
+    """Repair legacy untrimmed description text without reading raw PBFs."""
+    paths = _resolve_paths(args)
+    migrated = migrate_dataset_text(paths.data_root, max_workers=args.max_workers)
+    print_json({"data_root": str(paths.data_root), "migrated_files": migrated})
+    return 0
+
+
 def handle_publish_plan(args: SimpleNamespace) -> int:
     paths = _resolve_paths(args)
     plan = create_upload_plan(paths.data_root)
@@ -359,6 +371,30 @@ def migrate_schema_command(
     )
 
 
+@app.command(
+    "migrate-text",
+    help="Repair legacy untrimmed description text in published Parquets",
+)
+def migrate_text_command(
+    max_workers: Annotated[
+        int,
+        typer.Option("--max-workers", help="Artifacts to repair concurrently"),
+    ] = 1,
+    source_root: SourceRoot = None,
+    data_root: DataRoot = None,
+    osmium: Osmium = "osmium",
+) -> None:
+    _invoke(
+        handle_migrate_text,
+        SimpleNamespace(
+            source_root=source_root,
+            data_root=data_root,
+            osmium=osmium,
+            max_workers=max_workers,
+        ),
+    )
+
+
 @app.command("trackio-snapshot", help="Log a completed dataset snapshot to Trackio")
 def trackio_snapshot_command(
     project: Annotated[str, typer.Option("--project")] = "osm-polygon-description-tag",
@@ -495,6 +531,7 @@ _ERROR_TYPES = (
     PreflightError,
     OrchestratorError,
     MigrationError,
+    TextMigrationError,
     LanguageDetectionError,
 )
 

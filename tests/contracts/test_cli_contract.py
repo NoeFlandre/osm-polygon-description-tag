@@ -28,6 +28,7 @@ COMMANDS = (
     "validate",
     "generate-card",
     "migrate-schema",
+    "migrate-text",
     "trackio-snapshot",
     "publish-plan",
     "publish",
@@ -46,6 +47,7 @@ COMMAND_OPTIONS = {
     "validate": {*COMMON_OPTIONS, *HELP_OPTION},
     "generate-card": {*COMMON_OPTIONS, *HELP_OPTION},
     "migrate-schema": {*COMMON_OPTIONS, *HELP_OPTION},
+    "migrate-text": {*COMMON_OPTIONS, *HELP_OPTION, "--max-workers"},
     "trackio-snapshot": {
         *COMMON_OPTIONS,
         *HELP_OPTION,
