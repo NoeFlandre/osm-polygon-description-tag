@@ -7,6 +7,7 @@ which the final-artifact contract rejects.
 
 import json
 import re
+from dataclasses import replace
 from pathlib import Path
 
 import pyarrow as pa
@@ -269,3 +270,96 @@ def test_concurrent_and_sequential_runs_agree(tmp_path: Path) -> None:
     assert pq.read_table(concurrent_parquet).column("description").to_pylist() == [
         f"Description {index}" for index in range(1, 5)
     ]
+
+
+def _row_with(
+    osm_id: int,
+    description: object,
+    *,
+    geometry_type: str = "Polygon",
+    bbox: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0),
+    tags: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    row = _row(osm_id, description)
+    min_x, min_y, max_x, max_y = bbox
+    row["geometry_type"] = geometry_type
+    row["bbox_min_x"] = min_x
+    row["bbox_min_y"] = min_y
+    row["bbox_max_x"] = max_x
+    row["bbox_max_y"] = max_y
+    row["geometry"] = to_wkb(
+        Polygon([(min_x, min_y), (min_x, max_y), (max_x, max_y), (max_x, min_y)])
+    )
+    if tags is not None:
+        row["tags"] = tags
+    return row
+
+
+def test_dropping_the_extent_holder_rebuilds_the_geo_metadata(tmp_path: Path) -> None:
+    """A dropped row must not leave the geo block describing rows that are gone."""
+    data_root, parquet, _ = _prepare(
+        tmp_path,
+        [
+            _row_with(1, "   ", bbox=(-50.0, -40.0, -49.0, -39.0)),
+            _row_with(2, "Kept description", bbox=(0.0, 0.0, 1.0, 1.0)),
+        ],
+    )
+
+    assert migrate_dataset_text(data_root) == 1
+
+    table = pq.read_table(parquet)
+    assert table.column("osm_id").to_pylist() == [2]
+    assert validate_geoparquet(parquet) == 1
+    geo = json.loads(pq.read_schema(parquet).metadata[b"geo"])
+    assert geo["columns"]["geometry"]["bbox"] == [0.0, 0.0, 1.0, 1.0]
+
+
+def test_dropping_the_only_row_of_a_geometry_type_rebuilds_the_type_list(
+    tmp_path: Path,
+) -> None:
+    data_root, parquet, _ = _prepare(
+        tmp_path,
+        [
+            _row_with(1, "  ", geometry_type="MultiPolygon"),
+            _row_with(2, "Kept description", geometry_type="Polygon"),
+        ],
+    )
+
+    assert migrate_dataset_text(data_root) == 1
+
+    assert validate_geoparquet(parquet) == 1
+    geo = json.loads(pq.read_schema(parquet).metadata[b"geo"])
+    assert geo["columns"]["geometry"]["geometry_types"] == ["Polygon"]
+
+
+def test_non_text_columns_are_carried_through_untouched(tmp_path: Path) -> None:
+    """The repair may only touch description text, never tags or names."""
+    tags = [
+        {"key": "zebra", "value": "last"},
+        {"key": "alpha", "value": "first"},
+        {"key": "nulled", "value": None},
+    ]
+    data_root, parquet, _ = _prepare(tmp_path, [_row_with(1, "Trailing space ", tags=tags)])
+
+    assert migrate_dataset_text(data_root) == 1
+
+    table = pq.read_table(parquet)
+    assert table.column("description").to_pylist() == ["Trailing space"]
+    assert table.column("tags").to_pylist() == [tags]
+    assert table.column("localized_names").to_pylist() == [[{"key": "en", "value": "Example"}]]
+
+
+def test_a_stale_manifest_from_an_interrupted_run_is_healed(tmp_path: Path) -> None:
+    """A crash between promotion and the manifest write must be recoverable."""
+    data_root, parquet, manifest_path = _prepare(tmp_path, [_row(1, "Sahati Clock Tower\n")])
+    assert migrate_dataset_text(data_root) == 1
+
+    healthy = read_manifest(manifest_path)
+    write_manifest(
+        replace(healthy, output=replace(healthy.output, sha256="c" * 64)),
+        manifest_path,
+    )
+
+    assert migrate_dataset_text(data_root) == 1
+    assert read_manifest(manifest_path).output == output_identity_for(parquet)
+    assert migrate_dataset_text(data_root) == 0

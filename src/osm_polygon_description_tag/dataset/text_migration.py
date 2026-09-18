@@ -17,10 +17,12 @@ The raw PBF source root is never read or modified.
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from collections.abc import Callable, Sequence
 from concurrent.futures import ProcessPoolExecutor
+from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
@@ -29,15 +31,17 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from osm_polygon_description_tag.dataset.manifest import (
+    Manifest,
+    _fsync_dir,
     _manifest_path_for,
     output_identity_for,
     read_manifest,
     write_manifest,
 )
-from osm_polygon_description_tag.dataset.schema import SCHEMA
+from osm_polygon_description_tag.dataset.schema import SCHEMA, geo_metadata
 from osm_polygon_description_tag.dataset.storage import (
+    _DICTIONARY_COLUMNS,
     StorageError,
-    _arrow_record,
     validate_geoparquet,
 )
 from osm_polygon_description_tag.dataset.text import (
@@ -91,38 +95,96 @@ def _row_changed(before: dict[str, object], after: dict[str, object]) -> bool:
     )
 
 
+def _text_columns(table: pa.Table) -> tuple[list[object], list[object]]:
+    """Return the canonical text columns, leaving every other column untouched.
+
+    Only ``description`` and ``localized_descriptions`` are in scope. The other
+    columns are carried through as Arrow read them, so a repair can never
+    reorder ``tags``, collapse a duplicated key, or drop a null-valued entry.
+    """
+    descriptions: list[object] = []
+    localized: list[object] = []
+    for description, entries in zip(
+        table.column("description").to_pylist(),
+        table.column("localized_descriptions").to_pylist(),
+        strict=True,
+    ):
+        descriptions.append(trimmed_nonempty_text(description))
+        localized.append(_canonical_localized(entries))
+    return descriptions, localized
+
+
+def _retained_mask(descriptions: list[object], localized: list[object]) -> list[bool]:
+    return [
+        has_successful_description_text(description, entries)
+        for description, entries in zip(descriptions, localized, strict=True)
+    ]
+
+
+def _canonical_table(table: pa.Table) -> tuple[pa.Table, int]:
+    """Return the repaired table and the number of rows it drops."""
+    descriptions, localized = _text_columns(table)
+    repaired = table.set_column(
+        table.schema.get_field_index("description"),
+        "description",
+        pa.array(descriptions, SCHEMA.field("description").type),
+    ).set_column(
+        table.schema.get_field_index("localized_descriptions"),
+        "localized_descriptions",
+        pa.array(localized, SCHEMA.field("localized_descriptions").type),
+    )
+    mask = _retained_mask(descriptions, localized)
+    if all(mask):
+        return repaired, 0
+    return repaired.filter(pa.array(mask)), mask.count(False)
+
+
+def _geo_metadata_for(table: pa.Table, inherited: dict[bytes, bytes]) -> pa.Schema:
+    """Rebuild the ``geo`` block so it describes the rows actually retained."""
+    geometry_types = [value for value in table.column("geometry_type").to_pylist() if value]
+    bbox: list[float] = []
+    if table.num_rows:
+        bbox = [
+            min(table.column("bbox_min_x").to_pylist()),
+            min(table.column("bbox_min_y").to_pylist()),
+            max(table.column("bbox_max_x").to_pylist()),
+            max(table.column("bbox_max_y").to_pylist()),
+        ]
+    metadata = dict(inherited)
+    metadata[b"geo"] = json.dumps(geo_metadata(geometry_types, bbox)).encode()
+    return SCHEMA.with_metadata(metadata)
+
+
 def _rewrite_parquet_text(
     reader: pq.ParquetFile,
     temporary: Path,
     metadata: pa.Schema,
 ) -> int:
     """Write the canonical artifact and return the number of dropped rows."""
-    dropped = 0
-    with pq.ParquetWriter(temporary, metadata, compression="zstd") as writer:
-        for batch in reader.iter_batches(batch_size=_BATCH_SIZE):
-            rows: list[dict[str, object]] = []
-            for row in batch.to_pylist():
-                canonical = _canonical_row(row)
-                if canonical is None:
-                    dropped += 1
-                    continue
-                rows.append(_arrow_record(canonical))
-            writer.write_table(pa.Table.from_pylist(rows, schema=metadata))
+    repaired, dropped = _canonical_table(reader.read())
+    schema = metadata if not dropped else _geo_metadata_for(repaired, metadata.metadata or {})
+    with pq.ParquetWriter(
+        temporary,
+        schema,
+        compression="zstd",
+        use_dictionary=_DICTIONARY_COLUMNS,
+    ) as writer:
+        writer.write_table(repaired.cast(schema))
     validate_geoparquet(temporary)
     return dropped
 
 
 def _requires_text_migration(path: Path) -> bool:
     """Return whether any stored description value is not already canonical."""
-    reader = pq.ParquetFile(path)
-    for batch in reader.iter_batches(
-        batch_size=_BATCH_SIZE,
-        columns=["description", "localized_descriptions"],
-    ):
-        for row in batch.to_pylist():
-            canonical = _canonical_row(row)
-            if canonical is None or _row_changed(row, canonical):
-                return True
+    with closing(pq.ParquetFile(path)) as reader:
+        for batch in reader.iter_batches(
+            batch_size=_BATCH_SIZE,
+            columns=["description", "localized_descriptions"],
+        ):
+            for row in batch.to_pylist():
+                canonical = _canonical_row(row)
+                if canonical is None or _row_changed(row, canonical):
+                    return True
     return False
 
 
@@ -130,6 +192,7 @@ def _promote_migrated_parquet(temporary: Path, target: Path) -> None:
     with open(temporary, "rb") as handle:
         os.fsync(handle.fileno())
     os.replace(temporary, target)
+    _fsync_dir(target.parent)
 
 
 def _migrate_parquet_text(
@@ -140,14 +203,14 @@ def _migrate_parquet_text(
     if not _requires_text_migration(path):
         return None
 
-    reader = pq.ParquetFile(path)
-    metadata = SCHEMA.with_metadata(reader.schema_arrow.metadata or {})
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     writer = rewrite if rewrite is not None else _rewrite_parquet_text
     try:
-        dropped = writer(reader, temporary, metadata)
+        with closing(pq.ParquetFile(path)) as reader:
+            metadata = SCHEMA.with_metadata(reader.schema_arrow.metadata or {})
+            dropped = writer(reader, temporary, metadata)
         _promote_migrated_parquet(temporary, path)
-        return dropped if dropped is not None else 0
+        return dropped
     except (OSError, pa.ArrowException, StorageError) as error:
         raise TextMigrationError(f"cannot migrate {path}: {error}") from error
     finally:
@@ -157,9 +220,9 @@ def _migrate_parquet_text(
 
 def _migrate_one_artifact(parquet: Path, manifest_path: Path) -> int:
     dropped = _migrate_parquet_text(parquet)
-    if dropped is None:
-        return 0
     manifest = read_manifest(manifest_path)
+    if dropped is None:
+        return _heal_output_identity(manifest, parquet, manifest_path)
     counts = manifest.counts
     rejections = dict(counts.rejections)
     if dropped:
@@ -176,6 +239,21 @@ def _migrate_one_artifact(parquet: Path, manifest_path: Path) -> int:
         ),
         manifest_path,
     )
+    return 1
+
+
+def _heal_output_identity(manifest: Manifest, parquet: Path, manifest_path: Path) -> int:
+    """Refresh a manifest left stale by an interrupted earlier run.
+
+    A crash between promoting a Parquet and writing its manifest leaves the
+    repaired artifact on disk under the previous identity. The text is already
+    canonical by then, so no rewrite is needed and the counts are already
+    correct; only the recorded identity has to catch up.
+    """
+    identity = output_identity_for(parquet)
+    if manifest.output == identity:
+        return 0
+    write_manifest(replace(manifest, output=identity), manifest_path)
     return 1
 
 
