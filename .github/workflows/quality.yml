@@ -190,13 +190,23 @@ jobs:
           sudo apt-get install -y just
 
       - name: Select changed source scope
-        run: >-
-          git diff --unified=0
-          "${{ github.event.pull_request.base.sha }}"
-          "${{ github.event.pull_request.head.sha }}"
-          -- 'src/**/*.py' 'scripts/**/*.py' > "$RUNNER_TEMP/mutation-scope.txt"
+        id: scope
+        run: |
+          git diff --unified=0 \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}" \
+            -- 'src/**/*.py' 'scripts/**/*.py' > "$RUNNER_TEMP/mutation-scope.txt"
+          # A pull request that touches no Python source has nothing to mutate,
+          # so the gate is skipped rather than failed.
+          if [ -s "$RUNNER_TEMP/mutation-scope.txt" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No Python source changed; the mutation gate has nothing to mutate."
+          fi
 
       - name: Select changed mutation tests
+        if: steps.scope.outputs.changed == 'true'
         run: >-
           git diff --name-only
           "${{ github.event.pull_request.base.sha }}"
@@ -204,13 +214,14 @@ jobs:
           -- 'tests/**/*.py' > "$RUNNER_TEMP/mutation-tests.txt"
 
       - name: Run changed-source mutation gate
+        if: steps.scope.outputs.changed == 'true'
         run: >-
           just mutation-scope
           "$RUNNER_TEMP/mutation-scope.txt"
           "$RUNNER_TEMP/mutation-tests.txt"
 
       - name: Upload mutation report
-        if: always()
+        if: always() && steps.scope.outputs.changed == 'true'
         uses: actions/upload-artifact@v4.6.2
         with:
           name: mutation-score-scope
@@ -263,17 +274,19 @@ jobs:
       - name: Select this shard's source files
         env:
           MUTATION_SHARD: ${{ matrix.shard }}
-        run: >-
-          python3 -c "
-          import os, pathlib;
-          roots=[pathlib.Path('src'), pathlib.Path('scripts')];
-          files=sorted(str(p) for r in roots for p in r.rglob('*.py'));
-          count=int(os.environ['MUTATION_SHARD_COUNT']);
-          index=int(os.environ['MUTATION_SHARD']);
-          shard=[f for n, f in enumerate(files) if n % count == index];
-          pathlib.Path(os.environ['RUNNER_TEMP'], 'mutation-shard.txt').write_text(
-          chr(10).join(shard) + chr(10));
-          print(chr(10).join(shard))"
+        run: |
+          python3 - <<'PY' | tee "$RUNNER_TEMP/mutation-shard.txt"
+          import os
+          import pathlib
+
+          roots = (pathlib.Path("src"), pathlib.Path("scripts"))
+          files = sorted(str(path) for root in roots for path in root.rglob("*.py"))
+          count = int(os.environ["MUTATION_SHARD_COUNT"])
+          index = int(os.environ["MUTATION_SHARD"])
+          for position, name in enumerate(files):
+              if position % count == index:
+                  print(name)
+          PY
 
       - name: Run the sharded all-source mutation gate
         run: just mutation-shard "$RUNNER_TEMP/mutation-shard.txt"
