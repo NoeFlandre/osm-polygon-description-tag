@@ -132,12 +132,14 @@ def successful_description_text_sql(
         "AND length(entry.value) > 0 "
         f"AND entry.value = {_trim_sql('entry.value')})"
     )
+    # pragma: no mutate start - SQL casing is semantically equivalent in DuckDB
     localized_invalid = (
         f"EXISTS (SELECT 1 FROM unnest({entries}) AS localized(entry) "  # noqa: S608 - expressions use fixed internal column names
         "WHERE entry.value IS NULL "
         "OR length(entry.value) = 0 "
         f"OR entry.value <> {_trim_sql('entry.value')})"
     )
+    # pragma: no mutate end
     return (
         f"({base} OR {localized_valid}) "
         f"AND ({description_column} IS NULL OR {base}) "

@@ -193,6 +193,31 @@ def test_collection_helpers_preserve_allowlist_boundaries(tmp_path: Path) -> Non
     ]
 
 
+def test_collect_data_items_forwards_the_text_validation_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = tmp_path / "generated"
+    _make_dataset(data_root)
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def record_validation(*args: object, **kwargs: object) -> None:
+        calls.append((args, kwargs))
+
+    monkeypatch.setattr(planning, "_validate_manifest", record_validation)
+    parquet = data_root / "data" / "a-latest.parquet"
+    manifest = data_root / "manifests" / "a-latest.manifest.json"
+
+    _collect_data_items(data_root)
+    assert calls == [((manifest, parquet), {})]
+
+    calls.clear()
+    _collect_data_items(data_root, require_successful_text=False)
+    assert calls == [
+        ((manifest, parquet), {"require_successful_text": False}),
+    ]
+
+
 def test_build_item_preserves_non_regular_file_error(tmp_path: Path) -> None:
     directory = tmp_path / "not-a-file"
     directory.mkdir()
@@ -589,6 +614,41 @@ def test_publication_validation_helpers_preserve_their_contracts(
     with pytest.raises(PublicationError) as error:
         _validate_manifest(manifest_path, parquet_path)
     assert str(error.value) == f"manifest output identity does not match parquet: {manifest_path}"
+
+
+def test_publication_text_validation_mode_is_forwarded_at_each_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = tmp_path / "generated"
+    _make_dataset(data_root)
+    manifest_path = data_root / "manifests" / "a-latest.manifest.json"
+    parquet_path = data_root / "data" / "a-latest.parquet"
+    publication_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def record_publication_validation(*args: object, **kwargs: object) -> None:
+        publication_calls.append((args, kwargs))
+
+    monkeypatch.setattr(planning, "_validate_publication_parquet", record_publication_validation)
+    _validate_manifest(manifest_path, parquet_path)
+    _validate_manifest(manifest_path, parquet_path, require_successful_text=False)
+    assert publication_calls == [
+        ((parquet_path,), {}),
+        ((parquet_path,), {"require_successful_text": False}),
+    ]
+
+    parquet_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def record_geoparquet_validation(*args: object, **kwargs: object) -> None:
+        parquet_calls.append((args, kwargs))
+
+    monkeypatch.setattr(planning, "validate_geoparquet", record_geoparquet_validation)
+    _validate_publication_parquet(parquet_path)
+    _validate_publication_parquet(parquet_path, require_successful_text=False)
+    assert parquet_calls == [
+        ((parquet_path,), {}),
+        ((parquet_path,), {"require_successful_text": False}),
+    ]
 
 
 def test_publication_asset_requirements_report_exact_missing_files(

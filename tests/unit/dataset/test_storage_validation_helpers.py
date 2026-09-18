@@ -34,6 +34,7 @@ from osm_polygon_description_tag.dataset.storage import (
     _stream_rewrite_with_metadata,
     _UniquenessIndex,
     _validate_area,
+    _validate_batch,
     _validate_bbox,
     _validate_description_values,
     _validate_geo_metadata_header,
@@ -225,6 +226,48 @@ def test_validate_description_values_rejects_untrimmed_final_text(
 ) -> None:
     with pytest.raises(StorageError, match="trimmed"):
         _validate_description_values(description, localized)
+
+
+def test_legacy_validation_mode_is_forwarded_through_every_text_validator(
+    tmp_path: Path,
+    way_record_dict: dict[str, object],
+) -> None:
+    legacy_record = dict(way_record_dict)
+    legacy_record["description"] = " padded base "
+    legacy_record["localized_descriptions"] = [{"key": "en", "value": " padded local "}]
+    batch = pa.RecordBatch.from_pylist([legacy_record])
+
+    with _UniquenessIndex(work_root=tmp_path / "work") as uniqueness:
+        state = _ValidationState(uniqueness=uniqueness)
+        _validate_batch(batch, state, require_successful_text=False)
+
+    assert state.row_count == 1
+
+
+def test_text_validation_helpers_are_strict_by_default(
+    tmp_path: Path,
+    way_record_dict: dict[str, object],
+) -> None:
+    legacy_record = dict(way_record_dict)
+    legacy_record["description"] = " padded base "
+    legacy_record["localized_descriptions"] = [{"key": "en", "value": " padded local "}]
+    columns = _columns(legacy_record)
+    batch = pa.RecordBatch.from_pylist([legacy_record])
+
+    with pytest.raises(StorageError, match="trimmed"):
+        storage._validate_localized_descriptions(columns["localized_descriptions"][0])
+
+    with (
+        _UniquenessIndex(work_root=tmp_path / "row-work") as uniqueness,
+        pytest.raises(StorageError, match="trimmed"),
+    ):
+        _validate_row(columns, 0, _ValidationState(uniqueness=uniqueness))
+
+    with (
+        _UniquenessIndex(work_root=tmp_path / "batch-work") as uniqueness,
+        pytest.raises(StorageError, match="trimmed"),
+    ):
+        _validate_batch(batch, _ValidationState(uniqueness=uniqueness))
 
 
 @pytest.mark.parametrize(

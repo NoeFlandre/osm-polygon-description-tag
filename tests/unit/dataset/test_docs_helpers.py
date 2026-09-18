@@ -563,3 +563,46 @@ def test_generate_dataset_docs_forwards_clock_and_orchestrates_all_outputs(
         "area_histogram_render_version": docs_module.AREA_HISTOGRAM_RENDER_VERSION,
         "area_histogram_total_rows": 5,
     }
+
+
+def test_text_rejection_section_distinguishes_persisted_artifacts_exactly() -> None:
+    stats = {
+        "text_rejection_counts": {
+            reason: index + 1 for index, reason in enumerate(docs_module.TEXT_REJECTION_REASONS)
+        },
+        "persisted_text_rejection_rows": 12,
+    }
+
+    expected = [
+        "### Text-contract exclusions in source manifests",
+        "",
+        "These counts describe rows rejected before publication; the final "
+        "polygon and area populations contain only trimmed, non-empty text. "
+        "The separate persisted-artifact count covers legacy rows retained "
+        "in published Parquet but excluded by the final predicate.",
+        "",
+        "| Rejection category | Rows |",
+        "| --- | ---: |",
+    ]
+    expected.extend(
+        f"| `{reason}` | {index + 1:,} |"
+        for index, reason in enumerate(docs_module.TEXT_REJECTION_REASONS)
+    )
+    expected.extend(
+        [
+            "",
+            "**Persisted artifact rows excluded by the final text predicate:** 12.",
+            "",
+            "Source/manifest rejection counts and persisted artifact exclusions "
+            "are separate populations and are not added together.",
+            "",
+        ]
+    )
+
+    assert docs_module._render_text_rejection_section(stats) == expected
+
+
+def test_text_rejection_section_keeps_legacy_fallbacks_safe() -> None:
+    rendered = docs_module._render_text_rejection_section({"persisted_text_rejection_rows": 0})
+
+    assert "**Persisted artifact rows excluded by the final text predicate:** 0." in rendered

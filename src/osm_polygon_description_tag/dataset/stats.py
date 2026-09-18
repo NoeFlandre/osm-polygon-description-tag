@@ -258,7 +258,10 @@ def _find_validated_artifacts(data_root: Path) -> tuple[_ValidatedArtifact, ...]
     parquets = _matching_parquets(data_dir, manifests_dir)
     artifacts = tuple(_validate_artifact(parquet, manifests_dir) for parquet in parquets)
     for artifact in artifacts:
-        validate_geoparquet(artifact.parquet, require_successful_text=False)
+        validate_geoparquet(
+            artifact.parquet,
+            require_successful_text=False,
+        )
     return artifacts
 
 
@@ -378,11 +381,7 @@ def _collect_feature_summary(connection: duckdb.DuckDBPyConnection) -> _FeatureS
     raw_successful_text_rows = _query_int(
         connection,
         "SELECT COUNT(*) FROM all_features WHERE "  # noqa: S608 - internal fixed columns
-        + successful_description_text_sql(
-            description_column="description",
-            localized_column="localized_descriptions",
-            localized_is_map=True,
-        ),
+        + successful_description_text_sql(localized_is_map=True),
     )
     unique_osm_objects = _query_int(
         connection,

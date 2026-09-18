@@ -185,6 +185,100 @@ def test_apply_uploads_only_metadata_and_verifies(workspace: Path) -> None:
     assert verifier.inventory_calls[1][2] == "deadbeef"
 
 
+def test_legacy_release_boundaries_forward_non_strict_inventory_validation(
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inventory_calls: list[dict[str, object]] = []
+
+    def record_inventory(_root: Path, **kwargs: object) -> tuple[UploadItem, ...]:
+        inventory_calls.append(kwargs)
+        return (UploadItem("data/region-a.parquet", 1, "a" * 64),)
+
+    monkeypatch.setattr(release_module, "_published_inventory", record_inventory)
+    monkeypatch.setattr(
+        release_module,
+        "generate_dataset_docs",
+        lambda *_args, **_kwargs: {"rows": 1},
+    )
+    monkeypatch.setattr(release_module, "_build_metadata_only_upload_plan", lambda _root: object())
+
+    release_module._compute_release_artifacts(workspace, dataset_card_template())
+    assert inventory_calls == [{"require_successful_text": False}]
+
+
+def test_prepare_remote_release_forwards_non_strict_inventory_validation(
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inventory_calls: list[dict[str, object]] = []
+    sync_calls: list[tuple[object, ...]] = []
+
+    def record_inventory(_root: Path, **kwargs: object) -> tuple[UploadItem, ...]:
+        inventory_calls.append(kwargs)
+        return (UploadItem("data/region-a.parquet", 1, "a" * 64),)
+
+    monkeypatch.setattr(release_module, "_published_inventory", record_inventory)
+    monkeypatch.setattr(
+        release_module,
+        "_sync_remote_card",
+        lambda *args: sync_calls.append(args),
+    )
+    verifier = _RecordingVerifier()
+
+    context = release_module._prepare_remote_release(workspace, REPO_ID, verifier)
+
+    assert inventory_calls == [{"require_successful_text": False}]
+    assert context.data_revision == "data-revision"
+    assert sync_calls == [(workspace, verifier, REPO_ID, "data-revision")]
+
+
+def test_published_inventory_forwards_non_strict_text_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = tmp_path / "generated"
+    (data_root / "data").mkdir(parents=True)
+    (data_root / "manifests").mkdir()
+    calls: list[tuple[Path, dict[str, object]]] = []
+    data_item = UploadItem("data/region-a.parquet", 1, "a" * 64)
+
+    def record_data_items(_root: Path, **kwargs: object) -> list[UploadItem]:
+        calls.append((_root, kwargs))
+        return [data_item]
+
+    monkeypatch.setattr(release_module, "_collect_data_items", record_data_items)
+    monkeypatch.setattr(release_module, "_collect_manifest_items", lambda _root: [])
+
+    inventory = release_module._published_inventory(
+        data_root,
+        require_successful_text=False,
+    )
+
+    assert calls == [(data_root, {"require_successful_text": False})]
+
+    calls.clear()
+    assert release_module._published_inventory(data_root) == (data_item,)
+    assert calls == [(data_root, {"require_successful_text": True})]
+    assert inventory == (data_item,)
+
+
+def test_validate_published_inventory_uses_non_strict_inventory_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def record_inventory(_root: Path, **kwargs: object) -> tuple[UploadItem, ...]:
+        calls.append(kwargs)
+        return (UploadItem("data/region-a.parquet", 1, "a" * 64),)
+
+    monkeypatch.setattr(release_module, "_published_inventory", record_inventory)
+
+    assert release_module.validate_published_inventory(tmp_path) == 1
+    assert calls == [{"require_successful_text": False}]
+
+
 def test_apply_is_remote_idempotent_when_metadata_already_matches(workspace: Path) -> None:
     commands: list[list[str]] = []
     verifier = _RecordingVerifier()
@@ -519,8 +613,9 @@ def test_missing_inventory_is_refused(tmp_path: Path) -> None:
 
 def test_empty_inventory_is_refused(tmp_path: Path) -> None:
     (tmp_path / "data").mkdir()
-    with pytest.raises(PublicationError, match="no published Parquet files"):
+    with pytest.raises(PublicationError) as error:
         validate_published_inventory(tmp_path)
+    assert str(error.value) == f"no published Parquet files under {tmp_path / 'data'}"
 
 
 def test_parquet_without_matching_manifest_is_refused(workspace: Path) -> None:

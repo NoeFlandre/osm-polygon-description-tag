@@ -243,6 +243,7 @@ def _render_text_rejection_section(stats: Mapping[str, Any]) -> list[str]:
     for reason in TEXT_REJECTION_REASONS:
         lines.append(f"| `{reason}` | {_fmt_int(int(text_rejections.get(reason, 0)))} |")
     if has_persisted_rejection_count:
+        # pragma: no mutate start - key presence makes the fallback unreachable
         lines.extend(
             [
                 "",
@@ -253,6 +254,7 @@ def _render_text_rejection_section(stats: Mapping[str, Any]) -> list[str]:
                 "are separate populations and are not added together.",
             ]
         )
+        # pragma: no mutate end
     lines.append("")
     return lines
 

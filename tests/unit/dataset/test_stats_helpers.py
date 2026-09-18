@@ -244,6 +244,55 @@ def test_collect_spatial_summary_streams_all_files_and_is_empty_safe(tmp_path: P
     assert summary.multipolygon_components_total == 1
 
 
+def test_find_validated_artifacts_uses_explicit_legacy_text_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    source_root.mkdir()
+    write_reporting_fixture(data_root, source_root)
+    calls: list[dict[str, object]] = []
+
+    def record_validation(_path: Path, **kwargs: object) -> None:
+        calls.append(kwargs)
+
+    monkeypatch.setattr(stats_module, "validate_geoparquet", record_validation)
+
+    artifacts = stats_module._find_validated_artifacts(data_root)
+
+    assert len(artifacts) == 2
+    assert calls == [{"require_successful_text": False}] * 2
+
+
+def test_collect_spatial_summary_preserves_unique_source_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parquet = tmp_path / "data" / "region.parquet"
+    artifacts = (stats_module._ValidatedArtifact(parquet, Mock()),)
+    batch = object()
+    seen: list[tuple[object, str, int]] = []
+
+    monkeypatch.setattr(
+        stats_module,
+        "iter_unique_parquet_batches",
+        lambda *_args, **_kwargs: iter((batch,)),
+    )
+
+    def summarize(
+        value: object, *, source_name: str, row_offset: int
+    ) -> stats_module._SpatialSummary:
+        seen.append((value, source_name, row_offset))
+        return stats_module._SpatialSummary(0, 0.0, None, None, 0, 0, 0, 0)
+
+    monkeypatch.setattr(stats_module, "_summarize_spatial_batch", summarize)
+
+    stats_module._collect_spatial_summary(artifacts)
+
+    assert seen == [(batch, "unique.parquet", 0)]
+
+
 def test_create_unique_feature_view_requires_successful_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -500,11 +549,7 @@ def test_collect_feature_summary_forwards_each_query_and_quantile_contract() -> 
         call(
             connection,
             "SELECT COUNT(*) FROM all_features WHERE "  # noqa: S608 - internal fixed columns
-            + stats_module.successful_description_text_sql(
-                description_column="description",
-                localized_column="localized_descriptions",
-                localized_is_map=True,
-            ),
+            + stats_module.successful_description_text_sql(localized_is_map=True),
         ),
         call(connection, "SELECT COUNT(*) FROM (SELECT DISTINCT osm_type, osm_id FROM features)"),
         call(connection, "SELECT COUNT(*) FROM features WHERE description IS NOT NULL"),
@@ -631,6 +676,7 @@ def test_build_stats_payload_preserves_public_fields_and_zero_rate_fallback() ->
         area_max_m2=5.0,
         data_min_timestamp_utc="2024-01-01T00:00:00+00:00",
         data_max_timestamp_utc="2024-02-01T00:00:00+00:00",
+        raw_successful_text_rows=8,
     )
     manifest_summary = stats_module._ManifestSummary(
         emitted_features=12,
@@ -645,6 +691,8 @@ def test_build_stats_payload_preserves_public_fields_and_zero_rate_fallback() ->
     assert payload["regional_overlap_duplicate_rows"] == 3
     assert payload["regional_overlap_duplicate_rate"] == 0.3
     assert payload["regional_rows"] == 10
+    assert payload["regional_rows_with_successful_nonempty_text"] == 8
+    assert payload["persisted_text_rejection_rows"] == 2
     assert payload["globally_unique_polygons"] == 7
     assert payload["unique_polygons_with_successful_nonempty_text"] == 10
     assert payload["unique_polygons_with_text"] == 10
