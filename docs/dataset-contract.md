@@ -72,11 +72,14 @@ The machine-readable report also contains dataset-wide polygon geometry facts:
 and total `geometry_vertices_total`, `geometry_rings_total`,
 `geometry_holes_total`, and `multipolygon_components_total`. The report
 distinguishes `regional_rows`, distinct global identities, overlap duplicate
-rows, and `unique_polygons_with_successful_nonempty_text`. Area statistics use
-only the latter population, recorded explicitly in `area_m2_population`; area
-is never silently summed from regional rows. Geometry vertices exclude each
-ring's repeated closing coordinate. The same values are rendered in the
-generated dataset-card statistics block.
+rows, regional rows with successful text, and
+`unique_polygons_with_successful_nonempty_text`. Source/manifest text rejects
+are reported separately from persisted artifact rows excluded by the final
+text predicate. Area statistics use only the latter population, recorded
+explicitly in `area_m2_population`; area is never silently summed from
+regional rows. Geometry vertices exclude each ring's repeated closing
+coordinate. The same values are rendered in the generated dataset-card
+statistics block.
 
 ## Reproducibility
 

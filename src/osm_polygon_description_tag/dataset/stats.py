@@ -39,13 +39,14 @@ from osm_polygon_description_tag.dataset.manifest import (
 )
 from osm_polygon_description_tag.dataset.schema import SCHEMA, SCHEMA_VERSION
 from osm_polygon_description_tag.dataset.storage import validate_geoparquet
+from osm_polygon_description_tag.dataset.text import successful_description_text_sql
 from osm_polygon_description_tag.dataset.unique_rows import (
     iter_unique_parquet_batches,
     unique_rows_sql,
 )
 from osm_polygon_description_tag.runtime.time import utc_now_iso
 
-STATS_SCHEMA_VERSION = 8
+STATS_SCHEMA_VERSION = 9
 _QUANTILE_PROBABILITIES = [0.25, 0.5, 0.75]
 TEXT_REJECTION_REASONS = (
     "no_description",
@@ -193,6 +194,7 @@ class _FeatureSummary:
     geometry_holes_total: int = 0
     multipolygon_components_total: int = 0
     raw_rows: int | None = None
+    raw_successful_text_rows: int | None = None
     all_unique_osm_objects: int | None = None
 
 
@@ -256,7 +258,7 @@ def _find_validated_artifacts(data_root: Path) -> tuple[_ValidatedArtifact, ...]
     parquets = _matching_parquets(data_dir, manifests_dir)
     artifacts = tuple(_validate_artifact(parquet, manifests_dir) for parquet in parquets)
     for artifact in artifacts:
-        validate_geoparquet(artifact.parquet)
+        validate_geoparquet(artifact.parquet, require_successful_text=False)
     return artifacts
 
 
@@ -373,6 +375,15 @@ def _collect_feature_summary(connection: duckdb.DuckDBPyConnection) -> _FeatureS
         "SELECT COUNT(*) FROM (SELECT DISTINCT osm_type, osm_id FROM all_features)",
     )
     rows = _query_int(connection, "SELECT COUNT(*) FROM features")
+    raw_successful_text_rows = _query_int(
+        connection,
+        "SELECT COUNT(*) FROM all_features WHERE "  # noqa: S608 - internal fixed columns
+        + successful_description_text_sql(
+            description_column="description",
+            localized_column="localized_descriptions",
+            localized_is_map=True,
+        ),
+    )
     unique_osm_objects = _query_int(
         connection,
         "SELECT COUNT(*) FROM (SELECT DISTINCT osm_type, osm_id FROM features)",
@@ -441,6 +452,7 @@ def _collect_feature_summary(connection: duckdb.DuckDBPyConnection) -> _FeatureS
         area_max_m2=_quantile_or_none(connection, "area_m2", 1.0),
         data_min_timestamp_utc=min_ts.isoformat() if min_ts else None,
         data_max_timestamp_utc=max_ts.isoformat() if max_ts else None,
+        raw_successful_text_rows=raw_successful_text_rows,
         all_unique_osm_objects=all_unique_osm_objects,
     )
 
@@ -795,9 +807,14 @@ def _build_stats_payload(
     raw_rows = _raw_row_count(feature_summary)
     globally_unique = _globally_unique_count(feature_summary)
     successful_text_unique = feature_summary.rows
-    regional_successful_text_rows = raw_rows
+    regional_successful_text_rows = (
+        feature_summary.rows
+        if feature_summary.raw_successful_text_rows is None
+        else feature_summary.raw_successful_text_rows
+    )
     duplicate_rows = raw_rows - globally_unique
     text_rejection_counts = _text_rejection_counts(manifest_summary)
+    persisted_text_rejection_rows = raw_rows - regional_successful_text_rows
     manifest_duplicate_rows = manifest_summary.rejections.get("duplicate_osm_object", 0)
     return {
         "stats_schema_version": STATS_SCHEMA_VERSION,
@@ -830,6 +847,7 @@ def _build_stats_payload(
         "rejections": manifest_summary.rejections,
         "text_rejection_counts": text_rejection_counts,
         "text_rejection_rows": sum(text_rejection_counts.values()),
+        "persisted_text_rejection_rows": persisted_text_rejection_rows,
         "deduplicated_rows": duplicate_rows,
         "manifest_duplicate_rows": manifest_duplicate_rows,
         "source_bytes_total": manifest_summary.source_bytes_total,

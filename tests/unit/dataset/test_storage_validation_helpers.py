@@ -723,6 +723,20 @@ def test_validate_geoparquet_uses_empty_metadata_defaults_and_exact_validation_i
     uniqueness.close.assert_called_once_with()
 
 
+def test_validate_geoparquet_can_allow_source_text_rejections(
+    tmp_path: Path,
+    way_record_dict: dict[str, object],
+) -> None:
+    record = dict(way_record_dict, description="  legacy whitespace  ")
+    target = tmp_path / "data" / "legacy.parquet"
+
+    write_geoparquet(iter([record]), target, validator=lambda _path: 1)
+
+    with pytest.raises(StorageError, match="description text must be trimmed"):
+        storage.validate_geoparquet(target)
+    assert storage.validate_geoparquet(target, require_successful_text=False) == 1
+
+
 def test_fsync_dir_uses_the_owned_directory_and_closes_the_fd(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

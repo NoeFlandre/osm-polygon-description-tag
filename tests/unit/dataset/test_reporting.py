@@ -21,7 +21,6 @@ from osm_polygon_description_tag.dataset.stats import (
     _new_connection,
     _validate_artifact,
 )
-from osm_polygon_description_tag.dataset.storage import StorageError
 from osm_polygon_description_tag.dataset.unique_rows import iter_unique_parquet_batches
 from tests.conftest import make_record_dict
 from tests.helpers.dataset import write_finalized_dataset, write_reporting_fixture
@@ -144,7 +143,7 @@ def test_collect_stats_aggregates_from_validated_artifacts(tmp_path: Path) -> No
     assert stats["multipolygon_components_total"] == 1
     assert stats["area_m2_min_m2"] is not None and stats["area_m2_min_m2"] > 0
     assert stats["area_m2_max_m2"] >= stats["area_m2_min_m2"]
-    assert stats["stats_schema_version"] == 8
+    assert stats["stats_schema_version"] == 9
 
 
 def test_statistics_media_and_card_use_one_canonical_row_per_osm_identity(
@@ -318,7 +317,7 @@ def test_collect_stats_separates_base_and_localized_description_words(
 
     stats = collect_stats(data_root)
 
-    assert stats["stats_schema_version"] == 8
+    assert stats["stats_schema_version"] == 9
     assert stats["base_description_values"] == 2
     assert stats["base_description_words_total"] == 3
     assert stats["base_description_words_median"] == 1.5
@@ -434,8 +433,14 @@ def test_collect_stats_rejects_final_artifact_without_successful_text(
     ):
         write_finalized_dataset(data_root, source_root, {"invalid": [invalid]})
 
-    with pytest.raises(StorageError, match="non-empty"):
-        collect_stats(data_root, clock=_frozen_clock)
+    stats = collect_stats(data_root, clock=_frozen_clock)
+
+    assert stats["regional_rows"] == 1
+    assert stats["regional_rows_with_successful_nonempty_text"] == 0
+    assert stats["globally_unique_polygons"] == 1
+    assert stats["unique_polygons_with_successful_nonempty_text"] == 0
+    assert stats["persisted_text_rejection_rows"] == 1
+    assert stats["area_m2_count"] == 0
 
 
 def test_generate_dataset_docs_installs_hero_image(tmp_path: Path) -> None:

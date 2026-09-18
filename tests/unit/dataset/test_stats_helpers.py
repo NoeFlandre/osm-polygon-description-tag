@@ -441,7 +441,11 @@ def test_collect_feature_summary_forwards_each_query_and_quantile_contract() -> 
     connection.execute.return_value.fetchone.return_value = (min_timestamp, max_timestamp)
 
     with (
-        patch.object(stats_module, "_query_int", side_effect=[7, 11, 10, 3, 5, 4, 9]) as query_int,
+        patch.object(
+            stats_module,
+            "_query_int",
+            side_effect=[7, 11, 9, 10, 3, 5, 4, 9],
+        ) as query_int,
         patch.object(
             stats_module,
             "_ordered_counts",
@@ -466,6 +470,7 @@ def test_collect_feature_summary_forwards_each_query_and_quantile_contract() -> 
         summary = stats_module._collect_feature_summary(connection)
 
     assert summary.rows == 11
+    assert summary.raw_successful_text_rows == 9
     assert summary.unique_osm_objects == 10
     assert summary.all_unique_osm_objects == 7
     assert summary.osm_types == {"relation": 4}
@@ -492,6 +497,15 @@ def test_collect_feature_summary_forwards_each_query_and_quantile_contract() -> 
             "SELECT COUNT(*) FROM (SELECT DISTINCT osm_type, osm_id FROM all_features)",
         ),
         call(connection, "SELECT COUNT(*) FROM features"),
+        call(
+            connection,
+            "SELECT COUNT(*) FROM all_features WHERE "  # noqa: S608 - internal fixed columns
+            + stats_module.successful_description_text_sql(
+                description_column="description",
+                localized_column="localized_descriptions",
+                localized_is_map=True,
+            ),
+        ),
         call(connection, "SELECT COUNT(*) FROM (SELECT DISTINCT osm_type, osm_id FROM features)"),
         call(connection, "SELECT COUNT(*) FROM features WHERE description IS NOT NULL"),
         call(

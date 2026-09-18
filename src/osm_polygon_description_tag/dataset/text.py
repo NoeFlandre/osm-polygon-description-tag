@@ -126,13 +126,23 @@ def successful_description_text_sql(
         f"length({description_column}) > 0 AND "
         f"{description_column} = {_trim_sql(description_column)}"
     )
-    localized = (
+    localized_valid = (
         f"EXISTS (SELECT 1 FROM unnest({entries}) AS localized(entry) "  # noqa: S608 - expressions use fixed internal column names
         "WHERE entry.value IS NOT NULL "
         "AND length(entry.value) > 0 "
         f"AND entry.value = {_trim_sql('entry.value')})"
     )
-    return f"({base} OR {localized})"
+    localized_invalid = (
+        f"EXISTS (SELECT 1 FROM unnest({entries}) AS localized(entry) "  # noqa: S608 - expressions use fixed internal column names
+        "WHERE entry.value IS NULL "
+        "OR length(entry.value) = 0 "
+        f"OR entry.value <> {_trim_sql('entry.value')})"
+    )
+    return (
+        f"({base} OR {localized_valid}) "
+        f"AND ({description_column} IS NULL OR {base}) "
+        f"AND NOT ({localized_invalid})"
+    )
 
 
 def description_row_has_successful_text(row: Mapping[str, Any]) -> bool:

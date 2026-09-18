@@ -255,7 +255,7 @@ def test_ensure_area_histogram_reuses_or_rebuilds_and_returns_current_row_count(
     ):
         assert docs_module._ensure_area_histogram(tmp_path, stats, {}) == ("new-hash", 9)
 
-    aggregate.assert_called_once_with(tmp_path)
+    aggregate.assert_called_once_with(tmp_path, require_successful_text=False)
     write_histogram.assert_called_once_with(
         counts, tmp_path / docs_module._AREA_HISTOGRAM_ASSET_RELATIVE_PATH
     )

@@ -820,7 +820,7 @@ def test_generate_dataset_docs_recomputes_histogram_when_parquet_changes(
     render_calls: list[Path] = []
     identity_iter = iter(["identity-v1", "identity-v2"])
 
-    def fake_aggregate(root: Path) -> dict[str, int]:
+    def fake_aggregate(root: Path, **_kwargs: object) -> dict[str, int]:
         aggregate_calls.append(root)
         return dict.fromkeys(AREA_BUCKET_LABELS, 1)
 

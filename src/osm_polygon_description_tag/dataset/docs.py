@@ -222,17 +222,37 @@ def _render_text_rejection_section(stats: Mapping[str, Any]) -> list[str]:
     text_rejections = stats.get("text_rejection_counts")
     if not isinstance(text_rejections, Mapping):
         text_rejections = {}
+    has_persisted_rejection_count = "persisted_text_rejection_rows" in stats
+    explanation = (
+        "These counts describe rows rejected before publication; the final "
+        "polygon and area populations contain only trimmed, non-empty text."
+    )
+    if has_persisted_rejection_count:
+        explanation += (
+            " The separate persisted-artifact count covers legacy rows retained "
+            "in published Parquet but excluded by the final predicate."
+        )
     lines = [
         "### Text-contract exclusions in source manifests",
         "",
-        "These counts describe rows rejected before publication; the final "
-        "polygon and area populations contain only trimmed, non-empty text.",
+        explanation,
         "",
         "| Rejection category | Rows |",
         "| --- | ---: |",
     ]
     for reason in TEXT_REJECTION_REASONS:
         lines.append(f"| `{reason}` | {_fmt_int(int(text_rejections.get(reason, 0)))} |")
+    if has_persisted_rejection_count:
+        lines.extend(
+            [
+                "",
+                "**Persisted artifact rows excluded by the final text predicate:** "
+                f"{_fmt_int(int(stats.get('persisted_text_rejection_rows', 0)))}.",
+                "",
+                "Source/manifest rejection counts and persisted artifact exclusions "
+                "are separate populations and are not added together.",
+            ]
+        )
     lines.append("")
     return lines
 
@@ -441,7 +461,10 @@ def _ensure_area_histogram(
     input_sha256 = _area_histogram_input_sha256(stats)
     histogram_path = data_root / _AREA_HISTOGRAM_ASSET_RELATIVE_PATH
     if not _histogram_cache_is_valid(histogram_path, previous_stats, input_sha256):
-        render_area_histogram(aggregate_area_histogram(data_root), histogram_path)
+        render_area_histogram(
+            aggregate_area_histogram(data_root, require_successful_text=False),
+            histogram_path,
+        )
     return input_sha256, int(stats["rows"])
 
 
