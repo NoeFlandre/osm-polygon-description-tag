@@ -201,7 +201,7 @@ def test_legacy_release_boundaries_forward_non_strict_inventory_validation(
         "generate_dataset_docs",
         lambda *_args, **_kwargs: {"rows": 1},
     )
-    monkeypatch.setattr(release_module, "_build_metadata_only_upload_plan", lambda _root: object())
+    monkeypatch.setattr(release_module, "build_metadata_only_upload_plan", lambda _root: object())
 
     release_module._compute_release_artifacts(workspace, dataset_card_template())
     assert inventory_calls == [{"require_successful_text": False}]

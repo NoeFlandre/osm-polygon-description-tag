@@ -30,7 +30,7 @@ from osm_polygon_description_tag.publication.models import (
     UploadPlan,
 )
 from osm_polygon_description_tag.publication.planning import (
-    _build_metadata_only_upload_plan,
+    build_metadata_only_upload_plan,
     _collect_data_items,
     _collect_manifest_items,
 )
@@ -256,7 +256,7 @@ def _compute_release_artifacts(
         template_path,
         preserve_existing=True,
     )
-    plan = _build_metadata_only_upload_plan(data_root)
+    plan = build_metadata_only_upload_plan(data_root)
     inventory = _published_inventory(data_root, require_successful_text=False)
     return stats, plan, inventory
 

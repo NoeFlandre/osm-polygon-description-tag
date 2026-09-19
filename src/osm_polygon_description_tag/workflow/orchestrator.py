@@ -52,8 +52,8 @@ from osm_polygon_description_tag.publication.models import (
     PublicationError,
 )
 from osm_polygon_description_tag.publication.planning import (
-    _build_metadata_only_upload_plan,  # noqa: F401
-    _build_per_pbf_upload_plan,
+    build_metadata_only_upload_plan,  # noqa: F401
+    build_per_pbf_upload_plan,
     create_upload_plan,
     per_pbf_command,
 )
@@ -166,7 +166,7 @@ def _execute_publication(
     per-PBF plan builder; it contains exactly the four files for this PBF.
     Production and tests share the same canonical plan builder.
     """
-    plan = _build_per_pbf_upload_plan(paths.data_root, source.name)
+    plan = build_per_pbf_upload_plan(paths.data_root, source.name)
     # Revalidate the dataset-wide upload plan immediately before upload to
     # catch in-place mutations between build and upload.
     create_upload_plan(paths.data_root)
@@ -338,7 +338,7 @@ def _publish_source_if_needed(
         )
         raise
     output_identity = output_identity_for(output_path)
-    plan_identity = _build_per_pbf_upload_plan(paths.data_root, source.name).identity_sha256
+    plan_identity = build_per_pbf_upload_plan(paths.data_root, source.name).identity_sha256
     _write_publication_state(
         paths.data_root,
         source_name=source.name,
@@ -466,7 +466,7 @@ def _run_with_subprocess_bridge(
 ) -> OrchestrationReport:
     import osm_polygon_description_tag.publication.upload as pub
 
-    original_runner = pub._default_runner_with_retry
+    original_runner = pub.default_runner_with_retry
 
     def _bridge(
         command: list[str],
@@ -492,11 +492,11 @@ def _run_with_subprocess_bridge(
         )
         # pragma: no mutate end
 
-    pub._default_runner_with_retry = _bridge
+    pub.default_runner_with_retry = _bridge
     try:
         return _run_and_publish(**kwargs)
     finally:
-        pub._default_runner_with_retry = original_runner
+        pub.default_runner_with_retry = original_runner
 
 
 def _run_and_publish(

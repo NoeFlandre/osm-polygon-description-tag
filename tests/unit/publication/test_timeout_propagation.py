@@ -18,7 +18,7 @@ from osm_polygon_description_tag.config import Paths
 from osm_polygon_description_tag.orchestrator import run_and_publish
 from osm_polygon_description_tag.publication import (
     REPO_ID,
-    _default_runner_with_retry,
+    default_runner_with_retry,
     execute_upload,
 )
 
@@ -63,25 +63,25 @@ def _fake_exporter_records() -> object:
     return _export
 
 
-def test_default_runner_with_retry_accepts_timeout() -> None:
+def testdefault_runner_with_retry_accepts_timeout() -> None:
     """The default runner forwards the timeout argument to subprocess.run."""
     seen: list[float | None] = []
 
     def fake_subprocess(command: list[str], timeout: float | None = None) -> None:
         seen.append(timeout)
 
-    _default_runner_with_retry(["hf", "--version"], _runner=fake_subprocess, timeout=12.5)
+    default_runner_with_retry(["hf", "--version"], _runner=fake_subprocess, timeout=12.5)
     assert seen == [12.5]
 
 
-def test_default_runner_with_retry_default_timeout_is_none() -> None:
+def testdefault_runner_with_retry_default_timeout_is_none() -> None:
     """Omitting ``timeout`` defaults to None (no overall kill)."""
     seen: list[float | None] = []
 
     def fake_subprocess(command: list[str], timeout: float | None = None) -> None:
         seen.append(timeout)
 
-    _default_runner_with_retry(["hf", "--version"], _runner=fake_subprocess)
+    default_runner_with_retry(["hf", "--version"], _runner=fake_subprocess)
     assert seen == [None]
 
 
@@ -103,7 +103,7 @@ def test_orchestrator_threads_timeout_to_publication(
     def fake_subprocess(command: list[str], timeout: float | None = None) -> None:
         seen.append(timeout)
 
-    monkeypatch.setattr(pub, "_default_runner_with_retry", fake_subprocess)
+    monkeypatch.setattr(pub, "default_runner_with_retry", fake_subprocess)
 
     from osm_polygon_description_tag._resources import project_code_revision
     from osm_polygon_description_tag.manifest import (
@@ -180,7 +180,7 @@ def test_keyboard_interrupt_escapes_immediately() -> None:
         raise KeyboardInterrupt()
 
     with pytest.raises(KeyboardInterrupt):
-        _default_runner_with_retry(["hf", "x"], _runner=fake_subprocess)
+        default_runner_with_retry(["hf", "x"], _runner=fake_subprocess)
     assert len(calls) == 1, "exactly once; never retried"
 
 
@@ -246,7 +246,7 @@ def test_keyboardinterrupt_through_cli_returns_130(
     def interrupting_runner(command: list[str], timeout: float | None = None) -> None:
         raise KeyboardInterrupt()
 
-    monkeypatch.setattr(pub, "_default_runner_with_retry", interrupting_runner)
+    monkeypatch.setattr(pub, "default_runner_with_retry", interrupting_runner)
     verifier_factory_calls = 0
 
     def verifier_factory():
@@ -284,7 +284,7 @@ def test_explicit_timeout_reaches_subprocess_run() -> None:
     def fake_subprocess(command: list[str], timeout: float | None = None) -> None:
         seen.append(timeout)
 
-    _default_runner_with_retry(["hf", "x"], _runner=fake_subprocess, timeout=42.0)
+    default_runner_with_retry(["hf", "x"], _runner=fake_subprocess, timeout=42.0)
     assert seen == [42.0]
 
 
@@ -295,5 +295,5 @@ def test_default_no_timeout_reaches_subprocess_run() -> None:
     def fake_subprocess(command: list[str], timeout: float | None = None) -> None:
         seen.append(timeout)
 
-    _default_runner_with_retry(["hf", "x"], _runner=fake_subprocess)
+    default_runner_with_retry(["hf", "x"], _runner=fake_subprocess)
     assert seen == [None]

@@ -116,6 +116,19 @@ def test_publication_package_exports_canonical_objects() -> None:
     assert legacy_publication.execute_upload is publication_upload.execute_upload
 
 
+def test_publication_package_exposes_only_supported_names() -> None:
+    assert all(not name.startswith("_") for name in legacy_publication.__all__)
+    assert (
+        legacy_publication.build_metadata_only_upload_plan
+        is publication_planning.build_metadata_only_upload_plan
+    )
+    assert (
+        legacy_publication.build_per_pbf_upload_plan
+        is publication_planning.build_per_pbf_upload_plan
+    )
+    assert legacy_publication.default_runner_with_retry is publication_upload.default_runner_with_retry
+
+
 def test_orchestrator_error_preserves_public_class_identity() -> None:
     assert OrchestratorError.__name__ == "OrchestratorError"
     assert OrchestratorError.__module__ == "osm_polygon_description_tag.orchestrator"
