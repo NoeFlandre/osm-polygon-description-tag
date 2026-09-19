@@ -63,7 +63,7 @@ def _fake_exporter_records() -> object:
     return _export
 
 
-def testdefault_runner_with_retry_accepts_timeout() -> None:
+def test_default_runner_with_retry_accepts_timeout() -> None:
     """The default runner forwards the timeout argument to subprocess.run."""
     seen: list[float | None] = []
 
@@ -74,7 +74,7 @@ def testdefault_runner_with_retry_accepts_timeout() -> None:
     assert seen == [12.5]
 
 
-def testdefault_runner_with_retry_default_timeout_is_none() -> None:
+def test_default_runner_with_retry_default_timeout_is_none() -> None:
     """Omitting ``timeout`` defaults to None (no overall kill)."""
     seen: list[float | None] = []
 

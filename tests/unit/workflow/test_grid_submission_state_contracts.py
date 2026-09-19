@@ -27,17 +27,9 @@ from osm_polygon_description_tag.workflow.grid_policy import (
     PolicyVerdict,
 )
 from osm_polygon_description_tag.workflow.grid_scheduler import SubmissionOutcome, SubmissionResult
-from tests.unit.workflow.test_grid_operator import REMOTE, SHARD, _verdict
-from tests.unit.workflow.test_grid_operator import prepared as prepared
+from tests.unit.workflow.test_grid_operator import SHARD, _verdict
 
 _MOMENT = datetime(2026, 9, 15, 22, 0, tzinfo=UTC)
-
-
-@pytest.fixture
-def job(request: pytest.FixtureRequest) -> tuple[Path, object, object]:
-    _, run, snapshot = request.getfixturevalue("prepared")
-    bundle, paths = operator.prepare_job(run, snapshot, SHARD, **REMOTE)
-    return run, bundle, paths
 
 
 def _intent(bundle: object, **changes: object) -> SubmissionIntent:

@@ -100,12 +100,12 @@ def test_classify_failure_detects_timeout_in_stderr() -> None:
     assert kind == "timeout"
 
 
-def testdefault_runner_with_retry_returns_on_success() -> None:
+def test_default_runner_with_retry_returns_on_success() -> None:
     # /bin/echo always succeeds; this exercises the happy path.
     default_runner_with_retry(["echo", "ok"], max_retries=1, backoff_seconds=0.0)
 
 
-def testdefault_runner_with_retry_raises_after_max_attempts() -> None:
+def test_default_runner_with_retry_raises_after_max_attempts() -> None:
     with pytest.raises(subprocess.CalledProcessError):
         default_runner_with_retry(["/bin/sh", "-c", "exit 1"], max_retries=2, backoff_seconds=0.0)
 

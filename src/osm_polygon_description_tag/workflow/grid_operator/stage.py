@@ -14,7 +14,6 @@ from osm_polygon_description_tag.dataset.languages.atomic import (
     canonical_json_bytes,
 )
 from osm_polygon_description_tag.dataset.languages.checkpoint import (
-    CheckpointError,
     read_checkpoint,
     shard_paths,
     shards_root,
@@ -173,15 +172,12 @@ def _materialize_payload(
     snapshot: SnapshotManifest,
     resume_fingerprint: str,
 ) -> None:
-    temporary = Path(tempfile.mkdtemp(prefix=".payload-", dir=paths.root))
-    try:
+    with tempfile.TemporaryDirectory(prefix=".payload-", dir=paths.root) as temporary_name:
+        temporary = Path(temporary_name)
         _copy_payload_inputs(temporary, paths, bundle, project_root, source_dir, snapshot)
         _write_stage_manifest(temporary, bundle, resume_fingerprint)
         os.replace(temporary, payload_root)
         fsync_directory(paths.root)
-    except (OSError, SnapshotError, CheckpointError, GridOperatorError):
-        shutil.rmtree(temporary, ignore_errors=True)
-        raise
 
 
 def _copy_payload_inputs(

@@ -23,9 +23,6 @@ from osm_polygon_description_tag.workflow.grid_scheduler import CommandResult, S
 from tests.helpers.messages import exactly
 from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH
 from tests.unit.workflow.test_grid_operator import SHARD
-from tests.unit.workflow.test_grid_operator import collection_runs as collection_runs
-from tests.unit.workflow.test_grid_operator import portable_prepared as portable_prepared
-from tests.unit.workflow.test_grid_operator import prepared as prepared
 
 _REMOTE_BUNDLE = "/scratch/lang-bundle"
 
@@ -123,13 +120,13 @@ def test_a_payload_is_materialised_inside_the_job_directory(
     """A temporary elsewhere could not be renamed into place atomically."""
     project, source, run, snapshot = request.getfixturevalue("portable_prepared")
     seen: list[object] = []
-    real_mkdtemp = tempfile.mkdtemp
+    real_temporary_directory = tempfile.TemporaryDirectory
 
-    def recording_mkdtemp(*args: object, **kwargs: object) -> str:
+    def recording_temporary_directory(*args: object, **kwargs: object) -> object:
         seen.append(kwargs)
-        return real_mkdtemp(*args, **kwargs)  # type: ignore[arg-type]
+        return real_temporary_directory(*args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(operator.tempfile, "mkdtemp", recording_mkdtemp)
+    monkeypatch.setattr(operator.tempfile, "TemporaryDirectory", recording_temporary_directory)
 
     prepared_job = prepare_portable_job(
         run,
