@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from osm_polygon_description_tag.dataset.geography import (
@@ -893,6 +895,7 @@ def test_missing_inventory_is_refused(tmp_path: Path) -> None:
 
 def test_empty_inventory_is_refused(tmp_path: Path) -> None:
     (tmp_path / "data").mkdir()
+    (tmp_path / "manifests").mkdir()
     with pytest.raises(PublicationError) as error:
         validate_published_inventory(tmp_path)
     assert str(error.value) == f"no published Parquet files under {tmp_path / 'data'}"
@@ -940,3 +943,74 @@ def test_release_report_payload_serializes_file_evidence() -> None:
         "rows": 2,
         "validated_parquet_files": 1,
     }
+
+
+def test_publish_forwards_the_same_inventory_to_both_verification_steps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The inventory proves *which* data the metadata was released against.
+
+    Both the pre-upload match and the post-upload verification must see it;
+    passing anything else there would verify a revision against nothing.
+    """
+    plan = UploadPlan(REPO_ID, "root", (), "identity")
+    inventory = (UploadItem("data/a.parquet", 1, "a"),)
+    seen: list[object] = []
+
+    monkeypatch.setattr(
+        release_module,
+        "_matching_metadata_revision",
+        lambda _plan, items, *_rest: seen.append(("match", items)),
+    )
+    monkeypatch.setattr(release_module, "execute_upload", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        release_module,
+        "_verify_metadata_revision",
+        lambda _plan, items, *_rest: (seen.append(("verify", items)), "revision")[1],
+    )
+    monkeypatch.setattr(release_module, "_require_inventory_verifier", lambda verifier: verifier)
+
+    assert release_module._publish(
+        plan,
+        inventory=inventory,
+        runner=None,
+        verifier=object(),
+        data_revision="data-revision",
+    ) == ("data-revision", "revision")
+    assert seen == [("match", inventory), ("verify", inventory)]
+
+
+def test_a_missing_published_directory_is_refused_by_its_exact_name(tmp_path: Path) -> None:
+    """The refusal names both what is missing and where it was looked for."""
+    with pytest.raises(
+        PublicationError,
+        match=exactly(f"published data directory missing: {tmp_path / 'data'}"),
+    ):
+        release_module._published_inventory(tmp_path, require_successful_text=False)
+
+
+def test_a_missing_published_manifest_directory_is_refused_by_its_exact_name(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    pq.write_table(pa.table({"osm_id": [1]}), data_dir / "region.parquet")
+    manifests = tmp_path / "manifests"
+
+    with pytest.raises(
+        PublicationError,
+        match=exactly(f"published manifest directory missing: {manifests}"),
+    ):
+        release_module._published_inventory(tmp_path, require_successful_text=False)
+
+
+def test_an_empty_metadata_revision_is_refused_by_its_exact_message() -> None:
+    plan = UploadPlan(REPO_ID, "root", (), "identity")
+
+    with pytest.raises(
+        PublicationError,
+        match=exactly("hub verification returned an empty revision"),
+    ):
+        release_module._verify_metadata_revision(
+            plan, (), lambda *_a, **_k: "", lambda *_a, **_k: ""
+        )

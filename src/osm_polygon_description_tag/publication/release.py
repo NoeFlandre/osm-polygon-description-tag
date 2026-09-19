@@ -126,7 +126,13 @@ def _published_inventory(
     require_successful_text: bool = True,
 ) -> tuple[UploadItem, ...]:
     data_dir = data_root / "data"
+    manifests_dir = data_root / "manifests"
     _require_real_directory(data_dir, "published data directory missing")
+    # Checked before the data items are collected: collecting them reads each
+    # file's manifest, so a missing directory otherwise surfaced as "cannot
+    # read manifest <path>: No such file" for one arbitrary shard, which says
+    # nothing about the directory being absent.
+    _require_real_directory(manifests_dir, "published manifest directory missing")
     data_items = _require_nonempty_inventory(
         _collect_data_items(
             data_root,
@@ -134,8 +140,6 @@ def _published_inventory(
         ),
         data_dir,
     )
-    manifests_dir = data_root / "manifests"
-    _require_real_directory(manifests_dir, "published manifest directory missing")
     manifest_items = _collect_manifest_items(data_root)
     return tuple(sorted((*data_items, *manifest_items), key=lambda item: item.relative_path))
 
@@ -295,7 +299,7 @@ def release_metadata(
     network.
     """
     _require_exact_repo(confirm_repo)
-    resolved_root = data_root.resolve(strict=False)
+    resolved_root = data_root.resolve()  # non-strict is the default: the root need not exist
     validated_files = validate_published_inventory(resolved_root)
     context = _prepare_remote_release(resolved_root, confirm_repo, verifier) if apply else None
     stats, plan, computed_inventory = _compute_release_artifacts(resolved_root, template_path)
