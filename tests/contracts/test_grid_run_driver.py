@@ -415,9 +415,7 @@ def _stub_ssh(monkeypatch: pytest.MonkeyPatch, stdout: str) -> None:
             self.stdout = stdout
             self.returncode = 0
 
-    monkeypatch.setattr(
-        "scripts.run_language_grid.subprocess.run", lambda *a, **k: _Completed()
-    )
+    monkeypatch.setattr("scripts.run_language_grid.subprocess.run", lambda *a, **k: _Completed())
 
 
 def test_an_unacknowledged_submission_is_resumed_not_restaged(
