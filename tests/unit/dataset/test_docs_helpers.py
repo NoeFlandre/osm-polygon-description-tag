@@ -670,3 +670,47 @@ def test_manifest_duplicates_fall_back_to_the_deduplicated_row_count() -> None:
     stats = {"globally_unique_polygons": 1, "deduplicated_rows": 8}
 
     assert docs_module._polygon_count_metrics(stats)[3] == 8
+
+
+def test_geometry_stats_render_as_zero_when_the_stats_omit_them() -> None:
+    """Absent geometry counters must read as zero, not as a fabricated one.
+
+    Every fixture supplied the full stats mapping, so each ``.get(key, 0)``
+    default was unreached -- and a card that invents counts is worse than one
+    that omits them, because the number looks measured.
+    """
+    rows = docs_module._render_geometry_stats_section({"output_files": 0})
+
+    assert (
+        "| Geometry totals (vertices / rings / holes / MultiPolygon parts) | 0 / 0 / 0 / 0 |"
+        in rows
+    )
+    assert "| Polygon / MultiPolygon rows | 0 / 0 |" in rows
+
+
+def test_a_non_mapping_geometry_type_breakdown_is_treated_as_empty() -> None:
+    """Stats files are read from disk, so the shape cannot be assumed."""
+    rows = docs_module._render_geometry_stats_section(
+        {"output_files": 1, "geometry_types": ["Polygon"]}
+    )
+
+    assert "| Polygon / MultiPolygon rows | 0 / 0 |" in rows
+
+
+def test_geometry_type_counts_are_read_from_the_breakdown_when_present() -> None:
+    rows = docs_module._render_geometry_stats_section(
+        {
+            "output_files": 1,
+            "geometry_types": {"Polygon": 7, "MultiPolygon": 3},
+            "geometry_vertices_total": 11,
+            "geometry_rings_total": 5,
+            "geometry_holes_total": 2,
+            "multipolygon_components_total": 4,
+        }
+    )
+
+    assert (
+        "| Geometry totals (vertices / rings / holes / MultiPolygon parts) | 11 / 5 / 2 / 4 |"
+        in rows
+    )
+    assert "| Polygon / MultiPolygon rows | 7 / 3 |" in rows

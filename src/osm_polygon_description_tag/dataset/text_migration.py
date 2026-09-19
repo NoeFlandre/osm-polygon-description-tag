@@ -115,11 +115,13 @@ def _text_columns(table: pa.Table) -> tuple[list[object], list[object]]:
     """
     descriptions: list[object] = []
     localized: list[object] = []
-    for description, entries in zip(
-        table.column("description").to_pylist(),
-        table.column("localized_descriptions").to_pylist(),
-        strict=True,
-    ):
+    described = table.column("description").to_pylist()
+    localized_entries = table.column("localized_descriptions").to_pylist()
+    # Arrow refuses to build a table whose columns differ in length, so the
+    # strict zip cannot fire here. It is kept as a guard for a caller that
+    # assembles the two lists itself, and excluded from mutation because no
+    # input can tell it apart from a plain zip.
+    for description, entries in zip(described, localized_entries, strict=True):  # pragma: no mutate
         descriptions.append(trimmed_nonempty_text(description))
         localized.append(_canonical_localized(entries))
     return descriptions, localized

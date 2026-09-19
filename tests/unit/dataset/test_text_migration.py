@@ -308,16 +308,16 @@ def test_row_changed_treats_an_unchanged_nonempty_localized_value_as_unchanged()
     assert text_migration._row_changed(before, after) is False
 
 
-def test_text_columns_rejects_mismatched_column_lengths() -> None:
-    with pytest.raises(ValueError):
-        text_migration._text_columns(
-            pa.table(
-                {
-                    "description": ["one"],
-                    "localized_descriptions": [[], []],
-                }
-            )
-        )
+def test_arrow_refuses_a_table_whose_text_columns_differ_in_length() -> None:
+    """This is why ``_text_columns`` can zip its two columns safely.
+
+    The previous version of this test called ``_text_columns`` and asserted
+    ``ValueError``, which passed without ever reaching it: ``pa.table`` raises
+    ``ArrowInvalid`` -- itself a ``ValueError`` -- while building the argument.
+    The invariant being relied on belongs to Arrow, so it is asserted there.
+    """
+    with pytest.raises(pa.ArrowInvalid):
+        pa.table({"description": ["one"], "localized_descriptions": [[], []]})
 
 
 def test_retained_mask_rejects_mismatched_column_lengths() -> None:
@@ -577,3 +577,51 @@ def test_dropping_rows_preserves_metadata_inherited_from_the_source(
 
     assert rebuilt.metadata[b"provenance"] == b"kept"
     assert schema.metadata[b"provenance"] == b"kept"
+
+
+def test_artifacts_are_repaired_in_sorted_name_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deterministic order is what makes two runs of a repair comparable."""
+    data_root, _, _ = _prepare(tmp_path, [_row(1, "Kept")])
+    data_dir = data_root / "data"
+    manifests = data_root / "manifests"
+    for name in ("zulu", "alpha", "mike"):
+        (data_dir / f"{name}.parquet").write_bytes((data_dir / "region.parquet").read_bytes())
+        (manifests / f"{name}.manifest.json").write_text(
+            (manifests / "region.manifest.json").read_text(encoding="utf-8"), encoding="utf-8"
+        )
+
+    seen: list[str] = []
+    monkeypatch.setattr(
+        text_migration,
+        "_migrate_one_artifact",
+        lambda parquet, _manifest: (seen.append(parquet.name), 0)[1],
+    )
+
+    text_migration.migrate_dataset_text(data_root)
+
+    assert seen == sorted(seen)
+    assert seen == ["alpha.parquet", "mike.parquet", "region.parquet", "zulu.parquet"]
+
+
+def test_a_single_worker_repairs_sequentially_rather_than_through_a_pool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One worker is not concurrency; spinning up a pool for it buys nothing."""
+    data_root, _, _ = _prepare(tmp_path, [_row(1, "Kept")])
+    used_pool = False
+
+    def _concurrent(*_args: object, **_kwargs: object) -> int:
+        nonlocal used_pool
+        used_pool = True
+        return 0
+
+    monkeypatch.setattr(text_migration, "_migrate_concurrently", _concurrent)
+    monkeypatch.setattr(text_migration, "_migrate_one_artifact", lambda *_a: 0)
+
+    text_migration.migrate_dataset_text(data_root, max_workers=1)
+    assert used_pool is False
+
+    text_migration.migrate_dataset_text(data_root, max_workers=2)
+    assert used_pool is True
