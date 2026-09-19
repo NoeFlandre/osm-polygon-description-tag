@@ -16,8 +16,8 @@ from osm_polygon_description_tag.dataset.canonical_rows import (
     select_canonical_row,
 )
 from tests.conftest import make_record_dict
-from tests.helpers.messages import exactly
 from tests.helpers.dataset import write_finalized_dataset
+from tests.helpers.messages import exactly
 
 
 def test_parquet_column_expression_normalizes_geoparquet_geometry() -> None:
