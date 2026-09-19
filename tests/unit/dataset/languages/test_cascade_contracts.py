@@ -120,7 +120,7 @@ def test_the_builder_passes_the_policy_scope_and_model_path_to_both_detectors(
     """A dropped argument here would silently build a default-policy cascade."""
     lingua_calls: list[tuple[object, object]] = []
     glotlid_calls: list[tuple[object, object]] = []
-    policy = LanguagePolicy(min_alphabetic_chars=11, min_score=0.95, min_margin=0.5)
+    policy = LanguagePolicy(min_alphabetic_chars=11)
     model_path = tmp_path / "model_v3.bin"
 
     class _Built:

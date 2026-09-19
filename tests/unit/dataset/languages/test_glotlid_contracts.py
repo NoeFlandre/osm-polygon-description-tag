@@ -159,7 +159,7 @@ def test_the_requested_policy_reaches_the_constructed_detector(
     loader_calls: list[object] = []
     _install_fake_fasttext(monkeypatch, loader_calls)
     path = _pinned_model_file(tmp_path, monkeypatch)
-    policy = LanguagePolicy(min_alphabetic_chars=11, min_score=0.95, min_margin=0.5)
+    policy = LanguagePolicy(min_alphabetic_chars=11)
 
     detector = build_glotlid_detector(policy, model_path=path)
 

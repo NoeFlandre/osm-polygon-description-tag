@@ -12,7 +12,7 @@ from osm_polygon_description_tag import language_cli
 from osm_polygon_description_tag.dataset.languages.detector import LanguageDetector
 from osm_polygon_description_tag.dataset.languages.models import (
     CASCADE_DETECTOR_NAME,
-    V2_LANGUAGE_POLICY,
+    DEFAULT_LANGUAGE_POLICY,
     LanguagePolicy,
     cascade_model_identity,
     language_model_identity,
@@ -54,19 +54,17 @@ def test_prepare_command_forwards_all_language_policy_options(
         Path("/run"),
         Path("/project"),
         17,
-        0.91,
-        0.13,
     )
 
     assert received == {
         "source_root": Path("/source"),
         "run_dir": Path("/run"),
         "project_root": Path("/project"),
-        "policy": LanguagePolicy(min_alphabetic_chars=17, min_score=0.91, min_margin=0.13),
+        "policy": LanguagePolicy(min_alphabetic_chars=17),
     }
 
 
-def test_prepare_command_selects_the_named_v2_policy(
+def test_prepare_command_selects_the_named_v1_policy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     received: dict[str, object] = {}
@@ -87,15 +85,15 @@ def test_prepare_command_selects_the_named_v2_policy(
         Path("/source"),
         Path("/run"),
         Path("/project"),
-        policy_version="v2",
+        policy_version="v1",
     )
 
-    assert received["policy"] == V2_LANGUAGE_POLICY
+    assert received["policy"] == DEFAULT_LANGUAGE_POLICY
 
 
 def test_prepare_policy_rejects_an_unknown_named_policy() -> None:
-    with pytest.raises(ValueError, match=exactly("policy_version must be 'v1' or 'v2'")):
-        language_cli._policy(None, None, None, policy_version="v3")
+    with pytest.raises(ValueError, match=exactly("policy_version must be 'v1'")):
+        language_cli._policy(None, policy_version="v2")
 
 
 def test_handle_prepare_emits_complete_snapshot_metadata(
@@ -105,7 +103,7 @@ def test_handle_prepare_emits_complete_snapshot_metadata(
     source_root = Path("/source")
     run_dir = Path("/run")
     project_root = Path("/project")
-    policy = LanguagePolicy(min_alphabetic_chars=9, min_score=0.87, min_margin=0.14)
+    policy = LanguagePolicy(min_alphabetic_chars=9)
     snapshot = SimpleNamespace(
         snapshot_id="snapshot-123",
         source_files=(
@@ -174,7 +172,7 @@ def test_handle_run_forwards_operator_configuration_and_emits_counts(
     source_root = Path("/source")
     run_dir = Path("/run")
     shard = "north.parquet"
-    policy = LanguagePolicy(min_alphabetic_chars=8, min_score=0.88, min_margin=0.16)
+    policy = LanguagePolicy(min_alphabetic_chars=8)
     identity = language_model_identity(policy)
     snapshot = SimpleNamespace(
         snapshot_id="snapshot-123",

@@ -41,7 +41,7 @@ def _report(**payload: object) -> SimpleNamespace:
 
 def test_the_default_policy_preset_is_the_v1_preset() -> None:
     """The default must stay ``v1``; a corrupted default would be refused outright."""
-    assert language_cli._policy(None, None, None) == language_cli._POLICY_PRESETS["v1"]
+    assert language_cli._policy(None) == language_cli._POLICY_PRESETS["v1"]
 
 
 @pytest.mark.parametrize(

@@ -34,7 +34,7 @@ def _detected(code: str = "eng") -> LanguageResult:
 
 
 def _uncertain() -> LanguageResult:
-    return LanguageResult(None, None, None, None, LanguageStatus.UNCERTAIN, "below_min_score")
+    return LanguageResult(None, None, None, None, LanguageStatus.UNCERTAIN, "tie")
 
 
 def _non_linguistic() -> LanguageResult:
