@@ -34,6 +34,7 @@ from osm_polygon_description_tag.dataset.text_migration import (
     TextMigrationError,
     migrate_dataset_text,
 )
+from tests.helpers.messages import exactly
 
 _GEO_METADATA = {
     b"geo": json.dumps(
@@ -631,3 +632,65 @@ def test_a_single_worker_repairs_sequentially_rather_than_through_a_pool(
 
     text_migration.migrate_dataset_text(data_root, max_workers=2)
     assert used_pool is True
+
+
+def test_either_missing_directory_refuses_the_migration(tmp_path: Path) -> None:
+    """Both directories are required, so *either* one missing must refuse.
+
+    Joining the checks with ``and`` instead of ``or`` only refuses when both
+    are absent, which lets a run with manifests deleted proceed and rewrite
+    Parquet files whose manifests can never be updated.
+    """
+    for present in ("data", "manifests"):
+        root = tmp_path / present
+        (root / present).mkdir(parents=True)
+        with pytest.raises(
+            text_migration.TextMigrationError,
+            match=exactly(f"missing data/ or manifests/ under {root}"),
+        ):
+            text_migration.migrate_dataset_text(root)
+
+
+def test_dropped_rows_are_added_to_an_existing_rejection_count(tmp_path: Path) -> None:
+    """The reason may already have a count, and this repair adds to it."""
+    data_root, parquet, manifest_path = _prepare(
+        tmp_path, [_row(1, "   "), _row(2, "Kept description")]
+    )
+    manifest = read_manifest(manifest_path)
+    counts = replace(manifest.counts, rejections={text_migration.REJECTION_REASON: 5})
+    write_manifest(replace(manifest, counts=counts), manifest_path)
+
+    text_migration.migrate_dataset_text(data_root)
+
+    assert read_manifest(manifest_path).counts.rejections == {text_migration.REJECTION_REASON: 6}
+
+
+def test_the_requested_worker_count_reaches_the_process_pool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Handing the pool ``None`` silently takes one worker per CPU instead."""
+    data_root, _, _ = _prepare(tmp_path, [_row(1, "Kept")])
+    seen: list[object] = []
+
+    class _Pool:
+        def __init__(self, max_workers: object = None) -> None:
+            seen.append(max_workers)
+
+        def __enter__(self) -> "_Pool":
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def submit(self, fn, *args):  # type: ignore[no-untyped-def]
+            class _Future:
+                def result(self) -> int:
+                    return 0
+
+            return _Future()
+
+    monkeypatch.setattr(text_migration, "ProcessPoolExecutor", _Pool)
+
+    text_migration.migrate_dataset_text(data_root, max_workers=3)
+
+    assert seen == [3]
