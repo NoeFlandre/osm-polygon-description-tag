@@ -617,3 +617,56 @@ def test_text_rejection_section_keeps_legacy_fallbacks_safe() -> None:
     rendered = docs_module._render_text_rejection_section({"persisted_text_rejection_rows": 0})
 
     assert "**Persisted artifact rows excluded by the final text predicate:** 0." in rendered
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (0.5, "0.5 m²"),
+        (0.999, "0.999 m²"),
+        (1.0, "1.0 m²"),
+        (1.5, "1.5 m²"),
+        (999_999.94, "999,999.9 m²"),
+        (1_000_000.0, "1.0 km²"),
+        (2_500_000.0, "2.5 km²"),
+        (-1_000_000.0, "-1.0 km²"),
+    ],
+)
+def test_area_formatting_switches_units_exactly_at_its_boundaries(
+    value: float, expected: str
+) -> None:
+    """Both thresholds are inclusive, and the divisor is exactly a million.
+
+    The published card states dataset areas, so an off-by-one divisor or a
+    boundary that flips a unit is a wrong number in front of every reader.
+    """
+    assert docs_module._fmt_area(value) == expected
+
+
+def test_polygon_counts_fall_back_to_the_row_count_then_to_zero() -> None:
+    """The fallback chain is what older stats files rely on to render at all."""
+    complete = {
+        "globally_unique_polygons": 7,
+        "rows": 99,
+        "regional_overlap_duplicate_rows": 2,
+        "regional_rows": 11,
+        "manifest_duplicate_rows": 3,
+    }
+    assert docs_module._polygon_count_metrics(complete) == (11, 7, 2, 3)
+
+    without_unique = {"rows": 5}
+    assert docs_module._polygon_count_metrics(without_unique) == (5, 5, 0, 0)
+
+    assert docs_module._polygon_count_metrics({}) == (0, 0, 0, 0)
+
+
+def test_polygon_counts_derive_regional_rows_when_the_stats_omit_them() -> None:
+    stats = {"globally_unique_polygons": 4, "regional_overlap_duplicate_rows": 6}
+
+    assert docs_module._polygon_count_metrics(stats) == (10, 4, 6, 0)
+
+
+def test_manifest_duplicates_fall_back_to_the_deduplicated_row_count() -> None:
+    stats = {"globally_unique_polygons": 1, "deduplicated_rows": 8}
+
+    assert docs_module._polygon_count_metrics(stats)[3] == 8
