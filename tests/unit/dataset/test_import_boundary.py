@@ -30,7 +30,10 @@ def test_language_checkpoint_import_does_not_start_plotting_stack(tmp_path: Path
         env=env,
         capture_output=True,
         text=True,
-        timeout=10,
+        # Generous on purpose: this asserts *what* is imported, not how
+        # fast. A tight bound turns a loaded machine into a false failure,
+        # while still catching an import that genuinely hangs.
+        timeout=120,
     )
     assert result.stderr == ""
 
