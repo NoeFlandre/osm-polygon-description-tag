@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-REPORT_SCHEMA_VERSION = 1
+REPORT_SCHEMA_VERSION = 2
 STATUS_KEYS = (
     "survived",
     "no_tests",
@@ -79,6 +79,7 @@ def build_metadata_report(
     scope_file: Path | None = None,
 ) -> dict[str, Any]:
     stats = {"killed": 0, "total": 0}
+    unresolved: dict[str, list[str]] = {}
     for metadata_path in scoped_metadata_paths(mutants_root, scope_file):
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         for mutant_name, exit_code in sorted(metadata.get("exit_code_by_key", {}).items()):
@@ -87,8 +88,14 @@ def build_metadata_report(
             status = STATUS_BY_EXIT_CODE.get(exit_code, "suspicious")
             stats[status] = int(stats.get(status, 0)) + 1
             stats["total"] += 1
+            if status in STATUS_KEYS:
+                unresolved.setdefault(status, []).append(mutant_name)
     report = build_report(stats, minimum_score)
     report["patterns"] = patterns
+    # Name what survived. The score alone says a gate failed but not which
+    # mutant to go and kill, which left the only actionable list buried in
+    # per-shard CI state that is discarded when the runner is torn down.
+    report["unresolved_mutants"] = {status: sorted(names) for status, names in unresolved.items()}
     return report
 
 

@@ -1115,3 +1115,45 @@ def test_the_mutation_gate_reads_test_selection_file(
         "tests/unit/publication/test_release.py",
         "tests/unit/publication/test_upload_helpers.py",
     )
+
+
+def test_the_metadata_report_names_every_unresolved_mutant(tmp_path: Path) -> None:
+    """A failing gate must say which mutants to kill, not only how many."""
+    meta = tmp_path / "src" / "pkg" / "mod.py.meta"
+    meta.parent.mkdir(parents=True)
+    meta.write_text(
+        json.dumps(
+            {
+                "exit_code_by_key": {
+                    "x_mod__mutmut_1": 1,  # killed
+                    "x_mod__mutmut_2": 0,  # survived
+                    "x_mod__mutmut_3": 0,  # survived
+                    "x_mod__mutmut_4": 5,  # no_tests
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = check_mutation_score.build_metadata_report(tmp_path, [], 100.0)
+
+    assert report["unresolved"]["survived"] == 2
+    assert report["unresolved_mutants"]["survived"] == [
+        "x_mod__mutmut_2",
+        "x_mod__mutmut_3",
+    ]
+    assert report["unresolved_mutants"]["no_tests"] == ["x_mod__mutmut_4"]
+
+
+def test_a_fully_killed_report_names_no_unresolved_mutant(tmp_path: Path) -> None:
+    meta = tmp_path / "src" / "pkg" / "mod.py.meta"
+    meta.parent.mkdir(parents=True)
+    meta.write_text(
+        json.dumps({"exit_code_by_key": {"x_mod__mutmut_1": 1, "x_mod__mutmut_2": 3}}),
+        encoding="utf-8",
+    )
+
+    report = check_mutation_score.build_metadata_report(tmp_path, [], 100.0)
+
+    assert report["passed"] is True
+    assert report["unresolved_mutants"] == {}

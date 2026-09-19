@@ -354,7 +354,45 @@ def collect(args: argparse.Namespace, remote: Remote, shard: str, plan: dict[str
     _log("collected", shard=shard, annotations=report.get("annotation_count"))
 
 
+def awaiting_collection(remote: Remote, shard: str) -> bool:
+    """Return whether the site still holds results this run never collected.
+
+    ``grid stage`` rewrites the remote run directory from the local one, so
+    staging a shard whose job already finished overwrites the checkpoint that
+    job committed. The parts and receipts survive, but nothing records them any
+    more, and collection then refuses the shard as "unexpected part file not
+    recorded by the checkpoint" -- finished work stranded by a restart.
+
+    A recorded submission that was never acknowledged is exactly that case, so
+    the shard is resumed from the site instead of being staged again.
+    """
+    remote_run = f"{remote.bundle_dir(shard)}/run"
+    argv = [
+        "ssh",
+        remote.ssh_host,
+        f"cat {remote_run}/jobs/*/submission-intent.json 2>/dev/null",
+    ]
+    listing = subprocess.run(  # noqa: S603
+        argv, capture_output=True, text=True, check=False
+    )
+    intents = [line for line in listing.stdout.splitlines() if line.strip()]
+    if len(intents) != 1:
+        # Nothing recorded, or more than one attempt: not an unambiguous resume.
+        return False
+    try:
+        intent = json.loads(intents[0])
+    except json.JSONDecodeError:
+        return False
+    return intent.get("outcome") == "submitted" and not intent.get("result_acknowledged", False)
+
+
 def process(args: argparse.Namespace, remote: Remote, shard: str) -> None:
+    if awaiting_collection(remote, shard):
+        remote_run = f"{remote.bundle_dir(shard)}/run"
+        _log("resuming_uncollected", shard=shard)
+        await_terminal(args, remote, shard, remote_run)
+        collect(args, remote, shard, {"remote_run_dir": remote_run})
+        return
     plan = stage(args, remote, shard)
     submit(args, remote, shard, plan)
     await_terminal(args, remote, shard, plan["remote_run_dir"])
