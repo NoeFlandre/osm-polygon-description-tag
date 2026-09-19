@@ -8,6 +8,7 @@ from unittest.mock import Mock, call, patch
 import pytest
 
 import osm_polygon_description_tag.dataset.docs as docs_module
+from tests.helpers.messages import exactly
 
 
 def test_read_json_object_accepts_only_json_objects_and_uses_utf8() -> None:
@@ -714,3 +715,35 @@ def test_geometry_type_counts_are_read_from_the_breakdown_when_present() -> None
         in rows
     )
     assert "| Polygon / MultiPolygon rows | 7 / 3 |" in rows
+
+
+def test_a_continental_area_is_divided_by_exactly_one_million() -> None:
+    """Small areas hide an off-by-one divisor; the dataset's totals do not.
+
+    At a few million square metres, dividing by 1,000,001 instead of a million
+    still rounds to the same tenth. The published total is continental, and
+    there the error becomes visible -- which is the number people read.
+    """
+    assert docs_module._fmt_area(1e11) == "100,000.0 km\u00b2"
+
+
+def test_a_body_starting_with_a_bare_carriage_return_is_not_given_another() -> None:
+    """Old-Mac line endings are still line endings; the block must not gain one."""
+    assert docs_module._inserted_block_terminator("\rbody", "\n") == ""
+    assert docs_module._inserted_block_terminator("\nbody", "\n") == ""
+    assert docs_module._inserted_block_terminator("body", "\n") == "\n"
+    assert docs_module._inserted_block_terminator("", "\n") == ""
+
+
+def test_malformed_marker_refusals_state_their_whole_message() -> None:
+    """Both refusals are what an operator reads when a card cannot be updated."""
+    message = "existing README has malformed generated stats markers"
+
+    with pytest.raises(docs_module.ReportingError, match=exactly(message)):
+        docs_module._replace_stats_block("no markers here", "block")
+
+    with pytest.raises(docs_module.ReportingError, match=exactly(message)):
+        docs_module._stats_marker_count(
+            f"{docs_module._STATS_START_MARKER}\n{docs_module._STATS_START_MARKER}\n"
+            f"{docs_module._STATS_END_MARKER}\n{docs_module._STATS_END_MARKER}\n"
+        )

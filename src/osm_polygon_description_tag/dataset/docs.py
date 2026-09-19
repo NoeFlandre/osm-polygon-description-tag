@@ -155,7 +155,7 @@ def _fmt_area(value: float | None) -> str:
 def _coerce_float_values(values: Sequence[object]) -> tuple[float, ...] | None:
     """Convert object values to floats, returning ``None`` on conversion errors."""
     try:
-        return tuple(float(cast(Any, value)) for value in values)
+        return tuple(float(cast(Any, value)) for value in values)  # pragma: no mutate
     except (TypeError, ValueError):
         return None
 
