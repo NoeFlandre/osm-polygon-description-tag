@@ -16,11 +16,13 @@ from typing import Any
 import pytest
 
 from scripts.run_language_grid import (
+    _UNREADABLE_CHECKPOINT,
     DriverError,
     Remote,
     _cli,
     _parse_args,
     _shard_slug,
+    checkpointed_shards,
     selected_shards,
     shards_of,
     submit,
@@ -348,3 +350,48 @@ def test_the_driver_never_shells_out_through_uv() -> None:
     assert "uv" not in argv
     assert Path(argv[0]).name == "osm-polygon-description-tag"
     assert Path(argv[0]).parent == Path(sys.executable).parent
+
+
+def _write_checkpoint(run_dir: Path, slug: str, payload: object) -> Path:
+    shard_dir = run_dir / "shards" / slug
+    shard_dir.mkdir(parents=True)
+    checkpoint = shard_dir / "checkpoint.json"
+    if isinstance(payload, str):
+        checkpoint.write_text(payload, encoding="utf-8")
+    else:
+        checkpoint.write_text(json.dumps(payload), encoding="utf-8")
+    return checkpoint
+
+
+def test_checkpointed_shards_is_empty_without_a_shards_directory(tmp_path: Path) -> None:
+    """A run that has never written a shard cannot have a complete one."""
+    assert checkpointed_shards(tmp_path) == frozenset()
+
+
+def test_checkpointed_shards_reports_every_checkpointed_shard_name(tmp_path: Path) -> None:
+    _write_checkpoint(tmp_path, "aaa", {"shard": "albania-latest.parquet", "status": "complete"})
+    _write_checkpoint(tmp_path, "bbb", {"shard": "angola-latest.parquet", "status": "partial"})
+
+    assert checkpointed_shards(tmp_path) == frozenset(
+        {"albania-latest.parquet", "angola-latest.parquet"}
+    )
+
+
+def test_checkpointed_shards_reports_a_partial_checkpoint_too(tmp_path: Path) -> None:
+    """The scan narrows who is asked; it must not judge completeness itself."""
+    _write_checkpoint(tmp_path, "aaa", {"shard": "albania-latest.parquet", "status": "partial"})
+
+    assert "albania-latest.parquet" in checkpointed_shards(tmp_path)
+
+
+def test_an_unreadable_checkpoint_forces_the_cli_to_be_asked(tmp_path: Path) -> None:
+    """Unreadable is not absent: never treat it as an unstarted shard."""
+    _write_checkpoint(tmp_path, "aaa", "{not json")
+
+    assert _UNREADABLE_CHECKPOINT in checkpointed_shards(tmp_path)
+
+
+def test_a_checkpoint_without_a_shard_name_contributes_nothing(tmp_path: Path) -> None:
+    _write_checkpoint(tmp_path, "aaa", {"status": "complete"})
+
+    assert checkpointed_shards(tmp_path) == frozenset()

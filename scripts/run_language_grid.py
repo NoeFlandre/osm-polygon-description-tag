@@ -45,6 +45,9 @@ DEFAULT_SITE = "nancy"
 DEFAULT_POLL_SECONDS = 20
 DEFAULT_JOB_TIMEOUT_SECONDS = 2400
 TERMINAL_STATES = frozenset({"terminated"})
+# Sentinel: a checkpoint we could not read, which forces the CLI to be asked
+# about every shard rather than assuming an unreadable one means "unstarted".
+_UNREADABLE_CHECKPOINT = "\x00unreadable"
 
 
 class DriverError(RuntimeError):
@@ -120,6 +123,37 @@ def selected_shards(
     if not 0 <= index < stride:
         raise DriverError(f"partition index {index} is outside a stride of {stride}")
     return shards[index::stride]
+
+
+def checkpointed_shards(run_dir: Path) -> frozenset[str]:
+    """Return the shard names that have a checkpoint written at all.
+
+    ``shard_is_complete`` spawns a CLI process per shard, and each one pays a
+    full interpreter start plus package import before it can answer. A driver
+    resuming a 386-shard snapshot therefore paid hundreds of process starts
+    just to rediscover that most shards had never been touched -- minutes of
+    startup before the first submission, growing with the partition.
+
+    A shard with no checkpoint on disk cannot be complete, so one directory
+    scan answers for all of them. This narrows *who gets asked*; it never
+    decides completeness, which stays with the CLI.
+    """
+    shards_root = run_dir / "shards"
+    if not shards_root.is_dir():
+        return frozenset()
+    names: set[str] = set()
+    for checkpoint in shards_root.glob("*/checkpoint.json"):
+        try:
+            payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            # An unreadable checkpoint is not evidence of absence: let the CLI
+            # look at this shard rather than silently treating it as unstarted.
+            names.add(_UNREADABLE_CHECKPOINT)
+            continue
+        shard = payload.get("shard")
+        if isinstance(shard, str):
+            names.add(shard)
+    return frozenset(names)
 
 
 def shard_is_complete(run_dir: Path, shard: str) -> bool:
@@ -347,11 +381,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     done = failed = skipped = 0
+    checkpointed = checkpointed_shards(args.run_dir)
+    unreadable = _UNREADABLE_CHECKPOINT in checkpointed
     for shard, rows in shards:
         if args.max_shards and done >= args.max_shards:
             _log("budget_reached", processed=done)
             break
-        if shard_is_complete(args.run_dir, shard):
+        may_be_complete = unreadable or shard in checkpointed
+        if may_be_complete and shard_is_complete(args.run_dir, shard):
             skipped += 1
             continue
         try:
