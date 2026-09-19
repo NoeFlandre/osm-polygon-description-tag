@@ -75,8 +75,6 @@ LANGUAGE_COMMAND_OPTIONS = {
         "--project-root",
         "--policy-version",
         "--min-alphabetic-chars",
-        "--min-score",
-        "--min-margin",
     },
     "run": {
         *HELP_OPTION,

@@ -20,6 +20,7 @@ from osm_polygon_description_tag.dataset.manifest import (
 )
 from osm_polygon_description_tag.dataset.schema import KEY_VALUE_COLUMNS, SCHEMA, SCHEMA_VERSION
 from osm_polygon_description_tag.dataset.storage import (
+    GEOPARQUET_COMPRESSION,
     StorageError,
     _arrow_record,
     validate_geoparquet,
@@ -75,7 +76,7 @@ def _rewrite_legacy_parquet(
     temporary: Path,
     metadata: pa.Schema,
 ) -> None:
-    with pq.ParquetWriter(temporary, metadata, compression="zstd") as writer:
+    with pq.ParquetWriter(temporary, metadata, compression=GEOPARQUET_COMPRESSION) as writer:
         for batch in reader.iter_batches(batch_size=4096):
             rows = [_arrow_record(row) for row in batch.to_pylist()]
             writer.write_table(pa.Table.from_pylist(rows, schema=metadata))

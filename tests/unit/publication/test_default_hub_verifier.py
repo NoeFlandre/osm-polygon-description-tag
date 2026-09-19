@@ -408,7 +408,7 @@ def test_cli_run_and_publish_invokes_default_verifier(
     import osm_polygon_description_tag.publication.verification as orch
 
     monkeypatch.setattr(orch._huggingface_hub, "HfApi", fake_hubapi)
-    monkeypatch.setattr(pub, "_default_runner_with_retry", lambda command, **kw: None)
+    monkeypatch.setattr(pub, "default_runner_with_retry", lambda command, **kw: None)
 
     # Plant a resumable local artifact so the orchestrator does NOT need
     # to invoke the real osmium executable. Drop ``b`` for clarity.
@@ -530,7 +530,7 @@ def test_no_state_written_before_verifier_succeeds(
     import osm_polygon_description_tag.publication.upload as pub
     import osm_polygon_description_tag.workflow.orchestrator as orch
 
-    monkeypatch.setattr(pub, "_default_runner_with_retry", lambda command, **kw: None)
+    monkeypatch.setattr(pub, "default_runner_with_retry", lambda command, **kw: None)
 
     calls = {"count": 0}
 

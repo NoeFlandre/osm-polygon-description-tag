@@ -54,25 +54,19 @@ def _validate_positive_count(value: object) -> None:
 
 @dataclass(frozen=True, slots=True)
 class LanguagePolicy:
-    """Conservative, explicit thresholds applied to raw Lingua scores."""
+    """Explicit structural gates applied before a detector score is trusted.
+
+    Confidence is deliberately not gated: a score or margin threshold was
+    removed, so a value is labelled whenever it is long enough, unambiguous
+    between the top two candidates, and not mixed-language. Raw scores are
+    still recorded on every row for downstream filtering.
+    """
 
     min_alphabetic_chars: int = 5
-    min_score: float = 0.8
-    min_margin: float = 0.2
     tie_epsilon: float = 1e-12
 
     def __post_init__(self) -> None:
         _validate_positive_count(self.min_alphabetic_chars)
-        object.__setattr__(
-            self,
-            "min_score",
-            _validated_float("min_score", self.min_score, maximum=1.0),
-        )
-        object.__setattr__(
-            self,
-            "min_margin",
-            _validated_float("min_margin", self.min_margin, maximum=1.0),
-        )
         object.__setattr__(
             self,
             "tie_epsilon",
@@ -364,8 +358,6 @@ def _cascade_fingerprint(scope: tuple[str, ...], policy: dict[str, object]) -> s
 def _policy_payload(policy: LanguagePolicy) -> dict[str, object]:
     return {
         "min_alphabetic_chars": policy.min_alphabetic_chars,
-        "min_score": policy.min_score,
-        "min_margin": policy.min_margin,
         "tie_epsilon": policy.tie_epsilon,
     }
 
@@ -443,7 +435,6 @@ def cascade_model_identity(
 
 
 DEFAULT_LANGUAGE_POLICY = LanguagePolicy()
-V2_LANGUAGE_POLICY: Final = LanguagePolicy(min_score=0.70)
 
 
 __all__ = [
@@ -462,7 +453,6 @@ __all__ = [
     "LINGUA_DETECTOR_NAME",
     "LINGUA_LIBRARY_NAME",
     "PINNED_LINGUA_VERSION",
-    "V2_LANGUAGE_POLICY",
     "LanguageModelIdentity",
     "LanguagePolicy",
     "LanguageResult",

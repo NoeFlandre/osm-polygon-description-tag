@@ -554,8 +554,16 @@ def test_static_cast_pragmas_are_attached_to_mutatable_statement_lines() -> None
     from libcst import MetadataWrapper, parse_module
     from mutmut.mutation.pragma_handling import get_ignored_lines
 
+    candidates: list[tuple[Path, str]] = []
     for path in sorted((PROJECT_ROOT / "src").rglob("*.py")):
         source = path.read_text(encoding="utf-8")
+        if not any(
+            "cast(" in line and "# pragma: no mutate" in line for line in source.splitlines()
+        ):
+            continue
+        candidates.append((path, source))
+
+    for path, source in candidates:
         ignored = get_ignored_lines(
             str(path), source, MetadataWrapper(parse_module(source))
         ).no_mutate_lines
@@ -775,6 +783,7 @@ def test_mutation_gate_resets_state_before_first_escalation(monkeypatch) -> None
     )
     monkeypatch.setattr(gate, "coverage_selection", lambda _path, _durations: {})
     monkeypatch.setattr(gate, "escalation_stages", lambda _budget: (1,))
+    monkeypatch.setattr(gate, "mutated_function_names", lambda _root: {"pkg.mod.x_function"})
     monkeypatch.setattr(gate, "_read_stats", lambda: stats)
     monkeypatch.setattr(gate, "_write_stats", lambda _stats: events.append("write"))
     monkeypatch.setattr(gate, "unresolved_mutants", lambda _root: ["mutant"])
@@ -1106,3 +1115,45 @@ def test_the_mutation_gate_reads_test_selection_file(
         "tests/unit/publication/test_release.py",
         "tests/unit/publication/test_upload_helpers.py",
     )
+
+
+def test_the_metadata_report_names_every_unresolved_mutant(tmp_path: Path) -> None:
+    """A failing gate must say which mutants to kill, not only how many."""
+    meta = tmp_path / "src" / "pkg" / "mod.py.meta"
+    meta.parent.mkdir(parents=True)
+    meta.write_text(
+        json.dumps(
+            {
+                "exit_code_by_key": {
+                    "x_mod__mutmut_1": 1,  # killed
+                    "x_mod__mutmut_2": 0,  # survived
+                    "x_mod__mutmut_3": 0,  # survived
+                    "x_mod__mutmut_4": 5,  # no_tests
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = check_mutation_score.build_metadata_report(tmp_path, [], 100.0)
+
+    assert report["unresolved"]["survived"] == 2
+    assert report["unresolved_mutants"]["survived"] == [
+        "x_mod__mutmut_2",
+        "x_mod__mutmut_3",
+    ]
+    assert report["unresolved_mutants"]["no_tests"] == ["x_mod__mutmut_4"]
+
+
+def test_a_fully_killed_report_names_no_unresolved_mutant(tmp_path: Path) -> None:
+    meta = tmp_path / "src" / "pkg" / "mod.py.meta"
+    meta.parent.mkdir(parents=True)
+    meta.write_text(
+        json.dumps({"exit_code_by_key": {"x_mod__mutmut_1": 1, "x_mod__mutmut_2": 3}}),
+        encoding="utf-8",
+    )
+
+    report = check_mutation_score.build_metadata_report(tmp_path, [], 100.0)
+
+    assert report["passed"] is True
+    assert report["unresolved_mutants"] == {}

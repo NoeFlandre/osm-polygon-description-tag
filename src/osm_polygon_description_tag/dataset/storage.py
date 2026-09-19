@@ -20,7 +20,7 @@ import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Final, cast
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -46,6 +46,14 @@ from osm_polygon_description_tag.dataset.text import (
     is_nonempty_text,
     is_trimmed_nonempty_text,
 )
+
+GEOPARQUET_COMPRESSION: Final = "zstd"
+"""Codec every GeoParquet artifact is written with.
+
+The dataset contract fixes the codec, so it is named once here rather
+than spelled at each writer: four copies of a literal are four chances
+for one of them to drift.
+"""
 
 _DICTIONARY_COLUMNS = ["source_pbf", "osm_type", "geometry_type"]
 _VALID_GEOMETRY_TYPES = {"Polygon", "MultiPolygon"}
@@ -111,7 +119,7 @@ def _stream_rewrite_with_metadata(
     with pq.ParquetWriter(
         target,
         schema_geo,
-        compression="zstd",
+        compression=GEOPARQUET_COMPRESSION,
         use_dictionary=_DICTIONARY_COLUMNS,
     ) as writer:
         for batch in reader.iter_batches(batch_size=4096):
@@ -190,7 +198,7 @@ def write_geoparquet(
         with pq.ParquetWriter(
             temp_data,
             SCHEMA,
-            compression="zstd",
+            compression=GEOPARQUET_COMPRESSION,
             use_dictionary=_DICTIONARY_COLUMNS,
         ) as writer:
             summary = _stream_records(records, writer, batch_size)

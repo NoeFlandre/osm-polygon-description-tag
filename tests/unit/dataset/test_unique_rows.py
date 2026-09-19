@@ -17,6 +17,7 @@ from osm_polygon_description_tag.dataset.canonical_rows import (
 )
 from tests.conftest import make_record_dict
 from tests.helpers.dataset import write_finalized_dataset
+from tests.helpers.messages import exactly
 
 
 def test_parquet_column_expression_normalizes_geoparquet_geometry() -> None:
@@ -88,7 +89,11 @@ def test_missing_mapping_columns_use_typed_empty_lists(column: str, expected: st
 
 
 def test_missing_requested_mapping_column_is_rejected() -> None:
-    with pytest.raises(unique_rows.UniqueRowsError, match="missing unique-row column 'tags'"):
+    """The refusal names the file, which is the only way an operator finds it."""
+    with pytest.raises(
+        unique_rows.UniqueRowsError,
+        match=exactly("missing unique-row column 'tags' in region.parquet"),
+    ):
         unique_rows._parquet_column_expression(
             "tags",
             set(),
@@ -115,7 +120,10 @@ def test_unique_rows_sql_requires_text_only_when_opted_in() -> None:
 
 
 def test_parquet_column_expression_rejects_missing_required_column() -> None:
-    with pytest.raises(unique_rows.UniqueRowsError, match="missing unique-row column 'osm_id'"):
+    with pytest.raises(
+        unique_rows.UniqueRowsError,
+        match=exactly("missing unique-row column 'osm_id' in region.parquet"),
+    ):
         unique_rows._parquet_column_expression(
             "osm_id",
             set(),
@@ -460,3 +468,38 @@ def test_iter_unique_parquet_batches_wraps_duckdb_errors(
                 columns=("osm_type", "osm_id", "geometry"),
             )
         )
+
+
+def test_the_relation_requires_every_column_the_caller_asked_for(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A requested column missing from a file must refuse, not silently NULL.
+
+    ``_parquet_relation`` widens the required set with the caller's columns; if
+    that widening is dropped, a file lacking a requested column quietly yields
+    ``NULL AS <column>`` and the uniqueness result changes without any error.
+    """
+    seen: list[dict[str, object]] = []
+
+    def _spy(path: Path, columns: object, **kwargs: object) -> str:
+        seen.append(kwargs)
+        return "SELECT 1"
+
+    monkeypatch.setattr(unique_rows, "_parquet_select", _spy)
+
+    unique_rows._parquet_relation([Path("a.parquet")], ("description",))
+
+    assert seen == [
+        {"required_columns": frozenset({*unique_rows._REQUIRED_COLUMNS, "description"})}
+    ]
+
+
+def test_the_relation_joins_its_selects_with_union_all(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The generated SQL is a deterministic artifact, so its text is pinned."""
+    monkeypatch.setattr(unique_rows, "_parquet_select", lambda *_a, **_k: "SELECT 1")
+
+    relation = unique_rows._parquet_relation([Path("a.parquet"), Path("b.parquet")], ())
+
+    assert relation == "SELECT 1 UNION ALL SELECT 1"

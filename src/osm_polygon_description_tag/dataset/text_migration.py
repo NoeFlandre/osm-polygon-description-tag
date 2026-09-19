@@ -41,6 +41,7 @@ from osm_polygon_description_tag.dataset.manifest import (
 from osm_polygon_description_tag.dataset.schema import SCHEMA, geo_metadata
 from osm_polygon_description_tag.dataset.storage import (
     _DICTIONARY_COLUMNS,
+    GEOPARQUET_COMPRESSION,
     StorageError,
     validate_geoparquet,
 )
@@ -78,7 +79,8 @@ def _canonical_localized(value: object) -> list[dict[str, str]]:
     """Return localized entries with trimmed values, dropping blank ones."""
     if not _is_entry_sequence(value):
         return []
-    candidates = map(_canonical_entry, cast(Sequence[object], value))
+    entries = cast(Sequence[object], value)  # pragma: no mutate - static narrowing
+    candidates = map(_canonical_entry, entries)
     return [entry for entry in candidates if entry is not None]
 
 
@@ -135,11 +137,11 @@ def _canonical_table(table: pa.Table) -> tuple[pa.Table, int]:
     descriptions, localized = _text_columns(table)
     repaired = table.set_column(
         table.schema.get_field_index("description"),
-        "description",
+        SCHEMA.field("description"),
         pa.array(descriptions, SCHEMA.field("description").type),
     ).set_column(
         table.schema.get_field_index("localized_descriptions"),
-        "localized_descriptions",
+        SCHEMA.field("localized_descriptions"),
         pa.array(localized, SCHEMA.field("localized_descriptions").type),
     )
     mask = _retained_mask(descriptions, localized)
@@ -175,7 +177,7 @@ def _rewrite_parquet_text(
     with pq.ParquetWriter(
         temporary,
         schema,
-        compression="zstd",
+        compression=GEOPARQUET_COMPRESSION,
         use_dictionary=_DICTIONARY_COLUMNS,
     ) as writer:
         writer.write_table(repaired.cast(schema))

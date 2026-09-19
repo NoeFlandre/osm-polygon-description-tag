@@ -37,7 +37,7 @@ from osm_polygon_description_tag.dataset.geography.card import (
     write_map_block_marker_to_template,
 )
 from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
-from osm_polygon_description_tag.workflow.orchestrator import _build_metadata_only_upload_plan
+from osm_polygon_description_tag.workflow.orchestrator import build_metadata_only_upload_plan
 from tests.conftest import make_record_dict
 from tests.helpers.dataset import write_finalized_dataset
 
@@ -153,6 +153,20 @@ def test_insert_map_block_handles_insertion_refresh_append_and_partial_markers()
 
     with pytest.raises(ValueError, match="malformed"):
         card_module.insert_map_block("<!-- GENERATED:H3_MAP:START -->\n", "body")
+
+
+def test_insert_map_block_preserves_empty_template_separator() -> None:
+    assert card_module.insert_map_block("", "body") == (
+        "<!-- GENERATED:H3_MAP:START -->\nbody\n<!-- GENERATED:H3_MAP:END -->\n"
+    )
+
+
+def test_insert_map_block_reports_the_exact_partial_marker_error() -> None:
+    with pytest.raises(
+        ValueError,
+        match=rf"^{re.escape('dataset card has malformed H3 map markers')}$",
+    ):
+        card_module.insert_map_block(f"{H3_MAP_START_MARKER}\n", "body")
 
 
 def test_render_map_block_uses_relative_asset_path() -> None:
@@ -422,7 +436,7 @@ def test_metadata_only_plan_includes_map_when_present(
     (data_root / "assets" / "description_polygon_density.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     (data_root / "assets" / "area_distribution.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     (data_root / "assets" / "dataset-card-hero.png").write_bytes(b"\x89PNG\r\n\x1a\n")
-    plan = _build_metadata_only_upload_plan(data_root)
+    plan = build_metadata_only_upload_plan(data_root)
     relative = sorted(item.relative_path for item in plan.files)
     assert "assets/description_polygon_density.png" in relative
     assert "assets/area_distribution.png" in relative
@@ -717,6 +731,12 @@ def test_template_with_map_markers_replaces_only_the_first_stats_marker() -> Non
     assert output.count(H3_MAP_START_MARKER) == 1
     assert output.count(stats_marker) == 2
     assert output.endswith(f"{stats_marker}second\n")
+
+
+def test_template_with_map_markers_requires_the_stats_marker() -> None:
+    message = "template missing GENERATED:STATS:START marker; cannot insert map block"
+    with pytest.raises(ValueError, match=rf"^{re.escape(message)}$"):
+        _template_with_map_markers("before", "assets/map.png")
 
 
 def test_atomic_write_template_uses_explicit_utf8_and_binary_fsync_open() -> None:

@@ -134,7 +134,7 @@ def test_upload_metadata_requires_a_real_data_directory_before_globbing(
     monkeypatch.setattr(Path, "glob", glob)
     monkeypatch.setattr(
         finalization_module,
-        "_build_metadata_only_upload_plan",
+        "build_metadata_only_upload_plan",
         lambda _root: pytest.fail("missing data directory must stop before planning"),
     )
 
@@ -360,7 +360,7 @@ def test_upload_final_metadata_forwards_every_stage_argument(
 
     monkeypatch.setattr(
         finalization_module,
-        "_build_metadata_only_upload_plan",
+        "build_metadata_only_upload_plan",
         lambda root: (calls.append(("plan", root)) or plan),
     )
 
@@ -449,7 +449,7 @@ def test_upload_final_metadata_returns_existing_revision_before_upload(
     data_dir.mkdir()
     (data_dir / "region.parquet").write_bytes(b"parquet")
     plan = _metadata_plan(paths.data_root)
-    monkeypatch.setattr(finalization_module, "_build_metadata_only_upload_plan", lambda _root: plan)
+    monkeypatch.setattr(finalization_module, "build_metadata_only_upload_plan", lambda _root: plan)
     monkeypatch.setattr(finalization_module, "_metadata_state_matches", lambda _root, _plan: True)
     monkeypatch.setattr(finalization_module, "_metadata_skip_revision", lambda *_args: "existing")
     monkeypatch.setattr(

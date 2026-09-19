@@ -854,7 +854,7 @@ def test_publish_source_uploads_stale_state_and_persists_verified_identity(
         return SimpleNamespace(sha256="output-identity")
 
     monkeypatch.setattr(orchestrator, "_execute_publication", execute)
-    monkeypatch.setattr(orchestrator, "_build_per_pbf_upload_plan", build_plan)
+    monkeypatch.setattr(orchestrator, "build_per_pbf_upload_plan", build_plan)
     monkeypatch.setattr(orchestrator, "source_identity_for", source_identity)
     monkeypatch.setattr(orchestrator, "output_identity_for", output_identity)
 
@@ -996,7 +996,7 @@ def test_publish_source_retains_deduplicated_note_when_state_write_fails(
     )
     monkeypatch.setattr(
         orchestrator,
-        "_build_per_pbf_upload_plan",
+        "build_per_pbf_upload_plan",
         lambda *_args: SimpleNamespace(identity_sha256="plan-identity"),
     )
     monkeypatch.setattr(
@@ -1576,7 +1576,7 @@ def test_execute_publication_builds_validates_uploads_and_verifies_in_order(
         calls.append(("verify", (args, kwargs)))
         return "verified-revision"
 
-    monkeypatch.setattr(orchestrator, "_build_per_pbf_upload_plan", build_plan)
+    monkeypatch.setattr(orchestrator, "build_per_pbf_upload_plan", build_plan)
     monkeypatch.setattr(orchestrator, "create_upload_plan", validate_plan)
     monkeypatch.setattr(orchestrator, "_upload_source_plan", upload_plan)
     monkeypatch.setattr(orchestrator, "_verify_source_plan", verify_plan)
@@ -1787,7 +1787,7 @@ def test_subprocess_bridge_forwards_command_restores_runner_and_keeps_signature(
 ) -> None:
     import osm_polygon_description_tag.publication.upload as publication_upload
 
-    original_runner = publication_upload._default_runner_with_retry
+    original_runner = publication_upload.default_runner_with_retry
     subprocess_calls: list[list[str]] = []
     captured: dict[str, object] = {}
     report = object()
@@ -1796,7 +1796,7 @@ def test_subprocess_bridge_forwards_command_restores_runner_and_keeps_signature(
         subprocess_calls.append(command)
 
     def run_and_publish(**kwargs: object) -> object:
-        bridge = publication_upload._default_runner_with_retry
+        bridge = publication_upload.default_runner_with_retry
         parameters = inspect.signature(bridge).parameters
         captured["defaults"] = {
             name: parameters[name].default
@@ -1841,7 +1841,7 @@ def test_subprocess_bridge_forwards_command_restores_runner_and_keeps_signature(
         "_runner": None,
         "retry_observer": None,
     }
-    assert publication_upload._default_runner_with_retry is original_runner
+    assert publication_upload.default_runner_with_retry is original_runner
 
 
 def test_run_and_publish_forwards_all_options_and_closes_owned_resources(

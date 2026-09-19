@@ -14,6 +14,7 @@ import yaml
 
 from osm_polygon_description_tag.publication import language_card
 from osm_polygon_description_tag.publication.language_card import (
+    _SECTION_HEADING,
     LANGUAGE_CARD_SECTION_END,
     LANGUAGE_CARD_SECTION_START,
     _append_section,
@@ -532,3 +533,18 @@ def test_marked_section_count_error_is_exact() -> None:
         PublicationError, match=exactly("dataset card has a malformed language-v1 card section")
     ):
         _replace_marked_section("readme", "replacement", 0)
+
+
+def test_insert_section_preserves_non_newline_trailing_bytes_before_limitations() -> None:
+    readme = "introXX\n\n## Limitations\nbody\n"
+
+    assert language_card._insert_section(readme, "replacement", "\n") == (
+        "introXX\n\nreplacement\n## Limitations\nbody\n"
+    )
+
+
+def test_replace_helpers_use_lf_when_their_newline_argument_is_omitted() -> None:
+    readme = f"{_START}\n{_SECTION_HEADING}\nold\n{_END}\n\n## Limitations\nbody\n"
+
+    assert "\nreplacement\n" in _replace_section(readme, "replacement")
+    assert "\nreplacement\n" in _replace_marked_section(readme, "replacement", 1)

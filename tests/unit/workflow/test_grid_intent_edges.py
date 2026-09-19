@@ -11,8 +11,7 @@ from osm_polygon_description_tag.dataset.languages.checkpoint import (
 )
 from osm_polygon_description_tag.workflow import grid_operator as operator
 from osm_polygon_description_tag.workflow.grid_scheduler import CommandResult, SchedulerError
-from tests.unit.workflow.test_grid_operator import REMOTE, SHARD, _verdict
-from tests.unit.workflow.test_grid_operator import prepared as prepared
+from tests.unit.workflow.test_grid_operator import SHARD, _verdict
 
 
 def _intent(**changes: object) -> dict[str, object]:
@@ -110,13 +109,6 @@ def test_bundle_validates_content_before_accepting_identity(field, value, messag
     with pytest.raises(operator.GridOperatorError) as error:
         operator.JobBundle.from_payload({**bundle.to_payload(), field: value})
     assert str(error.value) == message
-
-
-@pytest.fixture
-def job(request):
-    _, run, snapshot = request.getfixturevalue("prepared")
-    bundle, paths = operator.prepare_job(run, snapshot, SHARD, **REMOTE)
-    return run, bundle, paths
 
 
 def _write_intent(bundle, paths, **changes):
