@@ -198,9 +198,9 @@ def test_full_run_no_rebuild_on_doc_only_commit(
     # Mark a.osm.pbf as already published AND mark the metadata as
     # already published so the fully-completed run is a no-op.
     from osm_polygon_description_tag.dataset.manifest import file_sha256
-    from osm_polygon_description_tag.publication import _build_metadata_only_upload_plan
+    from osm_polygon_description_tag.publication import build_metadata_only_upload_plan
 
-    metadata_plan = _build_metadata_only_upload_plan(paths.data_root)
+    metadata_plan = build_metadata_only_upload_plan(paths.data_root)
     state = {
         "schema_version": 1,
         "published": {

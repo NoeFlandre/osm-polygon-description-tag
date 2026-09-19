@@ -620,11 +620,11 @@ def test_orchestrator_subprocess_bridge_restores_upload_runner(
 ) -> None:
     import osm_polygon_description_tag.publication.upload as publication_upload
 
-    original = publication_upload._default_runner_with_retry
+    original = publication_upload.default_runner_with_retry
     commands: list[list[str]] = []
 
     def fake_run_and_publish(**_kwargs: object) -> str:
-        publication_upload._default_runner_with_retry(["hf", "upload"], timeout=1)
+        publication_upload.default_runner_with_retry(["hf", "upload"], timeout=1)
         return "ok"
 
     monkeypatch.setattr(orchestrator, "_run_and_publish", fake_run_and_publish)
@@ -632,7 +632,7 @@ def test_orchestrator_subprocess_bridge_restores_upload_runner(
 
     assert result == "ok"
     assert commands == [["hf", "upload"]]
-    assert publication_upload._default_runner_with_retry is original
+    assert publication_upload.default_runner_with_retry is original
 
 
 def test_default_hub_verifier_factory_uses_lazy_api(monkeypatch: pytest.MonkeyPatch) -> None:

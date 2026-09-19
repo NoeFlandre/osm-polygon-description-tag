@@ -37,7 +37,7 @@ from osm_polygon_description_tag.dataset.geography.card import (
     write_map_block_marker_to_template,
 )
 from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
-from osm_polygon_description_tag.workflow.orchestrator import _build_metadata_only_upload_plan
+from osm_polygon_description_tag.workflow.orchestrator import build_metadata_only_upload_plan
 from tests.conftest import make_record_dict
 from tests.helpers.dataset import write_finalized_dataset
 
@@ -422,7 +422,7 @@ def test_metadata_only_plan_includes_map_when_present(
     (data_root / "assets" / "description_polygon_density.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     (data_root / "assets" / "area_distribution.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     (data_root / "assets" / "dataset-card-hero.png").write_bytes(b"\x89PNG\r\n\x1a\n")
-    plan = _build_metadata_only_upload_plan(data_root)
+    plan = build_metadata_only_upload_plan(data_root)
     relative = sorted(item.relative_path for item in plan.files)
     assert "assets/description_polygon_density.png" in relative
     assert "assets/area_distribution.png" in relative
