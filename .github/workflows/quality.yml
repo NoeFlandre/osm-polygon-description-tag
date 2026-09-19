@@ -5,6 +5,7 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -233,7 +234,7 @@ jobs:
     # finishes. A single runner took over 90 minutes and was cancelled on every
     # push, which meant the gate never actually reported. Each shard still
     # requires a 100% score, so the shards together are the same strict gate.
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: quality
