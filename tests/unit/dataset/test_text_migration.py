@@ -542,6 +542,12 @@ def test_a_migrated_artifact_keeps_the_pinned_codec_and_dictionary_columns(
     for name in _DICTIONARY_COLUMNS:
         encodings = group.column(names.index(name)).encodings
         assert "RLE_DICTIONARY" in encodings, f"{name} lost dictionary encoding"
+    # The list is a restriction, not a hint: dropping it makes Arrow dictionary
+    # encode *every* column, including free text that never repeats, which is
+    # where the encoding costs space instead of saving it.
+    for name in ("description", "osm_id"):
+        encodings = group.column(names.index(name)).encodings
+        assert "RLE_DICTIONARY" not in encodings, f"{name} should not be dictionary encoded"
 
 
 def test_dropping_rows_rebuilds_the_geo_bbox_from_the_rows_that_remain(

@@ -919,3 +919,18 @@ def test_install_map_block_converts_a_crlf_body_into_the_card_line_ending() -> N
 
     assert "\r" not in out
     assert "first\nsecond" in out
+
+
+def test_install_map_block_takes_its_line_ending_from_the_opening_marker() -> None:
+    """The two markers can disagree, and the opening one is what counts.
+
+    A card edited on two platforms can carry a CRLF start marker and an LF end
+    marker. Reading the ending off the closing marker instead would rewrite the
+    inserted block with the wrong terminator while looking correct on a file
+    whose markers happen to agree -- which every other fixture here does.
+    """
+    template = f"# Card\r\n\r\n{H3_MAP_START_MARKER}\r\nold\r\n{H3_MAP_END_MARKER}\n\ntail\n"
+
+    out = install_map_block(template, "![alt](path.png)")
+
+    assert f"{H3_MAP_START_MARKER}\r\n![alt](path.png)\r\n{H3_MAP_END_MARKER}" in out
