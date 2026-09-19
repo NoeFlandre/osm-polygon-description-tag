@@ -26,7 +26,6 @@ from osm_polygon_description_tag.dataset.languages.models import (
     DEFAULT_LANGUAGE_POLICY,
     DEFAULT_LANGUAGE_SCOPE,
     LINGUA_DETECTOR_NAME,
-    V2_LANGUAGE_POLICY,
     LanguageModelIdentity,
     LanguagePolicy,
     cascade_model_identity,
@@ -123,15 +122,7 @@ MinChars = Annotated[
     int | None,
     typer.Option("--min-alphabetic-chars", help="Minimum letters before detection is attempted"),
 ]
-MinScore = Annotated[
-    float | None, typer.Option("--min-score", help="Minimum raw top score to accept")
-]
-MinMargin = Annotated[
-    float | None, typer.Option("--min-margin", help="Minimum raw score margin over the runner-up")
-]
-PolicyVersion = Annotated[
-    str, typer.Option("--policy-version", help="Named policy preset: v1 or v2")
-]
+PolicyVersion = Annotated[str, typer.Option("--policy-version", help="Named policy preset: v1")]
 
 GlotLIDModelPath = Annotated[
     Path | None, typer.Option("--glotlid-model-path", help="Pinned GlotLID v3 model file")
@@ -152,27 +143,22 @@ RemoteSatModelPath = Annotated[
 
 _POLICY_PRESETS = {
     "v1": DEFAULT_LANGUAGE_POLICY,
-    "v2": V2_LANGUAGE_POLICY,
 }
 
 
 def _policy(
     min_alphabetic_chars: int | None,
-    min_score: float | None,
-    min_margin: float | None,
     *,
     policy_version: str = "v1",
 ) -> LanguagePolicy:
     try:
         base = _POLICY_PRESETS[policy_version]
     except KeyError:
-        raise ValueError("policy_version must be 'v1' or 'v2'") from None
+        raise ValueError("policy_version must be 'v1'") from None
     return LanguagePolicy(
         min_alphabetic_chars=(
             base.min_alphabetic_chars if min_alphabetic_chars is None else min_alphabetic_chars
         ),
-        min_score=base.min_score if min_score is None else min_score,
-        min_margin=base.min_margin if min_margin is None else min_margin,
     )
 
 
@@ -308,16 +294,9 @@ def prepare_command(
     run_dir: RunDir,
     project_root: ProjectRoot = Path(),
     min_alphabetic_chars: MinChars = None,
-    min_score: MinScore = None,
-    min_margin: MinMargin = None,
     policy_version: PolicyVersion = "v1",
 ) -> None:
-    policy = _policy(
-        min_alphabetic_chars,
-        min_score,
-        min_margin,
-        policy_version=policy_version,
-    )
+    policy = _policy(min_alphabetic_chars, policy_version=policy_version)
     handle_prepare(
         source_root,
         run_dir,

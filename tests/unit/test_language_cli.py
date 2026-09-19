@@ -361,7 +361,7 @@ def test_a_custom_policy_changes_the_configuration_fingerprint(
         return _stdout(capsys)
 
     default = _prepare(tmp_path / "default")
-    strict = _prepare(tmp_path / "strict", "--min-score", "0.95")
+    strict = _prepare(tmp_path / "strict", "--min-alphabetic-chars", "9")
 
     assert default["model_config_fingerprint"] != strict["model_config_fingerprint"]
     assert default["snapshot_id"] != strict["snapshot_id"]

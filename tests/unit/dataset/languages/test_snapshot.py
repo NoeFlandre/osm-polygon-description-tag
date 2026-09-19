@@ -430,7 +430,9 @@ def test_model_identity_payload_rejects_unverifiable_claims(
 
 def test_model_identity_payload_rejects_malformed_policies_and_scopes(tmp_path: Path) -> None:
     _, run, _ = _prepared(tmp_path)
-    _rewrite(run, lambda payload: payload["model_identity"]["policy"].__setitem__("min_score", 5.0))
+    _rewrite(
+        run, lambda payload: payload["model_identity"]["policy"].__setitem__("tie_epsilon", 5.0)
+    )
     with pytest.raises(SnapshotError, match="invalid snapshot policy"):
         read_snapshot(run)
 
@@ -720,7 +722,7 @@ def test_a_non_canonical_relative_path_is_rejected() -> None:
 def test_a_malformed_policy_value_is_rejected(tmp_path: Path) -> None:
     _, run, _ = _prepared(tmp_path)
     _rewrite(
-        run, lambda payload: payload["model_identity"]["policy"].__setitem__("min_score", "high")
+        run, lambda payload: payload["model_identity"]["policy"].__setitem__("tie_epsilon", "high")
     )
 
     with pytest.raises(SnapshotError, match="must be a real number"):
