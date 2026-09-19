@@ -649,6 +649,20 @@ def test_shard_scopes_together_cover_every_mutant(tmp_path: Path) -> None:
     )
 
 
+def test_the_forced_fail_probe_follows_the_runs_test_selection() -> None:
+    """A narrowed run must probe with tests that reach the code it mutates.
+
+    The probe proves the harness can still observe a failure. A fixed smoke
+    file cannot fail for a scope it never imports, which surfaces as
+    ``Unable to force test failures`` and looks like a broken harness rather
+    than an out-of-scope probe.
+    """
+    selection = ["tests/unit/dataset/languages/test_detector.py"]
+
+    assert run_mutation_gate._probe_selection(selection) == selection
+    assert run_mutation_gate._probe_selection(()) == run_mutation_gate.SMOKE_TEST_SELECTION
+
+
 def test_sharded_mutation_gate_keeps_the_full_strictness() -> None:
     """Sharding may split which modules are mutated, never how strict the gate is."""
     justfile = (PROJECT_ROOT / "justfile").read_text(encoding="utf-8")
@@ -753,7 +767,7 @@ def test_mutation_gate_resets_state_before_first_escalation(monkeypatch) -> None
             or FakeRunner()
         ),
     )
-    monkeypatch.setattr(gate, "_verify_mutmut_can_fail", lambda _runner: None)
+    monkeypatch.setattr(gate, "_verify_mutmut_can_fail", lambda *_args: None)
     monkeypatch.setattr(
         gate,
         "recorded_associations",

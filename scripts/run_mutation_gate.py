@@ -504,13 +504,28 @@ def _prepare_mutmut(
     return runner
 
 
-def _verify_mutmut_can_fail(runner: Any) -> None:
-    """Run mutmut's failure probe with a deliberately small smoke selection."""
+SMOKE_TEST_SELECTION = ["tests/unit/test_mutation_surface.py"]
+
+
+def _probe_selection(test_selection: Sequence[str]) -> list[str]:
+    """Return the tests the forced-fail probe should run.
+
+    The probe proves the harness can still observe a failure. It therefore has
+    to run tests that reach the code under mutation: a fixed smoke file cannot
+    fail for a scope it never imports, which reads as a broken harness rather
+    than as an out-of-scope probe. A narrowed run probes with its own
+    selection; a whole-repository run keeps the small smoke file.
+    """
+    return list(test_selection) if test_selection else list(SMOKE_TEST_SELECTION)
+
+
+def _verify_mutmut_can_fail(runner: Any, test_selection: Sequence[str] = ()) -> None:
+    """Run mutmut's failure probe against tests that reach the mutated code."""
 
     import mutmut.__main__ as mutmut_main
 
     original_selection = runner._pytest_add_cli_args_test_selection
-    runner._pytest_add_cli_args_test_selection = ["tests/unit/test_mutation_surface.py"]
+    runner._pytest_add_cli_args_test_selection = _probe_selection(test_selection)
     try:
         mutmut_main.run_forced_fail_test(runner)
     finally:
@@ -538,7 +553,7 @@ def run_gate(
         test_selection=test_selection,
         changed_lines=changed_lines,
     )
-    _verify_mutmut_can_fail(runner)
+    _verify_mutmut_can_fail(runner, test_selection)
 
     stats = _read_stats()
     durations = stats["duration_by_test"]
