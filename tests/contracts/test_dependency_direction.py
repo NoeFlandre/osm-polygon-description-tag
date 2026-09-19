@@ -239,6 +239,22 @@ def test_console_modules_import_only_canonical_packages(module_name: str) -> Non
     assert violations == []
 
 
+def test_grid_operator_is_split_into_cohesive_package_modules() -> None:
+    package_dir = PACKAGE_ROOT / "workflow" / "grid_operator"
+    assert package_dir.is_dir()
+    assert not (PACKAGE_ROOT / "workflow" / "grid_operator.py").exists()
+    modules = sorted(package_dir.glob("*.py"))
+    assert {path.name for path in modules} >= {
+        "__init__.py",
+        "bundle.py",
+        "intent.py",
+        "script.py",
+        "submit.py",
+        "validation.py",
+    }
+    assert all(len(path.read_text(encoding="utf-8").splitlines()) <= 500 for path in modules)
+
+
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
