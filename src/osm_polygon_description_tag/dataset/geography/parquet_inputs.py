@@ -139,13 +139,15 @@ def _centroid_row(
 def _iter_centroid_batch(
     batch: Any, source_paths: Mapping[str, Path]
 ) -> Iterator[tuple[Path, float, float]]:
-    for wkb, osm_id, source_name in zip(
-        batch.column("geometry").to_pylist(),
-        batch.column("osm_id").to_pylist(),
-        batch.column("source_pbf").to_pylist(),
-        strict=True,
-    ):
-        yield _centroid_row(wkb, osm_id, source_name, source_paths)
+    geoms = batch.column("geometry").to_pylist()
+    osm_ids = batch.column("osm_id").to_pylist()
+    names = batch.column("source_pbf").to_pylist()
+    # Arrow gives every column of one record batch the same length, so the
+    # strict zip can never actually fire. It stays as a guard against a future
+    # caller zipping columns from *different* batches, and is excluded from
+    # mutation because no input can distinguish it from a non-strict zip.
+    for wkb, osm_id, name in zip(geoms, osm_ids, names, strict=True):  # pragma: no mutate
+        yield _centroid_row(wkb, osm_id, name, source_paths)
 
 
 def _validate_unique_centroids(data_root: Path, source_paths: Mapping[str, Path]) -> None:
