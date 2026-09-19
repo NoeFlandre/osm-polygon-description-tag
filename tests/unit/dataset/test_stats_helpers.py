@@ -13,6 +13,7 @@ from shapely.geometry import MultiPolygon, Point, Polygon
 import osm_polygon_description_tag.dataset.stats as stats_module
 from osm_polygon_description_tag.dataset.manifest import ManifestError
 from tests.helpers.dataset import write_reporting_fixture
+from tests.helpers.messages import exactly
 
 
 def test_new_connection_uses_a_reentrant_disk_backed_temp_directory(
@@ -776,3 +777,111 @@ def test_build_stats_payload_preserves_public_fields_and_zero_rate_fallback() ->
         ]
         == 0.0
     )
+
+
+def _spatial_batch(rows: list[dict[str, object]]) -> pa.RecordBatch:
+    """Build a spatial batch from explicit per-row values."""
+    return pa.record_batch(
+        [
+            pa.array([row["source_pbf"] for row in rows]),
+            pa.array(["way"] * len(rows)),
+            pa.array([index for index, _ in enumerate(rows)], type=pa.int64()),
+            pa.array([row["geometry_type"] for row in rows]),
+            pa.array([1.0] * len(rows), type=pa.float64()),
+            pa.array([row["min_x"] for row in rows], type=pa.float64()),
+            pa.array([row["min_y"] for row in rows], type=pa.float64()),
+            pa.array([row["max_x"] for row in rows], type=pa.float64()),
+            pa.array([row["max_y"] for row in rows], type=pa.float64()),
+            pa.array([row["wkb"] for row in rows], type=pa.binary()),
+        ],
+        names=stats_module._SPATIAL_COLUMNS,
+    )
+
+
+def _square(x: float, y: float) -> Polygon:
+    return Polygon([(x, y), (x, y + 1), (x + 1, y + 1), (x + 1, y)])
+
+
+def test_the_batch_extent_takes_each_edge_from_its_own_column() -> None:
+    """Deliberately asymmetric so swapping a column index cannot go unnoticed."""
+    rows = [
+        {
+            "source_pbf": "region.parquet",
+            "geometry_type": "Polygon",
+            "min_x": -30.0,
+            "min_y": -20.0,
+            "max_x": 40.0,
+            "max_y": 50.0,
+            "wkb": to_wkb(_square(0, 0)),
+        },
+        {
+            "source_pbf": "region.parquet",
+            "geometry_type": "Polygon",
+            "min_x": -10.0,
+            "min_y": -60.0,
+            "max_x": 70.0,
+            "max_y": 15.0,
+            "wkb": to_wkb(_square(2, 2)),
+        },
+    ]
+
+    summary = stats_module._summarize_spatial_batch(
+        _spatial_batch(rows), source_name="region.parquet", row_offset=0
+    )
+
+    assert summary.dataset_bbox == (-30.0, -60.0, 70.0, 50.0)
+
+
+def test_multipolygon_components_accumulate_across_the_batch() -> None:
+    """Assignment instead of accumulation would report only the final row."""
+    multi_two = MultiPolygon([_square(0, 0), _square(5, 5)])
+    multi_three = MultiPolygon([_square(0, 0), _square(5, 5), _square(10, 10)])
+    rows = [
+        {
+            "source_pbf": "region.parquet",
+            "geometry_type": "MultiPolygon",
+            "min_x": 0.0,
+            "min_y": 0.0,
+            "max_x": 6.0,
+            "max_y": 6.0,
+            "wkb": to_wkb(multi_two),
+        },
+        {
+            "source_pbf": "region.parquet",
+            "geometry_type": "MultiPolygon",
+            "min_x": 0.0,
+            "min_y": 0.0,
+            "max_x": 11.0,
+            "max_y": 11.0,
+            "wkb": to_wkb(multi_three),
+        },
+    ]
+
+    summary = stats_module._summarize_spatial_batch(
+        _spatial_batch(rows), source_name="region.parquet", row_offset=0
+    )
+
+    assert summary.multipolygon_components_total == 5
+
+
+def test_an_invalid_bounding_box_names_its_source_and_row() -> None:
+    """The row index is offset by the batch, which is how an operator finds it."""
+    rows = [
+        {
+            "source_pbf": "region.parquet",
+            "geometry_type": "Polygon",
+            "min_x": float("inf"),
+            "min_y": 0.0,
+            "max_x": 1.0,
+            "max_y": 1.0,
+            "wkb": to_wkb(_square(0, 0)),
+        }
+    ]
+
+    with pytest.raises(
+        stats_module.ReportingError,
+        match=exactly("invalid bounding box in region.parquet at row 7"),
+    ):
+        stats_module._summarize_spatial_batch(
+            _spatial_batch(rows), source_name="region.parquet", row_offset=7
+        )
