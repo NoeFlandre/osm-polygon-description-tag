@@ -626,3 +626,43 @@ def test_lazy_hub_wrapper_uses_existing_module_without_import() -> None:
     hub._module = module
 
     assert hub.answer == 42
+
+
+def test_a_short_hub_response_leaves_the_missing_paths_unmapped() -> None:
+    """A strict zip here would raise instead of reporting the missing file.
+
+    The Hub may answer with fewer entries than were asked for -- that *is* the
+    missing-file case. Pairing what came back and leaving the rest unmapped is
+    what lets the caller raise "remote file missing" against the exact path,
+    rather than a `zip()` length error naming nothing.
+    """
+    from osm_polygon_description_tag.publication import verification
+
+    class _Entry:
+        path = None
+
+        def __init__(self, size: int) -> None:
+            self.size = size
+
+    first = _Entry(1)
+
+    mapped = verification._entries_by_path(["a.parquet", "b.parquet"], [first])
+
+    assert mapped == {"a.parquet": first}
+    assert "b.parquet" not in mapped
+
+
+def test_hub_entries_carrying_their_own_paths_are_keyed_by_them() -> None:
+    """Real Hub entries are keyed explicitly, not by response order."""
+    from osm_polygon_description_tag.publication import verification
+
+    class _Entry:
+        def __init__(self, path: str) -> None:
+            self.path = path
+
+    second = _Entry("b.parquet")
+    first = _Entry("a.parquet")
+
+    mapped = verification._entries_by_path(["a.parquet", "b.parquet"], [second, first])
+
+    assert mapped == {"b.parquet": second, "a.parquet": first}

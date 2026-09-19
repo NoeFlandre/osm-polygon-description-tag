@@ -866,3 +866,34 @@ def test_matching_revision_reports_the_repository_and_revision_it_failed_on(
         default_hub_verifier_factory().matching_revision(
             REPO_ID, (UploadItem(relative_path="README.md", size_bytes=2, sha256="a" * 64),)
         )
+
+
+def test_verify_inventory_resolves_the_revision_from_the_named_repository(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no revision given, the repository's own head must be looked up.
+
+    The lookup has to use the authenticated client and the repository that was
+    asked about; addressing anything else verifies the wrong thing and still
+    returns a plausible-looking SHA.
+    """
+    seen: list[tuple[str, object]] = []
+
+    class _Api(_RecordingApi):
+        def repo_info(self, repo_id: str, **kwargs: object) -> object:
+            seen.append((repo_id, kwargs.get("repo_type")))
+            return _FakeRepo(self.sha)
+
+        def list_repo_files(self, *_args: object, **_kwargs: object) -> list[str]:
+            return []
+
+    _install(monkeypatch, _Api(sha="head-sha"))
+
+    from osm_polygon_description_tag.orchestrator import HubVerificationError
+
+    with pytest.raises(HubVerificationError):
+        default_hub_verifier_factory().verify_inventory(
+            REPO_ID, (UploadItem(relative_path="data/a.parquet", size_bytes=1, sha256="a" * 64),)
+        )
+
+    assert seen == [(REPO_ID, "dataset")]
