@@ -477,3 +477,103 @@ def test_a_stale_manifest_from_an_interrupted_run_is_healed(tmp_path: Path) -> N
     assert migrate_dataset_text(data_root) == 1
     assert read_manifest(manifest_path).output == output_identity_for(parquet)
     assert migrate_dataset_text(data_root) == 0
+
+
+def test_the_migration_probe_reads_only_the_text_columns_in_bounded_batches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The probe must not pull geometry just to inspect description text.
+
+    ``description`` and ``localized_descriptions`` are small; ``geometry`` is
+    the WKB blob and dominates the file. Reading every column, or reading the
+    file in one unbounded batch, turns a cheap text check into a full scan of
+    the dataset, so both arguments are part of the contract rather than hints.
+    """
+    _, parquet, _ = _prepare(tmp_path / "probe", [_row(1, "Already canonical")])
+    seen: list[dict[str, object]] = []
+    original = pq.ParquetFile.iter_batches
+
+    def _spy(self: pq.ParquetFile, **kwargs: object):
+        seen.append(dict(kwargs))
+        return original(self, **kwargs)
+
+    monkeypatch.setattr(pq.ParquetFile, "iter_batches", _spy)
+
+    text_migration._requires_text_migration(parquet)
+
+    assert seen == [
+        {
+            "batch_size": text_migration._BATCH_SIZE,
+            "columns": ["description", "localized_descriptions"],
+        }
+    ]
+
+
+def test_the_codec_is_pinned_to_zstd_by_one_named_constant() -> None:
+    """The dataset contract fixes the codec, so its spelling is pinned here."""
+    from osm_polygon_description_tag.dataset import storage
+
+    assert storage.GEOPARQUET_COMPRESSION == "zstd"
+
+
+def test_a_migrated_artifact_keeps_the_pinned_codec_and_dictionary_columns(
+    tmp_path: Path,
+) -> None:
+    """Rewriting text must not quietly change how the artifact is stored.
+
+    Dropping the codec leaves the file uncompressed and dropping the dictionary
+    columns inflates the low-cardinality ones, so both are asserted from the
+    written file rather than from the call.
+    """
+    from osm_polygon_description_tag.dataset.storage import (
+        _DICTIONARY_COLUMNS,
+        GEOPARQUET_COMPRESSION,
+    )
+
+    data_root, parquet, _ = _prepare(tmp_path, [_row(1, "  Needs trimming  "), _row(2, "Kept")])
+
+    assert migrate_dataset_text(data_root) == 1
+
+    metadata = pq.ParquetFile(parquet).metadata
+    group = metadata.row_group(0)
+    names = [metadata.schema.column(i).name for i in range(metadata.num_columns)]
+    for index, name in enumerate(names):
+        assert group.column(index).compression == GEOPARQUET_COMPRESSION.upper(), name
+    for name in _DICTIONARY_COLUMNS:
+        encodings = group.column(names.index(name)).encodings
+        assert "RLE_DICTIONARY" in encodings, f"{name} lost dictionary encoding"
+
+
+def test_dropping_rows_rebuilds_the_geo_bbox_from_the_rows_that_remain(
+    tmp_path: Path,
+) -> None:
+    """A stale extent would claim coverage the published rows do not have."""
+    far = _row(1, "   ")
+    far["bbox_min_x"] = -50.0
+    far["bbox_max_x"] = -40.0
+    near = _row(2, "Kept description")
+
+    data_root, parquet, _ = _prepare(tmp_path, [far, near])
+
+    assert migrate_dataset_text(data_root) == 1
+
+    geo = json.loads(pq.ParquetFile(parquet).schema_arrow.metadata[b"geo"])
+    bbox = geo["columns"]["geometry"]["bbox"]
+    assert bbox[0] == near["bbox_min_x"], "bbox still covers the dropped row"
+    assert bbox[2] == near["bbox_max_x"]
+
+
+def test_dropping_rows_preserves_metadata_inherited_from_the_source(
+    tmp_path: Path,
+) -> None:
+    """Only the ``geo`` block is recomputed; other stored metadata is carried."""
+    inherited = {b"provenance": b"kept", b"geo": b"{}"}
+    schema = text_migration.SCHEMA.with_metadata(inherited)
+
+    rebuilt = text_migration._geo_metadata_for(
+        pa.Table.from_pylist([_row(1, "Kept")], schema=text_migration.SCHEMA),
+        inherited,
+    )
+
+    assert rebuilt.metadata[b"provenance"] == b"kept"
+    assert schema.metadata[b"provenance"] == b"kept"

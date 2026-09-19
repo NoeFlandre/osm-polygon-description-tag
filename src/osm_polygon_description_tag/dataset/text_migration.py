@@ -41,6 +41,7 @@ from osm_polygon_description_tag.dataset.manifest import (
 from osm_polygon_description_tag.dataset.schema import SCHEMA, geo_metadata
 from osm_polygon_description_tag.dataset.storage import (
     _DICTIONARY_COLUMNS,
+    GEOPARQUET_COMPRESSION,
     StorageError,
     validate_geoparquet,
 )
@@ -176,7 +177,7 @@ def _rewrite_parquet_text(
     with pq.ParquetWriter(
         temporary,
         schema,
-        compression="zstd",
+        compression=GEOPARQUET_COMPRESSION,
         use_dictionary=_DICTIONARY_COLUMNS,
     ) as writer:
         writer.write_table(repaired.cast(schema))
