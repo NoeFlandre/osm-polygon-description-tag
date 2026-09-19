@@ -22,8 +22,6 @@ from osm_polygon_description_tag.publication import (
 from osm_polygon_description_tag.publication.models import UploadItem
 from osm_polygon_description_tag.publication.planning import (
     _build_item,
-    build_metadata_only_upload_plan,
-    build_per_pbf_upload_plan,
     _collect_data_items,
     _collect_manifest_items,
     _collect_required_metadata_items,
@@ -46,6 +44,8 @@ from osm_polygon_description_tag.publication.planning import (
     _validate_top_level_entries,
     _validate_top_level_entry,
     _validate_uploader_cache,
+    build_metadata_only_upload_plan,
+    build_per_pbf_upload_plan,
     file_sha256_bytes,
 )
 from osm_polygon_description_tag.storage import write_geoparquet

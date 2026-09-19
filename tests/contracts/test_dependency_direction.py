@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import os
 import re
 from pathlib import Path
 
@@ -20,6 +21,12 @@ CANONICAL_DEPENDENCIES = {
     "workflow": {"runtime", "osm", "dataset", "publication", "observability", "workflow"},
 }
 CONSOLE_MODULES = ("cli", "language_cli")
+CONSOLE_SUPPORT_MODULES = {
+    "grid_transport",
+    "grid_workflow",
+    "language_workflow",
+    "publication_workflow",
+}
 COMPATIBILITY_MODULES = (
     "_logging",
     "_resources",
@@ -229,7 +236,7 @@ def test_canonical_package_imports_only_allowed_lower_layers(package_name: str) 
 @pytest.mark.parametrize("module_name", CONSOLE_MODULES)
 def test_console_modules_import_only_canonical_packages(module_name: str) -> None:
     """Console entry points compose canonical packages and never the shims."""
-    allowed = set(CANONICAL_DEPENDENCIES) | set(CONSOLE_MODULES)
+    allowed = set(CANONICAL_DEPENDENCIES) | set(CONSOLE_MODULES) | CONSOLE_SUPPORT_MODULES
     imports = _package_imports(PACKAGE_ROOT / f"{module_name}.py")
     violations = [
         imported_module
@@ -240,6 +247,8 @@ def test_console_modules_import_only_canonical_packages(module_name: str) -> Non
 
 
 def test_grid_operator_is_split_into_cohesive_package_modules() -> None:
+    if "MUTANT_UNDER_TEST" in os.environ:
+        pytest.skip("static architecture bounds are checked on the canonical source tree")
     package_dir = PACKAGE_ROOT / "workflow" / "grid_operator"
     assert package_dir.is_dir()
     assert not (PACKAGE_ROOT / "workflow" / "grid_operator.py").exists()

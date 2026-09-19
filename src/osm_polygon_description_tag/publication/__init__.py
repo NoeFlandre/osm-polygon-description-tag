@@ -20,8 +20,8 @@ from osm_polygon_description_tag.publication.release import (
     release_metadata,
     validate_published_inventory,
 )
-from osm_polygon_description_tag.publication.upload import default_runner_with_retry
 from osm_polygon_description_tag.publication.upload import (
+    default_runner_with_retry,
     execute_upload,
 )
 

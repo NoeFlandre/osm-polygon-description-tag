@@ -35,7 +35,7 @@ import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from osm_polygon_description_tag.dataset.deduplication import deduplicate_dataset
 from osm_polygon_description_tag.dataset.manifest import (
@@ -492,11 +492,14 @@ def _run_with_subprocess_bridge(
         )
         # pragma: no mutate end
 
-    pub.default_runner_with_retry = _bridge
+    # ``pub`` is a module, so its attribute keeps the declared function's own
+    # type; rebinding it for the duration of the call needs a dynamic view.
+    patched = cast(Any, pub)  # pragma: no mutate - static cast
+    patched.default_runner_with_retry = _bridge
     try:
         return _run_and_publish(**kwargs)
     finally:
-        pub.default_runner_with_retry = original_runner
+        patched.default_runner_with_retry = original_runner
 
 
 def _run_and_publish(

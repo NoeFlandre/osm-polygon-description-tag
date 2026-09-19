@@ -17,8 +17,8 @@ from osm_polygon_description_tag.manifest import (
 )
 from osm_polygon_description_tag.publication import (
     PublicationError,
-    default_runner_with_retry,
     create_upload_plan,
+    default_runner_with_retry,
     execute_upload,
 )
 from osm_polygon_description_tag.publication.upload import _classify_failure

@@ -239,6 +239,39 @@ def test_run_with_retry_forwards_command_timeout_and_injected_runner(
     assert seen == [(["hf", "upload"], 12.5, sentinel)]
 
 
+def test_default_runner_with_retry_forwards_the_complete_retry_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    received: dict[str, object] = {}
+
+    def run_with_retry(command: list[str], **kwargs: object) -> None:
+        received.update(command=command, **kwargs)
+
+    monkeypatch.setattr(upload, "_run_with_retry", run_with_retry)
+
+    upload.default_runner_with_retry(
+        ["hf", "upload"],
+        max_retries=4,
+        backoff_seconds=1.5,
+        backoff_factor=2.5,
+        backoff_cap_seconds=9.0,
+        timeout=12.0,
+        _runner=lambda _command, _timeout: None,
+        retry_observer=lambda **_event: None,
+    )
+
+    assert received == {
+        "command": ["hf", "upload"],
+        "max_retries": 4,
+        "backoff_seconds": 1.5,
+        "backoff_factor": 2.5,
+        "backoff_cap_seconds": 9.0,
+        "timeout": 12.0,
+        "_runner": received["_runner"],
+        "retry_observer": received["retry_observer"],
+    }
+
+
 def test_require_confirmation_reports_exact_errors(tmp_path: Path) -> None:
     plan = _plan(tmp_path)
 

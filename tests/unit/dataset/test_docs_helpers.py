@@ -377,7 +377,10 @@ def test_insert_after_front_matter_preserves_existing_front_matter() -> None:
 
 
 def test_insert_after_front_matter_rejects_unterminated_front_matter() -> None:
-    with pytest.raises(docs_module.ReportingError, match="unterminated"):
+    with pytest.raises(
+        docs_module.ReportingError,
+        match=r"^existing README has unterminated YAML front matter$",
+    ):
         docs_module._insert_after_front_matter("---\ntitle: Dataset\nbody", "block", "\n")
 
 
@@ -386,6 +389,14 @@ def test_insert_after_front_matter_adds_separator_at_end_of_front_matter() -> No
 
     assert docs_module._insert_after_front_matter(readme, "block", "\n") == (
         "---\ntitle: Dataset\n---\nblock"
+    )
+
+
+def test_insert_stats_block_preserves_the_block_and_newline_after_front_matter() -> None:
+    readme = "---\r\ntitle: Dataset\r\n---\r\nbody"
+
+    assert docs_module._insert_stats_block(readme, "block", "\r\n") == (
+        "---\r\ntitle: Dataset\r\n---\r\nblock\r\nbody"
     )
 
 

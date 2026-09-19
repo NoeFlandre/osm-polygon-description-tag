@@ -1267,6 +1267,32 @@ def test_canonical_rows_sql_preserves_selection_validation_contract() -> None:
     assert str(unknown.value) == ("unsupported unique-row columns: ['not_a_schema_column']")
 
 
+def test_canonical_geometry_wkb_forwards_every_stable_encoding_option(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    geometry = object()
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr(canonical_rows, "from_wkb", lambda _value: geometry)
+
+    def encode(actual: object, **options: object) -> bytes:
+        seen["geometry"] = actual
+        seen["options"] = options
+        return b"canonical"
+
+    monkeypatch.setattr(canonical_rows, "to_wkb", encode)
+
+    assert canonical_rows.canonical_geometry_wkb(b"input") == b"canonical"
+    assert seen == {
+        "geometry": geometry,
+        "options": {"byte_order": 1, "include_srid": False, "output_dimension": 2},
+    }
+
+
+def test_non_geometry_bytes_are_not_interpreted_as_wkb() -> None:
+    assert canonical_rows._fingerprint_value("name", b"opaque") == b"opaque"
+
+
 def test_promote_artifact_moves_staged_file_and_reuses_identical_target(tmp_path: Path) -> None:
     stage = tmp_path / "stage"
     root = tmp_path / "root"

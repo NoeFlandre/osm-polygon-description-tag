@@ -307,15 +307,17 @@ def _run_parented_metadata_commit(plan: UploadPlan, parent_revision: str) -> Non
     try:
         api_class: object = _huggingface_hub.HfApi
         operation_class: object = _huggingface_hub.CommitOperationAdd
-        api = cast(Callable[[], object], api_class)()
+        api = cast(Callable[[], object], api_class)()  # pragma: no mutate - static cast
+        add_op = cast(Callable[..., object], operation_class)  # pragma: no mutate - static cast
         operations = [
-            cast(Callable[..., object], operation_class)(
+            add_op(
                 path_in_repo=item.relative_path,
                 path_or_fileobj=Path(plan.data_root) / item.relative_path,
             )
             for item in plan.files
         ]
-        cast(Any, api).create_commit(
+        commit = cast(Any, api).create_commit  # pragma: no mutate - static cast
+        commit(
             repo_id=plan.repo_id,
             operations=operations,
             repo_type="dataset",

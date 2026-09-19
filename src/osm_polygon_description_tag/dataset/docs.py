@@ -531,14 +531,28 @@ def _front_matter_separator(readme: str, position: int, newline: str) -> str:
     return newline
 
 
+def _inserted_block_terminator(remainder: str, newline: str) -> str:
+    """Return the newline that keeps an inserted block off the following line.
+
+    Body text that starts immediately after the front matter carries no leading
+    newline of its own, so without this the block and the first body line would
+    be concatenated into one line.
+    """
+    if not remainder or remainder[:1] in ("\n", "\r"):
+        return ""
+    return newline
+
+
 def _insert_after_front_matter(readme: str, block: str, newline: str) -> str | None:
     """Insert a generated block immediately after complete YAML front matter."""
     position = _front_matter_end(readme)
     if position is None:
         return None
 
-    separator = _front_matter_separator(readme, position, newline)
-    return readme[:position] + separator + block + readme[position:]
+    remainder = readme[position:]
+    leading = _front_matter_separator(readme, position, newline)
+    trailing = _inserted_block_terminator(remainder, newline)
+    return readme[:position] + leading + block + trailing + remainder
 
 
 def _insert_stats_block(readme: str, block: str, newline: str) -> str:

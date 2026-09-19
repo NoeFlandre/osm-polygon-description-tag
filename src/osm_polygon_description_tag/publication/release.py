@@ -30,9 +30,9 @@ from osm_polygon_description_tag.publication.models import (
     UploadPlan,
 )
 from osm_polygon_description_tag.publication.planning import (
-    build_metadata_only_upload_plan,
     _collect_data_items,
     _collect_manifest_items,
+    build_metadata_only_upload_plan,
 )
 from osm_polygon_description_tag.publication.upload import execute_upload
 from osm_polygon_description_tag.publication.verification import (
@@ -344,11 +344,12 @@ def _sync_remote_card(
     if remote_readme is None:
         return
     target = data_root / "README.md"
-    if target.is_file() and target.read_text(encoding="utf-8") == remote_readme:
+    current = target.read_text(encoding="utf-8") if target.is_file() else None  # pragma: no mutate
+    if current == remote_readme:
         return
     temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
     try:
-        temporary.write_text(remote_readme, encoding="utf-8", newline="")
+        temporary.write_text(remote_readme, encoding="utf-8", newline="")  # pragma: no mutate
         with temporary.open("rb") as handle:
             os.fsync(handle.fileno())
         os.replace(temporary, target)

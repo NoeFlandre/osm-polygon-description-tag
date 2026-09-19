@@ -276,6 +276,101 @@ def test_a_malformed_localized_entry_is_dropped() -> None:
     assert text_migration._canonical_localized(entries) == [{"key": "de", "value": "Beschreibung"}]
 
 
+def test_canonical_row_rewrites_base_and_localized_text_fields() -> None:
+    row = _row(
+        1,
+        "  Base description ",
+        [{"key": "fr", "value": "  Description française  "}],
+    )
+
+    assert text_migration._canonical_row(row) == {
+        **row,
+        "description": "Base description",
+        "localized_descriptions": [{"key": "fr", "value": "Description française"}],
+    }
+
+
+def test_canonical_row_keeps_localized_text_when_base_text_is_blank() -> None:
+    row = _row(1, "   ", [{"key": "fr", "value": " Un polygone "}])
+
+    result = text_migration._canonical_row(row)
+
+    assert result is not None
+    assert result["description"] is None
+    assert result["localized_descriptions"] == [{"key": "fr", "value": "Un polygone"}]
+
+
+def test_row_changed_treats_an_unchanged_nonempty_localized_value_as_unchanged() -> None:
+    localized = [{"key": "fr", "value": "Un polygone"}]
+    before = {"description": None, "localized_descriptions": localized}
+    after = {"description": None, "localized_descriptions": localized}
+
+    assert text_migration._row_changed(before, after) is False
+
+
+def test_text_columns_rejects_mismatched_column_lengths() -> None:
+    with pytest.raises(ValueError):
+        text_migration._text_columns(
+            pa.table(
+                {
+                    "description": ["one"],
+                    "localized_descriptions": [[], []],
+                }
+            )
+        )
+
+
+def test_retained_mask_rejects_mismatched_column_lengths() -> None:
+    with pytest.raises(ValueError):
+        text_migration._retained_mask(["one"], [[], []])
+
+
+def test_canonical_table_preserves_schema_when_all_rows_are_dropped() -> None:
+    table = pa.Table.from_pylist([_row(1, "   "), _row(2, "\t")], schema=SCHEMA)
+
+    repaired, dropped = text_migration._canonical_table(table)
+
+    assert dropped == 2
+    assert repaired.schema == SCHEMA
+    assert repaired.num_rows == 0
+
+
+def test_canonical_table_counts_only_rows_removed_by_the_mask() -> None:
+    table = pa.Table.from_pylist([_row(1, "   "), _row(2, "kept")], schema=SCHEMA)
+
+    repaired, dropped = text_migration._canonical_table(table)
+
+    assert dropped == 1
+    assert repaired.column("osm_id").to_pylist() == [2]
+
+
+def test_geo_metadata_keeps_inherited_values_and_writes_the_geo_key() -> None:
+    table = pa.Table.from_pylist([_row(1, "kept")], schema=SCHEMA)
+
+    schema = text_migration._geo_metadata_for(table, {b"custom": b"value"})
+
+    assert schema.metadata is not None
+    assert schema.metadata[b"custom"] == b"value"
+    assert b"geo" in schema.metadata
+    assert json.loads(schema.metadata[b"geo"])["columns"]["geometry"]["bbox"] == [
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+    ]
+
+
+def test_geo_metadata_omits_the_bbox_for_an_empty_table() -> None:
+    """An empty file has no extent, so GeoParquet omits ``bbox`` entirely."""
+    table = pa.Table.from_pylist([], schema=SCHEMA)
+
+    schema = text_migration._geo_metadata_for(table, {})
+
+    assert schema.metadata is not None
+    column = json.loads(schema.metadata[b"geo"])["columns"]["geometry"]
+    assert "bbox" not in column
+
+
 def test_concurrent_and_sequential_runs_agree(tmp_path: Path) -> None:
     """Worker count is an execution detail, never a change in the result."""
     rows = [_row(index, f"Description {index} ") for index in range(1, 5)]

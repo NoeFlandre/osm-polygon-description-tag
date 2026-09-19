@@ -1,7 +1,10 @@
 """Contracts that keep Typer wiring separate from language workflows."""
 
 import ast
+import os
 from pathlib import Path
+
+import pytest
 
 SOURCE_ROOT = Path(__file__).parents[2] / "src" / "osm_polygon_description_tag"
 CLI_PATH = SOURCE_ROOT / "language_cli.py"
@@ -63,10 +66,14 @@ def _defined_functions(path: Path) -> set[str]:
 
 
 def test_language_cli_is_only_command_wiring() -> None:
+    if "MUTANT_UNDER_TEST" in os.environ:
+        pytest.skip("static architecture bounds are checked on the canonical source tree")
     assert CLI_PATH.read_text(encoding="utf-8").count("\n") < 600
     assert not (_defined_functions(CLI_PATH) & MOVED_WORKFLOWS)
 
 
 def test_language_workflow_modules_exist_and_are_bounded() -> None:
+    if "MUTANT_UNDER_TEST" in os.environ:
+        pytest.skip("static architecture bounds are checked on the canonical source tree")
     assert all(path.is_file() for path in WORKFLOW_MODULES)
     assert all(path.read_text(encoding="utf-8").count("\n") < 600 for path in WORKFLOW_MODULES)

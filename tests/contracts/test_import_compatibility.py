@@ -2,12 +2,15 @@
 
 from types import ModuleType
 
+import pytest
+
 from osm_polygon_description_tag import _logging as legacy_logging
 from osm_polygon_description_tag import _resources as legacy_resources
 from osm_polygon_description_tag import config as legacy_config
 from osm_polygon_description_tag import dataset as dataset_package
 from osm_polygon_description_tag import discovery as legacy_discovery
 from osm_polygon_description_tag import extraction as legacy_extraction
+from osm_polygon_description_tag import language_cli
 from osm_polygon_description_tag import manifest as legacy_manifest
 from osm_polygon_description_tag import orchestrator as legacy_orchestrator
 from osm_polygon_description_tag import pipeline as legacy_pipeline
@@ -38,6 +41,7 @@ from osm_polygon_description_tag.workflow import (
     OrchestrationReport,
     build_all,
     build_one,
+    grid_operator,
     run_and_publish,
 )
 
@@ -126,7 +130,9 @@ def test_publication_package_exposes_only_supported_names() -> None:
         legacy_publication.build_per_pbf_upload_plan
         is publication_planning.build_per_pbf_upload_plan
     )
-    assert legacy_publication.default_runner_with_retry is publication_upload.default_runner_with_retry
+    assert (
+        legacy_publication.default_runner_with_retry is publication_upload.default_runner_with_retry
+    )
 
 
 def test_orchestrator_error_preserves_public_class_identity() -> None:
@@ -140,3 +146,21 @@ def test_workflow_legacy_imports_are_identical() -> None:
     assert legacy_pipeline.build_all is build_all
     assert legacy_orchestrator.OrchestrationReport is OrchestrationReport
     assert legacy_orchestrator.run_and_publish is run_and_publish
+
+
+@pytest.mark.parametrize(
+    ("module", "module_name"),
+    [
+        (language_cli, "osm_polygon_description_tag.language_cli"),
+        (grid_operator, "osm_polygon_description_tag.workflow.grid_operator"),
+    ],
+)
+def test_compatibility_module_reports_unknown_attributes_exactly(
+    module: ModuleType,
+    module_name: str,
+) -> None:
+    with pytest.raises(
+        AttributeError,
+        match=rf"^module {module_name!r} has no attribute 'unknown_attribute'$",
+    ):
+        module.__getattr__("unknown_attribute")

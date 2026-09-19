@@ -554,8 +554,16 @@ def test_static_cast_pragmas_are_attached_to_mutatable_statement_lines() -> None
     from libcst import MetadataWrapper, parse_module
     from mutmut.mutation.pragma_handling import get_ignored_lines
 
+    candidates: list[tuple[Path, str]] = []
     for path in sorted((PROJECT_ROOT / "src").rglob("*.py")):
         source = path.read_text(encoding="utf-8")
+        if not any(
+            "cast(" in line and "# pragma: no mutate" in line for line in source.splitlines()
+        ):
+            continue
+        candidates.append((path, source))
+
+    for path, source in candidates:
         ignored = get_ignored_lines(
             str(path), source, MetadataWrapper(parse_module(source))
         ).no_mutate_lines
@@ -775,6 +783,7 @@ def test_mutation_gate_resets_state_before_first_escalation(monkeypatch) -> None
     )
     monkeypatch.setattr(gate, "coverage_selection", lambda _path, _durations: {})
     monkeypatch.setattr(gate, "escalation_stages", lambda _budget: (1,))
+    monkeypatch.setattr(gate, "mutated_function_names", lambda _root: {"pkg.mod.x_function"})
     monkeypatch.setattr(gate, "_read_stats", lambda: stats)
     monkeypatch.setattr(gate, "_write_stats", lambda _stats: events.append("write"))
     monkeypatch.setattr(gate, "unresolved_mutants", lambda _root: ["mutant"])

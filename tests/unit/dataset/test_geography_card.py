@@ -155,6 +155,20 @@ def test_insert_map_block_handles_insertion_refresh_append_and_partial_markers()
         card_module.insert_map_block("<!-- GENERATED:H3_MAP:START -->\n", "body")
 
 
+def test_insert_map_block_preserves_empty_template_separator() -> None:
+    assert card_module.insert_map_block("", "body") == (
+        "<!-- GENERATED:H3_MAP:START -->\nbody\n<!-- GENERATED:H3_MAP:END -->\n"
+    )
+
+
+def test_insert_map_block_reports_the_exact_partial_marker_error() -> None:
+    with pytest.raises(
+        ValueError,
+        match=rf"^{re.escape('dataset card has malformed H3 map markers')}$",
+    ):
+        card_module.insert_map_block(f"{H3_MAP_START_MARKER}\n", "body")
+
+
 def test_render_map_block_uses_relative_asset_path() -> None:
     block = render_map_block()
     assert H3_MAP_ASSET_RELATIVE_PATH in block
@@ -717,6 +731,12 @@ def test_template_with_map_markers_replaces_only_the_first_stats_marker() -> Non
     assert output.count(H3_MAP_START_MARKER) == 1
     assert output.count(stats_marker) == 2
     assert output.endswith(f"{stats_marker}second\n")
+
+
+def test_template_with_map_markers_requires_the_stats_marker() -> None:
+    message = "template missing GENERATED:STATS:START marker; cannot insert map block"
+    with pytest.raises(ValueError, match=rf"^{re.escape(message)}$"):
+        _template_with_map_markers("before", "assets/map.png")
 
 
 def test_atomic_write_template_uses_explicit_utf8_and_binary_fsync_open() -> None:
