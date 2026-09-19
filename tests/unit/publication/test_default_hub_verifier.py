@@ -29,6 +29,7 @@ from osm_polygon_description_tag.orchestrator import (
     default_hub_verifier_factory,
 )
 from osm_polygon_description_tag.publication import REPO_ID, UploadItem
+from tests.helpers.messages import exactly
 
 
 class _FakeRepo:
@@ -755,3 +756,113 @@ def test_default_verifier_fails_closed_on_download_error(
 
     with pytest.raises(HubVerificationError, match="download failed"):
         factory(REPO_ID, items)
+
+
+class _RecordingApi:
+    """Fake ``HfApi`` that records exactly how it was called."""
+
+    def __init__(self, text: str = "card", sha: str = "revision-sha") -> None:
+        self.text = text
+        self.sha = sha
+        self.download_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def whoami(self) -> object:
+        return {"name": "fake"}
+
+    def repo_info(self, *_args: object, **_kwargs: object) -> object:
+        return _FakeRepo(self.sha)
+
+    def hf_hub_download(self, *args: object, **kwargs: object) -> str:
+        self.download_calls.append((args, dict(kwargs)))
+        import tempfile
+
+        handle = tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8")
+        handle.write(self.text)
+        handle.close()
+        return handle.name
+
+
+def _install(monkeypatch: pytest.MonkeyPatch, api: object) -> None:
+    import osm_polygon_description_tag.publication.verification as orch
+
+    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: api)
+
+
+def test_read_file_requests_the_exact_path_at_the_exact_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reading the remote card must be pinned to one revision and repo type.
+
+    A dropped ``revision`` silently reads the branch head instead of the
+    revision the release was planned against, which is precisely the race the
+    parented commit exists to prevent.
+    """
+    api = _RecordingApi(text="remote card")
+    _install(monkeypatch, api)
+
+    result = default_hub_verifier_factory().read_file(REPO_ID, "README.md", revision="abc123")
+
+    assert result == "remote card"
+    assert api.download_calls == [
+        ((REPO_ID, "README.md"), {"revision": "abc123", "repo_type": "dataset"})
+    ]
+
+
+def test_read_file_passes_the_cache_directory_only_when_one_was_configured(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    api = _RecordingApi()
+    _install(monkeypatch, api)
+
+    default_hub_verifier_factory(cache_dir=tmp_path).read_file(
+        REPO_ID, "README.md", revision="abc123"
+    )
+
+    assert api.download_calls[0][1] == {
+        "revision": "abc123",
+        "repo_type": "dataset",
+        "cache_dir": tmp_path,
+    }
+
+
+def test_read_file_reports_the_path_and_revision_it_could_not_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Failing(_RecordingApi):
+        def hf_hub_download(self, *args: object, **kwargs: object) -> str:
+            raise RuntimeError("boom")
+
+    _install(monkeypatch, _Failing())
+
+    from osm_polygon_description_tag.orchestrator import HubVerificationError
+
+    with pytest.raises(
+        HubVerificationError,
+        match=exactly(f"could not read README.md from {REPO_ID}@abc123: boom"),
+    ):
+        default_hub_verifier_factory().read_file(REPO_ID, "README.md", revision="abc123")
+
+
+def test_matching_revision_reports_the_repository_and_revision_it_failed_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An operational failure is not a content mismatch and must not return None."""
+
+    class _Failing(_RecordingApi):
+        def get_paths_info(self, *_args: object, **_kwargs: object) -> object:
+            raise RuntimeError("boom")
+
+    _install(monkeypatch, _Failing(sha="rev-9"))
+
+    from osm_polygon_description_tag.orchestrator import HubVerificationError
+
+    with pytest.raises(
+        HubVerificationError,
+        match=exactly(
+            f"remote metadata verification failed for {REPO_ID}@rev-9: "
+            "hub verification failed for README.md: boom"
+        ),
+    ):
+        default_hub_verifier_factory().matching_revision(
+            REPO_ID, (UploadItem(relative_path="README.md", size_bytes=2, sha256="a" * 64),)
+        )
