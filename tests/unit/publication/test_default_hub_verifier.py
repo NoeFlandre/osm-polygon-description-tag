@@ -776,10 +776,10 @@ class _RecordingApi:
         self.download_calls.append((args, dict(kwargs)))
         import tempfile
 
-        handle = tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8")
-        handle.write(self.text)
-        handle.close()
-        return handle.name
+        directory = tempfile.mkdtemp()
+        target = Path(directory) / "downloaded.md"
+        target.write_text(self.text, encoding="utf-8")
+        return str(target)
 
 
 def _install(monkeypatch: pytest.MonkeyPatch, api: object) -> None:
