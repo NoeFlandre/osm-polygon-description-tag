@@ -503,3 +503,26 @@ def test_the_relation_joins_its_selects_with_union_all(
     relation = unique_rows._parquet_relation([Path("a.parquet"), Path("b.parquet")], ())
 
     assert relation == "SELECT 1 UNION ALL SELECT 1"
+
+
+def test_a_naive_timestamp_ranks_as_utc_on_any_machine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Canonical ranking must not depend on the operator's local time zone.
+
+    A stored timestamp without an offset is UTC by the dataset's contract.
+    Leaving it naive makes ``astimezone`` assume *local* time, so the same
+    input ranks differently on two machines -- and the run that produced the
+    published dataset happened to be in UTC, which is why nothing noticed.
+    """
+    import time
+
+    from osm_polygon_description_tag.dataset import canonical_rows
+
+    monkeypatch.setenv("TZ", "America/New_York")
+    time.tzset()
+    try:
+        assert canonical_rows._timestamp_rank("2020-01-01T00:00:00") == 1577836800.0
+    finally:
+        monkeypatch.delenv("TZ", raising=False)
+        time.tzset()

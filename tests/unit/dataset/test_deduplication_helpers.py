@@ -1514,3 +1514,24 @@ def test_finish_deduplication_writes_complete_state_without_changes(
     assert result.input_rows == 2
     assert result.output_rows == 2
     assert writes == [(context.state_path, {"outputs": {"a.parquet": "sha"}})]
+
+
+def test_the_canonical_relation_sql_is_pinned_text() -> None:
+    """DuckDB ignores keyword and identifier case, so behaviour cannot pin this.
+
+    The relation is a deterministic artifact of this module, and its text is
+    what a reviewer reads when a deduplication result is questioned, so the
+    exact SQL is the contract.
+    """
+    executed: list[str] = []
+
+    class Connection:
+        def execute(self, sql: str) -> None:
+            executed.append(sql)
+
+    _canonical_relation(Connection(), [Path("/data/a.parquet")])
+
+    assert len(executed) == 1
+    assert executed[0].startswith("CREATE TEMP TABLE deduplicated AS ")
+    assert "(SELECT * EXCLUDE (geometry), " in executed[0]
+    assert "AS geometry FROM read_parquet(['/data/a.parquet'])" in executed[0]

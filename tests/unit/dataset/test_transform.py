@@ -386,3 +386,23 @@ def test_decode_polygon_preserves_invalid_geometry_reason_and_cause() -> None:
 
     assert info.value.reason == "invalid_geometry"
     assert isinstance(info.value.__cause__, ValueError)
+
+
+def test_a_naive_source_timestamp_is_read_as_utc_on_any_machine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OSM timestamps without an offset are UTC, not the operator's local time."""
+    import time
+    from datetime import UTC, datetime
+
+    from osm_polygon_description_tag.dataset import transform as transform_module
+
+    monkeypatch.setenv("TZ", "America/New_York")
+    time.tzset()
+    try:
+        assert transform_module._optional_timestamp("2020-01-01T00:00:00") == datetime(
+            2020, 1, 1, tzinfo=UTC
+        )
+    finally:
+        monkeypatch.delenv("TZ", raising=False)
+        time.tzset()

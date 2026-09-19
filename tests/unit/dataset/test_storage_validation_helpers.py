@@ -959,3 +959,13 @@ def test_validate_metadata_bbox_checks_arity_and_exact_tolerance(
         with pytest.raises(StorageError) as mismatch:
             _validate_metadata_bbox(state, [0.0, 1.0, 2.1, 3.0])
         assert str(mismatch.value).startswith("bbox mismatch: actual")
+
+
+def test_a_non_text_localized_value_is_refused_by_its_exact_message() -> None:
+    from osm_polygon_description_tag.dataset import storage
+
+    with pytest.raises(
+        storage.StorageError,
+        match=exactly("localized description value must be non-empty text"),
+    ):
+        storage._validate_localized_value(7)
