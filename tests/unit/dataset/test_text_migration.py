@@ -81,9 +81,27 @@ def _row(
     }
 
 
+def _geo_metadata_for_rows(rows: list[dict[str, object]]) -> dict[bytes, bytes]:
+    """Declare the extent the rows actually have.
+
+    A fixed extent silently matched whatever the retained rows happened to be,
+    so a stale-metadata defect produced the expected bounding box by accident.
+    """
+    payload = json.loads(_GEO_METADATA[b"geo"])
+    if rows:
+        payload["columns"]["geometry"]["bbox"] = [
+            min(float(row["bbox_min_x"]) for row in rows),
+            min(float(row["bbox_min_y"]) for row in rows),
+            max(float(row["bbox_max_x"]) for row in rows),
+            max(float(row["bbox_max_y"]) for row in rows),
+        ]
+    return {b"geo": json.dumps(payload).encode(), b"provenance": b"fixture"}
+
+
 def _write_parquet(path: Path, rows: list[dict[str, object]]) -> None:
     table = pa.Table.from_pylist(rows, schema=SCHEMA)
-    pq.write_table(table.cast(SCHEMA.with_metadata(_GEO_METADATA)), path, compression="zstd")
+    metadata = SCHEMA.with_metadata(_geo_metadata_for_rows(rows))
+    pq.write_table(table.cast(metadata), path, compression="zstd")
 
 
 def _write_manifest(path: Path, parquet: Path, *, included_rows: int) -> None:
@@ -564,10 +582,14 @@ def test_dropping_rows_rebuilds_the_geo_bbox_from_the_rows_that_remain(
 
     assert migrate_dataset_text(data_root) == 1
 
-    geo = json.loads(pq.ParquetFile(parquet).schema_arrow.metadata[b"geo"])
+    stored = pq.ParquetFile(parquet).schema_arrow.metadata
+    geo = json.loads(stored[b"geo"])
     bbox = geo["columns"]["geometry"]["bbox"]
+    # the file was written declaring -50.0, so an inherited extent is visible
     assert bbox[0] == near["bbox_min_x"], "bbox still covers the dropped row"
     assert bbox[2] == near["bbox_max_x"]
+    # only the geo block is recomputed; everything else is carried across
+    assert stored[b"provenance"] == b"fixture"
 
 
 def test_dropping_rows_preserves_metadata_inherited_from_the_source(
