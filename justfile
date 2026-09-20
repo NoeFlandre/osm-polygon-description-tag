@@ -53,10 +53,20 @@ risk:
 # into the exact covering-test set per function, which is what keeps it fast:
 # a test that never runs a function's lines cannot kill that function's mutants.
 # Keep TMPDIR inherited from the caller; it must remain outside the repository.
+# Record which tests cover which functions. Every mutation shard waits on this,
+# so it runs across processes: measured 5m04s to 2m37s on eight workers.
+#
+# The parallel map is not merely the same map sooner. Each worker starts with
+# fresh module state, so a lazily imported name that one process resolves once
+# and caches is re-resolved in the others, and four ``__getattr__``-style
+# functions gain covering tests that a single process never records. Compared
+# directly: no function lost a test, four gained some. That shadowing is the
+# same effect that let a ``__getattr__`` mutant survive a test reading an
+# already-cached attribute, so the parallel map is the sounder one.
 mutation-contexts:
     mkdir -p data-root/.tmp
     COVERAGE_FILE="$PWD/data-root/.tmp/.coverage-ctx" \
-        uv run pytest -q -p no:cacheprovider \
+        uv run pytest -q -p no:cacheprovider -n auto \
         --cov=osm_polygon_description_tag --cov-branch --cov-context=test --cov-report=
 
 # Run the all-source mutation gate for all source modules; mutmut resumes from its ignored cache.

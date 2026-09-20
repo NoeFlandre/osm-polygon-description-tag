@@ -278,10 +278,20 @@ check for zero-byte `.py.meta` files afterwards and delete them so mutmut
 regenerates them. Convergence from 624 survivors took eight passes on an SSD
 scratch copy, and the sequence that finally worked is worth repeating verbatim:
 
-1. run the suite, then re-record `just mutation-contexts`;
+1. run the suite, then re-record `just mutation-contexts` (it runs across
+   processes: 5m04s to 2m37s here, and every shard waits on it);
 2. delete `mutants/mutmut-stats.json` and `mutants/mutmut-recorded-tests.json`;
 3. run the gate;
 4. confirm with `scripts/check_mutation_score.py --minimum-score 100`.
+
+Record the contexts in parallel rather than serially, and not only for the
+time. Each worker starts with fresh module state, so a lazily imported name
+that one process resolves once and caches is resolved again in the others.
+Comparing the two maps directly over 1,466 functions: none lost a covering
+test, and four `__getattr__`-style functions gained some that a single process
+never records. That shadowing is exactly what let a `__getattr__` mutant
+survive a test which read an already-cached attribute, so the parallel map is
+the sounder input as well as the faster one.
 
 #### Reading a survivor without running the gate
 
