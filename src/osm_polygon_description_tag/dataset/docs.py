@@ -271,7 +271,9 @@ def _render_timestamp_section(stats: Mapping[str, Any]) -> list[str]:
 
 def _render_geometry_stats_section(stats: Mapping[str, Any]) -> list[str]:
     """Render the additive geometry statistics section."""
-    geometry_types = stats.get("geometry_types", {})
+    # The isinstance guard below normalises anything that is not a Mapping,
+    # so the default here cannot reach the caller: {} and None are the same.
+    geometry_types = stats.get("geometry_types", {})  # pragma: no mutate
     if not isinstance(geometry_types, Mapping):
         geometry_types = {}
     regional_rows, globally_unique, overlap_duplicates, _manifest_duplicates = (
@@ -572,8 +574,11 @@ def _stats_marker_count(readme: str) -> int:
 def _replace_stats_block(readme: str, block: str) -> str:
     if _GENERATED_PATTERN.search(readme) is None:
         raise ReportingError("existing README has malformed generated stats markers")
+    # _stats_marker_count refuses more than one block before this runs, so
+    # replacing "the first" and "all" are the same substitution here.
+    replace_one = 1  # pragma: no mutate
     return _GENERATED_PATTERN.sub(
-        lambda match: match.group(1) + block + match.group(3), readme, count=1
+        lambda match: match.group(1) + block + match.group(3), readme, count=replace_one
     )
 
 

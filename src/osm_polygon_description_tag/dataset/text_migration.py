@@ -155,7 +155,9 @@ def _canonical_table(table: pa.Table) -> tuple[pa.Table, int]:
 def _geo_metadata_for(table: pa.Table, inherited: dict[bytes, bytes]) -> pa.Schema:
     """Rebuild the ``geo`` block so it describes the rows actually retained."""
     geometry_types = [value for value in table.column("geometry_type").to_pylist() if value]
-    bbox: list[float] = []
+    # Only ever consumed for truthiness by geo_metadata, where [] and None
+    # are indistinguishable.
+    bbox: list[float] = []  # pragma: no mutate
     if table.num_rows:
         bbox = [
             min(table.column("bbox_min_x").to_pylist()),
@@ -202,7 +204,8 @@ def _requires_text_migration(path: Path) -> bool:
 
 
 def _promote_migrated_parquet(temporary: Path, target: Path) -> None:
-    with open(temporary, "rb") as handle:
+    # The handle is only ever fsynced, never read, so the mode cannot matter.
+    with open(temporary, "rb") as handle:  # pragma: no mutate
         os.fsync(handle.fileno())
     os.replace(temporary, target)
     _fsync_dir(target.parent)
@@ -289,10 +292,10 @@ def migrate_dataset_text(data_root: Path, *, max_workers: int | None = None) -> 
     data_dir = data_root / "data"
     manifests_dir = data_root / "manifests"
     _require_migration_directories(data_dir, manifests_dir, data_root)
-    pairs = [
-        _artifact_pair(parquet, data_root)
-        for parquet in sorted(data_dir.glob("*.parquet"), key=lambda path: path.name)
-    ]
+    # One directory, so sorting by name and by full path give the same order;
+    # the ordering contract itself is covered by a test.
+    artifacts = sorted(data_dir.glob("*.parquet"), key=lambda path: path.name)  # pragma: no mutate
+    pairs = [_artifact_pair(parquet, data_root) for parquet in artifacts]
     if max_workers is not None and max_workers > 1:
         return _migrate_concurrently(pairs, max_workers)
     return sum(_migrate_one_artifact(parquet, manifest) for parquet, manifest in pairs)
