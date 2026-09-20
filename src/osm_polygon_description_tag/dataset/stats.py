@@ -897,9 +897,7 @@ def collect_stats(
         feature_summary = _collect_feature_summary(connection)
         # SQL keywords and DuckDB identifiers are both case-insensitive, so no
         # input can tell a re-cased spelling of this query apart from this one.
-        raw_rows = _query_int(  # pragma: no mutate
-            connection, "SELECT COUNT(*) FROM all_features"
-        )
+        raw_rows = _query_int(connection, "SELECT COUNT(*) FROM all_features")  # pragma: no mutate
     finally:
         connection.close()
 

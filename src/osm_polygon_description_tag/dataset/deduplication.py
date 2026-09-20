@@ -276,15 +276,16 @@ def _resume_staged(
     )
 
 
+# DuckDB folds identifier case, even inside quotes, so a re-cased spelling of
+# this column name is the same query and no input can tell the two apart.
+_GEOMETRY_COLUMN = "geometry"  # pragma: no mutate
+
+
 def _canonical_relation(connection: duckdb.DuckDBPyConnection, parquets: Sequence[Path]) -> None:
     paths = ", ".join(_sql_literal(str(path)) for path in parquets)
     relation = (
         "(SELECT * EXCLUDE (geometry), "
-        # DuckDB folds identifier case, so re-casing this column name is the
-        # same query; see the note in ``stats._insert_batch``.
-        # pragma: no mutate start
-        f"{canonical_geometry_wkb_sql('geometry', input_is_geometry=True)} AS geometry "
-        # pragma: no mutate end
+        f"{canonical_geometry_wkb_sql(_GEOMETRY_COLUMN, input_is_geometry=True)} AS geometry "
         f"FROM read_parquet([{paths}]))"
     )
     canonical_query = canonical_rows_sql(
