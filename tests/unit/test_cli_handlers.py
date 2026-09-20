@@ -20,8 +20,20 @@ import osm_polygon_description_tag.cli as cli
 
 @pytest.fixture
 def paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """Resolve paths from the handler's own arguments, and prove it did.
+
+    A stub that ignores what it is handed cannot tell whether the handler
+    passed its arguments or something else entirely, which is exactly the
+    mutation it is meant to catch: `_resolve_paths(None)` would still be
+    handed back a valid Paths object and every assertion would pass.
+    """
     resolved = SimpleNamespace(source_root=tmp_path / "sources", data_root=tmp_path / "data-root")
-    monkeypatch.setattr(cli, "_resolve_paths", lambda _args: resolved)
+
+    def _resolve(args: object) -> SimpleNamespace:
+        assert isinstance(args, SimpleNamespace), f"handler passed {args!r} instead of its args"
+        return resolved
+
+    monkeypatch.setattr(cli, "_resolve_paths", _resolve)
     return resolved
 
 

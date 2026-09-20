@@ -6,6 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 from shapely import to_wkb
 from shapely.geometry import Polygon
@@ -526,3 +528,28 @@ def test_a_naive_timestamp_ranks_as_utc_on_any_machine(
     finally:
         monkeypatch.delenv("TZ", raising=False)
         time.tzset()
+
+
+def test_parquet_select_forwards_the_path_and_required_columns_per_column(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each column expression needs both, and only the refusal path reads them.
+
+    ``_parquet_select`` is where the file being read and the widened required
+    set are handed down; losing either turns a refusal that names the file
+    into one that names ``None``, or silently relaxes what the caller demanded.
+    """
+    parquet = tmp_path / "region.parquet"
+    pq.write_table(pa.table({"osm_id": [1]}), parquet)
+    seen: list[dict[str, object]] = []
+
+    def _spy(column: str, available: set[str], **kwargs: object) -> str:
+        seen.append(kwargs)
+        return column
+
+    monkeypatch.setattr(unique_rows, "_parquet_column_expression", _spy)
+    required = frozenset({"osm_id", "description"})
+
+    unique_rows._parquet_select(parquet, ("osm_id",), required_columns=required)
+
+    assert seen == [{"has_geo_metadata": False, "path": parquet, "required_columns": required}]
