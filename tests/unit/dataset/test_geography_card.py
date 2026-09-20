@@ -934,3 +934,13 @@ def test_install_map_block_takes_its_line_ending_from_the_opening_marker() -> No
     out = install_map_block(template, "![alt](path.png)")
 
     assert f"{H3_MAP_START_MARKER}\r\n![alt](path.png)\r\n{H3_MAP_END_MARKER}" in out
+
+
+def test_normalize_block_body_strips_only_line_endings_not_letters() -> None:
+    """``rstrip`` takes a character *set*, so a wider set eats body text.
+
+    A body ending in one of those characters is the only input that separates
+    stripping line endings from stripping whatever else was added to the set.
+    """
+    assert card_module._normalize_block_body("bodyX\r\n", "\r\n") == "bodyX"
+    assert card_module._normalize_block_body("bodyX", "\n") == "bodyX"
