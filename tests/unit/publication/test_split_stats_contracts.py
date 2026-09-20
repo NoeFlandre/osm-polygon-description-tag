@@ -171,3 +171,70 @@ def _unsupported_languages_in_columns(codes: list[str | None], statuses: list[st
     from osm_polygon_description_tag.publication.language import _unsupported_languages_in
 
     return _unsupported_languages_in(_unsupported_columns(codes, statuses))
+
+
+def _annotation_batch(rows: list[dict[str, object]]):
+    import pyarrow as pa
+
+    keys = (
+        "status",
+        "language_code",
+        "tag_key",
+        "osm_type",
+        "osm_id",
+        "split_status",
+        "sentence_count",
+    )
+    return pa.record_batch([pa.array([row[key] for row in rows]) for key in keys], names=list(keys))
+
+
+def _row(code: str | None, split: str, *, osm_id: int = 1) -> dict[str, object]:
+    return {
+        "status": "detected" if code else "uncertain",
+        "language_code": code,
+        "tag_key": "description",
+        "osm_type": "way",
+        "osm_id": osm_id,
+        "split_status": split,
+        "sentence_count": 1,
+    }
+
+
+def test_the_result_reports_every_distinct_unsupported_language() -> None:
+    """The distinct count is the whole set, not the truncated table."""
+    from osm_polygon_description_tag.publication.language import _StatsAccumulator
+
+    accumulator = _StatsAccumulator()
+    rows = [
+        _row("tso", "unsupported_language", osm_id=1),
+        _row("tso", "unsupported_language", osm_id=2),
+        _row("vec", "unsupported_language", osm_id=3),
+        _row("eng", "split", osm_id=4),
+        _row(None, "not_detected", osm_id=5),
+    ]
+    accumulator.observe(_annotation_batch(rows))
+
+    result = accumulator.result()
+
+    assert result.unsupported_distinct_count == 2
+    assert result.top_unsupported_languages == (("tso", 2), ("vec", 1))
+    assert result.unsupported_language_count == 3
+    assert result.split_count == 1
+    assert result.not_detected_count == 1
+
+
+def test_equal_unsupported_counts_are_ordered_by_language_code() -> None:
+    """Ties must resolve deterministically or the published table is unstable."""
+    from osm_polygon_description_tag.publication.language import _StatsAccumulator
+
+    accumulator = _StatsAccumulator()
+    accumulator.observe(
+        _annotation_batch(
+            [
+                _row("zul", "unsupported_language", osm_id=1),
+                _row("ast", "unsupported_language", osm_id=2),
+            ]
+        )
+    )
+
+    assert accumulator.result().top_unsupported_languages == (("ast", 1), ("zul", 1))
