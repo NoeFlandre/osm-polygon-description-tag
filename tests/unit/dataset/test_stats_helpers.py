@@ -1077,6 +1077,33 @@ def test_every_row_validator_is_told_which_row_it_is_looking_at(
         )
 
 
+def test_hole_counts_accumulate_across_rows_of_one_batch() -> None:
+    """Within a batch too, each row adds to the running total.
+
+    The cross-batch test cannot see this: it uses one row per batch, so
+    assigning and adding agree there. Here the last row has fewer holes than
+    the batch as a whole, so assignment reports the last row's count.
+    """
+    two_holes = Polygon(
+        [(0, 0), (0, 10), (10, 10), (10, 0)],
+        [[(1, 1), (1, 2), (2, 2), (2, 1)], [(5, 5), (5, 6), (6, 6), (6, 5)]],
+    )
+    one_hole = Polygon(
+        [(0, 0), (0, 10), (10, 10), (10, 0)],
+        [[(3, 3), (3, 4), (4, 4), (4, 3)]],
+    )
+    rows = [
+        _good_row("region.parquet") | {"wkb": to_wkb(geometry)}
+        for geometry in (two_holes, one_hole)
+    ]
+
+    summary = stats_module._summarize_spatial_batch(
+        _spatial_batch(rows), source_name="region.parquet", row_offset=0
+    )
+
+    assert summary.geometry_holes_total == 3
+
+
 def test_a_batch_without_a_source_column_falls_back_to_the_given_name() -> None:
     """A per-file batch has no source column, so the caller's name is used."""
     batch = pa.record_batch(

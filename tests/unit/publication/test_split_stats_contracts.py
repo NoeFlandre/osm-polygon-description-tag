@@ -170,9 +170,10 @@ def test_unsupported_languages_are_reported_largest_first_and_capped() -> None:
     # Twenty-five distinct languages with descending counts, so the cap is
     # observable, and two sharing a count, so the tie-break is observable.
     for index in range(25):
-        occurrences = 25 - index
-        if index == 1:
-            occurrences = 25
+        # Counts rise with the code so that ordering by count and ordering by
+        # code disagree: with the two agreeing, dropping the sort key entirely
+        # leaves the published table unchanged.
+        occurrences = 25 if index == 23 else index + 1
         for _ in range(occurrences):
             osm_id += 1
             rows.append(_row(f"l{index:02d}", "unsupported_language", osm_id=osm_id))
@@ -182,11 +183,11 @@ def test_unsupported_languages_are_reported_largest_first_and_capped() -> None:
 
     assert stats.unsupported_distinct_count == 25
     assert len(stats.top_unsupported_languages) == 20
-    # "l00" and "l01" both occur 25 times, so the code decides which comes first.
-    assert stats.top_unsupported_languages[0] == ("l00", 25)
-    assert stats.top_unsupported_languages[1] == ("l01", 25)
+    # "l23" and "l24" both occur 25 times, so the code decides which comes first.
+    assert stats.top_unsupported_languages[0] == ("l23", 25)
+    assert stats.top_unsupported_languages[1] == ("l24", 25)
     # Descending, and truncated before the five smallest.
-    assert stats.top_unsupported_languages[-1] == ("l19", 6)
+    assert stats.top_unsupported_languages[-1] == ("l05", 6)
     assert [count for _code, count in stats.top_unsupported_languages] == sorted(
         (count for _code, count in stats.top_unsupported_languages), reverse=True
     )

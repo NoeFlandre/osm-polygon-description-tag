@@ -536,17 +536,24 @@ def test_marked_section_count_error_is_exact() -> None:
         _replace_marked_section("readme", "replacement", 0)
 
 
-def test_insert_section_preserves_non_newline_trailing_bytes_before_limitations() -> None:
-    """Only the blank lines are trimmed, not the trailing spaces before them.
-
-    Two spaces at the end of a Markdown line are a hard line break, so a strip
-    that took all whitespace would silently rewrite the paragraph above the
-    inserted section.
-    """
-    readme = "introXX  \n\n## Limitations\nbody\n"
+@pytest.mark.parametrize(
+    "tail",
+    [
+        # Ends in a letter: a strip set widened beyond the line breaks eats it.
+        pytest.param("introXX", id="letter"),
+        # Ends in the two spaces that make a Markdown hard line break: a strip
+        # of all whitespace would silently rewrite the paragraph above.
+        pytest.param("introXX  ", id="hard-line-break"),
+    ],
+)
+def test_insert_section_preserves_non_newline_trailing_bytes_before_limitations(
+    tail: str,
+) -> None:
+    """Only the blank lines are trimmed, whatever precedes them."""
+    readme = f"{tail}\n\n## Limitations\nbody\n"
 
     assert language_card._insert_section(readme, "replacement", "\n") == (
-        "introXX  \n\nreplacement\n## Limitations\nbody\n"
+        f"{tail}\n\nreplacement\n## Limitations\nbody\n"
     )
 
 
