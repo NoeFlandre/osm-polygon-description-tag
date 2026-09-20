@@ -290,6 +290,8 @@ jobs:
         with:
           name: mutation-coverage-contexts
           path: data-root/.tmp/.coverage-ctx
+          # the database name starts with a dot, which this action skips by default
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
 
