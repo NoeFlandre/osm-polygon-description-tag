@@ -283,6 +283,29 @@ scratch copy, and the sequence that finally worked is worth repeating verbatim:
 3. run the gate;
 4. confirm with `scripts/check_mutation_score.py --minimum-score 100`.
 
+#### Reading a survivor without running the gate
+
+The loop above is for *proving* a score. It is the wrong tool for the question
+that comes up far more often -- "what does this survivor actually change?" --
+because a mutant's source is a by-product of a full run: tens of minutes in CI,
+and a local run that has to get through mutmut's stats phase first.
+
+`mutate_file_contents` is a pure function of one file's text, so the diff is
+available without executing anything:
+
+```
+python scripts/show_mutant.py \
+    osm_polygon_description_tag.dataset.stats.x_collect_stats__mutmut_24
+```
+
+Names paste straight from a shard's log, several at a time, and the answer
+arrives in seconds. Use this to triage survivors into "needs a test" and
+"equivalent", and keep the gate for confirming the result.
+
+The ids are positions in a per-function list, so any edit to the file renumbers
+them. Re-read the survivor names after changing the source; an id carried across
+a commit points at a different mutation.
+
 Give the gate a `TMPDIR` nothing else uses. Sharing one with an ad-hoc `pytest`
 run deletes the numbered directory underneath it and its stats collection dies
 with `FileNotFoundError`.

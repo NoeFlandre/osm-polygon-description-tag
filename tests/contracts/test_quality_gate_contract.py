@@ -1157,3 +1157,50 @@ def test_a_fully_killed_report_names_no_unresolved_mutant(tmp_path: Path) -> Non
 
     assert report["passed"] is True
     assert report["unresolved_mutants"] == {}
+
+
+def test_a_mutant_name_resolves_to_its_function_module_and_id() -> None:
+    """Names are split from the right: a module path may contain underscores."""
+    from scripts.show_mutant import split_mutant_name
+
+    assert split_mutant_name("a.b.c.x_func__mutmut_3") == ("a.b.c", "x_func", "3")
+    assert split_mutant_name("a.b.xǁCǁm__mutmut_12") == ("a.b", "xǁCǁm", "12")
+
+    for rejected in ("no_marker_here", "x_func__mutmut_1", "__mutmut_1"):
+        with pytest.raises(ValueError, match="not a mutant name"):
+            split_mutant_name(rejected)
+
+
+def test_a_module_resolves_to_a_file_or_its_package_init(tmp_path: Path) -> None:
+    """Packages are named by their dotted path, not by ``__init__``."""
+    from scripts.show_mutant import module_path
+
+    (tmp_path / "pkg" / "sub").mkdir(parents=True)
+    (tmp_path / "pkg" / "__init__.py").write_text("")
+    (tmp_path / "pkg" / "sub" / "__init__.py").write_text("")
+    (tmp_path / "pkg" / "mod.py").write_text("")
+
+    assert module_path("pkg.mod", source_root=tmp_path) == tmp_path / "pkg" / "mod.py"
+    assert module_path("pkg.sub", source_root=tmp_path) == tmp_path / "pkg" / "sub" / "__init__.py"
+
+    with pytest.raises(FileNotFoundError, match="pkg.missing"):
+        module_path("pkg.missing", source_root=tmp_path)
+
+
+def test_the_diff_shows_the_mutation_and_not_the_renamed_definition() -> None:
+    """Every mutant renames its def, which would otherwise be the whole diff."""
+    from scripts.show_mutant import mutant_diff
+
+    source = (
+        "def x_f__mutmut_orig(a):\n    return a + 1\n\ndef x_f__mutmut_1(a):\n    return a - 1\n"
+    )
+
+    assert mutant_diff(source, "x_f", "1") == "-    return a + 1\n+    return a - 1"
+
+    identical = "def x_g__mutmut_orig(a):\n    return a\n\ndef x_g__mutmut_1(a):\n    return a\n"
+    assert "equivalent mutant" in mutant_diff(identical, "x_g", "1")
+
+    with pytest.raises(KeyError, match="no mutant 9"):
+        mutant_diff(source, "x_f", "9")
+    with pytest.raises(KeyError, match="no mutants generated"):
+        mutant_diff(source, "x_missing", "1")
