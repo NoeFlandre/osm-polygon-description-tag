@@ -139,38 +139,57 @@ def test_no_unsupported_rows_yields_nothing() -> None:
     assert list(_unsupported_languages_in(columns)) == []
 
 
+def test_mismatched_column_lengths_are_rejected() -> None:
+    """Two columns of different lengths mean the batch was mis-assembled.
+
+    ``zip`` would silently stop at the shorter one and under-count the
+    unsupported languages, so the pairing is strict.
+    """
+    from osm_polygon_description_tag.publication.language import _unsupported_languages_in
+
+    columns = _unsupported_columns(
+        ["tso", "vec"], ["unsupported_language", "unsupported_language", "unsupported_language"]
+    )
+
+    with pytest.raises(ValueError, match="zip"):
+        list(_unsupported_languages_in(columns))
+
+
 def test_unsupported_languages_are_reported_largest_first_and_capped() -> None:
-    """The published table takes the twenty largest, ties broken by code."""
+    """The published table takes the twenty largest, ties broken by code.
+
+    Asserted through ``result()`` rather than by re-sorting the counter here:
+    the ordering and the cap belong to the published field, and a test that
+    re-implements them cannot notice the field losing either one.
+    """
     from osm_polygon_description_tag.publication.language import _StatsAccumulator
 
     accumulator = _StatsAccumulator()
-    codes: list[str | None] = []
-    statuses: list[str] = []
-    # 25 distinct languages with descending counts, so the cap and the order
-    # are both observable.
+    rows: list[dict[str, object]] = []
+    osm_id = 0
+    # Twenty-five distinct languages with descending counts, so the cap is
+    # observable, and two sharing a count, so the tie-break is observable.
     for index in range(25):
-        code = f"l{index:02d}"
-        for _ in range(25 - index):
-            codes.append(code)
-            statuses.append("unsupported_language")
-    accumulator._unsupported_languages.update(_unsupported_languages_in_columns(codes, statuses))
+        occurrences = 25 - index
+        if index == 1:
+            occurrences = 25
+        for _ in range(occurrences):
+            osm_id += 1
+            rows.append(_row(f"l{index:02d}", "unsupported_language", osm_id=osm_id))
+    accumulator.observe(_annotation_batch(rows))
 
-    top = tuple(
-        sorted(accumulator._unsupported_languages.items(), key=lambda item: (-item[1], item[0]))[
-            :20
-        ]
+    stats = accumulator.result()
+
+    assert stats.unsupported_distinct_count == 25
+    assert len(stats.top_unsupported_languages) == 20
+    # "l00" and "l01" both occur 25 times, so the code decides which comes first.
+    assert stats.top_unsupported_languages[0] == ("l00", 25)
+    assert stats.top_unsupported_languages[1] == ("l01", 25)
+    # Descending, and truncated before the five smallest.
+    assert stats.top_unsupported_languages[-1] == ("l19", 6)
+    assert [count for _code, count in stats.top_unsupported_languages] == sorted(
+        (count for _code, count in stats.top_unsupported_languages), reverse=True
     )
-
-    assert len(top) == 20
-    assert top[0] == ("l00", 25)
-    assert top[-1] == ("l19", 6)
-    assert len(accumulator._unsupported_languages) == 25
-
-
-def _unsupported_languages_in_columns(codes: list[str | None], statuses: list[str]):
-    from osm_polygon_description_tag.publication.language import _unsupported_languages_in
-
-    return _unsupported_languages_in(_unsupported_columns(codes, statuses))
 
 
 def _annotation_batch(rows: list[dict[str, object]]):
