@@ -19,6 +19,22 @@ test:
 test-integration:
     uv run pytest tests/integration -q
 
+# The suite is the expensive part and `quality` already runs it with coverage,
+# so re-running it here only produced the same numbers a second time.
+#
+# Build the CRAP report from an existing reports/coverage.json.
+risk-prepared:
+    test -f reports/coverage.json
+    uv run radon cc src/osm_polygon_description_tag -s -j > reports/radon.json
+    uv run python scripts/quality_metrics.py crap \
+        --coverage-json reports/coverage.json \
+        --radon-json reports/radon.json \
+        --output reports/crap.json \
+        --markdown-output reports/crap.md
+    uv run python scripts/quality_metrics.py check \
+        --report reports/crap.json \
+        --max-crap-score 6
+
 # Generate deterministic CRAP risk reports from test coverage and Radon.
 risk:
     mkdir -p reports
@@ -62,6 +78,25 @@ mutation: mutation-contexts
 # needs, so it is a superset of ``scope_file``. Scoring uses ``scope_file`` only,
 # which keeps the shards a clean partition: the canary is scored by the one
 # shard that owns it.
+# Contexts are a pure function of the source and the test suite, so regenerating
+# them inside every shard re-ran the whole suite once per shard for an identical
+# result.
+#
+# Score one shard against coverage contexts that already exist.
+mutation-shard-prepared scope_file mutate_file:
+    test -f "{{scope_file}}"
+    test -f "{{mutate_file}}"
+    test -f data-root/.tmp/.coverage-ctx
+    mkdir -p reports
+    uv run python -m scripts.run_mutation_gate --max-children 8 \
+        --coverage-file data-root/.tmp/.coverage-ctx \
+        --only-mutate-file "{{mutate_file}}"
+    uv run python scripts/check_mutation_score.py \
+        --mutants-root mutants \
+        --scope-file "{{scope_file}}" \
+        --output reports/mutation-summary.json \
+        --minimum-score 100
+
 mutation-shard scope_file mutate_file: mutation-contexts
     test -f "{{scope_file}}"
     test -f "{{mutate_file}}"

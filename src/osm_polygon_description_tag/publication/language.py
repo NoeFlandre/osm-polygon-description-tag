@@ -18,7 +18,7 @@ from collections import Counter
 from collections.abc import Iterator, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -143,6 +143,18 @@ class LanguageExport:
         }
 
 
+def _unsupported_languages_in(columns: dict[str, list[Any]]) -> Iterator[str]:
+    """Yield the language of each row the splitter could not handle.
+
+    Kept beside the accumulator rather than inside ``observe``: the method is a
+    plain sequence of column updates, and folding a filtered join into it was
+    enough to push the function past the project's complexity budget.
+    """
+    pairs = zip(columns["language_code"], columns["split_status"], strict=True)
+    unsupported = str(SentenceSplitStatus.UNSUPPORTED_LANGUAGE)
+    return (code for code, split in pairs if code is not None and split == unsupported)
+
+
 class _StatsAccumulator:
     """Accumulate exported-row statistics without holding the rows."""
 
@@ -178,11 +190,7 @@ class _StatsAccumulator:
         )
         self._objects.update(zip(columns["osm_type"], columns["osm_id"], strict=True))
         self._split_statuses.update(columns["split_status"])
-        self._unsupported_languages.update(
-            code
-            for code, split in zip(columns["language_code"], columns["split_status"], strict=True)
-            if code is not None and split == str(SentenceSplitStatus.UNSUPPORTED_LANGUAGE)
-        )
+        self._unsupported_languages.update(_unsupported_languages_in(columns))
         self._sentences += sum(columns["sentence_count"])
 
     def result(self) -> LanguageStats:
