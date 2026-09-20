@@ -1002,3 +1002,54 @@ def test_hole_counts_accumulate_across_batches(
 
     assert summary.geometry_holes_total == 2
     assert summary.geometry_rings_total == 4
+
+
+def test_a_row_is_named_by_its_own_source_column_when_present() -> None:
+    """Unique-row batches span files, so the row's own source is what names it.
+
+    Falling back to the caller's name here would point an operator at the batch
+    rather than at the file the bad row actually came from.
+    """
+    rows = [
+        {
+            "source_pbf": "shard-a.parquet",
+            "geometry_type": "Polygon",
+            "min_x": float("inf"),
+            "min_y": 0.0,
+            "max_x": 1.0,
+            "max_y": 1.0,
+            "wkb": to_wkb(_square(0, 0)),
+        }
+    ]
+
+    with pytest.raises(
+        stats_module.ReportingError,
+        match=exactly("invalid bounding box in shard-a.parquet at row 3"),
+    ):
+        stats_module._summarize_spatial_batch(
+            _spatial_batch(rows), source_name="region.parquet", row_offset=3
+        )
+
+
+def test_a_batch_without_a_source_column_falls_back_to_the_given_name() -> None:
+    """A per-file batch has no source column, so the caller's name is used."""
+    batch = pa.record_batch(
+        [
+            pa.array(["way"]),
+            pa.array([1], type=pa.int64()),
+            pa.array(["Polygon"]),
+            pa.array([1.0], type=pa.float64()),
+            pa.array([float("inf")], type=pa.float64()),
+            pa.array([0.0], type=pa.float64()),
+            pa.array([1.0], type=pa.float64()),
+            pa.array([1.0], type=pa.float64()),
+            pa.array([to_wkb(_square(0, 0))], type=pa.binary()),
+        ],
+        names=[name for name in stats_module._SPATIAL_COLUMNS if name != "source_pbf"],
+    )
+
+    with pytest.raises(
+        stats_module.ReportingError,
+        match=exactly("invalid bounding box in region.parquet at row 3"),
+    ):
+        stats_module._summarize_spatial_batch(batch, source_name="region.parquet", row_offset=3)
