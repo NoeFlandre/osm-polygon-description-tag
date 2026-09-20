@@ -1053,3 +1053,45 @@ def test_a_batch_without_a_source_column_falls_back_to_the_given_name() -> None:
         match=exactly("invalid bounding box in region.parquet at row 3"),
     ):
         stats_module._summarize_spatial_batch(batch, source_name="region.parquet", row_offset=3)
+
+
+def test_a_malformed_geometry_names_its_source_and_row() -> None:
+    """The row's identity travels down into every measurement failure."""
+    with pytest.raises(
+        stats_module.ReportingError,
+        match=r"\Amalformed geometry in region\.parquet at row 9: .*\Z",
+    ):
+        stats_module._geometry_measurements(
+            b"not wkb", "Polygon", source_name="region.parquet", row_index=9
+        )
+
+
+def test_an_unsupported_geometry_type_names_its_source_and_row() -> None:
+    with pytest.raises(
+        stats_module.ReportingError,
+        match=exactly("unsupported geometry in region.parquet at row 4: 'Point'"),
+    ):
+        stats_module._geometry_measurements(
+            to_wkb(Point(0, 0)), "Point", source_name="region.parquet", row_index=4
+        )
+
+
+def test_holes_accumulate_across_polygon_components() -> None:
+    """Assignment would report only the last component's holes.
+
+    Every existing fixture used solid squares, where each component reports
+    zero and the two forms agree.
+    """
+    holed = Polygon(
+        [(0, 0), (0, 10), (10, 10), (10, 0)],
+        [[(1, 1), (1, 2), (2, 2), (2, 1)], [(4, 4), (4, 5), (5, 5), (5, 4)]],
+    )
+    other = Polygon(
+        [(20, 20), (20, 30), (30, 30), (30, 20)], [[(21, 21), (21, 22), (22, 22), (22, 21)]]
+    )
+
+    vertices, rings, holes = stats_module._polygon_measurements((holed, other))
+
+    assert holes == 3
+    assert rings == 5
+    assert vertices == 20

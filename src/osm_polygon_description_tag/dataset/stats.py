@@ -582,7 +582,7 @@ def _validated_bbox(
 def _coerce_float_values(values: tuple[object, ...]) -> tuple[float, ...] | None:
     """Convert object values to floats, returning ``None`` on conversion errors."""
     try:
-        return tuple(float(cast(Any, value)) for value in values)
+        return tuple(float(cast(Any, value)) for value in values)  # pragma: no mutate
     except (TypeError, ValueError):
         return None
 
