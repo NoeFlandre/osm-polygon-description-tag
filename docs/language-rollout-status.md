@@ -124,8 +124,10 @@ metacharacters because OAR evaluates the stored command through a shell. Point
 
 `python scripts/check_mutation_score.py --mutants-root mutants --output
 reports/mutation-summary.json --minimum-score 100` reports **100.00 %
-(18 140 / 18 140)** with every unresolved bucket at zero: no survivor, timeout,
-`no_tests`, skipped, suspicious, segfault, or interrupted mutant.
+(20 773 / 20 773)** with every unresolved bucket at zero: no survivor, timeout,
+`no_tests`, skipped, suspicious, segfault, or interrupted mutant. That is the
+sum of the eight shards of the all-source gate, each of which requires 100 % on
+its own; the figure above is from run `35526775857`.
 
 Reaching it from 624 survivors took three kinds of change, in this order of
 preference.
