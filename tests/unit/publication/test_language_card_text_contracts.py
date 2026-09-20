@@ -569,8 +569,11 @@ def test_split_coverage_is_a_share_of_detected_values() -> None:
     from osm_polygon_description_tag.publication.language import _split_coverage_percent
 
     assert _split_coverage_percent(840897, 885740) == "94.9372%"
-    assert _split_coverage_percent(0, 0) == "n/a"
     assert _split_coverage_percent(1, 4) == "25.0000%"
+    # only an empty denominator is unanswerable; one eligible unit is not
+    assert _split_coverage_percent(0, 0) == "n/a"
+    assert _split_coverage_percent(1, 1) == "100.0000%"
+    assert _split_coverage_percent(0, 1) == "0.0000%"
 
 
 def test_the_top_language_table_lists_every_published_language() -> None:
@@ -581,9 +584,10 @@ def test_the_top_language_table_lists_every_published_language() -> None:
 
     rendered = _top_language_rows(stats)
 
-    assert "| `eng` | 273435 |" in rendered
-    assert "| `deu` | 138912 |" in rendered
-    assert rendered.index("`eng`") < rendered.index("`deu`")
+    # the whole table is the contract: a reader parses it, not a substring
+    assert rendered == (
+        "| Language | Annotations |\n| --- | ---: |\n| `eng` | 273435 |\n| `deu` | 138912 |"
+    )
 
 
 def test_an_empty_top_language_table_says_so_rather_than_rendering_a_header() -> None:
@@ -591,4 +595,68 @@ def test_an_empty_top_language_table_says_so_rather_than_rendering_a_header() ->
 
     assert _top_language_rows(SimpleNamespace(top_languages=())) == (
         "No language was detected in this run."
+    )
+
+
+def _stats_for_coverage(**overrides: object):
+    from osm_polygon_description_tag.publication.language import LanguageStats
+
+    base = dict(
+        annotation_count=100,
+        object_count=90,
+        base_description_count=80,
+        localized_description_count=20,
+        detected_count=60,
+        uncertain_count=30,
+        non_linguistic_count=10,
+        distinct_language_count=5,
+        top_languages=(("eng", 40),),
+        split_count=45,
+        unsupported_language_count=15,
+        unsupported_distinct_count=3,
+        top_unsupported_languages=(("tso", 10), ("vec", 5)),
+        not_detected_count=25,
+        sentence_count=70,
+    )
+    base.update(overrides)
+    return LanguageStats(**base)
+
+
+def test_coverage_is_measured_against_eligible_units_only() -> None:
+    """Values with no detected language were never candidates for splitting.
+
+    Dividing by every annotation would understate coverage by counting text the
+    splitter was never offered, so the denominator is split + unsupported.
+    """
+    from osm_polygon_description_tag.publication.language import _split_coverage_percent
+
+    stats = _stats_for_coverage()
+    eligible = stats.split_count + stats.unsupported_language_count
+
+    assert eligible == 60
+    assert _split_coverage_percent(stats.split_count, eligible) == "75.0000%"
+    assert _split_coverage_percent(stats.unsupported_language_count, eligible) == "25.0000%"
+
+
+def test_the_unsupported_language_table_lists_the_largest_groups_first() -> None:
+    from osm_polygon_description_tag.publication.language import _unsupported_language_rows
+
+    rendered = _unsupported_language_rows(_stats_for_coverage())
+
+    assert rendered == (
+        "Largest groups left unsplit:\n\n"
+        "| Language | Annotations |\n"
+        "| --- | ---: |\n"
+        "| `tso` | 10 |\n"
+        "| `vec` | 5 |"
+    )
+
+
+def test_full_coverage_says_so_rather_than_rendering_an_empty_table() -> None:
+    from osm_polygon_description_tag.publication.language import _unsupported_language_rows
+
+    stats = _stats_for_coverage(top_unsupported_languages=(), unsupported_language_count=0)
+
+    assert _unsupported_language_rows(stats) == (
+        "Every detected language was inside the supported set."
     )
