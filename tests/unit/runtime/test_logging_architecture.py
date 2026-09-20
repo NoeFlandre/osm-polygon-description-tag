@@ -299,8 +299,8 @@ def test_logs_directory_never_appears_in_upload_plan(tmp_path: Path, logger_fact
     logger.event("preflight", level="INFO")
     logger.flush()
     from osm_polygon_description_tag.publication import (
-        _build_metadata_only_upload_plan,
-        _build_per_pbf_upload_plan,
+        build_metadata_only_upload_plan,
+        build_per_pbf_upload_plan,
         create_upload_plan,
     )
 
@@ -320,11 +320,11 @@ def test_logs_directory_never_appears_in_upload_plan(tmp_path: Path, logger_fact
     )
     parquet_path = data_root / "data" / "a.parquet"
     has_parquet = parquet_path.exists()
-    per_pbf_plan = _build_per_pbf_upload_plan(data_root, "a.osm.pbf") if has_parquet else None
+    per_pbf_plan = build_per_pbf_upload_plan(data_root, "a.osm.pbf") if has_parquet else None
     for plan in (
         create_upload_plan(data_root),
         per_pbf_plan,
-        _build_metadata_only_upload_plan(data_root),
+        build_metadata_only_upload_plan(data_root),
     ):
         if plan is None:
             continue

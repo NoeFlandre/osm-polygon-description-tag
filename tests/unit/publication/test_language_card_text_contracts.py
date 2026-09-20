@@ -7,6 +7,7 @@ card survives, so each is asserted at its exact offset rather than by shape.
 
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 
 import pytest
@@ -14,6 +15,7 @@ import yaml
 
 from osm_polygon_description_tag.publication import language_card
 from osm_polygon_description_tag.publication.language_card import (
+    _SECTION_HEADING,
     LANGUAGE_CARD_SECTION_END,
     LANGUAGE_CARD_SECTION_START,
     _append_section,
@@ -532,3 +534,142 @@ def test_marked_section_count_error_is_exact() -> None:
         PublicationError, match=exactly("dataset card has a malformed language-v1 card section")
     ):
         _replace_marked_section("readme", "replacement", 0)
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        # Ends in a letter: a strip set widened beyond the line breaks eats it.
+        pytest.param("introXX", id="letter"),
+        # Ends in the two spaces that make a Markdown hard line break: a strip
+        # of all whitespace would silently rewrite the paragraph above.
+        pytest.param("introXX  ", id="hard-line-break"),
+    ],
+)
+def test_insert_section_preserves_non_newline_trailing_bytes_before_limitations(
+    tail: str,
+) -> None:
+    """Only the blank lines are trimmed, whatever precedes them."""
+    readme = f"{tail}\n\n## Limitations\nbody\n"
+
+    assert language_card._insert_section(readme, "replacement", "\n") == (
+        f"{tail}\n\nreplacement\n## Limitations\nbody\n"
+    )
+
+
+def test_replace_helpers_use_lf_when_their_newline_argument_is_omitted() -> None:
+    readme = f"{_START}\n{_SECTION_HEADING}\nold\n{_END}\n\n## Limitations\nbody\n"
+
+    assert "\nreplacement\n" in _replace_section(readme, "replacement")
+    assert "\nreplacement\n" in _replace_marked_section(readme, "replacement", 1)
+
+
+def test_the_card_states_that_detection_is_not_gated_on_confidence() -> None:
+    """The card must not describe a policy the run no longer applies.
+
+    Detection stopped being gated on a confidence threshold, and a card that
+    still says otherwise misdescribes every published row.
+    """
+    from osm_polygon_description_tag.publication import language as language_module
+
+    source = inspect.getsource(language_module.render_language_card_section)
+
+    assert "meets its confidence policy" not in source
+    assert "not** gated on a confidence threshold" in source
+
+
+def test_split_coverage_is_a_share_of_detected_values() -> None:
+    from osm_polygon_description_tag.publication.language import _split_coverage_percent
+
+    assert _split_coverage_percent(840897, 885740) == "94.9372%"
+    assert _split_coverage_percent(1, 4) == "25.0000%"
+    # only an empty denominator is unanswerable; one eligible unit is not
+    assert _split_coverage_percent(0, 0) == "n/a"
+    assert _split_coverage_percent(1, 1) == "100.0000%"
+    assert _split_coverage_percent(0, 1) == "0.0000%"
+
+
+def test_the_top_language_table_lists_every_published_language() -> None:
+    """The card publishes the same ordering the stats file records."""
+    from osm_polygon_description_tag.publication.language import _top_language_rows
+
+    stats = SimpleNamespace(top_languages=(("eng", 273435), ("deu", 138912)))
+
+    rendered = _top_language_rows(stats)
+
+    # the whole table is the contract: a reader parses it, not a substring
+    assert rendered == (
+        "| Language | Annotations |\n| --- | ---: |\n| `eng` | 273435 |\n| `deu` | 138912 |"
+    )
+
+
+def test_an_empty_top_language_table_says_so_rather_than_rendering_a_header() -> None:
+    from osm_polygon_description_tag.publication.language import _top_language_rows
+
+    assert _top_language_rows(SimpleNamespace(top_languages=())) == (
+        "No language was detected in this run."
+    )
+
+
+def _stats_for_coverage(**overrides: object):
+    from osm_polygon_description_tag.publication.language import LanguageStats
+
+    base = dict(
+        annotation_count=100,
+        object_count=90,
+        base_description_count=80,
+        localized_description_count=20,
+        detected_count=60,
+        uncertain_count=30,
+        non_linguistic_count=10,
+        distinct_language_count=5,
+        top_languages=(("eng", 40),),
+        split_count=45,
+        unsupported_language_count=15,
+        unsupported_distinct_count=3,
+        top_unsupported_languages=(("tso", 10), ("vec", 5)),
+        not_detected_count=25,
+        sentence_count=70,
+    )
+    base.update(overrides)
+    return LanguageStats(**base)
+
+
+def test_coverage_is_measured_against_eligible_units_only() -> None:
+    """Values with no detected language were never candidates for splitting.
+
+    Dividing by every annotation would understate coverage by counting text the
+    splitter was never offered, so the denominator is split + unsupported.
+    """
+    from osm_polygon_description_tag.publication.language import _split_coverage_percent
+
+    stats = _stats_for_coverage()
+    eligible = stats.split_count + stats.unsupported_language_count
+
+    assert eligible == 60
+    assert _split_coverage_percent(stats.split_count, eligible) == "75.0000%"
+    assert _split_coverage_percent(stats.unsupported_language_count, eligible) == "25.0000%"
+
+
+def test_the_unsupported_language_table_lists_the_largest_groups_first() -> None:
+    from osm_polygon_description_tag.publication.language import _unsupported_language_rows
+
+    rendered = _unsupported_language_rows(_stats_for_coverage())
+
+    assert rendered == (
+        "Largest groups left unsplit:\n\n"
+        "| Language | Annotations |\n"
+        "| --- | ---: |\n"
+        "| `tso` | 10 |\n"
+        "| `vec` | 5 |"
+    )
+
+
+def test_full_coverage_says_so_rather_than_rendering_an_empty_table() -> None:
+    from osm_polygon_description_tag.publication.language import _unsupported_language_rows
+
+    stats = _stats_for_coverage(top_unsupported_languages=(), unsupported_language_count=0)
+
+    assert _unsupported_language_rows(stats) == (
+        "Every detected language was inside the supported set."
+    )

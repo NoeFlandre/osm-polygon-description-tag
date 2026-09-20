@@ -37,8 +37,8 @@ from osm_polygon_description_tag.orchestrator import PUBLICATION_STATE_FILENAME
 from osm_polygon_description_tag.publication import (
     REPO_ID,
     PublicationError,
-    _build_metadata_only_upload_plan,
-    _build_per_pbf_upload_plan,
+    build_metadata_only_upload_plan,
+    build_per_pbf_upload_plan,
     create_upload_plan,
     per_pbf_command,
 )
@@ -123,7 +123,7 @@ def test_per_pbf_plan_contains_exactly_five_items_including_map(tmp_path: Path) 
     _plant_resumable_artifact(paths, source_root, "a.osm.pbf")
     _plant_metadata(paths)
 
-    plan = _build_per_pbf_upload_plan(paths.data_root, "a.osm.pbf")
+    plan = build_per_pbf_upload_plan(paths.data_root, "a.osm.pbf")
     relative = sorted(item.relative_path for item in plan.files)
     assert relative == sorted(
         [
@@ -147,7 +147,7 @@ def test_per_pbf_plan_fails_when_map_missing(tmp_path: Path) -> None:
     # No assets/ directory.
 
     with pytest.raises(PublicationError):
-        _build_per_pbf_upload_plan(paths.data_root, "a.osm.pbf")
+        build_per_pbf_upload_plan(paths.data_root, "a.osm.pbf")
 
 
 def test_per_pbf_command_lists_all_five_files(tmp_path: Path) -> None:
@@ -178,7 +178,7 @@ def test_per_pbf_command_lists_all_five_files(tmp_path: Path) -> None:
 def test_metadata_plan_contains_exactly_three_items_including_map(tmp_path: Path) -> None:
     paths, source_root, _data_root = _setup_two_sources(tmp_path)
     _plant_metadata(paths)
-    plan = _build_metadata_only_upload_plan(paths.data_root)
+    plan = build_metadata_only_upload_plan(paths.data_root)
     relative = sorted(item.relative_path for item in plan.files)
     assert relative == sorted(
         [
@@ -197,7 +197,7 @@ def test_metadata_plan_fails_when_map_missing(tmp_path: Path) -> None:
     (paths.data_root / "stats.json").write_text("{}")
     # No map.
     with pytest.raises(PublicationError):
-        _build_metadata_only_upload_plan(paths.data_root)
+        build_metadata_only_upload_plan(paths.data_root)
 
 
 def test_metadata_plan_fails_when_area_histogram_missing(tmp_path: Path) -> None:
@@ -208,7 +208,7 @@ def test_metadata_plan_fails_when_area_histogram_missing(tmp_path: Path) -> None
     (paths.data_root / "assets" / "description_polygon_density.png").write_bytes(MAP_BYTES_A)
     # No histogram.
     with pytest.raises(PublicationError):
-        _build_metadata_only_upload_plan(paths.data_root)
+        build_metadata_only_upload_plan(paths.data_root)
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +224,7 @@ def test_assets_allowlist_rejects_hidden_files(tmp_path: Path) -> None:
     # Add a hidden file under assets/.
     (paths.data_root / "assets" / ".hidden.png").write_bytes(MAP_BYTES_A)
     with pytest.raises(PublicationError):
-        _build_per_pbf_upload_plan(paths.data_root, "a.osm.pbf")
+        build_per_pbf_upload_plan(paths.data_root, "a.osm.pbf")
 
 
 def test_assets_allowlist_rejects_temp_files(tmp_path: Path) -> None:
@@ -234,7 +234,7 @@ def test_assets_allowlist_rejects_temp_files(tmp_path: Path) -> None:
     _plant_metadata(paths)
     (paths.data_root / "assets" / "description_polygon_density.png.tmp").write_bytes(b"tmp")
     with pytest.raises(PublicationError):
-        _build_per_pbf_upload_plan(paths.data_root, "a.osm.pbf")
+        build_per_pbf_upload_plan(paths.data_root, "a.osm.pbf")
 
 
 def test_assets_allowlist_rejects_unrelated_files(tmp_path: Path) -> None:
@@ -244,7 +244,7 @@ def test_assets_allowlist_rejects_unrelated_files(tmp_path: Path) -> None:
     _plant_metadata(paths)
     (paths.data_root / "assets" / "other.png").write_bytes(MAP_BYTES_A)
     with pytest.raises(PublicationError):
-        _build_per_pbf_upload_plan(paths.data_root, "a.osm.pbf")
+        build_per_pbf_upload_plan(paths.data_root, "a.osm.pbf")
 
 
 def test_assets_allowlist_rejects_directory_masquerading_as_file(tmp_path: Path) -> None:
@@ -257,7 +257,7 @@ def test_assets_allowlist_rejects_directory_masquerading_as_file(tmp_path: Path)
     map_path.unlink()
     map_path.mkdir()
     with pytest.raises(PublicationError):
-        _build_per_pbf_upload_plan(paths.data_root, "a.osm.pbf")
+        build_per_pbf_upload_plan(paths.data_root, "a.osm.pbf")
 
 
 def test_assets_allowlist_rejects_symlink(tmp_path: Path) -> None:
@@ -270,7 +270,7 @@ def test_assets_allowlist_rejects_symlink(tmp_path: Path) -> None:
     map_path.symlink_to("/etc/passwd")
     try:
         with pytest.raises(PublicationError):
-            _build_per_pbf_upload_plan(paths.data_root, "a.osm.pbf")
+            build_per_pbf_upload_plan(paths.data_root, "a.osm.pbf")
     finally:
         if map_path.is_symlink():
             map_path.unlink()
@@ -284,7 +284,7 @@ def test_assets_allowlist_rejects_symlink(tmp_path: Path) -> None:
 def test_publication_state_records_map_identity(tmp_path: Path) -> None:
     paths, _source_root, _data_root = _setup_two_sources(tmp_path)
     _plant_metadata(paths)
-    plan = _build_metadata_only_upload_plan(paths.data_root)
+    plan = build_metadata_only_upload_plan(paths.data_root)
 
     # The plan must include the map identity.
     map_item = next(item for item in plan.files if item.relative_path == H3_MAP_ASSET_RELATIVE_PATH)
@@ -297,7 +297,7 @@ def test_publication_state_records_map_identity(tmp_path: Path) -> None:
 def test_metadata_state_matches_requires_unchanged_map(tmp_path: Path) -> None:
     paths, _source_root, _data_root = _setup_two_sources(tmp_path)
     _plant_metadata(paths)
-    plan = _build_metadata_only_upload_plan(paths.data_root)
+    plan = build_metadata_only_upload_plan(paths.data_root)
     from osm_polygon_description_tag.publication.state import _write_metadata_state
 
     _write_metadata_state(
@@ -333,7 +333,7 @@ def test_metadata_state_matches_requires_unchanged_area_histogram(tmp_path: Path
     """Mutating the histogram PNG must invalidate the metadata no-op too."""
     paths, _source_root, _data_root = _setup_two_sources(tmp_path)
     _plant_metadata(paths)
-    plan = _build_metadata_only_upload_plan(paths.data_root)
+    plan = build_metadata_only_upload_plan(paths.data_root)
     from osm_polygon_description_tag.publication.state import _write_metadata_state
 
     _write_metadata_state(
@@ -368,7 +368,7 @@ def test_metadata_state_matches_requires_unchanged_area_histogram(tmp_path: Path
 def test_state_records_map_sha_and_size_fields(tmp_path: Path) -> None:
     paths, _source_root, _data_root = _setup_two_sources(tmp_path)
     _plant_metadata(paths)
-    plan = _build_metadata_only_upload_plan(paths.data_root)
+    plan = build_metadata_only_upload_plan(paths.data_root)
     from osm_polygon_description_tag.publication.state import _write_metadata_state
 
     _write_metadata_state(

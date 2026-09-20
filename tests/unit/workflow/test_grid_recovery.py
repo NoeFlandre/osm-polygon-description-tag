@@ -26,8 +26,6 @@ from osm_polygon_description_tag.dataset.languages.checkpoint import (
 from osm_polygon_description_tag.dataset.languages.models import LanguageResult, LanguageStatus
 from osm_polygon_description_tag.dataset.languages.snapshot import (
     SnapshotManifest,
-    fingerprint_lockfile,
-    fingerprint_project_source,
     prepare_snapshot,
 )
 from osm_polygon_description_tag.dataset.languages.validation import validate_run
@@ -105,45 +103,6 @@ def _write_shard(path: Path, rows: int) -> None:
         path,
         batch_size=2,
     )
-
-
-def _prepared_run(tmp_path: Path, rows: int = 4) -> tuple[Path, Path, SnapshotManifest]:
-    source = tmp_path / "source"
-    source.mkdir(parents=True)
-    _write_shard(source / SHARD, rows)
-    run = tmp_path / "run"
-    snapshot = prepare_snapshot(source, run, code_fingerprint="a" * 64, lock_fingerprint="b" * 64)
-    return source, run, snapshot
-
-
-@pytest.fixture
-def prepared(tmp_path: Path) -> tuple[Path, Path, SnapshotManifest]:
-    return _prepared_run(tmp_path)
-
-
-@pytest.fixture
-def empty_prepared(tmp_path: Path) -> tuple[Path, Path, SnapshotManifest]:
-    return _prepared_run(tmp_path, rows=0)
-
-
-@pytest.fixture
-def portable(tmp_path: Path) -> tuple[Path, Path, Path, SnapshotManifest]:
-    source = tmp_path / "source"
-    source.mkdir(parents=True)
-    _write_shard(source / SHARD, 4)
-    project = tmp_path / "project"
-    (project / "src").mkdir(parents=True)
-    (project / "src" / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
-    (project / "pyproject.toml").write_text("[project]\nname = 'synthetic'\n", encoding="utf-8")
-    (project / "uv.lock").write_text("version = 1\n", encoding="utf-8")
-    run = tmp_path / "run"
-    snapshot = prepare_snapshot(
-        source,
-        run,
-        code_fingerprint=fingerprint_project_source(project),
-        lock_fingerprint=fingerprint_lockfile(project),
-    )
-    return project, source, run, snapshot
 
 
 def test_preparing_a_job_initializes_a_paused_zero_cursor_checkpoint(

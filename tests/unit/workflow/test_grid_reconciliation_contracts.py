@@ -24,17 +24,8 @@ from osm_polygon_description_tag.workflow.grid_operator import (
 from osm_polygon_description_tag.workflow.grid_scheduler import CommandResult
 from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH
 from tests.unit.workflow.test_grid_operator import REMOTE, SHARD
-from tests.unit.workflow.test_grid_operator import portable_prepared as portable_prepared
-from tests.unit.workflow.test_grid_operator import prepared as prepared
 
 _MOMENT = datetime(2026, 9, 15, 22, 0, tzinfo=UTC)
-
-
-@pytest.fixture
-def job(request: pytest.FixtureRequest) -> tuple[Path, object, object]:
-    _, run, snapshot = request.getfixturevalue("prepared")
-    bundle, paths = operator.prepare_job(run, snapshot, SHARD, **REMOTE)
-    return run, bundle, paths
 
 
 def _intent(bundle_id: str, **changes: object) -> SubmissionIntent:
@@ -49,39 +40,6 @@ def _intent(bundle_id: str, **changes: object) -> SubmissionIntent:
         ),
         **changes,
     )
-
-
-@pytest.fixture
-def two_jobs(tmp_path: Path) -> tuple[Path, tuple[object, object], tuple[object, object]]:
-    """Prepare two shards' jobs, ordered so the first one iterates first."""
-    from shapely.geometry import Polygon
-
-    from osm_polygon_description_tag.dataset.languages.snapshot import prepare_snapshot
-    from osm_polygon_description_tag.storage import write_geoparquet
-    from tests.conftest import make_record_dict
-
-    source = tmp_path / "source"
-    source.mkdir(parents=True)
-    for index, name in enumerate((SHARD, "other.parquet")):
-        write_geoparquet(
-            (
-                make_record_dict(
-                    Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-                    {"description": f"A synthetic description {index}-{row}"},
-                    osm_id=index * 100 + row + 1,
-                )
-                for row in range(2)
-            ),
-            source / name,
-            batch_size=2,
-        )
-    run = tmp_path / "run"
-    snapshot = prepare_snapshot(source, run, code_fingerprint="a" * 64, lock_fingerprint="b" * 64)
-    jobs = [
-        operator.prepare_job(run, snapshot, name, **REMOTE) for name in (SHARD, "other.parquet")
-    ]
-    jobs.sort(key=lambda item: item[1].root.name)
-    return run, jobs[0], jobs[1]
 
 
 def test_another_shards_unresolved_job_blocks_this_one_and_names_it(

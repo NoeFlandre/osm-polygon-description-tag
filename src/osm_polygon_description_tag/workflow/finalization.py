@@ -31,7 +31,7 @@ from osm_polygon_description_tag.publication.artifacts import (
 )
 from osm_polygon_description_tag.publication.models import REPO_ID, PublicationError, UploadPlan
 from osm_polygon_description_tag.publication.planning import (
-    _build_metadata_only_upload_plan,
+    build_metadata_only_upload_plan,
     create_upload_plan,
     metadata_only_command,
 )
@@ -207,7 +207,7 @@ def upload_final_metadata(
     data_dir = paths.data_root / "data"
     if not data_dir.is_dir() or not list(data_dir.glob("*.parquet")):
         return None
-    metadata_plan = _build_metadata_only_upload_plan(paths.data_root)
+    metadata_plan = build_metadata_only_upload_plan(paths.data_root)
     plan_validator(paths.data_root)
 
     skipped = _metadata_skip_revision(paths.data_root, metadata_plan, logger)

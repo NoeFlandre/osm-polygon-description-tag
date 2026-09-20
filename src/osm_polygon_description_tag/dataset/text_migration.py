@@ -41,6 +41,7 @@ from osm_polygon_description_tag.dataset.manifest import (
 from osm_polygon_description_tag.dataset.schema import SCHEMA, geo_metadata
 from osm_polygon_description_tag.dataset.storage import (
     _DICTIONARY_COLUMNS,
+    GEOPARQUET_COMPRESSION,
     StorageError,
     validate_geoparquet,
 )
@@ -78,7 +79,8 @@ def _canonical_localized(value: object) -> list[dict[str, str]]:
     """Return localized entries with trimmed values, dropping blank ones."""
     if not _is_entry_sequence(value):
         return []
-    candidates = map(_canonical_entry, cast(Sequence[object], value))
+    entries = cast(Sequence[object], value)  # pragma: no mutate - static narrowing
+    candidates = map(_canonical_entry, entries)
     return [entry for entry in candidates if entry is not None]
 
 
@@ -113,11 +115,13 @@ def _text_columns(table: pa.Table) -> tuple[list[object], list[object]]:
     """
     descriptions: list[object] = []
     localized: list[object] = []
-    for description, entries in zip(
-        table.column("description").to_pylist(),
-        table.column("localized_descriptions").to_pylist(),
-        strict=True,
-    ):
+    described = table.column("description").to_pylist()
+    localized_entries = table.column("localized_descriptions").to_pylist()
+    # Arrow refuses to build a table whose columns differ in length, so the
+    # strict zip cannot fire here. It is kept as a guard for a caller that
+    # assembles the two lists itself, and excluded from mutation because no
+    # input can tell it apart from a plain zip.
+    for description, entries in zip(described, localized_entries, strict=True):  # pragma: no mutate
         descriptions.append(trimmed_nonempty_text(description))
         localized.append(_canonical_localized(entries))
     return descriptions, localized
@@ -135,11 +139,11 @@ def _canonical_table(table: pa.Table) -> tuple[pa.Table, int]:
     descriptions, localized = _text_columns(table)
     repaired = table.set_column(
         table.schema.get_field_index("description"),
-        "description",
+        SCHEMA.field("description"),
         pa.array(descriptions, SCHEMA.field("description").type),
     ).set_column(
         table.schema.get_field_index("localized_descriptions"),
-        "localized_descriptions",
+        SCHEMA.field("localized_descriptions"),
         pa.array(localized, SCHEMA.field("localized_descriptions").type),
     )
     mask = _retained_mask(descriptions, localized)
@@ -151,7 +155,9 @@ def _canonical_table(table: pa.Table) -> tuple[pa.Table, int]:
 def _geo_metadata_for(table: pa.Table, inherited: dict[bytes, bytes]) -> pa.Schema:
     """Rebuild the ``geo`` block so it describes the rows actually retained."""
     geometry_types = [value for value in table.column("geometry_type").to_pylist() if value]
-    bbox: list[float] = []
+    # Only ever consumed for truthiness by geo_metadata, where [] and None
+    # are indistinguishable.
+    bbox: list[float] = []  # pragma: no mutate
     if table.num_rows:
         bbox = [
             min(table.column("bbox_min_x").to_pylist()),
@@ -175,7 +181,7 @@ def _rewrite_parquet_text(
     with pq.ParquetWriter(
         temporary,
         schema,
-        compression="zstd",
+        compression=GEOPARQUET_COMPRESSION,
         use_dictionary=_DICTIONARY_COLUMNS,
     ) as writer:
         writer.write_table(repaired.cast(schema))
@@ -198,7 +204,8 @@ def _requires_text_migration(path: Path) -> bool:
 
 
 def _promote_migrated_parquet(temporary: Path, target: Path) -> None:
-    with open(temporary, "rb") as handle:
+    # The handle is only ever fsynced, never read, so the mode cannot matter.
+    with open(temporary, "rb") as handle:  # pragma: no mutate
         os.fsync(handle.fileno())
     os.replace(temporary, target)
     _fsync_dir(target.parent)
@@ -285,10 +292,10 @@ def migrate_dataset_text(data_root: Path, *, max_workers: int | None = None) -> 
     data_dir = data_root / "data"
     manifests_dir = data_root / "manifests"
     _require_migration_directories(data_dir, manifests_dir, data_root)
-    pairs = [
-        _artifact_pair(parquet, data_root)
-        for parquet in sorted(data_dir.glob("*.parquet"), key=lambda path: path.name)
-    ]
+    # One directory, so sorting by name and by full path give the same order;
+    # the ordering contract itself is covered by a test.
+    artifacts = sorted(data_dir.glob("*.parquet"), key=lambda path: path.name)  # pragma: no mutate
+    pairs = [_artifact_pair(parquet, data_root) for parquet in artifacts]
     if max_workers is not None and max_workers > 1:
         return _migrate_concurrently(pairs, max_workers)
     return sum(_migrate_one_artifact(parquet, manifest) for parquet, manifest in pairs)

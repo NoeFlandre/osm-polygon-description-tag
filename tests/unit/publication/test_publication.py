@@ -22,8 +22,6 @@ from osm_polygon_description_tag.publication import (
 from osm_polygon_description_tag.publication.models import UploadItem
 from osm_polygon_description_tag.publication.planning import (
     _build_item,
-    _build_metadata_only_upload_plan,
-    _build_per_pbf_upload_plan,
     _collect_data_items,
     _collect_manifest_items,
     _collect_required_metadata_items,
@@ -46,6 +44,8 @@ from osm_polygon_description_tag.publication.planning import (
     _validate_top_level_entries,
     _validate_top_level_entry,
     _validate_uploader_cache,
+    build_metadata_only_upload_plan,
+    build_per_pbf_upload_plan,
     file_sha256_bytes,
 )
 from osm_polygon_description_tag.storage import write_geoparquet
@@ -525,18 +525,18 @@ def test_per_pbf_plan_preserves_identity_and_validation_contract(tmp_path: Path)
     _make_dataset(data_root)
     (data_root / "assets" / "dataset-card-hero.png").write_bytes(b"hero")
 
-    plan = _build_per_pbf_upload_plan(data_root, "a-latest.osm.pbf")
+    plan = build_per_pbf_upload_plan(data_root, "a-latest.osm.pbf")
     provisional = replace(plan, identity_sha256="")
     assert plan.repo_id == "NoeFlandre/osm-polygon-description-tag"
     assert plan.data_root == str(data_root.resolve(strict=False))
     assert plan.identity_sha256 == file_sha256_bytes(provisional.to_json().encode("utf-8"))
 
     with pytest.raises(PublicationError, match="invalid source name"):
-        _build_per_pbf_upload_plan(data_root, "a-latest.pbf")
+        build_per_pbf_upload_plan(data_root, "a-latest.pbf")
 
     (data_root / "data" / "a-latest.parquet").unlink()
     with pytest.raises(PublicationError, match="required file missing for per-PBF plan"):
-        _build_per_pbf_upload_plan(data_root, "a-latest.osm.pbf")
+        build_per_pbf_upload_plan(data_root, "a-latest.osm.pbf")
 
 
 def test_metadata_plan_preserves_identity_and_missing_file_contract(tmp_path: Path) -> None:
@@ -544,7 +544,7 @@ def test_metadata_plan_preserves_identity_and_missing_file_contract(tmp_path: Pa
     _make_dataset(data_root)
     (data_root / "assets" / "dataset-card-hero.png").write_bytes(b"hero")
 
-    plan = _build_metadata_only_upload_plan(data_root)
+    plan = build_metadata_only_upload_plan(data_root)
     provisional = replace(plan, identity_sha256="")
     assert plan.repo_id == "NoeFlandre/osm-polygon-description-tag"
     assert plan.data_root == str(data_root.resolve(strict=False))
@@ -552,7 +552,7 @@ def test_metadata_plan_preserves_identity_and_missing_file_contract(tmp_path: Pa
 
     (data_root / "README.md").unlink()
     with pytest.raises(PublicationError, match="required file missing for metadata plan"):
-        _build_metadata_only_upload_plan(data_root)
+        build_metadata_only_upload_plan(data_root)
 
 
 def _write_assets(assets_dir: Path, *names: str) -> None:

@@ -310,7 +310,7 @@ def test_publish_subprocess_failures_use_plain_cli_error_path(
     def fail(*_args: object, **_kwargs: object) -> None:
         raise failure
 
-    monkeypatch.setattr(publication_upload, "_default_runner_with_retry", fail)
+    monkeypatch.setattr(publication_upload, "default_runner_with_retry", fail)
 
     exit_code = cli.run(
         [

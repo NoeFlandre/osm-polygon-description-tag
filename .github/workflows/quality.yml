@@ -5,6 +5,7 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -57,11 +58,21 @@ jobs:
 
       - name: Test with coverage
         run: >-
+          mkdir -p reports &&
           uv run pytest
           --cov=osm_polygon_description_tag
           --cov-branch
           --cov-report=term-missing
+          --cov-report=json:reports/coverage.json
           --cov-fail-under=90
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-json
+          path: reports/coverage.json
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Build distributions
         run: uv build
@@ -139,8 +150,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y just
 
+      - name: Restore coverage from the quality job
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: coverage-json
+          path: reports
+
       - name: Run all-source CRAP budget gate
-        run: just risk
+        run: just risk-prepared
 
       - name: Upload CRAP reports
         if: always()
@@ -205,20 +222,11 @@ jobs:
             echo "No Python source changed; the mutation gate has nothing to mutate."
           fi
 
-      - name: Select changed mutation tests
-        if: steps.scope.outputs.changed == 'true'
-        run: >-
-          git diff --name-only
-          "${{ github.event.pull_request.base.sha }}"
-          "${{ github.event.pull_request.head.sha }}"
-          -- 'tests/**/*.py' > "$RUNNER_TEMP/mutation-tests.txt"
-
       - name: Run changed-source mutation gate
         if: steps.scope.outputs.changed == 'true'
         run: >-
           just mutation-scope
           "$RUNNER_TEMP/mutation-scope.txt"
-          "$RUNNER_TEMP/mutation-tests.txt"
 
       - name: Upload mutation report
         if: always() && steps.scope.outputs.changed == 'true'
@@ -228,15 +236,65 @@ jobs:
           path: reports/mutation-summary.json
           if-no-files-found: error
 
+  mutation-contexts:
+    # Coverage contexts are a pure function of the source and the test suite, so
+    # they are identical in every shard. Generating them once and sharing the
+    # database removes one full suite run per shard.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: quality
+    env:
+      HF_HUB_OFFLINE: "1"
+      HF_DATASETS_OFFLINE: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.16"
+          enable-cache: true
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Install osmium
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y osmium-tool
+
+      - name: Sync locked environment
+        run: uv sync --frozen
+
+      - name: Install just
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y just
+
+      - name: Record per-test coverage contexts
+        run: just mutation-contexts
+
+      - name: Upload coverage contexts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mutation-coverage-contexts
+          path: data-root/.tmp/.coverage-ctx
+          # the database name starts with a dot, which this action skips by default
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
   mutation-all:
     # Main pushes run the exhaustive all-source gate, split across shards so it
     # finishes. A single runner took over 90 minutes and was cancelled on every
     # push, which meant the gate never actually reported. Each shard still
     # requires a 100% score, so the shards together are the same strict gate.
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    needs: quality
+    needs: [quality, mutation-contexts]
     strategy:
       fail-fast: false
       matrix:
@@ -289,7 +347,16 @@ jobs:
           files = sorted(str(path) for root in roots for path in root.rglob("*.py"))
           count = int(os.environ["MUTATION_SHARD_COUNT"])
           index = int(os.environ["MUTATION_SHARD"])
-          shard = [f for position, f in enumerate(files) if position % count == index]
+          # Round-robin by position put the heavy modules together: one shard
+          # ran 3-4x longer than the others and set the whole job's wall clock.
+          # Longest-processing-time-first on file size balances them instead.
+          loads = [0] * count
+          buckets: list[list[str]] = [[] for _ in range(count)]
+          for path in sorted(files, key=lambda f: (-pathlib.Path(f).stat().st_size, f)):
+              lightest = min(range(count), key=lambda b: (loads[b], b))
+              buckets[lightest].append(path)
+              loads[lightest] += pathlib.Path(path).stat().st_size
+          shard = sorted(buckets[index])
 
           temp = pathlib.Path(os.environ["RUNNER_TEMP"])
           temp.joinpath("mutation-shard.txt").write_text("".join(f"{f}\n" for f in shard))
@@ -298,9 +365,15 @@ jobs:
           print(f"scored: {len(shard)} files; mutated: {len(mutate)} files")
           PY
 
+      - name: Restore shared coverage contexts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: mutation-coverage-contexts
+          path: data-root/.tmp
+
       - name: Run the sharded all-source mutation gate
         run: >-
-          just mutation-shard
+          just mutation-shard-prepared
           "$RUNNER_TEMP/mutation-shard.txt"
           "$RUNNER_TEMP/mutation-mutate.txt"
 

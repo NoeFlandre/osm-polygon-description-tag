@@ -39,10 +39,8 @@ def test_policy_defaults_are_conservative_and_immutable() -> None:
     policy = LanguagePolicy()
 
     assert policy.min_alphabetic_chars == 5
-    assert policy.min_score == 0.8
-    assert policy.min_margin == 0.2
     with pytest.raises(dataclasses.FrozenInstanceError):
-        policy.min_score = 0.9  # type: ignore[misc]
+        policy.min_alphabetic_chars = 9  # type: ignore[misc]
 
 
 @pytest.mark.parametrize(
@@ -51,13 +49,10 @@ def test_policy_defaults_are_conservative_and_immutable() -> None:
         {"min_alphabetic_chars": 0},
         {"min_alphabetic_chars": -1},
         {"min_alphabetic_chars": True},
-        {"min_score": math.nan},
-        {"min_score": math.inf},
-        {"min_score": -0.1},
-        {"min_score": 1.1},
-        {"min_margin": math.nan},
-        {"min_margin": -0.1},
-        {"min_margin": 1.1},
+        {"tie_epsilon": math.nan},
+        {"tie_epsilon": math.inf},
+        {"tie_epsilon": -0.1},
+        {"tie_epsilon": 1.1},
         {"tie_epsilon": math.inf},
         {"tie_epsilon": -0.1},
     ],
@@ -121,7 +116,7 @@ def test_detector_constructor_validates_dependency_contracts() -> None:
     assert str(caught.value) == "policy must be a LanguagePolicy"
 
     policy = LanguagePolicy()
-    mismatched_identity = language_model_identity(LanguagePolicy(min_score=0.81))
+    mismatched_identity = language_model_identity(LanguagePolicy(min_alphabetic_chars=8))
     with pytest.raises(ValueError) as caught:
         LanguageDetector(
             lambda _text: {"eng": 0.9},
@@ -232,31 +227,40 @@ def test_short_text_is_uncertain_without_forcing_a_language() -> None:
     assert called is False
 
 
-def test_low_confidence_and_low_margin_are_uncertain() -> None:
+def test_low_confidence_and_low_margin_are_detected() -> None:
+    """Confidence is no longer gated; only a tie or mixed text refuses a label.
+
+    The raw scores stay on the row so a consumer can apply its own threshold.
+    """
     low_score = _detector({"eng": 0.79, "fra": 0.1})("A long enough sentence for testing.")
     low_margin = _detector({"eng": 0.9, "fra": 0.75})("A long enough sentence for testing.")
 
-    assert low_score.status is LanguageStatus.UNCERTAIN
-    assert low_score.language_code is None
-    assert low_score.reason == "low_confidence"
+    assert low_score.status is LanguageStatus.DETECTED
+    assert low_score.language_code == "eng"
+    assert low_score.reason == "detected"
     assert low_score.top_score == 0.79
-    assert low_margin.status is LanguageStatus.UNCERTAIN
-    assert low_margin.language_code is None
-    assert low_margin.reason == "low_margin"
+    assert low_margin.status is LanguageStatus.DETECTED
+    assert low_margin.language_code == "eng"
+    assert low_margin.reason == "detected"
     assert low_margin.margin == pytest.approx(0.15)
 
 
-@pytest.mark.parametrize(
-    ("score", "status"),
-    [(0.0, LanguageStatus.UNCERTAIN), (1.0, LanguageStatus.DETECTED)],
-)
-def test_provider_scores_accept_the_inclusive_zero_and_one_boundaries(
-    score: float, status: LanguageStatus
-) -> None:
+def test_a_vanishingly_small_margin_is_still_a_tie() -> None:
+    """Removing the margin threshold must not accept an outright tie."""
+    result = _detector({"eng": 0.5, "fra": 0.5})("A long enough sentence for testing.")
+
+    assert result.status is LanguageStatus.UNCERTAIN
+    assert result.language_code is None
+    assert result.reason == "tie"
+
+
+@pytest.mark.parametrize("score", [0.0, 1.0])
+def test_provider_scores_accept_the_inclusive_zero_and_one_boundaries(score: float) -> None:
+    """A lone candidate is accepted at either boundary now confidence is ungated."""
     result = _detector({"eng": score})("A long enough sentence for testing.")
 
     assert result.top_score == score
-    assert result.status is status
+    assert result.status is LanguageStatus.DETECTED
 
 
 def test_highest_confidence_wins_even_when_its_code_sorts_later() -> None:
@@ -279,7 +283,7 @@ def test_score_thresholds_are_inclusive_at_their_configured_boundaries() -> None
     at_minimum_score = _detector({"eng": 0.8, "fra": 0.0})("A long enough sentence for testing.")
     # Binary-exact fractions exercise equality, not subtraction round-off.
     at_minimum_margin = _detector(
-        {"eng": 0.75, "fra": 0.5}, policy=LanguagePolicy(min_score=0.5, min_margin=0.25)
+        {"eng": 0.75, "fra": 0.5}, policy=LanguagePolicy(min_alphabetic_chars=3)
     )("A long enough sentence for testing.")
 
     assert at_minimum_score.status is LanguageStatus.DETECTED
@@ -408,7 +412,7 @@ def test_description_detection_returns_one_result_for_each_entry() -> None:
 def test_model_identity_pins_library_version_policy_and_not_an_artifact_hash() -> None:
     first = language_model_identity(LanguagePolicy())
     second = language_model_identity(LanguagePolicy())
-    changed = language_model_identity(LanguagePolicy(min_score=0.81))
+    changed = language_model_identity(LanguagePolicy(min_alphabetic_chars=8))
 
     assert first == second
     assert first.library_name == "lingua-language-detector"

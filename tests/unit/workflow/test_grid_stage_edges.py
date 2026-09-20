@@ -19,7 +19,6 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
     SNAPSHOT_FILENAME,
     SnapshotManifest,
     fingerprint_lockfile,
-    fingerprint_project_source,
     prepare_snapshot,
 )
 from osm_polygon_description_tag.storage import write_geoparquet
@@ -44,39 +43,6 @@ from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH
 
 SHARD = "region.parquet"
 REMOTE_BUNDLE = "/scratch/lang-bundle"
-
-
-@pytest.fixture
-def portable_inputs(tmp_path: Path) -> tuple[Path, Path, Path, SnapshotManifest]:
-    source = tmp_path / "source"
-    source.mkdir()
-    write_geoparquet(
-        iter(
-            [
-                make_record_dict(
-                    Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-                    {"description": "A portable description"},
-                )
-            ]
-        ),
-        source / SHARD,
-        batch_size=1,
-    )
-
-    project = tmp_path / "project"
-    (project / "src").mkdir(parents=True)
-    (project / "src" / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
-    (project / "pyproject.toml").write_text("[project]\nname = 'synthetic'\n", encoding="utf-8")
-    (project / "uv.lock").write_text("version = 1\n", encoding="utf-8")
-
-    run = tmp_path / "run"
-    snapshot = prepare_snapshot(
-        source,
-        run,
-        code_fingerprint=fingerprint_project_source(project),
-        lock_fingerprint=fingerprint_lockfile(project),
-    )
-    return project, source, run, snapshot
 
 
 def _stage(

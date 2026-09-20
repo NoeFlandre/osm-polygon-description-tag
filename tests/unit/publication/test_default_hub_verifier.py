@@ -29,6 +29,7 @@ from osm_polygon_description_tag.orchestrator import (
     default_hub_verifier_factory,
 )
 from osm_polygon_description_tag.publication import REPO_ID, UploadItem
+from tests.helpers.messages import exactly
 
 
 class _FakeRepo:
@@ -408,7 +409,7 @@ def test_cli_run_and_publish_invokes_default_verifier(
     import osm_polygon_description_tag.publication.verification as orch
 
     monkeypatch.setattr(orch._huggingface_hub, "HfApi", fake_hubapi)
-    monkeypatch.setattr(pub, "_default_runner_with_retry", lambda command, **kw: None)
+    monkeypatch.setattr(pub, "default_runner_with_retry", lambda command, **kw: None)
 
     # Plant a resumable local artifact so the orchestrator does NOT need
     # to invoke the real osmium executable. Drop ``b`` for clarity.
@@ -530,7 +531,7 @@ def test_no_state_written_before_verifier_succeeds(
     import osm_polygon_description_tag.publication.upload as pub
     import osm_polygon_description_tag.workflow.orchestrator as orch
 
-    monkeypatch.setattr(pub, "_default_runner_with_retry", lambda command, **kw: None)
+    monkeypatch.setattr(pub, "default_runner_with_retry", lambda command, **kw: None)
 
     calls = {"count": 0}
 
@@ -755,3 +756,191 @@ def test_default_verifier_fails_closed_on_download_error(
 
     with pytest.raises(HubVerificationError, match="download failed"):
         factory(REPO_ID, items)
+
+
+class _RecordingApi:
+    """Fake ``HfApi`` that records exactly how it was called."""
+
+    def __init__(self, text: str = "card", sha: str = "revision-sha") -> None:
+        self.text = text
+        self.sha = sha
+        self.download_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def whoami(self) -> object:
+        return {"name": "fake"}
+
+    def repo_info(self, *_args: object, **_kwargs: object) -> object:
+        return _FakeRepo(self.sha)
+
+    def hf_hub_download(self, *args: object, **kwargs: object) -> str:
+        self.download_calls.append((args, dict(kwargs)))
+        import tempfile
+
+        directory = tempfile.mkdtemp()
+        target = Path(directory) / "downloaded.md"
+        target.write_text(self.text, encoding="utf-8")
+        return str(target)
+
+
+def _install(monkeypatch: pytest.MonkeyPatch, api: object) -> None:
+    import osm_polygon_description_tag.publication.verification as orch
+
+    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: api)
+
+
+def test_read_file_requests_the_exact_path_at_the_exact_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reading the remote card must be pinned to one revision and repo type.
+
+    A dropped ``revision`` silently reads the branch head instead of the
+    revision the release was planned against, which is precisely the race the
+    parented commit exists to prevent.
+    """
+    api = _RecordingApi(text="remote card")
+    _install(monkeypatch, api)
+
+    result = default_hub_verifier_factory().read_file(REPO_ID, "README.md", revision="abc123")
+
+    assert result == "remote card"
+    assert api.download_calls == [
+        ((REPO_ID, "README.md"), {"revision": "abc123", "repo_type": "dataset"})
+    ]
+
+
+def test_read_file_passes_the_cache_directory_only_when_one_was_configured(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    api = _RecordingApi()
+    _install(monkeypatch, api)
+
+    default_hub_verifier_factory(cache_dir=tmp_path).read_file(
+        REPO_ID, "README.md", revision="abc123"
+    )
+
+    assert api.download_calls[0][1] == {
+        "revision": "abc123",
+        "repo_type": "dataset",
+        "cache_dir": tmp_path,
+    }
+
+
+def test_read_file_reports_the_path_and_revision_it_could_not_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Failing(_RecordingApi):
+        def hf_hub_download(self, *args: object, **kwargs: object) -> str:
+            raise RuntimeError("boom")
+
+    _install(monkeypatch, _Failing())
+
+    from osm_polygon_description_tag.orchestrator import HubVerificationError
+
+    with pytest.raises(
+        HubVerificationError,
+        match=exactly(f"could not read README.md from {REPO_ID}@abc123: boom"),
+    ):
+        default_hub_verifier_factory().read_file(REPO_ID, "README.md", revision="abc123")
+
+
+def test_matching_revision_reports_the_repository_and_revision_it_failed_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An operational failure is not a content mismatch and must not return None."""
+
+    class _Failing(_RecordingApi):
+        def get_paths_info(self, *_args: object, **_kwargs: object) -> object:
+            raise RuntimeError("boom")
+
+    _install(monkeypatch, _Failing(sha="rev-9"))
+
+    from osm_polygon_description_tag.orchestrator import HubVerificationError
+
+    with pytest.raises(
+        HubVerificationError,
+        match=exactly(
+            f"remote metadata verification failed for {REPO_ID}@rev-9: "
+            "hub verification failed for README.md: boom"
+        ),
+    ):
+        default_hub_verifier_factory().matching_revision(
+            REPO_ID, (UploadItem(relative_path="README.md", size_bytes=2, sha256="a" * 64),)
+        )
+
+
+def test_verify_inventory_resolves_the_revision_from_the_named_repository(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no revision given, the repository's own head must be looked up.
+
+    The lookup has to use the authenticated client and the repository that was
+    asked about; addressing anything else verifies the wrong thing and still
+    returns a plausible-looking SHA.
+    """
+    seen: list[tuple[str, object]] = []
+
+    class _Api(_RecordingApi):
+        def repo_info(self, repo_id: str, **kwargs: object) -> object:
+            seen.append((repo_id, kwargs.get("repo_type")))
+            return _FakeRepo(self.sha)
+
+        def list_repo_files(self, *_args: object, **_kwargs: object) -> list[str]:
+            return []
+
+    _install(monkeypatch, _Api(sha="head-sha"))
+
+    from osm_polygon_description_tag.orchestrator import HubVerificationError
+
+    with pytest.raises(HubVerificationError):
+        default_hub_verifier_factory().verify_inventory(
+            REPO_ID, (UploadItem(relative_path="data/a.parquet", size_bytes=1, sha256="a" * 64),)
+        )
+
+    assert seen == [(REPO_ID, "dataset")]
+
+
+def test_a_failed_path_lookup_names_every_path_it_asked_about(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The refusal lists the paths, comma separated, so the request is legible."""
+
+    class _Api(_RecordingApi):
+        def get_paths_info(self, *_args: object, **_kwargs: object) -> object:
+            raise RuntimeError("boom")
+
+    _install(monkeypatch, _Api())
+
+    from osm_polygon_description_tag.orchestrator import HubVerificationError
+
+    items = (
+        UploadItem(relative_path="data/a.parquet", size_bytes=1, sha256="a" * 64),
+        UploadItem(relative_path="data/b.parquet", size_bytes=1, sha256="b" * 64),
+    )
+
+    with pytest.raises(
+        HubVerificationError,
+        match=exactly("hub verification failed for data/a.parquet, data/b.parquet: boom"),
+    ):
+        default_hub_verifier_factory()(REPO_ID, items)
+
+
+def test_a_failed_inventory_lookup_names_the_revision_it_used(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An inventory failure must say which revision it was listing."""
+
+    class _Api(_RecordingApi):
+        def list_repo_files(self, *_args: object, **_kwargs: object) -> list[str]:
+            raise RuntimeError("boom")
+
+    _install(monkeypatch, _Api(sha="rev-7"))
+
+    from osm_polygon_description_tag.orchestrator import HubVerificationError
+
+    with pytest.raises(
+        HubVerificationError,
+        match=exactly("hub inventory lookup failed at revision rev-7: boom"),
+    ):
+        default_hub_verifier_factory().verify_inventory(
+            REPO_ID, (UploadItem(relative_path="data/a.parquet", size_bytes=1, sha256="a" * 64),)
+        )

@@ -109,18 +109,6 @@ def _model_input(text: str) -> str:
     return " ".join(text.split())
 
 
-def _threshold_reason(
-    top_score: float,
-    margin: float | None,
-    policy: LanguagePolicy,
-) -> str | None:
-    if top_score < policy.min_score:
-        return "low_confidence"
-    if margin is not None and margin < policy.min_margin:
-        return "low_margin"
-    return None
-
-
 def _has_mixed_evidence(
     text: str,
     policy: LanguagePolicy,
@@ -150,17 +138,21 @@ def _score_details(
 
 
 def _score_reason(
-    top_score: float,
     margin: float | None,
     text: str,
     policy: LanguagePolicy,
     mixed_provider: MixedLanguageComputer | None,
 ) -> str | None:
+    """Return why a scored candidate is still refused, or ``None`` to accept.
+
+    Confidence is not gated: only an outright tie between the top two
+    candidates, or mixed-language evidence, prevents a label.
+    """
     if margin is not None and margin <= policy.tie_epsilon:
         return "tie"
     if _has_mixed_evidence(text, policy, mixed_provider):
         return "mixed_text"
-    return _threshold_reason(top_score, margin, policy)
+    return None
 
 
 def _uncertain_score_result(
@@ -189,7 +181,7 @@ def _score_result(
     if details is None:
         return _no_language_result(LanguageStatus.UNCERTAIN, "no_confidence_values")
     top_code, top_score, runner_up_score, margin = details
-    reason = _score_reason(top_score, margin, text, policy, mixed_provider)
+    reason = _score_reason(margin, text, policy, mixed_provider)
     if reason is not None:
         return _uncertain_score_result(top_score, runner_up_score, margin, reason)
     return LanguageResult(

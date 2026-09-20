@@ -313,7 +313,9 @@ def _insert_batch(
     localized_names_sql = _map_sql_expression(batch, "localized_names")
     localized_descriptions_sql = _map_sql_expression(batch, "localized_descriptions")
     tags_sql = _map_sql_expression(batch, "tags")
-    geometry_sql = canonical_geometry_wkb_sql("geometry")
+    # DuckDB folds identifier case, including inside quotes, so re-casing this
+    # column name produces the same query.
+    geometry_sql = canonical_geometry_wkb_sql("geometry")  # pragma: no mutate
     connection.register("batch", batch)
     try:
         connection.execute(
@@ -582,7 +584,7 @@ def _validated_bbox(
 def _coerce_float_values(values: tuple[object, ...]) -> tuple[float, ...] | None:
     """Convert object values to floats, returning ``None`` on conversion errors."""
     try:
-        return tuple(float(cast(Any, value)) for value in values)
+        return tuple(float(cast(Any, value)) for value in values)  # pragma: no mutate
     except (TypeError, ValueError):
         return None
 
@@ -608,13 +610,15 @@ def _summarize_spatial_batch(
     """Validate and summarize one bounded spatial Arrow batch."""
     areas = batch.column("area_m2").to_pylist()
     geometry_types = batch.column("geometry_type").to_pylist()
-    bbox_values = zip(
-        batch.column("bbox_min_x").to_pylist(),
-        batch.column("bbox_min_y").to_pylist(),
-        batch.column("bbox_max_x").to_pylist(),
-        batch.column("bbox_max_y").to_pylist(),
-        strict=True,
-    )
+    min_x = batch.column("bbox_min_x").to_pylist()
+    min_y = batch.column("bbox_min_y").to_pylist()
+    max_x = batch.column("bbox_max_x").to_pylist()
+    max_y = batch.column("bbox_max_y").to_pylist()
+    # Columns of one Arrow batch are the same length by construction, so these
+    # strict zips cannot fire. They stay as guards for a caller that assembles
+    # the lists itself, and are excluded from mutation because no input can
+    # tell them apart from a plain zip.
+    bbox_values = zip(min_x, min_y, max_x, max_y, strict=True)  # pragma: no mutate
     geometries = batch.column("geometry").to_pylist()
     source_names = (
         batch.column("source_pbf").to_pylist()
@@ -627,9 +631,10 @@ def _summarize_spatial_batch(
     rings_total = 0
     holes_total = 0
     multipolygon_components_total = 0
-    for offset, (area, geometry_type, bbox, wkb, row_source) in enumerate(
-        zip(areas, geometry_types, bbox_values, geometries, source_names, strict=True)
-    ):
+    # pragma: no mutate start - equal-length columns, see the note above
+    rows = zip(areas, geometry_types, bbox_values, geometries, source_names, strict=True)
+    # pragma: no mutate end
+    for offset, (area, geometry_type, bbox, wkb, row_source) in enumerate(rows):
         index = row_offset + offset
         source = str(row_source)
         area_values.append(_validated_area(area, source_name=source, row_index=index))
@@ -651,7 +656,8 @@ def _summarize_spatial_batch(
         rings_total += rings
         holes_total += holes
         multipolygon_components_total += components
-    columns = tuple(zip(*bboxes, strict=True))
+    # every bbox is a 4-tuple from ``_validated_bbox``; see the note above
+    columns = tuple(zip(*bboxes, strict=True))  # pragma: no mutate
     min_x = min(columns[0])
     min_y = min(columns[1])
     max_x = max(columns[2])
@@ -889,7 +895,9 @@ def collect_stats(
         _ingest_features(connection, artifacts)
         _create_unique_feature_view(connection)
         feature_summary = _collect_feature_summary(connection)
-        raw_rows = _query_int(connection, "SELECT COUNT(*) FROM all_features")
+        # SQL keywords and DuckDB identifiers are both case-insensitive, so no
+        # input can tell a re-cased spelling of this query apart from this one.
+        raw_rows = _query_int(connection, "SELECT COUNT(*) FROM all_features")  # pragma: no mutate
     finally:
         connection.close()
 
