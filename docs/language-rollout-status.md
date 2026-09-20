@@ -286,6 +286,13 @@ scratch copy, and the sequence that finally worked is worth repeating verbatim:
 3. run the gate;
 4. confirm with `scripts/check_mutation_score.py --minimum-score 100`.
 
+The scoped pull-request gate reads the same map. It used to select tests by
+which test files the branch touched, which is both slower and weaker: on a
+branch changing 69 test files and 303 source functions that rule ran 2,047
+tests for every mutant -- 620,241 test-executions for one mutant each --
+against 20,745 from the map, and a mutant killable only by an untouched test
+was reported as a survivor.
+
 Record the contexts in parallel rather than serially, and not only for the
 time. Each worker starts with fresh module state, so a lazily imported name
 that one process resolves once and caches is resolved again in the others.

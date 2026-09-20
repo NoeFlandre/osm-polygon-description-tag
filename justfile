@@ -123,13 +123,21 @@ mutation-shard scope_file mutate_file: mutation-contexts
 # Run a strict mutation gate for the exact source lines and tests changed by a
 # PR. The scoped runner uses only the targeted test set; an empty test file
 # falls back to the configured repository-wide test root.
-mutation-scope scope_file test_scope_file:
+# Selection comes from the coverage map, not from which test files the branch
+# happens to touch. Measured on a pull request that changed 69 test files and
+# 303 source functions: selecting by changed test files runs 2,047 tests for
+# every mutant (620,241 test-executions for one mutant each), while the
+# coverage map runs the tests that actually cover the mutated function -- a
+# median of 32, 20,745 in total. Recording the map costs 2m37s once.
+#
+# It is also the sounder selection: a mutant killable only by a test the branch
+# did not touch is reported as a survivor under the file-based rule.
+mutation-scope scope_file: mutation-contexts
     test -f "{{scope_file}}"
-    test -f "{{test_scope_file}}"
     mkdir -p reports data-root/.tmp
     uv run python -m scripts.run_mutation_gate --max-children 8 \
-        --changed-lines-file "{{scope_file}}" \
-        --test-selection-file "{{test_scope_file}}"
+        --coverage-file data-root/.tmp/.coverage-ctx \
+        --changed-lines-file "{{scope_file}}"
     uv run python scripts/check_mutation_score.py \
         --mutants-root mutants \
         --output reports/mutation-summary.json \

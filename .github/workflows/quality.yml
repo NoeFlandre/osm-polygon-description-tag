@@ -222,20 +222,11 @@ jobs:
             echo "No Python source changed; the mutation gate has nothing to mutate."
           fi
 
-      - name: Select changed mutation tests
-        if: steps.scope.outputs.changed == 'true'
-        run: >-
-          git diff --name-only
-          "${{ github.event.pull_request.base.sha }}"
-          "${{ github.event.pull_request.head.sha }}"
-          -- 'tests/**/*.py' > "$RUNNER_TEMP/mutation-tests.txt"
-
       - name: Run changed-source mutation gate
         if: steps.scope.outputs.changed == 'true'
         run: >-
           just mutation-scope
           "$RUNNER_TEMP/mutation-scope.txt"
-          "$RUNNER_TEMP/mutation-tests.txt"
 
       - name: Upload mutation report
         if: always() && steps.scope.outputs.changed == 'true'

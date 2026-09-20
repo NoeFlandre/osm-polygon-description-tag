@@ -584,7 +584,6 @@ def test_quality_recipes_and_required_mutation_gate_are_publicly_wired() -> None
     assert "run_mutation_gate" in justfile
     assert "uv run python -m scripts.run_mutation_gate" in justfile
     assert "--changed-lines-file" in justfile
-    assert "--test-selection-file" in justfile
     assert "--max-crap-score 6" in justfile
     assert "--pattern" not in justfile
     assert "planning.x*__mutmut_*" not in justfile
@@ -596,7 +595,6 @@ def test_quality_recipes_and_required_mutation_gate_are_publicly_wired() -> None
     assert "just mutation-scope" in workflow
     assert "--unified=0" in workflow
     assert "scripts/**/*.py" in workflow
-    assert "tests/**/*.py" in workflow
     assert "mutation-scope:" in workflow
     assert "mutation-all:" in workflow
     assert "run: just risk" in workflow
@@ -692,16 +690,26 @@ def test_sharded_mutation_gate_keeps_the_full_strictness() -> None:
     assert len([entry for entry in matrix.split(",") if entry.strip()]) == shard_count
 
 
-def test_scoped_mutation_recipe_does_not_collect_all_test_contexts() -> None:
-    """PR mutation must not spend the gate timeout rebuilding the full map."""
-    justfile = (PROJECT_ROOT / "justfile").read_text(encoding="utf-8")
-    scope_recipe = justfile.split("mutation-scope scope_file test_scope_file:", 1)[1].split(
-        "\n\n", 1
-    )[0]
+def test_scoped_mutation_selects_tests_from_the_coverage_map() -> None:
+    """PR mutation selects by what covers the function, not by what the branch touched.
 
-    assert "mutation-contexts" not in scope_recipe
-    assert "--coverage-file" not in scope_recipe
+    This reverses an earlier rule that kept the map out of the scoped gate to
+    protect the timeout. Measured on a pull request changing 69 test files and
+    303 source functions, the file-based rule ran 2,047 tests per mutant --
+    620,241 test-executions for one mutant each -- against 20,745 from the map,
+    which costs 2m37s to record. It is also the sounder rule: a mutant killable
+    only by a test the branch did not touch survives the file-based one.
+    """
+    justfile = (PROJECT_ROOT / "justfile").read_text(encoding="utf-8")
+    header, _, body = justfile.partition("mutation-scope scope_file:")
+    scope_recipe = body.split("\n\n", 1)[0]
+    del header
+
+    # The map has to be recorded before the recipe reads it.
+    assert scope_recipe.splitlines()[0].strip() == "mutation-contexts"
+    assert "--coverage-file" in scope_recipe
     assert "--changed-lines-file" in scope_recipe
+    assert "--test-selection-file" not in scope_recipe
 
 
 def test_mutation_scope_parser_keeps_only_added_or_modified_new_lines() -> None:
