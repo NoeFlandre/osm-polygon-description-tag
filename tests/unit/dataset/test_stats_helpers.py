@@ -885,3 +885,120 @@ def test_an_invalid_bounding_box_names_its_source_and_row() -> None:
         stats_module._summarize_spatial_batch(
             _spatial_batch(rows), source_name="region.parquet", row_offset=7
         )
+
+
+def test_merge_bboxes_takes_each_edge_from_its_own_position() -> None:
+    """Every coordinate differs, so a swapped index cannot produce the answer."""
+    current = (-10.0, -20.0, 30.0, 40.0)
+    addition = (-5.0, -25.0, 35.0, 15.0)
+
+    assert stats_module._merge_bboxes(current, addition) == (-10.0, -25.0, 35.0, 40.0)
+    assert stats_module._merge_bboxes(None, addition) == addition
+    assert stats_module._merge_bboxes(current, None) == current
+    assert stats_module._merge_bboxes(None, None) is None
+
+
+def test_spatial_totals_accumulate_across_every_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A single batch cannot tell accumulation from assignment.
+
+    Each counter starts at zero, so with one batch ``total += value`` and
+    ``total = value`` agree exactly. Two batches are not enough either when
+    only the last one contributes. Three batches, each carrying multipolygon
+    parts, separate the two, and the row offset only diverges once a third
+    batch has to start after the sum of the first two.
+    """
+
+    def _multi(parts: int, *, min_x: float, min_y: float, max_x: float, max_y: float) -> dict:
+        squares = [_square(4 * i, 4 * i) for i in range(parts)]
+        return {
+            "source_pbf": "unique.parquet",
+            "geometry_type": "MultiPolygon",
+            "min_x": min_x,
+            "min_y": min_y,
+            "max_x": max_x,
+            "max_y": max_y,
+            "wkb": to_wkb(MultiPolygon(squares)),
+        }
+
+    batches = [
+        _spatial_batch([_multi(2, min_x=-10.0, min_y=-20.0, max_x=5.0, max_y=8.0)]),
+        _spatial_batch(
+            [
+                _multi(3, min_x=-3.0, min_y=-40.0, max_x=60.0, max_y=7.0),
+                _multi(4, min_x=0.0, min_y=0.0, max_x=1.0, max_y=1.0),
+            ]
+        ),
+        _spatial_batch([_multi(5, min_x=2.0, min_y=3.0, max_x=4.0, max_y=90.0)]),
+    ]
+    offsets: list[int] = []
+    real = stats_module._summarize_spatial_batch
+
+    def _record(batch: object, *, source_name: str, row_offset: int):  # type: ignore[no-untyped-def]
+        offsets.append(row_offset)
+        return real(batch, source_name=source_name, row_offset=row_offset)
+
+    monkeypatch.setattr(stats_module, "_summarize_spatial_batch", _record)
+    monkeypatch.setattr(
+        stats_module, "iter_unique_parquet_batches", lambda *_a, **_k: iter(batches)
+    )
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    artifact = SimpleNamespace(parquet=data_dir / "unique.parquet")
+
+    summary = stats_module._collect_spatial_summary((artifact,))
+
+    # 1 + 2 + 1 rows, so the third batch must start at 3, not at 2.
+    assert summary.rows == 4
+    assert offsets == [0, 1, 3]
+    # 2 + (3 + 4) + 5 parts: assignment would report only the last batch's 5.
+    assert summary.multipolygon_components_total == 14
+    # every square is one ring, so the rings total tracks the parts total
+    assert summary.geometry_rings_total == 14
+    # four corners per ring: the closing point is not counted twice
+    assert summary.geometry_vertices_total == 14 * 4
+    assert summary.dataset_bbox == (-10.0, -40.0, 60.0, 90.0)
+
+
+def test_hole_counts_accumulate_across_batches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Holes need their own case: a dataset of solid squares never has any.
+
+    With every batch reporting zero holes, assignment and accumulation agree,
+    so the running total is only pinned once two batches each contribute one.
+    """
+    holed = Polygon(
+        [(0, 0), (0, 10), (10, 10), (10, 0)],
+        [[(2, 2), (2, 4), (4, 4), (4, 2)]],
+    )
+
+    def _row_with_hole(source: str) -> dict:
+        return {
+            "source_pbf": source,
+            "geometry_type": "Polygon",
+            "min_x": 0.0,
+            "min_y": 0.0,
+            "max_x": 10.0,
+            "max_y": 10.0,
+            "wkb": to_wkb(holed),
+        }
+
+    batches = [
+        _spatial_batch([_row_with_hole("a.parquet")]),
+        _spatial_batch([_row_with_hole("b.parquet")]),
+    ]
+    monkeypatch.setattr(
+        stats_module, "iter_unique_parquet_batches", lambda *_a, **_k: iter(batches)
+    )
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    summary = stats_module._collect_spatial_summary(
+        (SimpleNamespace(parquet=data_dir / "unique.parquet"),)
+    )
+
+    assert summary.geometry_holes_total == 2
+    assert summary.geometry_rings_total == 4
