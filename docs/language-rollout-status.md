@@ -325,6 +325,9 @@ reached `run_end` with no halt.
 | Distinct languages assigned | 278 |
 | Split into sentences | 840 897 |
 | Sentences produced | 978 773 |
+| Eligible for splitting (detected) | 885 740 |
+| Splitting coverage of eligible units | 94.9372 % |
+| Distinct languages outside the splitter's 85 | 192 |
 | Skipped, language unsupported by the splitter | 44 843 |
 | Skipped, no language detected | 33 386 |
 
@@ -389,6 +392,7 @@ Published and verified.
 | Baseline revision | `1c417fb242e8ef5b6cf6f62d5bf7aba14914c386` |
 | Data revision | `861c51c1488f4485a986cfe2683b3ea543e08faf` |
 | Published revision (corrected card) | `d144ca6ae1dad4aefefbf92241da9cd8b097a7f7` |
+| Published revision (splitting coverage) | `0eda1fd0d42a2b415cdbf950dca7047775a3895b` |
 | Files uploaded | 388 (386 Parquet + `stats.json` + `export-manifest.json`) |
 | Bytes under `language-v1/` | 103 531 140 |
 | Files verified by size and SHA-256 | 388 / 388 |
