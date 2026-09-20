@@ -4,7 +4,7 @@ A living record of the `language-v1` cascade rollout: what is finished, what is
 not, and what the next operator has to do. Update it in the same commit as the
 work it describes.
 
-**Last updated:** 2026-09-14 · **Code:** `main`
+**Last updated:** 2026-09-20 · **Code:** `codex/repo-hardening-release`
 
 ## Summary
 
@@ -13,10 +13,10 @@ work it describes.
 | Cascade implementation (Lingua primary, GlotLID v3 fallback) | **Done** |
 | Sentence splitting (SaT-3l-sm, gated on the languages it was trained on) | **Done** |
 | Local quality gates | **Done** |
-| Mutation gate at 100 % | **Done** — 18 140 / 18 140 killed |
+| Mutation gate at 100 % | **Not met** — 20 708 / 20 775 killed (99.677 %), 67 survivors; see [#20](https://github.com/NoeFlandre/osm-polygon-description-tag/issues/20) |
 | Grid'5000 operator environment | **Done** — the NumPy baseline blocker is resolved |
-| Grid'5000 full-dataset run | **Done** — 386 / 386 shards, 906 631 rows, 919 126 annotations |
-| Hugging Face publication | **Done** — revision `fec858b6`, 388 files under `language-v1/` |
+| Grid'5000 full-dataset run (ungated policy) | **Done** — 386 / 386 shards, 906 631 rows, 919 126 annotations |
+| Hugging Face publication (ungated policy) | **Done** — revision `d144ca6a`, 388 files under `language-v1/` |
 
 ## Done
 
@@ -300,9 +300,17 @@ must be re-frozen before the run below; that is already listed as step 1 there.
 
 ### Grid'5000 full-dataset run
 
-Complete. Snapshot
-`9a03d00020191df375c25d3e4fa9b79e28ac9f8d83868d274a508ab954a84e98`, frozen over
-all 386 shards, processed end to end in `data-root/language-run-sat-full`.
+Complete, under the **ungated** detection policy. Snapshot
+`0051cc7ce300e58e65829dead01e7edfda46fa7a0e76fb992e1928f61177ffdb`, model
+configuration fingerprint
+`1d6f31e245a922d89d6d341f24cf0db2304160b2b7ce4f5d8eb890eef148c9a7`, frozen over
+all 386 shards.
+
+The run was driven as eight cooperating drivers, one per site
+(`nancy`, `lille`, `lyon`, `grenoble`, `luxembourg`, `nantes`, `sophia`,
+`toulouse`), each owning a disjoint `--shard-stride 8` share and its own run
+directory; a shared run directory is refused by the run-wide lock. Every driver
+reached `run_end` with no halt.
 
 | Measure | Value |
 | --- | --- |
@@ -311,13 +319,27 @@ all 386 shards, processed end to end in `data-root/language-run-sat-full`.
 | Annotations produced | 919 126 |
 | Base `description` values | 887 077 |
 | Localized `description:*` values | 32 049 |
-| Detected | 572 328 |
-| Uncertain | 340 924 |
+| Detected | 885 740 |
+| Uncertain | 27 512 |
 | Non-linguistic | 5 874 |
-| Distinct languages assigned | 324 |
-| Split into sentences | 534 731 |
-| Skipped, language unsupported by the splitter | 37 597 |
-| Skipped, no language detected | 346 798 |
+| Distinct languages assigned | 278 |
+| Split into sentences | 840 897 |
+| Sentences produced | 978 773 |
+| Skipped, language unsupported by the splitter | 44 843 |
+| Skipped, no language detected | 33 386 |
+
+Row and annotation totals are identical to the previous conservative run, which
+is the conservation check: ungating changes *which* language a value is given,
+not how many values exist. Coverage moves from 62.27 % to 96.37 % of
+annotations, and the distinct-language count *falls* from 324 to 278 --- values
+that were previously withheld as uncertain now resolve into common languages
+rather than rare ones.
+
+Verified twice and independently: once by `language validate`, and once by
+recomputing every part's SHA-256 against its receipt, checking that the receipt
+chain tiles `[0, rows)` with no gap or overlap, reconciling annotation counts,
+and asserting the snapshot and model fingerprint on every checkpoint *and* every
+receipt. Both report 386 / 386 and zero issues.
 | Sentences | 649 186 |
 | Validation issues | none |
 
@@ -364,11 +386,13 @@ Published and verified.
 | Field | Value |
 | --- | --- |
 | Repository | `NoeFlandre/osm-polygon-description-tag` |
-| Baseline revision | `fec858b679f5ee7e87f0ecfaaa6b7223b2a7f5e2` |
-| Published revision | `7a9c678242e62ee1c7d5a9468b7751fa9aefb26b` |
+| Baseline revision | `1c417fb242e8ef5b6cf6f62d5bf7aba14914c386` |
+| Data revision | `861c51c1488f4485a986cfe2683b3ea543e08faf` |
+| Published revision (corrected card) | `d144ca6ae1dad4aefefbf92241da9cd8b097a7f7` |
 | Files uploaded | 388 (386 Parquet + `stats.json` + `export-manifest.json`) |
-| Bytes under `language-v1/` | 101 207 496 |
+| Bytes under `language-v1/` | 103 531 140 |
 | Files verified by size and SHA-256 | 388 / 388 |
+| No-op rerun | revision unchanged, zero uploads |
 | Outstanding issues | none |
 
 The upload is additive: everything lands under `language-v1/`, and the same
@@ -376,8 +400,22 @@ commit adds a `language-v1` configuration listing its Parquet paths explicitly
 rather than by wildcard, plus a generated section in the root `README.md`. The
 `default` configuration and every existing file are untouched.
 
-The dataset-card section was later shortened, which exposed a defect worth
-recording: `upload` commits the data files *and* the rendered card in one
+The card published with the data initially still described the removed
+confidence gate and reported only the split total. Both were corrected and
+republished as revision `d144ca6a`: the card now states that detection is not
+gated on confidence, publishes both reasons a value goes unsplit, the share of
+detected values that splitting covers, and the most frequent detected
+languages. The correction produced a *different* plan identity, which is the
+behaviour the defect below was fixed to give.
+
+The Hugging Face Dataset Viewer reported the `language-v1` configuration as
+missing immediately after the data upload. That was indexing lag on the Hub
+side, not a publication fault: the configuration was already declared in the
+card, and the Viewer exposed it once indexing completed. The publication was
+left recorded as `unverified` until then, which is the correct behaviour --- the
+state resolved to `verified` on re-run rather than being forced.
+
+An earlier defect worth keeping recorded: `upload` commits the data files *and* the rendered card in one
 commit, but the plan identity covered only the files. A card-only change
 therefore produced the same identity, publication resumed its recorded outcome,
 skipped the upload entirely, and returned `verified` --- against the *old*
