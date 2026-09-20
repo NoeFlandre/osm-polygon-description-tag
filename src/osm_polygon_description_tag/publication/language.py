@@ -459,15 +459,34 @@ def _language_provenance(export: LanguageExport) -> str:
     )
 
 
+def _split_coverage_percent(split_count: int, detected_count: int) -> str:
+    """Format split coverage as a share of detected values, or ``n/a``."""
+    if detected_count <= 0:
+        return "n/a"
+    return f"{split_count / detected_count * 100:.4f}%"
+
+
+def _top_language_rows(stats: LanguageStats) -> str:
+    """Render the published top-language table, or a note when there is none."""
+    if not stats.top_languages:
+        return "No language was detected in this run."
+    header = "| Language | Annotations |\n| --- | ---: |"
+    rows = "\n".join(f"| `{code}` | {count} |" for code, count in stats.top_languages)
+    return f"{header}\n{rows}"
+
+
 def render_language_card_section(export: LanguageExport) -> str:
     """Render the dataset-card section from validated, exported counts only."""
     stats = export.stats
     return f"""## Language annotations (`{LANGUAGE_CONFIG_NAME}`)
 
-This optional configuration adds a language label to each description value when
-the detector meets its confidence policy, plus sentence splits. It has one row
-per *description value*—not per polygon. The default configuration and its files
-are unchanged.
+This optional configuration adds a language label to each description value the
+detector resolves, plus sentence splits. It has one row per *description
+value*—not per polygon. The default configuration and its files are unchanged.
+
+Detection is **not** gated on a confidence threshold: a value is labelled
+whenever the cascade settles on a language, and `language_code` is left null
+when it stays uncertain or carries no letters.
 
 | Measure | Value |
 | --- | ---: |
@@ -478,6 +497,17 @@ are unchanged.
 | Distinct languages | {stats.distinct_language_count} |
 | Split into sentences | {stats.split_count} |
 | Sentences | {stats.sentence_count} |
+| Not split — language unsupported by the splitter | {stats.unsupported_language_count} |
+| Not split — no language detected | {stats.not_detected_count} |
+
+Sentence splitting covers {_split_coverage_percent(stats.split_count, stats.detected_count)}
+of detected values. The remainder is published unsplit with the reason recorded
+per row, because the splitter is only applied to the languages it was trained
+on; nothing is guessed.
+
+**Most frequent detected languages.**
+
+{_top_language_rows(stats)}
 
 **Models and provenance.** {_language_provenance(export)}
 

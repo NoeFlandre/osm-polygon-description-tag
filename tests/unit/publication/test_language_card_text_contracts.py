@@ -7,6 +7,7 @@ card survives, so each is asserted at its exact offset rather than by shape.
 
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 
 import pytest
@@ -548,3 +549,46 @@ def test_replace_helpers_use_lf_when_their_newline_argument_is_omitted() -> None
 
     assert "\nreplacement\n" in _replace_section(readme, "replacement")
     assert "\nreplacement\n" in _replace_marked_section(readme, "replacement", 1)
+
+
+def test_the_card_states_that_detection_is_not_gated_on_confidence() -> None:
+    """The card must not describe a policy the run no longer applies.
+
+    Detection stopped being gated on a confidence threshold, and a card that
+    still says otherwise misdescribes every published row.
+    """
+    from osm_polygon_description_tag.publication import language as language_module
+
+    source = inspect.getsource(language_module.render_language_card_section)
+
+    assert "meets its confidence policy" not in source
+    assert "not** gated on a confidence threshold" in source
+
+
+def test_split_coverage_is_a_share_of_detected_values() -> None:
+    from osm_polygon_description_tag.publication.language import _split_coverage_percent
+
+    assert _split_coverage_percent(840897, 885740) == "94.9372%"
+    assert _split_coverage_percent(0, 0) == "n/a"
+    assert _split_coverage_percent(1, 4) == "25.0000%"
+
+
+def test_the_top_language_table_lists_every_published_language() -> None:
+    """The card publishes the same ordering the stats file records."""
+    from osm_polygon_description_tag.publication.language import _top_language_rows
+
+    stats = SimpleNamespace(top_languages=(("eng", 273435), ("deu", 138912)))
+
+    rendered = _top_language_rows(stats)
+
+    assert "| `eng` | 273435 |" in rendered
+    assert "| `deu` | 138912 |" in rendered
+    assert rendered.index("`eng`") < rendered.index("`deu`")
+
+
+def test_an_empty_top_language_table_says_so_rather_than_rendering_a_header() -> None:
+    from osm_polygon_description_tag.publication.language import _top_language_rows
+
+    assert _top_language_rows(SimpleNamespace(top_languages=())) == (
+        "No language was detected in this run."
+    )
