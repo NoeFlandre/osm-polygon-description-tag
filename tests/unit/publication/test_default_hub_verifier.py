@@ -897,3 +897,50 @@ def test_verify_inventory_resolves_the_revision_from_the_named_repository(
         )
 
     assert seen == [(REPO_ID, "dataset")]
+
+
+def test_a_failed_path_lookup_names_every_path_it_asked_about(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The refusal lists the paths, comma separated, so the request is legible."""
+
+    class _Api(_RecordingApi):
+        def get_paths_info(self, *_args: object, **_kwargs: object) -> object:
+            raise RuntimeError("boom")
+
+    _install(monkeypatch, _Api())
+
+    from osm_polygon_description_tag.orchestrator import HubVerificationError
+
+    items = (
+        UploadItem(relative_path="data/a.parquet", size_bytes=1, sha256="a" * 64),
+        UploadItem(relative_path="data/b.parquet", size_bytes=1, sha256="b" * 64),
+    )
+
+    with pytest.raises(
+        HubVerificationError,
+        match=exactly("hub verification failed for data/a.parquet, data/b.parquet: boom"),
+    ):
+        default_hub_verifier_factory()(REPO_ID, items)
+
+
+def test_a_failed_inventory_lookup_names_the_revision_it_used(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An inventory failure must say which revision it was listing."""
+
+    class _Api(_RecordingApi):
+        def list_repo_files(self, *_args: object, **_kwargs: object) -> list[str]:
+            raise RuntimeError("boom")
+
+    _install(monkeypatch, _Api(sha="rev-7"))
+
+    from osm_polygon_description_tag.orchestrator import HubVerificationError
+
+    with pytest.raises(
+        HubVerificationError,
+        match=exactly("hub inventory lookup failed at revision rev-7: boom"),
+    ):
+        default_hub_verifier_factory().verify_inventory(
+            REPO_ID, (UploadItem(relative_path="data/a.parquet", size_bytes=1, sha256="a" * 64),)
+        )
