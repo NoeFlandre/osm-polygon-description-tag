@@ -257,3 +257,21 @@ def test_equal_unsupported_counts_are_ordered_by_language_code() -> None:
     )
 
     assert accumulator.result().top_unsupported_languages == (("ast", 1), ("zul", 1))
+
+
+def test_the_eligible_total_is_the_two_splitting_outcomes_added(export: object) -> None:
+    """Eligible is split plus unsupported, and the coverage divides by it.
+
+    Both counts have to be non-zero for the arithmetic to be visible at all:
+    with nothing unsupported, adding and subtracting agree.
+    """
+    from dataclasses import replace
+
+    stats = replace(export.stats, split_count=7, unsupported_language_count=3)
+    section = render_language_card_section(replace(export, stats=stats))
+
+    assert "| Eligible text units | 10 |" in section
+    assert "| Split (language supported) | 7 |" in section
+    assert "| Unsplit (language unsupported) | 3 |" in section
+    assert "| Coverage | 70.0000% |" in section
+    assert "| Unsupported | 30.0000% |" in section

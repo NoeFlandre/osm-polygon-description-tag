@@ -1014,3 +1014,35 @@ def test_an_empty_metadata_revision_is_refused_by_its_exact_message() -> None:
         release_module._verify_metadata_revision(
             plan, (), lambda *_a, **_k: "", lambda *_a, **_k: ""
         )
+
+
+def test_the_inventory_the_upload_is_verified_against_is_the_computed_one(
+    workspace: Path,
+) -> None:
+    """The verifier must be handed the inventory this release actually computed.
+
+    The pre-upload and post-upload checks are what prove the remote holds these
+    exact files; handing them nothing would verify an empty repository and
+    still report success.
+    """
+    verifier = _RecordingVerifier()
+    seen: list[tuple[UploadItem, ...]] = []
+    inner = verifier.verify_inventory
+
+    def record(
+        repo_id: str,
+        files: tuple[UploadItem, ...],
+        *,
+        revision: str | None = None,
+    ) -> str:
+        seen.append(files)
+        return inner(repo_id, files, revision=revision)
+
+    verifier.verify_inventory = record  # type: ignore[method-assign]
+
+    _release(workspace, apply=True, runner=lambda _command: None, verifier=verifier)
+
+    expected = release_module._published_inventory(workspace.resolve())
+    assert expected, "the fixture published nothing to verify against"
+    assert seen, "the inventory verifier was never called"
+    assert all(files == expected for files in seen)
