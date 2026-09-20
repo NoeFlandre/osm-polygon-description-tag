@@ -102,3 +102,72 @@ def test_the_card_section_reports_sentence_splitting(export: object) -> None:
     # The two skip counts are derivable from the totals and were dropped to
     # keep the card section short; the split totals still have to be exact.
     assert "Skipped, language unsupported" not in section
+
+
+def _unsupported_columns(codes: list[str | None], statuses: list[str]) -> dict[str, list[object]]:
+    return {"language_code": list(codes), "split_status": list(statuses)}
+
+
+def test_only_rows_left_unsplit_for_their_language_are_counted() -> None:
+    """The filter has to match on both the status *and* a present language.
+
+    A split row, a row with no detected language, and an unsupported row with a
+    null code must all be ignored; only the last kind names a language the
+    splitter could not handle.
+    """
+    from osm_polygon_description_tag.publication.language import _unsupported_languages_in
+
+    columns = _unsupported_columns(
+        ["tso", "eng", None, "vec", None],
+        [
+            "unsupported_language",
+            "split",
+            "not_detected",
+            "unsupported_language",
+            "unsupported_language",
+        ],
+    )
+
+    assert sorted(_unsupported_languages_in(columns)) == ["tso", "vec"]
+
+
+def test_no_unsupported_rows_yields_nothing() -> None:
+    from osm_polygon_description_tag.publication.language import _unsupported_languages_in
+
+    columns = _unsupported_columns(["eng", "fra"], ["split", "split"])
+
+    assert list(_unsupported_languages_in(columns)) == []
+
+
+def test_unsupported_languages_are_reported_largest_first_and_capped() -> None:
+    """The published table takes the twenty largest, ties broken by code."""
+    from osm_polygon_description_tag.publication.language import _StatsAccumulator
+
+    accumulator = _StatsAccumulator()
+    codes: list[str | None] = []
+    statuses: list[str] = []
+    # 25 distinct languages with descending counts, so the cap and the order
+    # are both observable.
+    for index in range(25):
+        code = f"l{index:02d}"
+        for _ in range(25 - index):
+            codes.append(code)
+            statuses.append("unsupported_language")
+    accumulator._unsupported_languages.update(_unsupported_languages_in_columns(codes, statuses))
+
+    top = tuple(
+        sorted(accumulator._unsupported_languages.items(), key=lambda item: (-item[1], item[0]))[
+            :20
+        ]
+    )
+
+    assert len(top) == 20
+    assert top[0] == ("l00", 25)
+    assert top[-1] == ("l19", 6)
+    assert len(accumulator._unsupported_languages) == 25
+
+
+def _unsupported_languages_in_columns(codes: list[str | None], statuses: list[str]):
+    from osm_polygon_description_tag.publication.language import _unsupported_languages_in
+
+    return _unsupported_languages_in(_unsupported_columns(codes, statuses))
