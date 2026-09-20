@@ -313,7 +313,9 @@ def _insert_batch(
     localized_names_sql = _map_sql_expression(batch, "localized_names")
     localized_descriptions_sql = _map_sql_expression(batch, "localized_descriptions")
     tags_sql = _map_sql_expression(batch, "tags")
-    geometry_sql = canonical_geometry_wkb_sql("geometry")
+    # DuckDB folds identifier case, including inside quotes, so re-casing this
+    # column name produces the same query.
+    geometry_sql = canonical_geometry_wkb_sql("geometry")  # pragma: no mutate
     connection.register("batch", batch)
     try:
         connection.execute(
@@ -893,7 +895,11 @@ def collect_stats(
         _ingest_features(connection, artifacts)
         _create_unique_feature_view(connection)
         feature_summary = _collect_feature_summary(connection)
-        raw_rows = _query_int(connection, "SELECT COUNT(*) FROM all_features")
+        # SQL keywords and DuckDB identifiers are both case-insensitive, so no
+        # input can tell a re-cased spelling of this query apart from this one.
+        raw_rows = _query_int(  # pragma: no mutate
+            connection, "SELECT COUNT(*) FROM all_features"
+        )
     finally:
         connection.close()
 

@@ -577,9 +577,11 @@ def _replace_stats_block(readme: str, block: str) -> str:
     # _stats_marker_count refuses more than one block before this runs, so
     # replacing "the first" and "all" are the same substitution here.
     replace_one = 1  # pragma: no mutate
+    # pragma: no mutate start - one block only, so "first" and "all" agree
     return _GENERATED_PATTERN.sub(
         lambda match: match.group(1) + block + match.group(3), readme, count=replace_one
     )
+    # pragma: no mutate end
 
 
 def _update_stats_block(readme: str, stats: dict[str, Any], stats_sha256: str) -> str:

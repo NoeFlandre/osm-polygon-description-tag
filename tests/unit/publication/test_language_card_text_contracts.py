@@ -537,10 +537,16 @@ def test_marked_section_count_error_is_exact() -> None:
 
 
 def test_insert_section_preserves_non_newline_trailing_bytes_before_limitations() -> None:
-    readme = "introXX\n\n## Limitations\nbody\n"
+    """Only the blank lines are trimmed, not the trailing spaces before them.
+
+    Two spaces at the end of a Markdown line are a hard line break, so a strip
+    that took all whitespace would silently rewrite the paragraph above the
+    inserted section.
+    """
+    readme = "introXX  \n\n## Limitations\nbody\n"
 
     assert language_card._insert_section(readme, "replacement", "\n") == (
-        "introXX\n\nreplacement\n## Limitations\nbody\n"
+        "introXX  \n\nreplacement\n## Limitations\nbody\n"
     )
 
 

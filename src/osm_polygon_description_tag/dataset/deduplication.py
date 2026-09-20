@@ -280,7 +280,11 @@ def _canonical_relation(connection: duckdb.DuckDBPyConnection, parquets: Sequenc
     paths = ", ".join(_sql_literal(str(path)) for path in parquets)
     relation = (
         "(SELECT * EXCLUDE (geometry), "
+        # DuckDB folds identifier case, so re-casing this column name is the
+        # same query; see the note in ``stats._insert_batch``.
+        # pragma: no mutate start
         f"{canonical_geometry_wkb_sql('geometry', input_is_geometry=True)} AS geometry "
+        # pragma: no mutate end
         f"FROM read_parquet([{paths}]))"
     )
     canonical_query = canonical_rows_sql(

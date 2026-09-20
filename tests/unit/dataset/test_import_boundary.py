@@ -56,6 +56,11 @@ def test_every_exported_name_resolves_to_its_defining_module(package_name: str) 
     for name in package.__all__:
         module_name, attribute_name = package._LAZY_EXPORTS[name]
         expected = getattr(importlib.import_module(module_name), attribute_name)
+        # An earlier test may have resolved the name already, and a cached name
+        # is an ordinary module attribute that never reaches ``__getattr__``.
+        # Dropping it first is what makes this an assertion about resolution.
+        vars(package).pop(name, None)
+        assert package.__getattr__(name) is expected, name
         assert getattr(package, name) is expected, name
 
 

@@ -1255,6 +1255,11 @@ def test_canonical_row_order_sql_has_stable_keyword_casing() -> None:
     assert order.split(", sha256", 1)[0] == (
         "version DESC NULLS LAST, timestamp DESC NULLS LAST, source_pbf ASC"
     )
+    # The default decides how the tie-breaking fingerprint reads key/value
+    # columns, and the two spellings order rows differently, so the default
+    # itself is pinned rather than only the part of the clause it cannot reach.
+    assert order == canonical_rows.canonical_row_order_sql(key_value_columns_are_maps=False)
+    assert order != canonical_rows.canonical_row_order_sql(key_value_columns_are_maps=True)
 
 
 def test_canonical_rows_sql_preserves_selection_validation_contract() -> None:
