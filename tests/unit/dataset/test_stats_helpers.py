@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -787,7 +788,7 @@ def _spatial_batch(rows: list[dict[str, object]]) -> pa.RecordBatch:
             pa.array(["way"] * len(rows)),
             pa.array([index for index, _ in enumerate(rows)], type=pa.int64()),
             pa.array([row["geometry_type"] for row in rows]),
-            pa.array([1.0] * len(rows), type=pa.float64()),
+            pa.array([row.get("area", 1.0) for row in rows], type=pa.float64()),
             pa.array([row["min_x"] for row in rows], type=pa.float64()),
             pa.array([row["min_y"] for row in rows], type=pa.float64()),
             pa.array([row["max_x"] for row in rows], type=pa.float64()),
@@ -1025,6 +1026,51 @@ def test_a_row_is_named_by_its_own_source_column_when_present() -> None:
     with pytest.raises(
         stats_module.ReportingError,
         match=exactly("invalid bounding box in shard-a.parquet at row 3"),
+    ):
+        stats_module._summarize_spatial_batch(
+            _spatial_batch(rows), source_name="region.parquet", row_offset=3
+        )
+
+
+def _good_row(source: str) -> dict[str, object]:
+    return {
+        "source_pbf": source,
+        "geometry_type": "Polygon",
+        "min_x": 0.0,
+        "min_y": 0.0,
+        "max_x": 1.0,
+        "max_y": 1.0,
+        "wkb": to_wkb(_square(0, 0)),
+    }
+
+
+@pytest.mark.parametrize(
+    ("broken", "message"),
+    [
+        pytest.param({"area": float("nan")}, "invalid area in", id="area"),
+        pytest.param({"geometry_type": None}, "missing geometry type in", id="geometry-type"),
+        pytest.param(
+            {"geometry_type": "MultiPolygon"},
+            "invalid geometry in",
+            id="geometry-measurement",
+        ),
+    ],
+)
+def test_every_row_validator_is_told_which_row_it_is_looking_at(
+    broken: dict[str, object], message: str
+) -> None:
+    """Each validator names the failing row's own file and absolute index.
+
+    The bad row is the second of the batch and the batch starts at row 3, so an
+    index that ignored the offset, or subtracted it, would name row 1 or row 2.
+    Its source column differs from the caller's name, so a validator handed the
+    batch name instead of the row's would name the wrong file.
+    """
+    rows = [_good_row("shard-a.parquet"), _good_row("shard-b.parquet") | broken]
+
+    with pytest.raises(
+        stats_module.ReportingError,
+        match=rf"\A{re.escape(message)} shard-b\.parquet at row 4(:|\Z)",
     ):
         stats_module._summarize_spatial_batch(
             _spatial_batch(rows), source_name="region.parquet", row_offset=3
