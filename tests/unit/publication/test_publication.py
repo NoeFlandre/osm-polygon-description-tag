@@ -30,7 +30,6 @@ from osm_polygon_description_tag.publication.planning import (
     _read_manifest_for_publication,
     _require_assets_directory_for_plan,
     _require_core_assets,
-    _require_h3_map,
     _require_matching_parquet,
     _require_supported_manifest_version,
     _validate_asset_entry,
@@ -503,21 +502,6 @@ def test_collect_manifest_items_does_not_scan_case_variant_directory(
     assert [item.relative_path for item in _collect_manifest_items(data_root)] == [
         "manifests/a-latest.manifest.json"
     ]
-
-
-def test_h3_compatibility_helper_requires_the_canonical_map(tmp_path: Path) -> None:
-    data_root = tmp_path / "generated"
-    assets = data_root / "assets"
-    assets.mkdir(parents=True)
-    map_path = assets / "description_polygon_density.png"
-    map_path.write_bytes(b"map")
-
-    item = _require_h3_map(data_root)
-    assert item.relative_path == "assets/description_polygon_density.png"
-
-    map_path.unlink()
-    with pytest.raises(PublicationError, match="required file missing for H3 map"):
-        _require_h3_map(data_root)
 
 
 def test_per_pbf_plan_preserves_identity_and_validation_contract(tmp_path: Path) -> None:

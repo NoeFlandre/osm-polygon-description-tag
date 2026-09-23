@@ -177,8 +177,8 @@ def test_metadata_paths_use_exact_managed_artifact_names(tmp_path: Path) -> None
         "readme": tmp_path / "README.md",
         "stats": tmp_path / "stats.json",
         "h3_map": tmp_path / state.H3_MAP_ASSET_RELATIVE_PATH,
-        "area_histogram": tmp_path / state.AREA_HISTOGRAM_ASSET_RELATIVE_PATH,
-        "hero": tmp_path / state.DATASET_CARD_HERO_ASSET_RELATIVE_PATH,
+        "area_histogram": tmp_path / state.AREA_HISTOGRAM_ARTIFACT.relative_path,
+        "hero": tmp_path / state.DATASET_CARD_HERO_ARTIFACT.relative_path,
     }
 
 

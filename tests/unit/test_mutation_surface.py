@@ -22,7 +22,6 @@ import osm_polygon_description_tag.runtime.presentation as presentation
 import osm_polygon_description_tag.workflow.orchestrator as orchestrator
 from osm_polygon_description_tag.dataset.manifest import _empty_policy_hash
 from osm_polygon_description_tag.dataset.text import trimmed_nonempty_text
-from osm_polygon_description_tag.publication.models import PublishRetry
 
 
 def _cli_args(tmp_path: Path, **values: object) -> SimpleNamespace:
@@ -606,13 +605,6 @@ def test_cli_main_delegates_to_run(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_empty_policy_hash_is_sha256_of_empty_bytes() -> None:
     assert _empty_policy_hash() == hashlib.sha256(b"").hexdigest()
-
-
-def test_publish_retry_preserves_public_error_context() -> None:
-    error = PublishRetry("retry", exit_code=503, kind="http")
-    assert str(error) == "retry"
-    assert error.exit_code == 503
-    assert error.kind == "http"
 
 
 def test_orchestrator_subprocess_bridge_restores_upload_runner(
