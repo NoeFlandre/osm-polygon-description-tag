@@ -271,8 +271,8 @@ def write_manifest(manifest: Manifest, path: Path) -> None:
         temp.write_bytes(encoded)
         with open(temp, "rb") as handle:  # pragma: no mutate - only the descriptor is used
             os.fsync(handle.fileno())
-        _fsync_dir(path.parent)
         os.replace(temp, path)
+        _fsync_dir(path.parent)
     finally:
         if temp.exists():
             temp.unlink()

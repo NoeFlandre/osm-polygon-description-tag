@@ -12,6 +12,7 @@ import pyarrow.parquet as pq
 
 from osm_polygon_description_tag.dataset.manifest import (
     TRANSFORM_ALGORITHM_VERSION,
+    _fsync_dir,
     _manifest_path_for,
     current_output_algorithm_revision,
     output_identity_for,
@@ -86,6 +87,7 @@ def _promote_migrated_parquet(temporary: Path, target: Path) -> None:
     with open(temporary, "rb") as handle:
         os.fsync(handle.fileno())
     os.replace(temporary, target)
+    _fsync_dir(target.parent)
 
 
 def migrate_dataset_schema(data_root: Path) -> int:

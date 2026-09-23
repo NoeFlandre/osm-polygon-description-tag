@@ -268,6 +268,24 @@ def test_write_manifest_creates_nested_parent_and_fsyncs_that_directory(tmp_path
     fsync_dir.assert_called_once_with(path.parent)
 
 
+def test_write_manifest_fsyncs_the_directory_after_the_rename(tmp_path: Path) -> None:
+    path = tmp_path / "region.manifest.json"
+    events: list[str] = []
+    real_replace = manifest_module.os.replace
+
+    def replace_then_record(source: Path, destination: Path) -> None:
+        real_replace(source, destination)
+        events.append("replace")
+
+    with (
+        patch.object(manifest_module.os, "replace", replace_then_record),
+        patch.object(manifest_module, "_fsync_dir", lambda _d: events.append("fsync_dir")),
+    ):
+        write_manifest(_manifest(), path)
+
+    assert events == ["replace", "fsync_dir"]
+
+
 def test_write_manifest_serializes_non_ascii_values_as_utf8(tmp_path: Path) -> None:
     manifest = replace(_manifest(), dependency_versions={"é": "été"})
     path = tmp_path / "region.manifest.json"
