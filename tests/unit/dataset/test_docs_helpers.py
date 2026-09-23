@@ -290,11 +290,51 @@ def test_render_stats_block_uses_zero_defaults_and_actual_medians() -> None:
 
     rendered = docs_module._render_stats_block(stats, "hash")
 
-    assert "| Closed ways | 0 |" in rendered
-    assert "| Relations | 0 |" in rendered
-    assert "| Polygon geometries | 0 |" in rendered
-    assert "| MultiPolygon geometries | 0 |" in rendered
+    assert "| OSM objects (closed ways / relations) | 0 / 0 |" in rendered
+    assert "| Geometry rows (Polygon / MultiPolygon) | 0 / 0 |" in rendered
     assert "| Base descriptions | 1 | 3 | 1.5 |" in rendered
+
+
+def test_render_stats_block_is_compact_without_repeated_geometry_section() -> None:
+    stats = {
+        "stats_schema_version": 1,
+        "schema_version": 1,
+        "rows": 3,
+        "regional_rows": 3,
+        "globally_unique_polygons": 3,
+        "regional_overlap_duplicate_rows": 0,
+        "output_files": 1,
+        "output_bytes_total": 1,
+        "osm_types": {"way": 2, "relation": 1},
+        "geometry_types": {"Polygon": 1, "MultiPolygon": 2},
+        "base_description_values": 1,
+        "base_description_words_total": 3,
+        "base_description_words_median": 1.5,
+        "localized_description_values": 0,
+        "localized_description_words_total": 0,
+        "localized_description_words_median": None,
+        "description_suffixes": {},
+        "area_m2_total_m2": 10.0,
+        "area_m2_mean_m2": 3.3,
+        "area_m2_min_m2": 1.0,
+        "area_m2_max_m2": 5.0,
+        "area_m2_p25_m2": 1.5,
+        "area_m2_median_m2": 3.0,
+        "area_m2_p75_m2": 4.5,
+        "dataset_bbox": [0.0, 1.0, 2.0, 3.0],
+        "geometry_vertices_total": 10,
+        "geometry_rings_total": 4,
+        "geometry_holes_total": 1,
+        "multipolygon_components_total": 2,
+        "data_min_timestamp_utc": None,
+        "data_max_timestamp_utc": None,
+    }
+
+    rendered = docs_module._render_stats_block(stats, "hash")
+
+    assert rendered.count("## Polygon surface and geometry") == 0
+    assert "| Surface area (total / mean) | 10.0 m² / 3.3 m² |" in rendered
+    assert "| Geometry detail (vertices / rings / holes / parts) | 10 / 4 / 1 / 2 |" in rendered
 
 
 def test_successful_text_count_uses_current_legacy_and_fallback_keys() -> None:
@@ -310,19 +350,6 @@ def test_successful_text_count_uses_current_legacy_and_fallback_keys() -> None:
     )
     assert docs_module._successful_text_count({"unique_polygons_with_text": 7}, 1) == 7
     assert docs_module._successful_text_count({}, 1) == 1
-
-
-def test_render_text_rejection_section_uses_categories_and_safe_defaults() -> None:
-    rendered = "\n".join(
-        docs_module._render_text_rejection_section(
-            {"text_rejection_counts": {"blank_description": 3}}
-        )
-    )
-
-    assert "| `blank_description` | 3 |" in rendered
-    assert "| `no_description` | 0 |" in rendered
-    malformed = "\n".join(docs_module._render_text_rejection_section({"text_rejection_counts": 3}))
-    assert "| `blank_description` | 0 |" in malformed
 
 
 def test_format_bytes_handles_values_above_the_last_named_unit() -> None:
@@ -563,46 +590,3 @@ def test_generate_dataset_docs_forwards_clock_and_orchestrates_all_outputs(
         "area_histogram_render_version": docs_module.AREA_HISTOGRAM_RENDER_VERSION,
         "area_histogram_total_rows": 5,
     }
-
-
-def test_text_rejection_section_distinguishes_persisted_artifacts_exactly() -> None:
-    stats = {
-        "text_rejection_counts": {
-            reason: index + 1 for index, reason in enumerate(docs_module.TEXT_REJECTION_REASONS)
-        },
-        "persisted_text_rejection_rows": 12,
-    }
-
-    expected = [
-        "### Text-contract exclusions in source manifests",
-        "",
-        "These counts describe rows rejected before publication; the final "
-        "polygon and area populations contain only trimmed, non-empty text. "
-        "The separate persisted-artifact count covers legacy rows retained "
-        "in published Parquet but excluded by the final predicate.",
-        "",
-        "| Rejection category | Rows |",
-        "| --- | ---: |",
-    ]
-    expected.extend(
-        f"| `{reason}` | {index + 1:,} |"
-        for index, reason in enumerate(docs_module.TEXT_REJECTION_REASONS)
-    )
-    expected.extend(
-        [
-            "",
-            "**Persisted artifact rows excluded by the final text predicate:** 12.",
-            "",
-            "Source/manifest rejection counts and persisted artifact exclusions "
-            "are separate populations and are not added together.",
-            "",
-        ]
-    )
-
-    assert docs_module._render_text_rejection_section(stats) == expected
-
-
-def test_text_rejection_section_keeps_legacy_fallbacks_safe() -> None:
-    rendered = docs_module._render_text_rejection_section({"persisted_text_rejection_rows": 0})
-
-    assert "**Persisted artifact rows excluded by the final text predicate:** 0." in rendered

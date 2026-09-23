@@ -92,13 +92,18 @@ def test_the_stats_payload_carries_the_split_counts(export: object) -> None:
     assert payload["unsupported_language_count"] == 1
     assert payload["not_detected_count"] == 1
     assert payload["sentence_count"] == 4
+    assert payload["top_unsupported_languages"] == [{"language_code": "hrv", "annotation_count": 1}]
 
 
 def test_the_card_section_reports_sentence_splitting(export: object) -> None:
     section = render_language_card_section(export)  # type: ignore[arg-type]
 
-    assert "| Split into sentences | 2 |" in section
+    assert "### Sentence splitting coverage" in section
+    assert "| Split-eligible values | 3 |" in section
+    assert "| Split successfully | 2 |" in section
+    assert "| Unsupported splitter language | 1 |" in section
+    assert "| Supported coverage | 66.7% |" in section
+    assert "| Unsupported coverage | 33.3% |" in section
     assert "| Sentences | 4 |" in section
-    # The two skip counts are derivable from the totals and were dropped to
-    # keep the card section short; the split totals still have to be exact.
-    assert "Skipped, language unsupported" not in section
+    assert "### Most common unsupported splitter languages" in section
+    assert "| `hrv` | 1 |" in section

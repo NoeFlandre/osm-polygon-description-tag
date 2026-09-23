@@ -500,6 +500,7 @@ def test_generate_dataset_docs_writes_stats_and_card(tmp_path: Path) -> None:
     assert "Total words" in generated
     assert "Median words per description" in generated
     assert "Detailed machine-readable statistics" in generated
+    assert "| Geometry rows (Polygon / MultiPolygon) |" in generated
     assert "Files (deterministic, sorted by parquet filename)" not in generated
     assert "Source SHA-256" not in generated
     assert "Transformation rejections by reason" not in generated

@@ -39,7 +39,6 @@ from osm_polygon_description_tag.dataset.geography.card import (
 from osm_polygon_description_tag.dataset.geography.rendering import render_density_map
 from osm_polygon_description_tag.dataset.manifest import file_sha256
 from osm_polygon_description_tag.dataset.stats import (
-    TEXT_REJECTION_REASONS,
     ReportingError,
     collect_stats,
     utc_now_iso,
@@ -201,8 +200,8 @@ def _successful_text_count(stats: Mapping[str, Any], fallback: int) -> int:
 
 def _render_suffix_section(stats: Mapping[str, Any]) -> list[str]:
     top_suffixes = sorted(
-        stats["description_suffixes"].items(), key=lambda item: (-item[1], item[0])
-    )[:10]
+        stats.get("description_suffixes", {}).items(), key=lambda item: (-item[1], item[0])
+    )[:5]
     if not top_suffixes:
         return []
     lines = [
@@ -218,47 +217,6 @@ def _render_suffix_section(stats: Mapping[str, Any]) -> list[str]:
     return lines
 
 
-def _render_text_rejection_section(stats: Mapping[str, Any]) -> list[str]:
-    text_rejections = stats.get("text_rejection_counts")
-    if not isinstance(text_rejections, Mapping):
-        text_rejections = {}
-    has_persisted_rejection_count = "persisted_text_rejection_rows" in stats
-    explanation = (
-        "These counts describe rows rejected before publication; the final "
-        "polygon and area populations contain only trimmed, non-empty text."
-    )
-    if has_persisted_rejection_count:
-        explanation += (
-            " The separate persisted-artifact count covers legacy rows retained "
-            "in published Parquet but excluded by the final predicate."
-        )
-    lines = [
-        "### Text-contract exclusions in source manifests",
-        "",
-        explanation,
-        "",
-        "| Rejection category | Rows |",
-        "| --- | ---: |",
-    ]
-    for reason in TEXT_REJECTION_REASONS:
-        lines.append(f"| `{reason}` | {_fmt_int(int(text_rejections.get(reason, 0)))} |")
-    if has_persisted_rejection_count:
-        # pragma: no mutate start - key presence makes the fallback unreachable
-        lines.extend(
-            [
-                "",
-                "**Persisted artifact rows excluded by the final text predicate:** "
-                f"{_fmt_int(int(stats.get('persisted_text_rejection_rows', 0)))}.",
-                "",
-                "Source/manifest rejection counts and persisted artifact exclusions "
-                "are separate populations and are not added together.",
-            ]
-        )
-        # pragma: no mutate end
-    lines.append("")
-    return lines
-
-
 def _render_timestamp_section(stats: Mapping[str, Any]) -> list[str]:
     if not stats["data_min_timestamp_utc"] or not stats["data_max_timestamp_utc"]:
         return []
@@ -269,66 +227,17 @@ def _render_timestamp_section(stats: Mapping[str, Any]) -> list[str]:
     ]
 
 
-def _render_geometry_stats_section(stats: Mapping[str, Any]) -> list[str]:
-    """Render the additive geometry statistics section."""
-    geometry_types = stats.get("geometry_types", {})
-    if not isinstance(geometry_types, Mapping):
-        geometry_types = {}
-    regional_rows, globally_unique, overlap_duplicates, _manifest_duplicates = (
-        _polygon_count_metrics(stats)
-    )
-    successful_text = _successful_text_count(stats, globally_unique)
-    return [
-        "## Polygon surface and geometry",
-        "",
-        "Computed deterministically from the complete published polygon table: "
-        f"all {_fmt_int(successful_text)} canonical globally unique "
-        "`(osm_type, osm_id)` polygons with successfully extracted trimmed "
-        "non-empty description text from "
-        f"{_fmt_int(regional_rows)} regional/raw rows across "
-        f"{_fmt_int(stats['output_files'])} "
-        "Parquet files, using only the dataset's area_m2, bbox, and geometry columns. "
-        f"{_fmt_int(overlap_duplicates)} regional-overlap duplicate rows are excluded. "
-        "No sampling, truncation, external lookup, or raw-PBF recomputation is used.",
-        "",
-        "| Metric | Value |",
-        "| --- | ---: |",
-        f"| Unique `(osm_type, osm_id)` polygons across regional/raw rows | "
-        f"{_fmt_int(globally_unique)} |",
-        f"| Canonical globally unique `(osm_type, osm_id)` polygons with "
-        f"successfully extracted trimmed non-empty description text | "
-        f"{_fmt_int(successful_text)} |",
-        "| Surface area (total / mean) | "
-        f"{_fmt_area(stats.get('area_m2_total_m2'))} / "
-        f"{_fmt_area(stats.get('area_m2_mean_m2'))} |",
-        "| Smallest / largest area | "
-        f"{_fmt_area(stats.get('area_m2_min_m2'))} / "
-        f"{_fmt_area(stats.get('area_m2_max_m2'))} |",
-        "| Area p25 / median / p75 | "
-        f"{_fmt_area(stats.get('area_m2_p25_m2'))} / "
-        f"{_fmt_area(stats.get('area_m2_median_m2'))} / "
-        f"{_fmt_area(stats.get('area_m2_p75_m2'))} |",
-        f"| Dataset bounding box | {_fmt_bbox(stats.get('dataset_bbox'))} |",
-        "| Geometry totals (vertices / rings / holes / MultiPolygon parts) | "
-        f"{_fmt_int(stats.get('geometry_vertices_total', 0))} / "
-        f"{_fmt_int(stats.get('geometry_rings_total', 0))} / "
-        f"{_fmt_int(stats.get('geometry_holes_total', 0))} / "
-        f"{_fmt_int(stats.get('multipolygon_components_total', 0))} |",
-        "| Polygon / MultiPolygon rows | "
-        f"{_fmt_int(geometry_types.get('Polygon', 0))} / "
-        f"{_fmt_int(geometry_types.get('MultiPolygon', 0))} |",
-        "",
-        "The complete machine-readable report is published in stats.json. These values "
-        "are generated from the data only and are deterministic for unchanged published "
-        "artifacts.",
-    ]
-
-
 def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
     regional_rows, globally_unique, overlap_duplicates, manifest_duplicates = (
         _polygon_count_metrics(stats)
     )
     successful_text = _successful_text_count(stats, globally_unique)
+    osm_types = stats.get("osm_types", {})
+    if not isinstance(osm_types, Mapping):
+        osm_types = {}
+    geometry_types = stats.get("geometry_types", {})
+    if not isinstance(geometry_types, Mapping):
+        geometry_types = {}
     lines: list[str] = [
         f"<!-- stats_sha256: {stats_sha256} -->",
         f"<!-- stats_schema_version: {stats['stats_schema_version']} -->",
@@ -348,10 +257,27 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
         f"| Parquet files | {_fmt_int(stats['output_files'])} |",
         f"| Download size | {_fmt_bytes(stats['output_bytes_total'])} |",
         f"| Manifest duplicate rows rejected | {_fmt_int(manifest_duplicates)} |",
-        f"| Closed ways | {_fmt_int(stats['osm_types'].get('way', 0))} |",
-        f"| Relations | {_fmt_int(stats['osm_types'].get('relation', 0))} |",
-        f"| Polygon geometries | {_fmt_int(stats['geometry_types'].get('Polygon', 0))} |",
-        f"| MultiPolygon geometries | {_fmt_int(stats['geometry_types'].get('MultiPolygon', 0))} |",
+        f"| OSM objects (closed ways / relations) | "
+        f"{_fmt_int(osm_types.get('way', 0))} / {_fmt_int(osm_types.get('relation', 0))} |",
+        f"| Geometry rows (Polygon / MultiPolygon) | "
+        f"{_fmt_int(geometry_types.get('Polygon', 0))} / "
+        f"{_fmt_int(geometry_types.get('MultiPolygon', 0))} |",
+        "| Surface area (total / mean) | "
+        f"{_fmt_area(stats.get('area_m2_total_m2'))} / "
+        f"{_fmt_area(stats.get('area_m2_mean_m2'))} |",
+        "| Smallest / largest area | "
+        f"{_fmt_area(stats.get('area_m2_min_m2'))} / "
+        f"{_fmt_area(stats.get('area_m2_max_m2'))} |",
+        "| Area p25 / median / p75 | "
+        f"{_fmt_area(stats.get('area_m2_p25_m2'))} / "
+        f"{_fmt_area(stats.get('area_m2_median_m2'))} / "
+        f"{_fmt_area(stats.get('area_m2_p75_m2'))} |",
+        f"| Dataset bounding box | {_fmt_bbox(stats.get('dataset_bbox'))} |",
+        "| Geometry detail (vertices / rings / holes / parts) | "
+        f"{_fmt_int(stats.get('geometry_vertices_total', 0))} / "
+        f"{_fmt_int(stats.get('geometry_rings_total', 0))} / "
+        f"{_fmt_int(stats.get('geometry_holes_total', 0))} / "
+        f"{_fmt_int(stats.get('multipolygon_components_total', 0))} |",
         "",
         "## Description coverage",
         "",
@@ -374,15 +300,11 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
             "",
             f"![{_AREA_HISTOGRAM_TITLE}]({_AREA_HISTOGRAM_ASSET_RELATIVE_PATH})",
             "",
-            "Area buckets span <1 m² to >=100B m² on a logarithmic scale; "
-            "each bar shows the number of polygons in that bucket "
-            f"(total {_fmt_int(successful_text)} canonical globally unique "
-            "`(osm_type, osm_id)` polygons with successfully extracted trimmed "
-            "non-empty description text).",
+            "Log-scaled area buckets for the canonical globally unique "
+            f"description-tagged polygons (n={_fmt_int(successful_text)}).",
             "",
         ]
     )
-    lines.extend(_render_text_rejection_section(stats))
     lines.extend(_render_timestamp_section(stats))
     lines.extend(
         [
@@ -391,7 +313,6 @@ def _render_stats_block(stats: dict[str, Any], stats_sha256: str) -> str:
             "",
         ]
     )
-    lines.extend(_render_geometry_stats_section(stats))
     return "\n".join(lines)
 
 

@@ -51,7 +51,10 @@ from osm_polygon_description_tag.dataset.languages.payloads import PayloadReader
 from osm_polygon_description_tag.dataset.languages.snapshot import SnapshotManifest, read_snapshot
 from osm_polygon_description_tag.dataset.languages.validation import validate_run
 from osm_polygon_description_tag.dataset.manifest import file_sha256
-from osm_polygon_description_tag.dataset.sentences.models import SentenceSplitStatus
+from osm_polygon_description_tag.dataset.sentences.models import (
+    UNSUPPORTED_LANGUAGE_REASON_PREFIX,
+    SentenceSplitStatus,
+)
 from osm_polygon_description_tag.publication.models import PublicationError, UploadItem, UploadPlan
 from osm_polygon_description_tag.publication.planning import file_sha256_bytes
 
@@ -85,6 +88,7 @@ class LanguageStats:
     unsupported_language_count: int
     not_detected_count: int
     sentence_count: int
+    top_unsupported_languages: tuple[tuple[str, int], ...] = ()
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -104,6 +108,10 @@ class LanguageStats:
             "top_languages": [
                 {"language_code": code, "annotation_count": count}
                 for code, count in self.top_languages
+            ],
+            "top_unsupported_languages": [
+                {"language_code": code, "annotation_count": count}
+                for code, count in self.top_unsupported_languages
             ],
         }
 
@@ -146,6 +154,7 @@ class _StatsAccumulator:
         "_statuses",
         "_tag_keys",
         "_total",
+        "_unsupported_languages",
     )
 
     def __init__(self) -> None:
@@ -156,6 +165,7 @@ class _StatsAccumulator:
         self._sentences = 0
         self._tag_keys: Counter[str] = Counter()
         self._languages: Counter[str] = Counter()
+        self._unsupported_languages: Counter[str] = Counter()
 
     def observe(self, batch: pa.RecordBatch) -> None:
         """Record one exported batch."""
@@ -168,6 +178,12 @@ class _StatsAccumulator:
         )
         self._objects.update(zip(columns["osm_type"], columns["osm_id"], strict=True))
         self._split_statuses.update(columns["split_status"])
+        prefix = UNSUPPORTED_LANGUAGE_REASON_PREFIX
+        self._unsupported_languages.update(
+            reason.removeprefix(prefix)
+            for reason in columns["split_reason"]
+            if isinstance(reason, str) and reason.startswith(prefix) and len(reason) > len(prefix)
+        )
         self._sentences += sum(columns["sentence_count"])
 
     def result(self) -> LanguageStats:
@@ -181,16 +197,20 @@ class _StatsAccumulator:
             uncertain_count=self._statuses["uncertain"],
             non_linguistic_count=self._statuses["non_linguistic"],
             distinct_language_count=len(self._languages),
-            top_languages=tuple(
-                sorted(self._languages.items(), key=lambda item: (-item[1], item[0]))[:20]
-            ),
+            top_languages=_rank_counts(self._languages, limit=20),
             split_count=self._split_statuses[str(SentenceSplitStatus.SPLIT)],
             unsupported_language_count=self._split_statuses[
                 str(SentenceSplitStatus.UNSUPPORTED_LANGUAGE)
             ],
             not_detected_count=self._split_statuses[str(SentenceSplitStatus.NOT_DETECTED)],
             sentence_count=self._sentences,
+            top_unsupported_languages=_rank_counts(self._unsupported_languages, limit=10),
         )
+
+
+def _rank_counts(counts: Counter[str], *, limit: int) -> tuple[tuple[str, int], ...]:
+    """Return deterministic highest-count-first entries from one counter."""
+    return tuple(sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:limit])
 
 
 def _export_name(shard: str) -> str:
@@ -320,13 +340,27 @@ def _stats_from_payload(reader: PayloadReader) -> LanguageStats:
         unsupported_language_count=values.integer("unsupported_language_count"),
         not_detected_count=values.integer("not_detected_count"),
         sentence_count=values.integer("sentence_count"),
+        top_unsupported_languages=_optional_top_languages(values, "top_unsupported_languages"),
     )
 
 
 def _top_languages(values: PayloadReader) -> tuple[tuple[str, int], ...]:
+    return _read_ranked_languages(values, "top_languages", label="top language")
+
+
+def _optional_top_languages(values: PayloadReader, key: str) -> tuple[tuple[str, int], ...]:
+    """Read a newer ranked field while accepting older export stats."""
+    if not values.has(key):
+        return ()
+    return _read_ranked_languages(values, key, label="top unsupported language")
+
+
+def _read_ranked_languages(
+    values: PayloadReader, key: str, *, label: str
+) -> tuple[tuple[str, int], ...]:
     entries: list[tuple[str, int]] = []
-    for item in values.items("top_languages"):
-        entry = require_object(item, error=LanguagePublicationError, label="top language")
+    for item in values.items(key):
+        entry = require_object(item, error=LanguagePublicationError, label=label)
         entries.append((entry.text("language_code"), entry.integer("annotation_count")))
     return tuple(entries)
 
@@ -462,12 +496,26 @@ def _language_provenance(export: LanguageExport) -> str:
 def render_language_card_section(export: LanguageExport) -> str:
     """Render the dataset-card section from validated, exported counts only."""
     stats = export.stats
+    split_eligible = stats.split_count + stats.unsupported_language_count
+    supported_coverage = _format_percentage(stats.split_count, split_eligible)
+    unsupported_coverage = _format_percentage(stats.unsupported_language_count, split_eligible)
+    unsupported_rows = ""
+    if stats.top_unsupported_languages:
+        unsupported_rows = "\n".join(
+            [
+                "### Most common unsupported splitter languages",
+                "",
+                "| ISO 639-3 | Values |",
+                "| --- | ---: |",
+                *(f"| `{code}` | {count} |" for code, count in stats.top_unsupported_languages[:5]),
+                "",
+            ]
+        )
     return f"""## Language annotations (`{LANGUAGE_CONFIG_NAME}`)
 
-This optional configuration adds a language label to each description value when
-the detector meets its confidence policy, plus sentence splits. It has one row
-per *description value*—not per polygon. The default configuration and its files
-are unchanged.
+One row records one description value—not one polygon. It adds a detected
+language when available and sentences when the language is supported. The default
+configuration and its files are unchanged.
 
 | Measure | Value |
 | --- | ---: |
@@ -476,20 +524,40 @@ are unchanged.
 | Uncertain | {stats.uncertain_count} |
 | Non-linguistic | {stats.non_linguistic_count} |
 | Distinct languages | {stats.distinct_language_count} |
-| Split into sentences | {stats.split_count} |
+
+### Sentence splitting coverage
+
+Coverage is computed only for values with a detected language: successfully split
+values divided by split-eligible values.
+
+| Measure | Value |
+| --- | ---: |
+| Split-eligible values | {split_eligible} |
+| Split successfully | {stats.split_count} |
+| Unsupported splitter language | {stats.unsupported_language_count} |
+| Language unresolved | {stats.not_detected_count} |
+| Supported coverage | {supported_coverage} |
+| Unsupported coverage | {unsupported_coverage} |
 | Sentences | {stats.sentence_count} |
 
 **Models and provenance.** {_language_provenance(export)}
 
-**How to read this.** `language_code` is null for uncertain or non-linguistic
-values. `top_score`, `runner_up_score`, and `margin` are **raw detector scores,
-not calibrated probabilities**; they must not be read as confidence percentages.
+**Rules.** Blank, no-letter, too-short, mixed, or unresolved values keep no
+language label. `language_code` is null for uncertain or non-linguistic values.
+`top_score`, `runner_up_score`, and `margin` are raw detector scores, not
+calibrated probabilities; they must not be read as confidence percentages.
 No accuracy has been measured because this dataset has no ground-truth labels.
 Short or mixed-language text may remain unresolved (`mixed_text`), and text
 outside the detector's supported set may be misclassified as a supported
-language. A `description:<suffix>` key is opaque and is not used as a language
-label. Text with no letters is `non_linguistic`.
-"""
+language. A `description:<suffix>` key is opaque and is not a language label.
+{unsupported_rows}"""
+
+
+def _format_percentage(numerator: int, denominator: int) -> str:
+    """Format a deterministic percentage, including the empty-denominator case."""
+    if denominator == 0:
+        return "0.0%"
+    return f"{100 * numerator / denominator:.1f}%"
 
 
 __all__ = [

@@ -26,6 +26,7 @@ def _batch(rows: list[dict[str, object]]) -> pa.RecordBatch:
             pa.field("osm_type", pa.string()),
             pa.field("osm_id", pa.int64()),
             pa.field("split_status", pa.string()),
+            pa.field("split_reason", pa.string()),
             pa.field("sentence_count", pa.int32()),
         ]
     )
@@ -41,6 +42,7 @@ def _row(**overrides: object) -> dict[str, object]:
         "osm_type": "way",
         "osm_id": 1,
         "split_status": "split",
+        "split_reason": "split_sat_3l_sm",
         "sentence_count": 0,
         **overrides,
     }
@@ -95,6 +97,23 @@ def test_top_languages_are_ranked_by_descending_count_then_by_code() -> None:
     )
 
     assert accumulator.result().top_languages == (("fra", 3), ("ces", 2), ("deu", 2), ("eng", 1))
+
+
+def test_top_unsupported_languages_are_ranked_from_split_reasons() -> None:
+    accumulator = _StatsAccumulator()
+    accumulator.observe(
+        _batch(
+            [
+                _row(split_status="unsupported_language", split_reason="unsupported_language_hrv"),
+                _row(split_status="unsupported_language", split_reason="unsupported_language_hrv"),
+                _row(split_status="unsupported_language", split_reason="unsupported_language_pol"),
+                _row(split_status="unsupported_language", split_reason="unsupported_language"),
+                _row(split_status="not_detected", split_reason="not_detected_uncertain"),
+            ]
+        )
+    )
+
+    assert accumulator.result().top_unsupported_languages == (("hrv", 2), ("pol", 1))
 
 
 def test_the_ranking_keeps_exactly_twenty_languages() -> None:

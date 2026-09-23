@@ -164,7 +164,7 @@ def test_stats_payload_retains_deterministic_per_file_provenance(tmp_path: Path)
         assert entry["source_bytes"] > 0
 
 
-def test_card_renders_only_ten_suffixes_in_deterministic_order(tmp_path: Path) -> None:
+def test_card_renders_only_five_suffixes_in_deterministic_order(tmp_path: Path) -> None:
     data_root = tmp_path / "generated"
     source_root = tmp_path / "raw"
     _populate_dataset(data_root, source_root)
@@ -173,9 +173,9 @@ def test_card_renders_only_ten_suffixes_in_deterministic_order(tmp_path: Path) -
 
     rendered = _render_stats_block(stats, "0" * 64)
 
-    positions = [rendered.index(f"| `s{index:02d}` |") for index in range(10)]
+    positions = [rendered.index(f"| `s{index:02d}` |") for index in range(5)]
     assert positions == sorted(positions)
-    assert "| `s10` |" not in rendered
+    assert "| `s05` |" not in rendered
 
 
 def test_stats_block_is_an_exact_contract_for_non_default_values() -> None:
@@ -235,10 +235,13 @@ def test_stats_block_is_an_exact_contract_for_non_default_values() -> None:
             "| Parquet files | 6 |",
             "| Download size | 1.5 KiB |",
             "| Manifest duplicate rows rejected | 3 |",
-            "| Closed ways | 1,234 |",
-            "| Relations | 56 |",
-            "| Polygon geometries | 1,200 |",
-            "| MultiPolygon geometries | 90 |",
+            "| OSM objects (closed ways / relations) | 1,234 / 56 |",
+            "| Geometry rows (Polygon / MultiPolygon) | 1,200 / 90 |",
+            "| Surface area (total / mean) | 1.0 km² / 80.0 m² |",
+            "| Smallest / largest area | 0.5 m² / 2.0 km² |",
+            "| Area p25 / median / p75 | 10.0 m² / 50.0 m² / 100.0 m² |",
+            "| Dataset bounding box | lon -10.0000° to 30.0000°, lat -20.0000° to 40.0000° |",
+            "| Geometry detail (vertices / rings / holes / parts) | 2,000 / 500 / 20 / 120 |",
             "",
             "## Description coverage",
             "",
@@ -261,57 +264,14 @@ def test_stats_block_is_an_exact_contract_for_non_default_values() -> None:
             "",
             "![Area distribution of description-tagged polygons](assets/area_distribution.png)",
             "",
-            "Area buckets span <1 m² to >=100B m² on a logarithmic scale; "
-            "each bar shows the number of polygons in that bucket (total 12,345 "
-            "canonical globally unique `(osm_type, osm_id)` polygons with "
-            "successfully extracted trimmed non-empty description text).",
-            "",
-            "### Text-contract exclusions in source manifests",
-            "",
-            "These counts describe rows rejected before publication; the final "
-            "polygon and area populations contain only trimmed, non-empty text.",
-            "",
-            "| Rejection category | Rows |",
-            "| --- | ---: |",
-            "| `no_description` | 0 |",
-            "| `missing_description` | 0 |",
-            "| `no_nonempty_description` | 0 |",
-            "| `blank_description` | 0 |",
-            "| `malformed_description` | 0 |",
-            "| `failed_description_extraction` | 0 |",
+            "Log-scaled area buckets for the canonical globally unique description-tagged "
+            "polygons (n=12,345).",
             "",
             "**OSM object timestamps (UTC):** 2020-01-01T00:00:00Z to 2026-01-01T00:00:00Z",
             "",
             "Detailed machine-readable statistics, exact suffix frequencies, rejection counts, "
             "and per-file SHA-256 provenance are available in [`stats.json`](stats.json).",
             "",
-            "## Polygon surface and geometry",
-            "",
-            "Computed deterministically from the complete published polygon table: all "
-            "12,345 canonical globally unique `(osm_type, osm_id)` polygons with "
-            "successfully extracted trimmed non-empty description text from 12,352 "
-            "regional/raw rows across 6 "
-            "Parquet files, using only the "
-            "dataset's area_m2, bbox, "
-            "and geometry columns. 7 regional-overlap duplicate rows are excluded. No "
-            "sampling, truncation, external lookup, or raw-PBF recomputation is used.",
-            "",
-            "| Metric | Value |",
-            "| --- | ---: |",
-            "| Unique `(osm_type, osm_id)` polygons across regional/raw rows | 12,345 |",
-            "| Canonical globally unique `(osm_type, osm_id)` polygons with successfully "
-            "extracted trimmed non-empty description text | 12,345 |",
-            "| Surface area (total / mean) | 1.0 km² / 80.0 m² |",
-            "| Smallest / largest area | 0.5 m² / 2.0 km² |",
-            "| Area p25 / median / p75 | 10.0 m² / 50.0 m² / 100.0 m² |",
-            "| Dataset bounding box | lon -10.0000° to 30.0000°, lat -20.0000° to 40.0000° |",
-            "| Geometry totals (vertices / rings / holes / MultiPolygon parts) | "
-            "2,000 / 500 / 20 / 120 |",
-            "| Polygon / MultiPolygon rows | 1,200 / 90 |",
-            "",
-            "The complete machine-readable report is published in stats.json. These values "
-            "are generated from the data only and are deterministic for unchanged "
-            "published artifacts.",
         ]
     )
 

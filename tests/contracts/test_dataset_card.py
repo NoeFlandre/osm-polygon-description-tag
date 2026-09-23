@@ -161,8 +161,8 @@ def test_generated_block_contains_only_backed_numbers(
     assert "Total words" in generated
     assert "Median words per description" in generated
     assert "Detailed machine-readable statistics" in generated
-    assert "## Polygon surface and geometry" in generated
-    assert "| Polygon / MultiPolygon rows |" in generated
+    assert "| Geometry rows (Polygon / MultiPolygon) |" in generated
+    assert "| Geometry detail (vertices / rings / holes / parts) |" in generated
     assert "Files (deterministic, sorted by parquet filename)" not in readme
     assert "Source SHA-256" not in readme
     assert "Transformation rejections by reason" not in readme

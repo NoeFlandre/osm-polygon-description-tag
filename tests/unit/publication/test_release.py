@@ -367,7 +367,7 @@ def test_release_preserves_existing_language_card_content(workspace: Path) -> No
     assert language_section in updated
     assert other_section in updated
     assert "<!-- preserved metadata -->" in updated
-    assert "| Polygon geometries |" in updated
+    assert "| Geometry rows (Polygon / MultiPolygon) |" in updated
 
     stats_start = "<!-- GENERATED:STATS:START -->"
     stats_end = "<!-- GENERATED:STATS:END -->"
@@ -498,12 +498,8 @@ def test_release_restores_pre_regression_card_without_losing_content(
             "Detailed machine-readable statistics, exact suffix frequencies, rejection counts, "
             "and per-file SHA-256 provenance are available in [`stats.json`](stats.json)."
         ),
-        "## Polygon surface and geometry",
-        (
-            "| Canonical globally unique `(osm_type, osm_id)` polygons with "
-            "successfully extracted trimmed non-empty description text | 3 |"
-        ),
-        "| Polygon / MultiPolygon rows | 2 / 1 |",
+        "| Geometry rows (Polygon / MultiPolygon) | 2 / 1 |",
+        "| Surface area (total / mean) |",
     ):
         assert expected in generated_stats
 

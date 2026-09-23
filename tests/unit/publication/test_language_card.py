@@ -94,6 +94,28 @@ def test_install_adds_only_the_language_config_and_controlled_section(
     assert f"- {LANGUAGE_DATA_PREFIX}/region.parquet" in updated
 
 
+def test_language_card_uses_plain_current_rules_and_reports_split_coverage(
+    export: LanguageExport,
+) -> None:
+    stats = replace(
+        export.stats,
+        split_count=6,
+        unsupported_language_count=2,
+        not_detected_count=1,
+        sentence_count=12,
+        top_unsupported_languages=(("hrv", 2),),
+    )
+
+    section = render_language_card_section(replace(export, stats=stats))
+
+    assert "confidence policy" not in section
+    assert "### Sentence splitting coverage" in section
+    assert "| Split-eligible values | 8 |" in section
+    assert "| Supported coverage | 75.0% |" in section
+    assert "| Unsupported coverage | 25.0% |" in section
+    assert "| `hrv` | 2 |" in section
+
+
 def test_install_selects_only_sorted_export_files_for_language_train_config(
     export: LanguageExport,
 ) -> None:

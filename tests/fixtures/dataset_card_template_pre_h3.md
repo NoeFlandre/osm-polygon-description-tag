@@ -18,127 +18,85 @@ configs:
 
 # OSM Polygon Description Tag
 
-OpenStreetMap polygons with a successfully extracted trimmed non-empty
-`description` or
-`description:<suffix>` tag, published as one GeoParquet file per regional PBF
-extract. Every row retains the complete original tag map, full Polygon or
-MultiPolygon geometry, WGS84 geodesic area, bounding box, and OSM provenance.
+OpenStreetMap polygons with a non-empty `description` or
+`description:<suffix>` tag. Each row keeps the original tags, geometry,
+WGS84 area, bounding box, and OSM provenance.
 
-Source repository: [github.com/NoeFlandre/osm-polygon-description-tag](https://github.com/NoeFlandre/osm-polygon-description-tag).
+The `default` configuration is the polygon GeoParquet dataset. The optional
+`language-v1` configuration has one row per description value with a detected
+language and sentence splits when supported.
 
-Explore the pipeline metrics in the [Trackio dashboard](https://noeflandre-osm-polygon-description-tag-trackio.static.hf.space/?project=osm-polygon-description-tag&sidebar=hidden).
+Source: [GitHub](https://github.com/NoeFlandre/osm-polygon-description-tag) ·
+[Trackio](https://noeflandre-osm-polygon-description-tag-trackio.static.hf.space/?project=osm-polygon-description-tag&sidebar=hidden) ·
+[dataset presentation](https://noeflandre.github.io/osm-polygon-description-tag/slides/dataset/dataset.html)
 
-Read the [dataset presentation](https://noeflandre.github.io/osm-polygon-description-tag/slides/dataset/dataset.html) for a concise visual overview of the snapshot, methodology, and findings.
+The map and generated counts use canonical globally unique
+`(osm_type, osm_id)` polygons. Regional/raw rows and overlap duplicates are
+reported separately.
 
-The map and generated counts describe canonical globally unique
-`(osm_type, osm_id)` polygons with successfully extracted trimmed non-empty
-description text. Regional/raw rows and overlap duplicates are reported
-separately.
-
-Hexbin density of every canonical globally unique `(osm_type, osm_id)` polygon
+Hexbin density of canonical globally unique `(osm_type, osm_id)` polygons
 with successfully extracted trimmed non-empty description text at H3 resolution
 3, drawn from each canonical row's geometry centroid on a logarithmic scale.
 Regional overlap duplicates are removed globally; this is not a count of
 regional rows. Lighter cells contain more polygons.
+
 <!-- GENERATED:STATS:START -->
 <!-- GENERATED:STATS:END -->
 
 ## Terminology
 
-- **Closed way**: an OSM way whose first and last nodes share an identifier
-  and that `osmium export` emits as an area when its tags mark it as a
-  polygon feature.
-- **Relation**: an OSM object (here `type=multipolygon` or `type=boundary`)
-  grouping several ways into one logical feature; kept when it assembles into
-  a valid polygon.
-- **Polygon**: a single outer-ring area geometry.
-- **MultiPolygon**: a geometry of one or more disjoint Polygon parts,
-  produced for assembled multipolygon and boundary relations.
-- **Base description**: the exact text of the `description=*` tag on a feature.
-- **Localized description**: the exact text of a suffixed
-  `description:<suffix>=*` tag; the suffix is preserved verbatim and is not
-  validated as a language code.
-
-## What is included
-
-- Tagged closed ways that OSM classifies as areas, excluding `area=no`.
-- Successfully assembled `type=multipolygon` and `type=boundary` relations.
-- Exact base and localized descriptions and names; retained description values
-  are trimmed, non-null strings and at least one valid description value is
-  required per row.
-- Complete original OSM tags, full WKB geometry, `area_m2`, and bounding boxes.
-
-Nodes, open ways, undescribed features, malformed/blank description values,
-and failed polygon assemblies are not included. Cross-region duplicates are
-removed globally before publication; source-level exclusions remain in the
-manifest rejection counts.
+- **Base description:** the exact `description=*` value.
+- **Localized description:** the exact `description:<suffix>=*` value; the
+  suffix is preserved and is not validated as a language code.
+- **Canonical polygon:** one row per `(osm_type, osm_id)` after regional
+  overlap duplicates are removed.
 
 ## Schema
 
 - **Identity:** `source_pbf`, `osm_type`, `osm_id`, `osm_url`
 - **OSM provenance:** `version`, `changeset`, `timestamp`
-- **Convenience text fields:** `name`, `localized_names`, `description`,
-  `localized_descriptions`
-- **Authoritative source tags:** `tags`
-- **Spatial fields:** `geometry_type`, `area_m2`, `bbox_min_x`, `bbox_min_y`,
+- **Text:** `name`, `localized_names`, `description`,
+  `localized_descriptions`, `tags`
+- **Spatial:** `geometry_type`, `area_m2`, `bbox_min_x`, `bbox_min_y`,
   `bbox_max_x`, `bbox_max_y`, `geometry`
 
 `geometry` is WKB with GeoParquet 1.1 metadata and OGC:CRS84 longitude/latitude
-semantics. The `tags` key/value list is authoritative; convenience text fields
-are exact derived views.
+semantics. `tags` is the authoritative source for tag values.
 
 ## Load the data
 
-```python
-import pyarrow.parquet as pq
-
-table = pq.read_table("data/<region>-latest.parquet")
-```
-
-```python
-import geopandas as gpd
-
-gdf = gpd.read_parquet("data/<region>-latest.parquet")
-```
+Use any GeoParquet reader on `data/<region>-latest.parquet`. The language
+configuration uses the same train split under `language-v1/data/`.
 
 ## Methodology
 
-`osmium export` applies standard OSM area handling and emits polygon geometry
-only. The pipeline retains features with at least one successfully extracted
-trimmed non-empty description tag, computes geodesic WGS84 area with holes and
-multipolygon components included, validates GeoParquet and manifest
-identities, and writes artifacts atomically. Global statistics and the map use
-one deterministic canonical row per `(osm_type, osm_id)`; regional rows,
-overlap duplicates, and source rejection categories are reported separately.
+`osmium export` emits valid polygon features from OSM closed ways and
+multipolygon or boundary relations. The pipeline keeps rows with at least one
+trimmed, non-empty description value, computes geodesic WGS84 area, validates
+GeoParquet and manifest identities, and writes deterministic artifacts.
 
-All displayed statistics are generated from validated Parquet files and their
-matching manifests. No counts are handwritten.
+Statistics and plots are generated from the published Parquet files. Global
+counts use one canonical row per `(osm_type, osm_id)`; no sampling or external
+lookup is used.
 
 ## Limitations
 
-- Suffixes such as `en` or `pt-BR` are preserved exactly but are not validated
-  as language codes.
-- Text comes directly from OpenStreetMap and may vary in quality, language,
-  formatting, and completeness.
-- Cross-region overlaps are globally deduplicated by `(osm_type, osm_id)` before publication.
-- Geometry and tags reflect the source extracts at their recorded OSM
-  timestamps.
+- OSM descriptions vary in quality, language, formatting, and completeness.
+- Description suffixes are opaque and are not language labels.
+- Geometry and tags reflect the source extracts at their recorded OSM times.
 
 ## License and attribution
 
 Derived data is © OpenStreetMap contributors and available under the
 [Open Database License](https://opendatacommons.org/licenses/odbl/) (ODbL).
-Users and redistributors must comply with its attribution and share-alike
-requirements. Pipeline code is Apache-2.0.
+Follow its attribution and share-alike requirements. Pipeline code is
+Apache-2.0.
 
 ## Reproducibility
 
-The public source repository contains the versioned extraction policy,
-deterministic reporting code, validation contracts, and the stoppable,
-resumable `just run-and-publish` workflow.
+The [source repository](https://github.com/NoeFlandre/osm-polygon-description-tag)
+contains the extraction policy, validation code, and resumable workflows.
 
 ## Citation
 
-If you use this software or its dataset, please cite the repository using the
-metadata in [`CITATION.cff`](https://github.com/NoeFlandre/osm-polygon-description-tag/blob/main/CITATION.cff).
-GitHub provides formatted citation downloads through **Cite this repository**.
+Cite the repository using [`CITATION.cff`](https://github.com/NoeFlandre/osm-polygon-description-tag/blob/main/CITATION.cff).
