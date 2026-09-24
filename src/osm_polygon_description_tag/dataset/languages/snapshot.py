@@ -131,8 +131,6 @@ def _model_payload(identity: LanguageModelIdentity) -> dict[str, object]:
         "runtime_library_version": identity.runtime_library_version,
         "policy": {
             "min_alphabetic_chars": policy.min_alphabetic_chars,
-            "min_score": policy.min_score,
-            "min_margin": policy.min_margin,
             "tie_epsilon": policy.tie_epsilon,
         },
         "policy_fingerprint": identity.policy_fingerprint,
@@ -165,8 +163,6 @@ def _policy_from_payload(reader: PayloadReader) -> LanguagePolicy:
     try:
         return LanguagePolicy(
             min_alphabetic_chars=values.integer("min_alphabetic_chars"),
-            min_score=values.number("min_score"),
-            min_margin=values.number("min_margin"),
             tie_epsilon=values.number("tie_epsilon"),
         )
     except SnapshotError:

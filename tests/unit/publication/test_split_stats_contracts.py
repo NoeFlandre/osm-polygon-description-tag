@@ -102,3 +102,177 @@ def test_the_card_section_reports_sentence_splitting(export: object) -> None:
     # The two skip counts are derivable from the totals and were dropped to
     # keep the card section short; the split totals still have to be exact.
     assert "Skipped, language unsupported" not in section
+
+
+def _unsupported_columns(codes: list[str | None], statuses: list[str]) -> dict[str, list[object]]:
+    return {"language_code": list(codes), "split_status": list(statuses)}
+
+
+def test_only_rows_left_unsplit_for_their_language_are_counted() -> None:
+    """The filter has to match on both the status *and* a present language.
+
+    A split row, a row with no detected language, and an unsupported row with a
+    null code must all be ignored; only the last kind names a language the
+    splitter could not handle.
+    """
+    from osm_polygon_description_tag.publication.language import _unsupported_languages_in
+
+    columns = _unsupported_columns(
+        ["tso", "eng", None, "vec", None],
+        [
+            "unsupported_language",
+            "split",
+            "not_detected",
+            "unsupported_language",
+            "unsupported_language",
+        ],
+    )
+
+    assert sorted(_unsupported_languages_in(columns)) == ["tso", "vec"]
+
+
+def test_no_unsupported_rows_yields_nothing() -> None:
+    from osm_polygon_description_tag.publication.language import _unsupported_languages_in
+
+    columns = _unsupported_columns(["eng", "fra"], ["split", "split"])
+
+    assert list(_unsupported_languages_in(columns)) == []
+
+
+def test_mismatched_column_lengths_are_rejected() -> None:
+    """Two columns of different lengths mean the batch was mis-assembled.
+
+    ``zip`` would silently stop at the shorter one and under-count the
+    unsupported languages, so the pairing is strict.
+    """
+    from osm_polygon_description_tag.publication.language import _unsupported_languages_in
+
+    columns = _unsupported_columns(
+        ["tso", "vec"], ["unsupported_language", "unsupported_language", "unsupported_language"]
+    )
+
+    with pytest.raises(ValueError, match="zip"):
+        list(_unsupported_languages_in(columns))
+
+
+def test_unsupported_languages_are_reported_largest_first_and_capped() -> None:
+    """The published table takes the twenty largest, ties broken by code.
+
+    Asserted through ``result()`` rather than by re-sorting the counter here:
+    the ordering and the cap belong to the published field, and a test that
+    re-implements them cannot notice the field losing either one.
+    """
+    from osm_polygon_description_tag.publication.language import _StatsAccumulator
+
+    accumulator = _StatsAccumulator()
+    rows: list[dict[str, object]] = []
+    osm_id = 0
+    # Twenty-five distinct languages with descending counts, so the cap is
+    # observable, and two sharing a count, so the tie-break is observable.
+    for index in range(25):
+        # Counts rise with the code so that ordering by count and ordering by
+        # code disagree: with the two agreeing, dropping the sort key entirely
+        # leaves the published table unchanged.
+        occurrences = 25 if index == 23 else index + 1
+        for _ in range(occurrences):
+            osm_id += 1
+            rows.append(_row(f"l{index:02d}", "unsupported_language", osm_id=osm_id))
+    accumulator.observe(_annotation_batch(rows))
+
+    stats = accumulator.result()
+
+    assert stats.unsupported_distinct_count == 25
+    assert len(stats.top_unsupported_languages) == 20
+    # "l23" and "l24" both occur 25 times, so the code decides which comes first.
+    assert stats.top_unsupported_languages[0] == ("l23", 25)
+    assert stats.top_unsupported_languages[1] == ("l24", 25)
+    # Descending, and truncated before the five smallest.
+    assert stats.top_unsupported_languages[-1] == ("l05", 6)
+    assert [count for _code, count in stats.top_unsupported_languages] == sorted(
+        (count for _code, count in stats.top_unsupported_languages), reverse=True
+    )
+
+
+def _annotation_batch(rows: list[dict[str, object]]):
+    import pyarrow as pa
+
+    keys = (
+        "status",
+        "language_code",
+        "tag_key",
+        "osm_type",
+        "osm_id",
+        "split_status",
+        "sentence_count",
+    )
+    return pa.record_batch([pa.array([row[key] for row in rows]) for key in keys], names=list(keys))
+
+
+def _row(code: str | None, split: str, *, osm_id: int = 1) -> dict[str, object]:
+    return {
+        "status": "detected" if code else "uncertain",
+        "language_code": code,
+        "tag_key": "description",
+        "osm_type": "way",
+        "osm_id": osm_id,
+        "split_status": split,
+        "sentence_count": 1,
+    }
+
+
+def test_the_result_reports_every_distinct_unsupported_language() -> None:
+    """The distinct count is the whole set, not the truncated table."""
+    from osm_polygon_description_tag.publication.language import _StatsAccumulator
+
+    accumulator = _StatsAccumulator()
+    rows = [
+        _row("tso", "unsupported_language", osm_id=1),
+        _row("tso", "unsupported_language", osm_id=2),
+        _row("vec", "unsupported_language", osm_id=3),
+        _row("eng", "split", osm_id=4),
+        _row(None, "not_detected", osm_id=5),
+    ]
+    accumulator.observe(_annotation_batch(rows))
+
+    result = accumulator.result()
+
+    assert result.unsupported_distinct_count == 2
+    assert result.top_unsupported_languages == (("tso", 2), ("vec", 1))
+    assert result.unsupported_language_count == 3
+    assert result.split_count == 1
+    assert result.not_detected_count == 1
+
+
+def test_equal_unsupported_counts_are_ordered_by_language_code() -> None:
+    """Ties must resolve deterministically or the published table is unstable."""
+    from osm_polygon_description_tag.publication.language import _StatsAccumulator
+
+    accumulator = _StatsAccumulator()
+    accumulator.observe(
+        _annotation_batch(
+            [
+                _row("zul", "unsupported_language", osm_id=1),
+                _row("ast", "unsupported_language", osm_id=2),
+            ]
+        )
+    )
+
+    assert accumulator.result().top_unsupported_languages == (("ast", 1), ("zul", 1))
+
+
+def test_the_eligible_total_is_the_two_splitting_outcomes_added(export: object) -> None:
+    """Eligible is split plus unsupported, and the coverage divides by it.
+
+    Both counts have to be non-zero for the arithmetic to be visible at all:
+    with nothing unsupported, adding and subtracting agree.
+    """
+    from dataclasses import replace
+
+    stats = replace(export.stats, split_count=7, unsupported_language_count=3)
+    section = render_language_card_section(replace(export, stats=stats))
+
+    assert "| Eligible text units | 10 |" in section
+    assert "| Split (language supported) | 7 |" in section
+    assert "| Unsplit (language unsupported) | 3 |" in section
+    assert "| Coverage | 70.0000% |" in section
+    assert "| Unsupported | 30.0000% |" in section

@@ -18,11 +18,11 @@ from osm_polygon_description_tag.dataset.manifest import (
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import (
     PublicationError,
-    _classify_failure,
-    _default_runner_with_retry,
     create_upload_plan,
+    default_runner_with_retry,
     execute_upload,
 )
+from osm_polygon_description_tag.publication.upload import _classify_failure
 from tests.conftest import make_record_dict
 from tests.helpers.messages import exactly
 
@@ -102,12 +102,12 @@ def test_classify_failure_detects_timeout_in_stderr() -> None:
 
 def test_default_runner_with_retry_returns_on_success() -> None:
     # /bin/echo always succeeds; this exercises the happy path.
-    _default_runner_with_retry(["echo", "ok"], max_retries=1, backoff_seconds=0.0)
+    default_runner_with_retry(["echo", "ok"], max_retries=1, backoff_seconds=0.0)
 
 
 def test_default_runner_with_retry_raises_after_max_attempts() -> None:
     with pytest.raises(subprocess.CalledProcessError):
-        _default_runner_with_retry(["/bin/sh", "-c", "exit 1"], max_retries=2, backoff_seconds=0.0)
+        default_runner_with_retry(["/bin/sh", "-c", "exit 1"], max_retries=2, backoff_seconds=0.0)
 
 
 def test_execute_upload_rejects_missing_confirmation(tmp_path: Path) -> None:

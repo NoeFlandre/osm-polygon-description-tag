@@ -24,7 +24,6 @@ from osm_polygon_description_tag.dataset.languages.models import (
     language_model_identity,
 )
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
-from osm_polygon_description_tag.workflow import grid_commands
 from tests.conftest import make_record_dict
 from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH, fake_splitter
 
@@ -44,7 +43,7 @@ def _fake_sentence_splitter(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def night_clock(monkeypatch: pytest.MonkeyPatch) -> datetime:
     """Freeze the Grid handlers' clock so the day/night policy is deterministic."""
-    monkeypatch.setattr(grid_commands, "_utc_now", lambda: NIGHT_INSTANT)
+    monkeypatch.setattr(language_cli, "_utc_now", lambda: NIGHT_INSTANT)
     return NIGHT_INSTANT
 
 
@@ -362,7 +361,7 @@ def test_a_custom_policy_changes_the_configuration_fingerprint(
         return _stdout(capsys)
 
     default = _prepare(tmp_path / "default")
-    strict = _prepare(tmp_path / "strict", "--min-score", "0.95")
+    strict = _prepare(tmp_path / "strict", "--min-alphabetic-chars", "9")
 
     assert default["model_config_fingerprint"] != strict["model_config_fingerprint"]
     assert default["snapshot_id"] != strict["snapshot_id"]
@@ -794,7 +793,7 @@ def test_grid_stage_plans_a_portable_transfer_without_the_apply_gate(
     )
     calls: dict[str, object] = {}
 
-    monkeypatch.setattr(grid_commands, "read_snapshot", lambda _: snapshot)
+    monkeypatch.setattr(language_cli, "read_snapshot", lambda _: snapshot)
 
     def fake_prepare_portable_job(*args: object, **kwargs: object) -> object:
         calls["prepare"] = (args, kwargs)
@@ -804,8 +803,8 @@ def test_grid_stage_plans_a_portable_transfer_without_the_apply_gate(
         calls["transfer"] = (received_prepared, remote_bundle_dir)
         return transfer_argv
 
-    monkeypatch.setattr(grid_commands, "prepare_portable_job", fake_prepare_portable_job)
-    monkeypatch.setattr(grid_commands, "build_bundle_transfer_argv", fake_build_transfer)
+    monkeypatch.setattr(language_cli, "prepare_portable_job", fake_prepare_portable_job)
+    monkeypatch.setattr(language_cli, "build_bundle_transfer_argv", fake_build_transfer)
 
     language_cli.handle_grid_stage(
         run_dir=run_dir,
@@ -867,9 +866,9 @@ def test_grid_stage_apply_executes_only_the_explicit_transfer_argv(
     transfer_argv = ("rsync", "--archive", "--", "/payload/", "/remote/")
     observed: list[tuple[tuple[str, ...], float]] = []
 
-    monkeypatch.setattr(grid_commands, "read_snapshot", lambda _: object())
-    monkeypatch.setattr(grid_commands, "prepare_portable_job", lambda *_, **__: prepared)
-    monkeypatch.setattr(grid_commands, "build_bundle_transfer_argv", lambda *_: transfer_argv)
+    monkeypatch.setattr(language_cli, "read_snapshot", lambda _: object())
+    monkeypatch.setattr(language_cli, "prepare_portable_job", lambda *_, **__: prepared)
+    monkeypatch.setattr(language_cli, "build_bundle_transfer_argv", lambda *_: transfer_argv)
 
     def fake_runner(argv: tuple[str, ...], timeout: float) -> SimpleNamespace:
         observed.append((argv, timeout))
@@ -905,7 +904,7 @@ def test_grid_stage_apply_executes_only_the_explicit_transfer_argv(
 @pytest.mark.parametrize(
     ("outcome", "message"),
     [
-        (grid_commands.SchedulerError("missing rsync"), "transport command could not run"),
+        (language_cli.SchedulerError("missing rsync"), "transport command could not run"),
         (SimpleNamespace(returncode=-1, stdout="", stderr="", timed_out=True), "timed out"),
         (
             SimpleNamespace(returncode=23, stdout="", stderr="permission denied", timed_out=False),
@@ -929,16 +928,16 @@ def test_grid_stage_reports_transport_failures(
         manifest=tmp_path / "payload" / "stage.json",
     )
     transfer_argv = ("rsync", "--archive", "--", "/payload/", "/remote/")
-    monkeypatch.setattr(grid_commands, "read_snapshot", lambda _: object())
-    monkeypatch.setattr(grid_commands, "prepare_portable_job", lambda *_, **__: prepared)
-    monkeypatch.setattr(grid_commands, "build_bundle_transfer_argv", lambda *_: transfer_argv)
+    monkeypatch.setattr(language_cli, "read_snapshot", lambda _: object())
+    monkeypatch.setattr(language_cli, "prepare_portable_job", lambda *_, **__: prepared)
+    monkeypatch.setattr(language_cli, "build_bundle_transfer_argv", lambda *_: transfer_argv)
 
     def failing_runner(argv: tuple[str, ...], timeout: float) -> object:
         if isinstance(outcome, BaseException):
             raise outcome
         return outcome
 
-    with pytest.raises(grid_commands.GridOperatorError, match=message):
+    with pytest.raises(language_cli.GridOperatorError, match=message):
         language_cli.handle_grid_stage(
             run_dir=tmp_path / "run",
             project_root=tmp_path / "project",
@@ -967,32 +966,32 @@ def test_grid_submit_passes_fresh_account_wide_policy_evidence(
     observed: dict[str, object] = {}
     plan = SimpleNamespace(to_payload=lambda: {"may_apply": True})
 
-    monkeypatch.setattr(grid_commands, "read_snapshot", lambda _: snapshot)
+    monkeypatch.setattr(language_cli, "read_snapshot", lambda _: snapshot)
 
     def fake_prepare(*args: object, **kwargs: object) -> tuple[object, object]:
         observed["prepare"] = kwargs
         return bundle, paths
 
-    monkeypatch.setattr(grid_commands, "prepare_job", fake_prepare)
+    monkeypatch.setattr(language_cli, "prepare_job", fake_prepare)
 
     def fake_gather(site: str, *, runner: object) -> tuple[str, str, str]:
         observed["gather"] = (site, runner)
         return "usage", "quota", "77: Terminated\n"
 
-    monkeypatch.setattr(grid_commands, "gather_policy_evidence", fake_gather)
-    monkeypatch.setattr(grid_commands, "account_active_job_count", lambda output: 0)
+    monkeypatch.setattr(language_cli, "gather_policy_evidence", fake_gather)
+    monkeypatch.setattr(language_cli, "account_active_job_count", lambda output: 0)
 
     def fake_evaluate(**kwargs: object) -> object:
         observed["policy"] = kwargs
         return SimpleNamespace(to_payload=lambda: {"decision": "allowed"}, may_submit=True)
 
-    monkeypatch.setattr(grid_commands, "evaluate_policy", fake_evaluate)
+    monkeypatch.setattr(language_cli, "evaluate_policy", fake_evaluate)
 
     def fake_submit(*args: object, **kwargs: object) -> tuple[object, None]:
         observed["submit"] = (args, kwargs)
         return plan, None
 
-    monkeypatch.setattr(grid_commands, "submit_job", fake_submit)
+    monkeypatch.setattr(language_cli, "submit_job", fake_submit)
 
     language_cli.handle_grid_submit(
         run_dir,
@@ -1046,15 +1045,15 @@ def test_grid_status_passes_the_backend_job_name_resolver_for_ambiguous_apply(
     )
     observed: dict[str, object] = {}
 
-    monkeypatch.setattr(grid_commands, "read_snapshot", lambda _: snapshot)
-    monkeypatch.setattr(grid_commands, "bundle_for_shard", lambda received, shard: bundle)
-    monkeypatch.setattr(grid_commands, "job_paths", lambda received_run, received_bundle: paths)
+    monkeypatch.setattr(language_cli, "read_snapshot", lambda _: snapshot)
+    monkeypatch.setattr(language_cli, "bundle_for_shard", lambda received, shard: bundle)
+    monkeypatch.setattr(language_cli, "job_paths", lambda received_run, received_bundle: paths)
 
     def resolver(job_name: str) -> int | None:
         observed["resolver_name"] = job_name
         return 77
 
-    monkeypatch.setattr(grid_commands, "resolve_job_name", resolver)
+    monkeypatch.setattr(language_cli, "resolve_job_name", resolver)
 
     def fake_reconcile(
         received_paths: object,
@@ -1065,7 +1064,7 @@ def test_grid_status_passes_the_backend_job_name_resolver_for_ambiguous_apply(
         observed["reconcile"] = (received_paths, apply, resolve_job_name)
         return reconciliation
 
-    monkeypatch.setattr(grid_commands, "reconcile_job", fake_reconcile)
+    monkeypatch.setattr(language_cli, "reconcile_job", fake_reconcile)
 
     language_cli.handle_grid_status(Path("/run"), SHARD, True)
 
@@ -1107,7 +1106,7 @@ def test_grid_collect_retrieves_imports_and_acknowledges_terminal_results(
     transfer_argv = ("rsync", "--archive", "--", "/remote/run/", "/retrieved/")
     observed: list[object] = []
 
-    monkeypatch.setattr(grid_commands, "build_result_retrieval_argv", lambda *args: transfer_argv)
+    monkeypatch.setattr(language_cli, "build_result_retrieval_argv", lambda *args: transfer_argv)
 
     def fake_runner(argv: tuple[str, ...], timeout: float) -> SimpleNamespace:
         observed.append(("transfer", argv, timeout))
@@ -1121,16 +1120,16 @@ def test_grid_collect_retrieves_imports_and_acknowledges_terminal_results(
         observed.append(("ack", received_paths, received_report))
         return acknowledgment
 
-    monkeypatch.setattr(grid_commands, "import_retrieved_results", fake_import, raising=False)
-    monkeypatch.setattr(grid_commands, "bundle_for_shard", lambda *_: bundle)
-    monkeypatch.setattr(grid_commands, "job_paths", lambda *_: paths)
-    monkeypatch.setattr(grid_commands, "read_snapshot", lambda _: object())
-    monkeypatch.setattr(grid_commands, "acknowledge_collected_results", fake_ack, raising=False)
+    monkeypatch.setattr(language_cli, "import_retrieved_results", fake_import, raising=False)
+    monkeypatch.setattr(language_cli, "bundle_for_shard", lambda *_: bundle)
+    monkeypatch.setattr(language_cli, "job_paths", lambda *_: paths)
+    monkeypatch.setattr(language_cli, "read_snapshot", lambda _: object())
+    monkeypatch.setattr(language_cli, "acknowledge_collected_results", fake_ack, raising=False)
 
     def fake_adopt(received_paths: object, incoming: Path, received_bundle: object) -> None:
         observed.append(("adopt", received_paths, incoming, received_bundle))
 
-    monkeypatch.setattr(grid_commands, "adopt_retrieved_intent", fake_adopt, raising=False)
+    monkeypatch.setattr(language_cli, "adopt_retrieved_intent", fake_adopt, raising=False)
 
     language_cli.handle_grid_collect(
         run_dir,
@@ -1179,9 +1178,9 @@ def test_grid_collect_remote_apply_requires_the_local_snapshot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     transfer_argv = ("rsync", "--archive", "--", "/remote/run/", "/retrieved/")
-    monkeypatch.setattr(grid_commands, "build_result_retrieval_argv", lambda *args: transfer_argv)
+    monkeypatch.setattr(language_cli, "build_result_retrieval_argv", lambda *args: transfer_argv)
 
-    with pytest.raises(grid_commands.GridOperatorError, match="local run snapshot is missing"):
+    with pytest.raises(language_cli.GridOperatorError, match="local run snapshot is missing"):
         language_cli.handle_grid_collect(
             tmp_path / "run",
             SHARD,
@@ -1212,9 +1211,9 @@ def test_grid_collect_remote_apply_rejects_symlink_staging_destinations(
         actual.write_text("{}\n", encoding="utf-8")
         (retrieved_run_dir / "snapshot.json").symlink_to(actual)
     transfer_argv = ("rsync", "--archive", "--", "/remote/run/", "/retrieved/")
-    monkeypatch.setattr(grid_commands, "build_result_retrieval_argv", lambda *args: transfer_argv)
+    monkeypatch.setattr(language_cli, "build_result_retrieval_argv", lambda *args: transfer_argv)
 
-    with pytest.raises(grid_commands.GridOperatorError, match="must not be a symlink"):
+    with pytest.raises(language_cli.GridOperatorError, match="must not be a symlink"):
         language_cli.handle_grid_collect(
             run_dir,
             SHARD,
@@ -1233,14 +1232,14 @@ def test_grid_collect_remote_apply_reports_snapshot_copy_failure(
     run_dir.mkdir()
     (run_dir / "snapshot.json").write_text("{}\n", encoding="utf-8")
     transfer_argv = ("rsync", "--archive", "--", "/remote/run/", "/retrieved/")
-    monkeypatch.setattr(grid_commands, "build_result_retrieval_argv", lambda *args: transfer_argv)
+    monkeypatch.setattr(language_cli, "build_result_retrieval_argv", lambda *args: transfer_argv)
 
     def fail_copy(*args: object, **kwargs: object) -> None:
         raise OSError("read-only")
 
-    monkeypatch.setattr(grid_commands.shutil, "copyfile", fail_copy)
+    monkeypatch.setattr(language_cli.shutil, "copyfile", fail_copy)
 
-    with pytest.raises(grid_commands.GridOperatorError, match="cannot seed retrieved run snapshot"):
+    with pytest.raises(language_cli.GridOperatorError, match="cannot seed retrieved run snapshot"):
         language_cli.handle_grid_collect(
             run_dir,
             SHARD,
@@ -1259,9 +1258,9 @@ def test_grid_collect_remote_plan_does_not_retrieve_or_import_without_apply(
     run_dir = tmp_path / "run"
     retrieved_run_dir = tmp_path / "retrieved"
     transfer_argv = ("rsync", "--archive", "--", "/remote/run/", "/retrieved/")
-    monkeypatch.setattr(grid_commands, "build_result_retrieval_argv", lambda *args: transfer_argv)
+    monkeypatch.setattr(language_cli, "build_result_retrieval_argv", lambda *args: transfer_argv)
     monkeypatch.setattr(
-        grid_commands,
+        language_cli,
         "import_retrieved_results",
         lambda *_: pytest.fail("dry collect must not import results"),
         raising=False,
@@ -1443,7 +1442,7 @@ def test_grid_stage_then_submit_reuses_the_exact_staged_script_contract(
             )
         raise AssertionError(f"unexpected fake command: {received}")
 
-    monkeypatch.setattr(grid_commands, "grid_command_runner", fake_runner)
+    monkeypatch.setattr(language_cli, "grid_command_runner", fake_runner)
 
     assert (
         run(
@@ -1617,7 +1616,7 @@ def test_grid_prepare_then_submit_reuses_the_legacy_script_contract(
             )
         raise AssertionError(f"unexpected fake command: {received}")
 
-    monkeypatch.setattr(grid_commands, "grid_command_runner", fake_runner)
+    monkeypatch.setattr(language_cli, "grid_command_runner", fake_runner)
 
     assert (
         run(

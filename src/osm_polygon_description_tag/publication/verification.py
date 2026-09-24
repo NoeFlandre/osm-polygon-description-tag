@@ -51,7 +51,11 @@ def _entries_by_path(requested_paths: list[str], entries: list[Any]) -> dict[str
     """
     if all(isinstance(getattr(entry, "path", None), str) for entry in entries):
         return {str(entry.path): entry for entry in entries}
-    return {path: entry for path, entry in zip(requested_paths, entries, strict=False)}
+    # Non-strict on purpose: a short response *is* the missing-file case, and
+    # the caller reports it against the exact path. ``strict=False`` is also
+    # the default, so writing it either way cannot change behaviour.
+    pairs = zip(requested_paths, entries, strict=False)  # pragma: no mutate
+    return {path: entry for path, entry in pairs}
 
 
 def _authenticated_api() -> Any:

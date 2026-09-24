@@ -87,7 +87,7 @@ def test_compiled_python_artifacts_are_treated_as_cache_whatever_their_suffix(
 def test_a_remote_child_of_the_bundle_root_is_joined_once(
     base: str, name: str, expected: str
 ) -> None:
-    assert grid_operator.remote_child(base, name) == expected
+    assert grid_operator._remote_child(base, name) == expected
 
 
 @pytest.mark.parametrize("value", ["/a/../b", "/.."])

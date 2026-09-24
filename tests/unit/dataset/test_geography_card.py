@@ -37,7 +37,7 @@ from osm_polygon_description_tag.dataset.geography.card import (
 )
 from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
 from osm_polygon_description_tag.runtime.resources import dataset_card_template
-from osm_polygon_description_tag.workflow.orchestrator import _build_metadata_only_upload_plan
+from osm_polygon_description_tag.workflow.orchestrator import build_metadata_only_upload_plan
 from tests.conftest import make_record_dict
 from tests.helpers.dataset import write_finalized_dataset
 
@@ -153,6 +153,20 @@ def test_insert_map_block_handles_insertion_refresh_append_and_partial_markers()
 
     with pytest.raises(ValueError, match="malformed"):
         card_module.insert_map_block("<!-- GENERATED:H3_MAP:START -->\n", "body")
+
+
+def test_insert_map_block_preserves_empty_template_separator() -> None:
+    assert card_module.insert_map_block("", "body") == (
+        "<!-- GENERATED:H3_MAP:START -->\nbody\n<!-- GENERATED:H3_MAP:END -->\n"
+    )
+
+
+def test_insert_map_block_reports_the_exact_partial_marker_error() -> None:
+    with pytest.raises(
+        ValueError,
+        match=rf"^{re.escape('dataset card has malformed H3 map markers')}$",
+    ):
+        card_module.insert_map_block(f"{H3_MAP_START_MARKER}\n", "body")
 
 
 def test_render_map_block_uses_relative_asset_path() -> None:
@@ -422,7 +436,7 @@ def test_metadata_only_plan_includes_map_when_present(
     (data_root / "assets" / "description_polygon_density.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     (data_root / "assets" / "area_distribution.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     (data_root / "assets" / "dataset-card-hero.png").write_bytes(b"\x89PNG\r\n\x1a\n")
-    plan = _build_metadata_only_upload_plan(data_root)
+    plan = build_metadata_only_upload_plan(data_root)
     relative = sorted(item.relative_path for item in plan.files)
     assert "assets/description_polygon_density.png" in relative
     assert "assets/area_distribution.png" in relative
@@ -719,6 +733,12 @@ def test_template_with_map_markers_replaces_only_the_first_stats_marker() -> Non
     assert output.endswith(f"{stats_marker}second\n")
 
 
+def test_template_with_map_markers_requires_the_stats_marker() -> None:
+    message = "template missing GENERATED:STATS:START marker; cannot insert map block"
+    with pytest.raises(ValueError, match=rf"^{re.escape(message)}$"):
+        _template_with_map_markers("before", "assets/map.png")
+
+
 def test_atomic_write_template_uses_explicit_utf8_and_binary_fsync_open() -> None:
     template = Mock()
     temporary = Mock()
@@ -843,3 +863,84 @@ def test_map_is_recomputed_when_finalized_parquet_data_changes(
     assert len(render_calls) == 2, "H3 PNG must be re-rendered on data change"
     assert map_path.read_bytes() == b"map-2"
     assert map_path.read_bytes() != first_bytes
+
+
+# A dataset card authored on Windows arrives with CRLF line endings. The card
+# writer preserves the template byte-for-byte outside the marker block, so the
+# CRLF branch of every newline helper is part of that guarantee -- and it was
+# reached by no test at all.
+
+CRLF_TEMPLATE = (
+    f"# Card\r\n\r\n{H3_MAP_START_MARKER}\r\nold body\r\n{H3_MAP_END_MARKER}\r\n\r\ntail\r\n"
+)
+LF_TEMPLATE = f"# Card\n\n{H3_MAP_START_MARKER}\nold body\n{H3_MAP_END_MARKER}\n\ntail\n"
+
+
+def test_newline_for_reports_the_line_ending_the_text_actually_uses() -> None:
+    assert card_module._newline_for("a\r\nb") == "\r\n"
+    assert card_module._newline_for("a\nb") == "\n"
+    assert card_module._newline_for("no line ending") == "\n"
+
+
+def test_normalize_block_body_rewrites_every_line_ending_to_the_target() -> None:
+    assert card_module._normalize_block_body("one\r\ntwo", "\r\n") == "one\r\ntwo"
+    assert card_module._normalize_block_body("one\r\ntwo", "\n") == "one\ntwo"
+    assert card_module._normalize_block_body("one\ntwo", "\r\n") == "one\r\ntwo"
+
+
+def test_normalize_block_body_strips_only_trailing_line_endings() -> None:
+    """``rstrip`` without an argument would also eat significant trailing spaces."""
+    assert card_module._normalize_block_body("body  \r\n\r\n", "\r\n") == "body  "
+    assert card_module._normalize_block_body("body\t\n", "\n") == "body\t"
+
+
+def test_install_map_block_keeps_a_crlf_card_in_crlf() -> None:
+    out = install_map_block(CRLF_TEMPLATE, "![alt](path.png)")
+
+    assert out == (
+        f"# Card\r\n\r\n{H3_MAP_START_MARKER}\r\n![alt](path.png)\r\n"
+        f"{H3_MAP_END_MARKER}\r\n\r\ntail\r\n"
+    )
+    assert "\r" in out
+
+
+def test_install_map_block_keeps_an_lf_card_in_lf() -> None:
+    out = install_map_block(LF_TEMPLATE, "![alt](path.png)")
+
+    assert out == (
+        f"# Card\n\n{H3_MAP_START_MARKER}\n![alt](path.png)\n{H3_MAP_END_MARKER}\n\ntail\n"
+    )
+    assert "\r" not in out
+
+
+def test_install_map_block_converts_a_crlf_body_into_the_card_line_ending() -> None:
+    """The body's own line endings must not leak into an LF card."""
+    out = install_map_block(LF_TEMPLATE, "first\r\nsecond")
+
+    assert "\r" not in out
+    assert "first\nsecond" in out
+
+
+def test_install_map_block_takes_its_line_ending_from_the_opening_marker() -> None:
+    """The two markers can disagree, and the opening one is what counts.
+
+    A card edited on two platforms can carry a CRLF start marker and an LF end
+    marker. Reading the ending off the closing marker instead would rewrite the
+    inserted block with the wrong terminator while looking correct on a file
+    whose markers happen to agree -- which every other fixture here does.
+    """
+    template = f"# Card\r\n\r\n{H3_MAP_START_MARKER}\r\nold\r\n{H3_MAP_END_MARKER}\n\ntail\n"
+
+    out = install_map_block(template, "![alt](path.png)")
+
+    assert f"{H3_MAP_START_MARKER}\r\n![alt](path.png)\r\n{H3_MAP_END_MARKER}" in out
+
+
+def test_normalize_block_body_strips_only_line_endings_not_letters() -> None:
+    """``rstrip`` takes a character *set*, so a wider set eats body text.
+
+    A body ending in one of those characters is the only input that separates
+    stripping line endings from stripping whatever else was added to the set.
+    """
+    assert card_module._normalize_block_body("bodyX\r\n", "\r\n") == "bodyX"
+    assert card_module._normalize_block_body("bodyX", "\n") == "bodyX"

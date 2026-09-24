@@ -138,7 +138,7 @@ def _install_external_boundaries(
             log["interrupted"] = True
             raise KeyboardInterrupt
 
-    monkeypatch.setattr(pub, "_default_runner_with_retry", runner_wrapper)
+    monkeypatch.setattr(pub, "default_runner_with_retry", runner_wrapper)
     monkeypatch.setattr(orch, "default_hub_verifier_factory", verifier_factory)
     monkeypatch.setattr(orch, "_default_clock", lambda: "2026-07-28T00:00:00+00:00")
     monkeypatch.setattr(
@@ -220,7 +220,7 @@ def test_run_two_resumes_and_publishes_remaining_and_metadata(
         write_manifest,
     )
     from osm_polygon_description_tag.dataset.storage import write_geoparquet
-    from osm_polygon_description_tag.publication import _build_per_pbf_upload_plan
+    from osm_polygon_description_tag.publication import build_per_pbf_upload_plan
     from tests.conftest import make_record_dict
 
     # Plant a pre-published first PBF to set up the resume scenario.
@@ -277,7 +277,7 @@ def test_run_two_resumes_and_publishes_remaining_and_metadata(
                 "output_sha256": file_sha256(data_root / "data" / "amendment.parquet"),
                 "output_bytes": (data_root / "data" / "amendment.parquet").stat().st_size,
                 "remote_revision": "pre-rev",
-                "artifact_identity": _build_per_pbf_upload_plan(
+                "artifact_identity": build_per_pbf_upload_plan(
                     data_root, "amendment.osm.pbf"
                 ).identity_sha256,
                 "completed_at": "2026-07-28T00:00:00+00:00",
@@ -333,8 +333,8 @@ def test_run_three_is_pure_no_op(
     )
     from osm_polygon_description_tag.dataset.storage import write_geoparquet
     from osm_polygon_description_tag.publication import (
-        _build_metadata_only_upload_plan,
-        _build_per_pbf_upload_plan,
+        build_metadata_only_upload_plan,
+        build_per_pbf_upload_plan,
     )
     from tests.conftest import make_record_dict
 
@@ -428,7 +428,7 @@ def test_run_three_is_pure_no_op(
         clock=lambda: "2026-07-28T00:00:00+00:00",
     )
     assert (data_root / "assets" / "description_polygon_density.png").is_file()
-    plan_meta = _build_metadata_only_upload_plan(data_root)
+    plan_meta = build_metadata_only_upload_plan(data_root)
     state = {
         "schema_version": 1,
         "published": {
@@ -437,7 +437,7 @@ def test_run_three_is_pure_no_op(
                 "output_sha256": file_sha256(data_root / "data" / "amendment.parquet"),
                 "output_bytes": (data_root / "data" / "amendment.parquet").stat().st_size,
                 "remote_revision": "pre-rev",
-                "artifact_identity": _build_per_pbf_upload_plan(
+                "artifact_identity": build_per_pbf_upload_plan(
                     data_root, "amendment.osm.pbf"
                 ).identity_sha256,
                 "completed_at": "2026-07-28T00:00:00+00:00",
@@ -447,7 +447,7 @@ def test_run_three_is_pure_no_op(
                 "output_sha256": file_sha256(data_root / "data" / "duplicate.parquet"),
                 "output_bytes": (data_root / "data" / "duplicate.parquet").stat().st_size,
                 "remote_revision": "pre-rev-dup",
-                "artifact_identity": _build_per_pbf_upload_plan(
+                "artifact_identity": build_per_pbf_upload_plan(
                     data_root, "duplicate.osm.pbf"
                 ).identity_sha256,
                 "completed_at": "2026-07-28T00:00:00+00:00",

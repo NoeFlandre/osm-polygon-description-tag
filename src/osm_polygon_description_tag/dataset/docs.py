@@ -155,7 +155,7 @@ def _fmt_area(value: float | None) -> str:
 def _coerce_float_values(values: Sequence[object]) -> tuple[float, ...] | None:
     """Convert object values to floats, returning ``None`` on conversion errors."""
     try:
-        return tuple(float(cast(Any, value)) for value in values)
+        return tuple(float(cast(Any, value)) for value in values)  # pragma: no mutate
     except (TypeError, ValueError):
         return None
 
@@ -271,7 +271,9 @@ def _render_timestamp_section(stats: Mapping[str, Any]) -> list[str]:
 
 def _render_geometry_stats_section(stats: Mapping[str, Any]) -> list[str]:
     """Render the additive geometry statistics section."""
-    geometry_types = stats.get("geometry_types", {})
+    # The isinstance guard below normalises anything that is not a Mapping,
+    # so the default here cannot reach the caller: {} and None are the same.
+    geometry_types = stats.get("geometry_types", {})  # pragma: no mutate
     if not isinstance(geometry_types, Mapping):
         geometry_types = {}
     regional_rows, globally_unique, overlap_duplicates, _manifest_duplicates = (
@@ -531,14 +533,28 @@ def _front_matter_separator(readme: str, position: int, newline: str) -> str:
     return newline
 
 
+def _inserted_block_terminator(remainder: str, newline: str) -> str:
+    """Return the newline that keeps an inserted block off the following line.
+
+    Body text that starts immediately after the front matter carries no leading
+    newline of its own, so without this the block and the first body line would
+    be concatenated into one line.
+    """
+    if not remainder or remainder[:1] in ("\n", "\r"):
+        return ""
+    return newline
+
+
 def _insert_after_front_matter(readme: str, block: str, newline: str) -> str | None:
     """Insert a generated block immediately after complete YAML front matter."""
     position = _front_matter_end(readme)
     if position is None:
         return None
 
-    separator = _front_matter_separator(readme, position, newline)
-    return readme[:position] + separator + block + readme[position:]
+    remainder = readme[position:]
+    leading = _front_matter_separator(readme, position, newline)
+    trailing = _inserted_block_terminator(remainder, newline)
+    return readme[:position] + leading + block + trailing + remainder
 
 
 def _insert_stats_block(readme: str, block: str, newline: str) -> str:
@@ -558,9 +574,14 @@ def _stats_marker_count(readme: str) -> int:
 def _replace_stats_block(readme: str, block: str) -> str:
     if _GENERATED_PATTERN.search(readme) is None:
         raise ReportingError("existing README has malformed generated stats markers")
+    # _stats_marker_count refuses more than one block before this runs, so
+    # replacing "the first" and "all" are the same substitution here.
+    replace_one = 1  # pragma: no mutate
+    # pragma: no mutate start - one block only, so "first" and "all" agree
     return _GENERATED_PATTERN.sub(
-        lambda match: match.group(1) + block + match.group(3), readme, count=1
+        lambda match: match.group(1) + block + match.group(3), readme, count=replace_one
     )
+    # pragma: no mutate end
 
 
 def _update_stats_block(readme: str, stats: dict[str, Any], stats_sha256: str) -> str:

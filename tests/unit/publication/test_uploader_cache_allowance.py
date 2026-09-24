@@ -28,13 +28,13 @@ import pytest
 from osm_polygon_description_tag.publication import (
     REPO_ID,
     PublicationError,
-    _build_metadata_only_upload_plan,
-    _build_per_pbf_upload_plan,
-    _collect_allowlisted_files,
+    build_metadata_only_upload_plan,
+    build_per_pbf_upload_plan,
     create_upload_plan,
     metadata_only_command,
     per_pbf_command,
 )
+from osm_polygon_description_tag.publication.planning import _collect_allowlisted_files
 
 
 def _setup_data_root(tmp_path: Path) -> Path:
@@ -177,7 +177,7 @@ def test_uploader_cache_never_in_per_pbf_plan(tmp_path: Path) -> None:
     (data_root / ".cache" / "huggingface").mkdir(parents=True)
     _write_resumable_artifact(data_root, "a.osm.pbf")
 
-    plan = _build_per_pbf_upload_plan(data_root, "a.osm.pbf")
+    plan = build_per_pbf_upload_plan(data_root, "a.osm.pbf")
     relative = sorted(item.relative_path for item in plan.files)
     assert relative == sorted(
         [
@@ -198,7 +198,7 @@ def test_uploader_cache_never_in_metadata_only_plan(tmp_path: Path) -> None:
     data_root = _setup_data_root(tmp_path)
     (data_root / ".cache" / "huggingface").mkdir(parents=True)
 
-    plan = _build_metadata_only_upload_plan(data_root)
+    plan = build_metadata_only_upload_plan(data_root)
     relative = sorted(item.relative_path for item in plan.files)
     assert relative == sorted(
         [
@@ -349,7 +349,7 @@ def test_uploader_cache_survives_across_runs(
     import osm_polygon_description_tag.workflow.orchestrator as orch
     import osm_polygon_description_tag.workflow.preflight as preflight_module
 
-    monkeypatch.setattr(pub, "_default_runner_with_retry", fake_runner)
+    monkeypatch.setattr(pub, "default_runner_with_retry", fake_runner)
     monkeypatch.setattr(orch, "default_hub_verifier_factory", stub_hf_api_factory)
     monkeypatch.setattr(orch, "_default_clock", lambda: "2026-07-27T00:00:00+00:00")
 
@@ -391,7 +391,7 @@ def test_uploader_cache_survives_across_runs(
         assert cache_file.read_bytes() == b"updated-by-runner"
         return "rev-2"
 
-    monkeypatch.setattr(pub, "_default_runner_with_retry", fake_runner_repeat)
+    monkeypatch.setattr(pub, "default_runner_with_retry", fake_runner_repeat)
 
     exit_code = cli_run(
         [

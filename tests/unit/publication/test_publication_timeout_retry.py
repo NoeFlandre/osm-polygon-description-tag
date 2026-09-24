@@ -13,7 +13,7 @@ import pytest
 
 from osm_polygon_description_tag.publication import (
     PublicationError,
-    _default_runner_with_retry,
+    default_runner_with_retry,
 )
 
 
@@ -27,7 +27,7 @@ def test_retry_observer_receives_attempt_classification_and_delay() -> None:
         if attempts == 1:
             raise subprocess.CalledProcessError(503, ["hf"], stderr=b"temporary")
 
-    _default_runner_with_retry(
+    default_runner_with_retry(
         ["hf"],
         max_retries=1,
         backoff_seconds=0,
@@ -57,7 +57,7 @@ def test_default_runner_retries_timeout_and_eventually_succeeds() -> None:
             raise subprocess.TimeoutExpired(cmd=command, timeout=timeout or 0.1)
         return None
 
-    _default_runner_with_retry(
+    default_runner_with_retry(
         ["hf", "upload-large-folder"],
         _runner=runner,
         max_retries=3,
@@ -81,7 +81,7 @@ def test_default_runner_propagates_timeout_after_max_retries() -> None:
         raise subprocess.TimeoutExpired(cmd=command, timeout=timeout or 0.1)
 
     with pytest.raises(subprocess.TimeoutExpired):
-        _default_runner_with_retry(
+        default_runner_with_retry(
             ["hf", "upload-large-folder"],
             _runner=runner,
             max_retries=2,
@@ -96,7 +96,7 @@ def test_publication_error_is_wrapped_when_runner_raises_publication_error() -> 
         raise PublicationError("hub rejected")
 
     with pytest.raises(PublicationError, match="hub rejected"):
-        _default_runner_with_retry(
+        default_runner_with_retry(
             ["hf", "upload-large-folder"],
             _runner=runner,
             max_retries=2,

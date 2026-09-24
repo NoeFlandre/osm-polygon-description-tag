@@ -102,7 +102,7 @@ def _patch_external_boundaries(
     import osm_polygon_description_tag.workflow.orchestrator as orch
     import osm_polygon_description_tag.workflow.preflight as preflight_module
 
-    monkeypatch.setattr(pub, "_default_runner_with_retry", subprocess_runner)
+    monkeypatch.setattr(pub, "default_runner_with_retry", subprocess_runner)
     monkeypatch.setattr(orch, "default_hub_verifier_factory", verifier_factory)
     # Patch HfApi used by the default preflight to avoid real network calls.
     if hf_api_factory is not None:

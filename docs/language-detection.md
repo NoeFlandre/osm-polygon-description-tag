@@ -124,9 +124,14 @@ published unsplit with `unsupported_language_hrv`.
 - **No accuracy has been measured on this dataset.** The detector was chosen
   for its documented suitability on short text and has not been benchmarked
   here. Treat every label as an unvalidated annotation.
-- Short values are frequently `uncertain` by design. A conservative minimum
-  letter count, minimum score, and minimum margin are applied before any
-  language is assigned.
+- **Confidence is not gated.** A minimum score and a minimum margin were
+  removed, so a value is labelled whenever it is long enough, is not an
+  outright tie between the top two candidates, and shows no mixed-language
+  evidence. Low-confidence labels are therefore expected, and `top_score`,
+  `runner_up_score` and `margin` are recorded on every row so consumers can
+  apply their own threshold.
+- Short values are still `uncertain` by design: a minimum letter count is
+  applied before detection is attempted at all.
 - When mixed-language evidence is identified, the result is `uncertain` with
   reason `mixed_text`. The detector may miss mixed-language text, especially
   short values.

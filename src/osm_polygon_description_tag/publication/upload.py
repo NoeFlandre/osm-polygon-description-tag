@@ -221,7 +221,28 @@ def _sleep_before_retry(
     return attempt, current_delay * factor
 
 
-_default_runner_with_retry: _RetryRunner = _run_with_retry
+def default_runner_with_retry(
+    command: list[str],
+    *,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    backoff_seconds: float = DEFAULT_BACKOFF_SECONDS,
+    backoff_factor: float = DEFAULT_BACKOFF_FACTOR,
+    backoff_cap_seconds: float = DEFAULT_BACKOFF_CAP_SECONDS,
+    timeout: float | None = None,
+    _runner: Callable[[list[str], float | None], None] | None = None,
+    retry_observer: Callable[..., None] | None = None,
+) -> None:
+    """Run an HF upload command with bounded, retryable failure handling."""
+    _run_with_retry(
+        command,
+        max_retries=max_retries,
+        backoff_seconds=backoff_seconds,
+        backoff_factor=backoff_factor,
+        backoff_cap_seconds=backoff_cap_seconds,
+        timeout=timeout,
+        _runner=_runner,
+        retry_observer=retry_observer,
+    )
 
 
 def _dispatch_upload(
@@ -309,9 +330,9 @@ def _run_default_upload(
     command: list[str], timeout: float | None, retry_observer: Callable[..., None] | None
 ) -> None:
     try:
-        _default_runner_with_retry(command, timeout=timeout, retry_observer=retry_observer)
+        default_runner_with_retry(command, timeout=timeout, retry_observer=retry_observer)
     except TypeError as error:
         # Compatibility for injected legacy runners used by embedders.
         if "unexpected keyword argument 'retry_observer'" not in str(error):
             raise
-        _default_runner_with_retry(command, timeout=timeout)
+        default_runner_with_retry(command, timeout=timeout)

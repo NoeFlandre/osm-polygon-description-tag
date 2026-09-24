@@ -8,6 +8,7 @@ from unittest.mock import Mock, call, patch
 import pytest
 
 import osm_polygon_description_tag.dataset.docs as docs_module
+from tests.helpers.messages import exactly
 
 
 def test_read_json_object_accepts_only_json_objects_and_uses_utf8() -> None:
@@ -377,7 +378,10 @@ def test_insert_after_front_matter_preserves_existing_front_matter() -> None:
 
 
 def test_insert_after_front_matter_rejects_unterminated_front_matter() -> None:
-    with pytest.raises(docs_module.ReportingError, match="unterminated"):
+    with pytest.raises(
+        docs_module.ReportingError,
+        match=r"^existing README has unterminated YAML front matter$",
+    ):
         docs_module._insert_after_front_matter("---\ntitle: Dataset\nbody", "block", "\n")
 
 
@@ -386,6 +390,14 @@ def test_insert_after_front_matter_adds_separator_at_end_of_front_matter() -> No
 
     assert docs_module._insert_after_front_matter(readme, "block", "\n") == (
         "---\ntitle: Dataset\n---\nblock"
+    )
+
+
+def test_insert_stats_block_preserves_the_block_and_newline_after_front_matter() -> None:
+    readme = "---\r\ntitle: Dataset\r\n---\r\nbody"
+
+    assert docs_module._insert_stats_block(readme, "block", "\r\n") == (
+        "---\r\ntitle: Dataset\r\n---\r\nblock\r\nbody"
     )
 
 
@@ -606,3 +618,132 @@ def test_text_rejection_section_keeps_legacy_fallbacks_safe() -> None:
     rendered = docs_module._render_text_rejection_section({"persisted_text_rejection_rows": 0})
 
     assert "**Persisted artifact rows excluded by the final text predicate:** 0." in rendered
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (0.5, "0.5 m²"),
+        (0.999, "0.999 m²"),
+        (1.0, "1.0 m²"),
+        (1.5, "1.5 m²"),
+        (999_999.94, "999,999.9 m²"),
+        (1_000_000.0, "1.0 km²"),
+        (2_500_000.0, "2.5 km²"),
+        (-1_000_000.0, "-1.0 km²"),
+    ],
+)
+def test_area_formatting_switches_units_exactly_at_its_boundaries(
+    value: float, expected: str
+) -> None:
+    """Both thresholds are inclusive, and the divisor is exactly a million.
+
+    The published card states dataset areas, so an off-by-one divisor or a
+    boundary that flips a unit is a wrong number in front of every reader.
+    """
+    assert docs_module._fmt_area(value) == expected
+
+
+def test_polygon_counts_fall_back_to_the_row_count_then_to_zero() -> None:
+    """The fallback chain is what older stats files rely on to render at all."""
+    complete = {
+        "globally_unique_polygons": 7,
+        "rows": 99,
+        "regional_overlap_duplicate_rows": 2,
+        "regional_rows": 11,
+        "manifest_duplicate_rows": 3,
+    }
+    assert docs_module._polygon_count_metrics(complete) == (11, 7, 2, 3)
+
+    without_unique = {"rows": 5}
+    assert docs_module._polygon_count_metrics(without_unique) == (5, 5, 0, 0)
+
+    assert docs_module._polygon_count_metrics({}) == (0, 0, 0, 0)
+
+
+def test_polygon_counts_derive_regional_rows_when_the_stats_omit_them() -> None:
+    stats = {"globally_unique_polygons": 4, "regional_overlap_duplicate_rows": 6}
+
+    assert docs_module._polygon_count_metrics(stats) == (10, 4, 6, 0)
+
+
+def test_manifest_duplicates_fall_back_to_the_deduplicated_row_count() -> None:
+    stats = {"globally_unique_polygons": 1, "deduplicated_rows": 8}
+
+    assert docs_module._polygon_count_metrics(stats)[3] == 8
+
+
+def test_geometry_stats_render_as_zero_when_the_stats_omit_them() -> None:
+    """Absent geometry counters must read as zero, not as a fabricated one.
+
+    Every fixture supplied the full stats mapping, so each ``.get(key, 0)``
+    default was unreached -- and a card that invents counts is worse than one
+    that omits them, because the number looks measured.
+    """
+    rows = docs_module._render_geometry_stats_section({"output_files": 0})
+
+    assert (
+        "| Geometry totals (vertices / rings / holes / MultiPolygon parts) | 0 / 0 / 0 / 0 |"
+        in rows
+    )
+    assert "| Polygon / MultiPolygon rows | 0 / 0 |" in rows
+
+
+def test_a_non_mapping_geometry_type_breakdown_is_treated_as_empty() -> None:
+    """Stats files are read from disk, so the shape cannot be assumed."""
+    rows = docs_module._render_geometry_stats_section(
+        {"output_files": 1, "geometry_types": ["Polygon"]}
+    )
+
+    assert "| Polygon / MultiPolygon rows | 0 / 0 |" in rows
+
+
+def test_geometry_type_counts_are_read_from_the_breakdown_when_present() -> None:
+    rows = docs_module._render_geometry_stats_section(
+        {
+            "output_files": 1,
+            "geometry_types": {"Polygon": 7, "MultiPolygon": 3},
+            "geometry_vertices_total": 11,
+            "geometry_rings_total": 5,
+            "geometry_holes_total": 2,
+            "multipolygon_components_total": 4,
+        }
+    )
+
+    assert (
+        "| Geometry totals (vertices / rings / holes / MultiPolygon parts) | 11 / 5 / 2 / 4 |"
+        in rows
+    )
+    assert "| Polygon / MultiPolygon rows | 7 / 3 |" in rows
+
+
+def test_a_continental_area_is_divided_by_exactly_one_million() -> None:
+    """Small areas hide an off-by-one divisor; the dataset's totals do not.
+
+    At a few million square metres, dividing by 1,000,001 instead of a million
+    still rounds to the same tenth. The published total is continental, and
+    there the error becomes visible -- which is the number people read.
+    """
+    assert docs_module._fmt_area(1e11) == "100,000.0 km\u00b2"
+
+
+def test_a_body_starting_with_a_bare_carriage_return_is_not_given_another() -> None:
+    """Old-Mac line endings are still line endings; the block must not gain one."""
+    assert docs_module._inserted_block_terminator("\rbody", "\n") == ""
+    assert docs_module._inserted_block_terminator("\nbody", "\n") == ""
+    assert docs_module._inserted_block_terminator("body", "\n") == "\n"
+    assert docs_module._inserted_block_terminator("", "\n") == ""
+
+
+def test_malformed_marker_refusals_state_their_whole_message() -> None:
+    """Both refusals are what an operator reads when a card cannot be updated."""
+    message = "existing README has malformed generated stats markers"
+
+    with pytest.raises(docs_module.ReportingError, match=exactly(message)):
+        docs_module._replace_stats_block("no markers here", "block")
+
+    with pytest.raises(docs_module.ReportingError, match=exactly(message)):
+        docs_module._stats_marker_count(
+            f"{docs_module._STATS_START_MARKER}\n{docs_module._STATS_START_MARKER}\n"
+            f"{docs_module._STATS_END_MARKER}\n{docs_module._STATS_END_MARKER}\n"
+        )

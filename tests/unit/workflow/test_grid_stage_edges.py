@@ -3,7 +3,6 @@
 import hashlib
 import json
 import os
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -20,10 +19,10 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
     SNAPSHOT_FILENAME,
     SnapshotManifest,
     fingerprint_lockfile,
-    fingerprint_project_source,
     prepare_snapshot,
 )
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
+from osm_polygon_description_tag.workflow import grid_operator
 from osm_polygon_description_tag.workflow.grid_operator import (
     JOB_CONFIG_FILENAME,
     MAX_PROCESSING_SECONDS,
@@ -44,39 +43,6 @@ from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH
 
 SHARD = "region.parquet"
 REMOTE_BUNDLE = "/scratch/lang-bundle"
-
-
-@pytest.fixture
-def portable_inputs(tmp_path: Path) -> tuple[Path, Path, Path, SnapshotManifest]:
-    source = tmp_path / "source"
-    source.mkdir()
-    write_geoparquet(
-        iter(
-            [
-                make_record_dict(
-                    Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-                    {"description": "A portable description"},
-                )
-            ]
-        ),
-        source / SHARD,
-        batch_size=1,
-    )
-
-    project = tmp_path / "project"
-    (project / "src").mkdir(parents=True)
-    (project / "src" / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
-    (project / "pyproject.toml").write_text("[project]\nname = 'synthetic'\n", encoding="utf-8")
-    (project / "uv.lock").write_text("version = 1\n", encoding="utf-8")
-
-    run = tmp_path / "run"
-    snapshot = prepare_snapshot(
-        source,
-        run,
-        code_fingerprint=fingerprint_project_source(project),
-        lock_fingerprint=fingerprint_lockfile(project),
-    )
-    return project, source, run, snapshot
 
 
 def _stage(
@@ -404,7 +370,7 @@ def test_prepare_portable_job_cleans_temporary_payload_after_copy_failure(
     def fail_copy(source_path: Path, destination: Path) -> None:
         raise OSError("simulated copy failure")
 
-    monkeypatch.setattr(shutil, "copyfile", fail_copy)
+    monkeypatch.setattr(grid_operator.shutil, "copyfile", fail_copy)
     bundle = bundle_for_shard(snapshot, SHARD)
     paths = job_paths(run, bundle)
     with pytest.raises(GridOperatorError, match="cannot stage"):
@@ -427,7 +393,7 @@ def test_prepare_portable_job_cleans_temporary_payload_after_rename_failure(
     project, source, run, snapshot = portable_inputs
     bundle = bundle_for_shard(snapshot, SHARD)
     paths = job_paths(run, bundle)
-    original_replace = os.replace
+    original_replace = grid_operator.os.replace
 
     def fail_payload_replace(source_path: object, destination: object) -> None:
         destination_path = Path(destination)
@@ -435,7 +401,7 @@ def test_prepare_portable_job_cleans_temporary_payload_after_rename_failure(
             raise OSError("simulated payload rename failure")
         original_replace(source_path, destination)
 
-    monkeypatch.setattr(os, "replace", fail_payload_replace)
+    monkeypatch.setattr(grid_operator.os, "replace", fail_payload_replace)
     with pytest.raises(OSError, match="payload rename failure"):
         prepare_portable_job(
             run,

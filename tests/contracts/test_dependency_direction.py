@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import os
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,12 @@ CANONICAL_DEPENDENCIES = {
     "workflow": {"runtime", "osm", "dataset", "publication", "observability", "workflow"},
 }
 CONSOLE_MODULES = ("cli", "language_cli")
+CONSOLE_SUPPORT_MODULES = {
+    "grid_transport",
+    "grid_workflow",
+    "language_workflow",
+    "publication_workflow",
+}
 
 
 def _package_imports_from_source(source: str, module_parts: list[str]) -> list[str]:
@@ -80,7 +87,7 @@ def test_canonical_package_imports_only_allowed_lower_layers(package_name: str) 
 @pytest.mark.parametrize("module_name", CONSOLE_MODULES)
 def test_console_modules_import_only_canonical_packages(module_name: str) -> None:
     """Console entry points compose canonical packages and never the shims."""
-    allowed = set(CANONICAL_DEPENDENCIES) | set(CONSOLE_MODULES)
+    allowed = set(CANONICAL_DEPENDENCIES) | set(CONSOLE_MODULES) | CONSOLE_SUPPORT_MODULES
     imports = _package_imports(PACKAGE_ROOT / f"{module_name}.py")
     violations = [
         imported_module
@@ -88,6 +95,24 @@ def test_console_modules_import_only_canonical_packages(module_name: str) -> Non
         if imported_module.split(".", maxsplit=1)[0] not in allowed
     ]
     assert violations == []
+
+
+def test_grid_operator_is_split_into_cohesive_package_modules() -> None:
+    if "MUTANT_UNDER_TEST" in os.environ:
+        pytest.skip("static architecture bounds are checked on the canonical source tree")
+    package_dir = PACKAGE_ROOT / "workflow" / "grid_operator"
+    assert package_dir.is_dir()
+    assert not (PACKAGE_ROOT / "workflow" / "grid_operator.py").exists()
+    modules = sorted(package_dir.glob("*.py"))
+    assert {path.name for path in modules} >= {
+        "__init__.py",
+        "bundle.py",
+        "intent.py",
+        "script.py",
+        "submit.py",
+        "validation.py",
+    }
+    assert all(len(path.read_text(encoding="utf-8").splitlines()) <= 500 for path in modules)
 
 
 @pytest.mark.parametrize(

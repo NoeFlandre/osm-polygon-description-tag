@@ -56,9 +56,7 @@ def prepared(tmp_path: Path) -> tuple[Path, Path, module.SnapshotManifest]:
         run,
         code_fingerprint="a" * 64,
         lock_fingerprint="b" * 64,
-        policy=LanguagePolicy(
-            min_alphabetic_chars=7, min_score=0.75, min_margin=0.25, tie_epsilon=0.001
-        ),
+        policy=LanguagePolicy(min_alphabetic_chars=7, tie_epsilon=0.001),
         language_scope=("fra", "eng"),
     )
     return source, run, snapshot
@@ -82,7 +80,7 @@ def test_prepared_bytes_bind_exact_schema_metadata_policy_and_source(prepared: t
         "row_count": 0,
     }
     expected_identity = language_model_identity(
-        LanguagePolicy(min_alphabetic_chars=7, min_score=0.75, min_margin=0.25, tie_epsilon=0.001),
+        LanguagePolicy(min_alphabetic_chars=7, tie_epsilon=0.001),
         language_scope=("eng", "fra"),
     )
     assert snapshot.model_identity == expected_identity
@@ -107,9 +105,9 @@ def test_prepared_bytes_bind_exact_schema_metadata_policy_and_source(prepared: t
             "snapshot field min_alphabetic_chars must be an integer",
         ),
         (
-            ("model_identity", "policy", "min_margin"),
+            ("model_identity", "policy", "tie_epsilon"),
             "0.25",
-            "snapshot field min_margin must be a real number",
+            "snapshot field tie_epsilon must be a real number",
         ),
         (
             ("model_identity", "policy", "tie_epsilon"),
@@ -117,9 +115,9 @@ def test_prepared_bytes_bind_exact_schema_metadata_policy_and_source(prepared: t
             "snapshot field tie_epsilon must be a real number",
         ),
         (
-            ("model_identity", "policy", "min_score"),
+            ("model_identity", "policy", "tie_epsilon"),
             2,
-            "invalid snapshot policy: min_score must be finite and between 0 and 1.0",
+            "invalid snapshot policy: tie_epsilon must be finite and between 0 and 1.0",
         ),
         (
             ("model_identity", "language_scope"),

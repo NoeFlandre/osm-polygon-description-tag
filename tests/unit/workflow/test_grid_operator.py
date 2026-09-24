@@ -98,55 +98,6 @@ def _verdict(
     )
 
 
-@pytest.fixture
-def prepared(tmp_path: Path) -> tuple[Path, Path, SnapshotManifest]:
-    source = tmp_path / "source"
-    records = (
-        make_record_dict(
-            Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-            {"description": f"A synthetic description {index}"},
-            osm_id=index + 1,
-        )
-        for index in range(4)
-    )
-    source.mkdir(parents=True)
-    write_geoparquet(records, source / SHARD, batch_size=2)
-    run = tmp_path / "run"
-    snapshot = prepare_snapshot(source, run, code_fingerprint="a" * 64, lock_fingerprint="b" * 64)
-    return source, run, snapshot
-
-
-@pytest.fixture
-def portable_prepared(tmp_path: Path) -> tuple[Path, Path, Path, SnapshotManifest]:
-    source = tmp_path / "source"
-    source.mkdir(parents=True)
-    write_geoparquet(
-        (
-            make_record_dict(
-                Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-                {"description": f"A portable description {index}"},
-                osm_id=index + 1,
-            )
-            for index in range(4)
-        ),
-        source / SHARD,
-        batch_size=2,
-    )
-    project = tmp_path / "project"
-    (project / "src").mkdir(parents=True)
-    (project / "src" / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
-    (project / "pyproject.toml").write_text("[project]\nname = 'synthetic'\n", encoding="utf-8")
-    (project / "uv.lock").write_text("version = 1\n", encoding="utf-8")
-    run = tmp_path / "run"
-    snapshot = prepare_snapshot(
-        source,
-        run,
-        code_fingerprint=fingerprint_project_source(project),
-        lock_fingerprint=fingerprint_lockfile(project),
-    )
-    return project, source, run, snapshot
-
-
 def _two_shard_prepared(tmp_path: Path) -> tuple[Path, SnapshotManifest, dict[str, Path]]:
     source = tmp_path / "source"
     source.mkdir(parents=True)
@@ -595,21 +546,6 @@ def _process_collection_fixture(
     )
 
 
-@pytest.fixture
-def collection_runs(
-    prepared: tuple[Path, Path, SnapshotManifest], tmp_path: Path
-) -> tuple[Path, Path, Path, SnapshotManifest]:
-    source, local, snapshot = prepared
-    incoming = tmp_path / "retrieved"
-    prepare_snapshot(
-        source,
-        incoming,
-        code_fingerprint=snapshot.code_fingerprint,
-        lock_fingerprint=snapshot.lock_fingerprint,
-    )
-    return source, local, incoming, snapshot
-
-
 @pytest.mark.parametrize("fault", ["unexpected_shard", "uncommitted_part"])
 def test_collection_does_not_report_success_with_invalid_local_artifacts(
     collection_runs: tuple[Path, Path, Path, SnapshotManifest], fault: str
@@ -680,7 +616,7 @@ def test_interrupted_collection_keeps_the_old_checkpoint_and_can_retry(
     collection_runs: tuple[Path, Path, Path, SnapshotManifest],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from osm_polygon_description_tag.workflow import grid_collection
+    from osm_polygon_description_tag.workflow import grid_operator
 
     source, local, incoming, snapshot = collection_runs
     _process_collection_fixture(
@@ -689,19 +625,19 @@ def test_interrupted_collection_keeps_the_old_checkpoint_and_can_retry(
     _process_collection_fixture(source, incoming, snapshot)
     checkpoint = shard_paths(local, SHARD).checkpoint
     before = checkpoint.read_bytes()
-    original = grid_collection.atomic_write_bytes
+    original = grid_operator.atomic_write_bytes
 
     def interrupt_checkpoint(path: Path, content: bytes) -> None:
         if path == checkpoint:
             raise KeyboardInterrupt
         original(path, content)
 
-    monkeypatch.setattr(grid_collection, "atomic_write_bytes", interrupt_checkpoint)
+    monkeypatch.setattr(grid_operator, "atomic_write_bytes", interrupt_checkpoint)
     with pytest.raises(KeyboardInterrupt):
         import_retrieved_results(local, incoming, SHARD)
     assert checkpoint.read_bytes() == before
 
-    monkeypatch.setattr(grid_collection, "atomic_write_bytes", original)
+    monkeypatch.setattr(grid_operator, "atomic_write_bytes", original)
     assert import_retrieved_results(local, incoming, SHARD).is_complete
 
 

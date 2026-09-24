@@ -57,6 +57,7 @@ from osm_polygon_description_tag.dataset.manifest import (
 )
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from tests.conftest import make_record_dict
+from tests.helpers.messages import exactly
 
 
 def _make_valid_record(
@@ -835,3 +836,53 @@ def test_generate_dataset_docs_uses_validate_finalized_artifacts(tmp_path: Path)
             dataset_card_template(),
             clock=lambda: "2026-07-30T00:02:00+00:00",
         )
+
+
+def test_a_centroid_row_falls_back_to_the_source_name_as_a_path() -> None:
+    """An unmapped source still has to name itself in the refusal.
+
+    The map is built from the files actually on disk; a row naming a source
+    outside it is exactly the case where an operator needs the name, so the
+    fallback path is the name itself rather than nothing.
+    """
+    from osm_polygon_description_tag.dataset.geography import parquet_inputs
+
+    with pytest.raises(
+        parquet_inputs.H3AggregationError,
+        match=exactly("null geometry at elsewhere.parquet (osm_id=42)"),
+    ):
+        parquet_inputs._centroid_row(None, 42, "elsewhere.parquet", {})
+
+
+def test_a_centroid_row_prefers_the_mapped_path_over_the_bare_name() -> None:
+    from osm_polygon_description_tag.dataset.geography import parquet_inputs
+
+    mapped = Path("/data/region.parquet")
+
+    with pytest.raises(
+        parquet_inputs.H3AggregationError,
+        match=exactly(f"null geometry at {mapped} (osm_id=7)"),
+    ):
+        parquet_inputs._centroid_row(None, 7, "region.parquet", {"region.parquet": mapped})
+
+
+def test_a_unique_row_failure_is_reported_with_its_own_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The underlying reason must survive the change of exception type."""
+    from osm_polygon_description_tag.dataset.geography import parquet_inputs
+    from osm_polygon_description_tag.dataset.unique_rows import UniqueRowsError
+
+    (tmp_path / "data").mkdir()
+    monkeypatch.setattr(parquet_inputs, "_source_paths", lambda _dir: {})
+
+    def _boom(*_args: object, **_kwargs: object) -> object:
+        raise UniqueRowsError("missing unique-row column 'osm_id' in region.parquet")
+
+    monkeypatch.setattr(parquet_inputs, "iter_unique_parquet_batches", _boom)
+
+    with pytest.raises(
+        parquet_inputs.H3AggregationError,
+        match=exactly("missing unique-row column 'osm_id' in region.parquet"),
+    ):
+        list(parquet_inputs.iter_centroids(tmp_path))

@@ -47,7 +47,7 @@ from osm_polygon_description_tag.dataset.manifest import (
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import (
     REPO_ID,
-    _build_metadata_only_upload_plan,
+    build_metadata_only_upload_plan,
 )
 from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.workflow.orchestrator import (
@@ -178,7 +178,7 @@ def _patch_external_boundaries(
             return None
 
     monkeypatch.setattr(preflight_module._huggingface_hub, "HfApi", lambda *_a, **_kw: _Stub())
-    monkeypatch.setattr(pub, "_default_runner_with_retry", counting_runner)
+    monkeypatch.setattr(pub, "default_runner_with_retry", counting_runner)
     monkeypatch.setattr(orch, "default_hub_verifier_factory", patching_verifier_factory)
     monkeypatch.setattr(orch, "_default_clock", lambda: _CLOCK)
     return call_log
@@ -321,7 +321,7 @@ def test_metadata_state_records_required_fields(
 
     state = read_publication_state(data_root)
     metadata = state["metadata"]
-    expected_plan = _build_metadata_only_upload_plan(data_root)
+    expected_plan = build_metadata_only_upload_plan(data_root)
     assert metadata["identity_sha256"] == expected_plan.identity_sha256
     assert metadata["readme_sha256"] == file_sha256(data_root / "README.md")
     assert metadata["stats_sha256"] == file_sha256(data_root / "stats.json")
@@ -482,7 +482,7 @@ def test_metadata_uploaded_when_no_per_pbf_uploads(
     _plant_resumable_artifact(data_root, source_root, "b.osm.pbf")
     _plant_metadata(data_root)
 
-    from osm_polygon_description_tag.publication import _build_per_pbf_upload_plan
+    from osm_polygon_description_tag.publication import build_per_pbf_upload_plan
 
     # Mark both PBFs as already-published so the run can skip per-PBF uploads.
     state_init = {
@@ -493,7 +493,7 @@ def test_metadata_uploaded_when_no_per_pbf_uploads(
                 "output_sha256": file_sha256(data_root / "data" / "a.parquet"),
                 "output_bytes": (data_root / "data" / "a.parquet").stat().st_size,
                 "remote_revision": "r-a",
-                "artifact_identity": _build_per_pbf_upload_plan(
+                "artifact_identity": build_per_pbf_upload_plan(
                     data_root, "a.osm.pbf"
                 ).identity_sha256,
                 "completed_at": _CLOCK,
@@ -503,7 +503,7 @@ def test_metadata_uploaded_when_no_per_pbf_uploads(
                 "output_sha256": file_sha256(data_root / "data" / "b.parquet"),
                 "output_bytes": (data_root / "data" / "b.parquet").stat().st_size,
                 "remote_revision": "r-b",
-                "artifact_identity": _build_per_pbf_upload_plan(
+                "artifact_identity": build_per_pbf_upload_plan(
                     data_root, "b.osm.pbf"
                 ).identity_sha256,
                 "completed_at": _CLOCK,

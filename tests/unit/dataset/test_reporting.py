@@ -24,6 +24,7 @@ from osm_polygon_description_tag.dataset.stats import (
 from osm_polygon_description_tag.dataset.unique_rows import iter_unique_parquet_batches
 from tests.conftest import make_record_dict
 from tests.helpers.dataset import write_finalized_dataset, write_reporting_fixture
+from tests.helpers.messages import exactly
 
 
 def _repository_file(relative_path: str) -> Path:
@@ -508,3 +509,34 @@ def test_generate_dataset_docs_writes_stats_and_card(tmp_path: Path) -> None:
     assert stats["files"][0]["emitted_features"] == 4
     assert stats["files"][0]["rejections"] == {"no_nonempty_description": 2}
     assert stats["rejections"] == {"no_nonempty_description": 4}
+
+
+def test_a_feature_spatial_row_disagreement_names_both_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The two passes count the same rows, so a disagreement is corruption.
+
+    The message has to carry both numbers: which pass is wrong is the first
+    thing an operator needs, and a bare failure says only that they differ.
+    """
+    from dataclasses import replace
+
+    import osm_polygon_description_tag.dataset.stats as stats_module
+
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    source_root.mkdir()
+    write_reporting_fixture(data_root, source_root)
+    real = stats_module._collect_spatial_summary
+
+    monkeypatch.setattr(
+        stats_module,
+        "_collect_spatial_summary",
+        lambda artifacts: replace(real(artifacts), rows=99),
+    )
+
+    with pytest.raises(
+        stats_module.ReportingError,
+        match=exactly("feature/spatial row count mismatch: 3 != 99"),
+    ):
+        collect_stats(data_root, clock=_frozen_clock)

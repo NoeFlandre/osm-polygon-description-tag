@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -314,3 +315,18 @@ def test_cast_dict_validates_runtime_shape_and_preserves_mapping() -> None:
 
     with pytest.raises(PublicationStateError, match=r"^expected dict, got list$"):
         state.cast_dict([])
+
+
+def test_atomic_write_json_fsyncs_the_files_own_directory(tmp_path: Path) -> None:
+    """The durability barrier is the parent directory, not some other path.
+
+    Without the fsync on that directory the rename can survive in the page
+    cache while the directory entry does not, which is exactly the crash this
+    write is structured to survive.
+    """
+    target = tmp_path / "publication-state.json"
+
+    state._atomic_write_json(target, {"schema_version": 1})
+
+    assert json.loads(target.read_text(encoding="utf-8")) == {"schema_version": 1}
+    assert [entry.name for entry in tmp_path.glob("*.tmp")] == []

@@ -1267,6 +1267,11 @@ def test_canonical_row_order_sql_has_stable_keyword_casing() -> None:
     assert order.split(", sha256", 1)[0] == (
         "version DESC NULLS LAST, timestamp DESC NULLS LAST, source_pbf ASC"
     )
+    # The default decides how the tie-breaking fingerprint reads key/value
+    # columns, and the two spellings order rows differently, so the default
+    # itself is pinned rather than only the part of the clause it cannot reach.
+    assert order == canonical_rows.canonical_row_order_sql(key_value_columns_are_maps=False)
+    assert order != canonical_rows.canonical_row_order_sql(key_value_columns_are_maps=True)
 
 
 def test_canonical_rows_sql_preserves_selection_validation_contract() -> None:
@@ -1277,6 +1282,32 @@ def test_canonical_rows_sql_preserves_selection_validation_contract() -> None:
     with pytest.raises(ValueError) as unknown:
         canonical_rows.canonical_rows_sql("rows", ("not_a_schema_column",))
     assert str(unknown.value) == ("unsupported unique-row columns: ['not_a_schema_column']")
+
+
+def test_canonical_geometry_wkb_forwards_every_stable_encoding_option(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    geometry = object()
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr(canonical_rows, "from_wkb", lambda _value: geometry)
+
+    def encode(actual: object, **options: object) -> bytes:
+        seen["geometry"] = actual
+        seen["options"] = options
+        return b"canonical"
+
+    monkeypatch.setattr(canonical_rows, "to_wkb", encode)
+
+    assert canonical_rows.canonical_geometry_wkb(b"input") == b"canonical"
+    assert seen == {
+        "geometry": geometry,
+        "options": {"byte_order": 1, "include_srid": False, "output_dimension": 2},
+    }
+
+
+def test_non_geometry_bytes_are_not_interpreted_as_wkb() -> None:
+    assert canonical_rows._fingerprint_value("name", b"opaque") == b"opaque"
 
 
 def test_promote_artifact_moves_staged_file_and_reuses_identical_target(tmp_path: Path) -> None:
@@ -1500,3 +1531,24 @@ def test_finish_deduplication_writes_complete_state_without_changes(
     assert result.input_rows == 2
     assert result.output_rows == 2
     assert writes == [(context.state_path, {"outputs": {"a.parquet": "sha"}})]
+
+
+def test_the_canonical_relation_sql_is_pinned_text() -> None:
+    """DuckDB ignores keyword and identifier case, so behaviour cannot pin this.
+
+    The relation is a deterministic artifact of this module, and its text is
+    what a reviewer reads when a deduplication result is questioned, so the
+    exact SQL is the contract.
+    """
+    executed: list[str] = []
+
+    class Connection:
+        def execute(self, sql: str) -> None:
+            executed.append(sql)
+
+    _canonical_relation(Connection(), [Path("/data/a.parquet")])
+
+    assert len(executed) == 1
+    assert executed[0].startswith("CREATE TEMP TABLE deduplicated AS ")
+    assert "(SELECT * EXCLUDE (geometry), " in executed[0]
+    assert "AS geometry FROM read_parquet(['/data/a.parquet'])" in executed[0]

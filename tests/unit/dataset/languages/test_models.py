@@ -9,7 +9,6 @@ from osm_polygon_description_tag.dataset.languages.models import (
     GLOTLID_MODEL_REPOSITORY,
     GLOTLID_MODEL_REVISION,
     GLOTLID_MODEL_SHA256,
-    V2_LANGUAGE_POLICY,
     LanguageModelIdentity,
     LanguagePolicy,
     LanguageResult,
@@ -36,18 +35,20 @@ def _detected(**overrides: object) -> LanguageResult:
 @pytest.mark.parametrize("value", ["high", None, [0.9]])
 def test_a_non_numeric_threshold_is_rejected(value: object) -> None:
     with pytest.raises(TypeError, match="must be a real number"):
-        LanguagePolicy(min_score=value)  # type: ignore[arg-type]
+        LanguagePolicy(tie_epsilon=value)  # type: ignore[arg-type]
 
 
 def test_a_boolean_threshold_is_rejected() -> None:
     with pytest.raises(TypeError, match="must be a real number"):
-        LanguagePolicy(min_margin=True)  # type: ignore[arg-type]
+        LanguagePolicy(tie_epsilon=True)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("value", [-0.1, 1.5, float("nan"), float("inf")])
 def test_an_out_of_range_threshold_is_rejected(value: float) -> None:
-    with pytest.raises(ValueError, match=exactly("min_score must be finite and between 0 and 1.0")):
-        LanguagePolicy(min_score=value)
+    with pytest.raises(
+        ValueError, match=exactly("tie_epsilon must be finite and between 0 and 1.0")
+    ):
+        LanguagePolicy(tie_epsilon=value)
 
 
 @pytest.mark.parametrize(
@@ -68,25 +69,17 @@ def test_an_invalid_minimum_length_is_rejected(
 
 
 def test_policy_accepts_inclusive_minimum_and_threshold_boundaries() -> None:
-    policy = LanguagePolicy(
-        min_alphabetic_chars=1,
-        min_score=1.0,
-        min_margin=1.0,
-        tie_epsilon=1.0,
-    )
+    policy = LanguagePolicy(min_alphabetic_chars=1, tie_epsilon=1.0)
 
     assert policy.min_alphabetic_chars == 1
-    assert policy.min_score == 1.0
-    assert policy.min_margin == 1.0
     assert policy.tie_epsilon == 1.0
 
 
-def test_v2_policy_lowers_only_the_minimum_confidence_threshold() -> None:
-    assert V2_LANGUAGE_POLICY.min_alphabetic_chars == DEFAULT_LANGUAGE_POLICY.min_alphabetic_chars
-    assert V2_LANGUAGE_POLICY.min_score == 0.70
-    assert V2_LANGUAGE_POLICY.min_margin == DEFAULT_LANGUAGE_POLICY.min_margin
-    assert V2_LANGUAGE_POLICY.tie_epsilon == DEFAULT_LANGUAGE_POLICY.tie_epsilon
-    assert V2_LANGUAGE_POLICY != DEFAULT_LANGUAGE_POLICY
+def test_the_policy_carries_no_confidence_threshold() -> None:
+    """A score or margin gate was removed; only structural gates remain."""
+    assert not hasattr(DEFAULT_LANGUAGE_POLICY, "min_score")
+    assert not hasattr(DEFAULT_LANGUAGE_POLICY, "min_margin")
+    assert DEFAULT_LANGUAGE_POLICY.min_alphabetic_chars == 5
 
 
 def test_a_status_may_be_given_by_its_string_spelling() -> None:
@@ -216,7 +209,7 @@ def test_a_scope_is_deduplicated_and_ordered() -> None:
 
 def test_fingerprints_track_the_configuration() -> None:
     default = language_model_identity(LanguagePolicy())
-    strict = language_model_identity(LanguagePolicy(min_score=0.95))
+    strict = language_model_identity(LanguagePolicy(min_alphabetic_chars=9))
     scoped = language_model_identity(LanguagePolicy(), language_scope=("eng",))
 
     assert default.policy_fingerprint != strict.policy_fingerprint
@@ -252,25 +245,25 @@ def test_fallback_identity_fingerprints_are_pinned_exactly() -> None:
     glotlid_unicode = glotlid_model_identity(LanguagePolicy(), language_scope=("é",))
     cascade = cascade_model_identity(LanguagePolicy())
     cascade_unicode = cascade_model_identity(LanguagePolicy(), language_scope=("é",))
-    cascade_v2 = cascade_model_identity(V2_LANGUAGE_POLICY)
+    cascade_variant = cascade_model_identity(LanguagePolicy(min_alphabetic_chars=7))
 
     assert glotlid.config_fingerprint == (
-        "efe352b1d0ab1ad5980760f7bff5fb34f4f7e3885cb112e5f2c9e8895dcea8de"
+        "fdef129c5596c2b24d1d96166c1cfcbf2198ce576bc9f7ade5f07f46202270eb"
     )
     assert glotlid_unicode.config_fingerprint == (
-        "e7b6987f64941a620d2419e611204a6102c0c5c3be0933f07bae196be63059e4"
+        "367996be3160bc9f800f6c550f4e4dfd5a30f92d798ce130ad16f091770d41cb"
     )
     assert cascade.config_fingerprint == (
-        "5d87faafca790cf96bbd495caca50bd8dfe4bf2cf50be8c19ff65989e2581980"
+        "1d6f31e245a922d89d6d341f24cf0db2304160b2b7ce4f5d8eb890eef148c9a7"
     )
     assert cascade_unicode.config_fingerprint == (
-        "72974dcf5bb98cbbe0b86deecd98c2a95a21d79e3c936293d7e9a8c90a501453"
+        "8cca62e3469d615d815ce9bc9868b563a1a92aa71704b118415e4e1de0a1ea5e"
     )
-    assert cascade_v2.config_fingerprint == (
-        "da659d1a6fbbfaf3db75912a382805b9ecd46def7a1efb4abe1de933188320f2"
+    assert cascade_variant.config_fingerprint == (
+        "8ec9d6748e5c750d0f617aab800a1c0083daf3f3631470d4fc6c578830c2d749"
     )
-    assert cascade_v2.policy_fingerprint == (
-        "ee1bf70f81105efe95c0548328d5ec0adecd5c4533665c480450a51205e2527d"
+    assert cascade_variant.policy_fingerprint == (
+        "a1158f6df6db870156f52234dcca39d32e69513a84d567cfd3be3df0cd974289"
     )
 
 
@@ -279,11 +272,11 @@ def test_identity_fingerprints_use_canonical_and_unicode_safe_serialization() ->
     unicode_scope = language_model_identity(LanguagePolicy(), language_scope=("é",))
 
     assert default.policy_fingerprint == (
-        "747f558ab865b409ec3ae383f752331df39738a2235d6f7d6d8b587ea2a01451"
+        "d9d4a96aeed0cf08282bcb22f7e83b80531b3459eb0c5bbc9ec24ea76eead107"
     )
     assert default.config_fingerprint == (
-        "0ee39e8d6ad019a34530ef46df5b75f38f229dc7f598f977b4301542044f86ff"
+        "43f31727f50bf00d92986a122fd68919e19f6a709c20551856bf816d420ec13f"
     )
     assert unicode_scope.config_fingerprint == (
-        "b0cd693eba0cf4a40485ff48667caa66e52222f53e465bd179271319910187d0"
+        "2ae1ae6f1e949ae52e56964fa1ca3ff6a9e0b0c0eb242355aec05d0531e6b262"
     )

@@ -18,7 +18,7 @@ from collections import Counter
 from collections.abc import Iterator, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -51,6 +51,7 @@ from osm_polygon_description_tag.dataset.languages.payloads import PayloadReader
 from osm_polygon_description_tag.dataset.languages.snapshot import SnapshotManifest, read_snapshot
 from osm_polygon_description_tag.dataset.languages.validation import validate_run
 from osm_polygon_description_tag.dataset.manifest import file_sha256
+from osm_polygon_description_tag.dataset.sentences.languages import SAT_SUPPORTED_LANGUAGES
 from osm_polygon_description_tag.dataset.sentences.models import SentenceSplitStatus
 from osm_polygon_description_tag.publication.models import PublicationError, UploadItem, UploadPlan
 from osm_polygon_description_tag.publication.planning import file_sha256_bytes
@@ -83,6 +84,8 @@ class LanguageStats:
     top_languages: tuple[tuple[str, int], ...]
     split_count: int
     unsupported_language_count: int
+    unsupported_distinct_count: int
+    top_unsupported_languages: tuple[tuple[str, int], ...]
     not_detected_count: int
     sentence_count: int
 
@@ -104,6 +107,11 @@ class LanguageStats:
             "top_languages": [
                 {"language_code": code, "annotation_count": count}
                 for code, count in self.top_languages
+            ],
+            "unsupported_distinct_count": self.unsupported_distinct_count,
+            "top_unsupported_languages": [
+                {"language_code": code, "annotation_count": count}
+                for code, count in self.top_unsupported_languages
             ],
         }
 
@@ -135,6 +143,18 @@ class LanguageExport:
         }
 
 
+def _unsupported_languages_in(columns: dict[str, list[Any]]) -> Iterator[str]:
+    """Yield the language of each row the splitter could not handle.
+
+    Kept beside the accumulator rather than inside ``observe``: the method is a
+    plain sequence of column updates, and folding a filtered join into it was
+    enough to push the function past the project's complexity budget.
+    """
+    pairs = zip(columns["language_code"], columns["split_status"], strict=True)
+    unsupported = str(SentenceSplitStatus.UNSUPPORTED_LANGUAGE)
+    return (code for code, split in pairs if code is not None and split == unsupported)
+
+
 class _StatsAccumulator:
     """Accumulate exported-row statistics without holding the rows."""
 
@@ -146,6 +166,7 @@ class _StatsAccumulator:
         "_statuses",
         "_tag_keys",
         "_total",
+        "_unsupported_languages",
     )
 
     def __init__(self) -> None:
@@ -156,6 +177,7 @@ class _StatsAccumulator:
         self._sentences = 0
         self._tag_keys: Counter[str] = Counter()
         self._languages: Counter[str] = Counter()
+        self._unsupported_languages: Counter[str] = Counter()
 
     def observe(self, batch: pa.RecordBatch) -> None:
         """Record one exported batch."""
@@ -168,6 +190,7 @@ class _StatsAccumulator:
         )
         self._objects.update(zip(columns["osm_type"], columns["osm_id"], strict=True))
         self._split_statuses.update(columns["split_status"])
+        self._unsupported_languages.update(_unsupported_languages_in(columns))
         self._sentences += sum(columns["sentence_count"])
 
     def result(self) -> LanguageStats:
@@ -188,6 +211,12 @@ class _StatsAccumulator:
             unsupported_language_count=self._split_statuses[
                 str(SentenceSplitStatus.UNSUPPORTED_LANGUAGE)
             ],
+            unsupported_distinct_count=len(self._unsupported_languages),
+            top_unsupported_languages=tuple(
+                sorted(self._unsupported_languages.items(), key=lambda item: (-item[1], item[0]))[
+                    :20
+                ]
+            ),
             not_detected_count=self._split_statuses[str(SentenceSplitStatus.NOT_DETECTED)],
             sentence_count=self._sentences,
         )
@@ -318,17 +347,23 @@ def _stats_from_payload(reader: PayloadReader) -> LanguageStats:
         top_languages=_top_languages(values),
         split_count=values.integer("split_count"),
         unsupported_language_count=values.integer("unsupported_language_count"),
+        unsupported_distinct_count=values.integer("unsupported_distinct_count"),
+        top_unsupported_languages=_top_language_entries(values, "top_unsupported_languages"),
         not_detected_count=values.integer("not_detected_count"),
         sentence_count=values.integer("sentence_count"),
     )
 
 
-def _top_languages(values: PayloadReader) -> tuple[tuple[str, int], ...]:
+def _top_language_entries(values: PayloadReader, key: str) -> tuple[tuple[str, int], ...]:
     entries: list[tuple[str, int]] = []
-    for item in values.items("top_languages"):
+    for item in values.items(key):
         entry = require_object(item, error=LanguagePublicationError, label="top language")
         entries.append((entry.text("language_code"), entry.integer("annotation_count")))
     return tuple(entries)
+
+
+def _top_languages(values: PayloadReader) -> tuple[tuple[str, int], ...]:
+    return _top_language_entries(values, "top_languages")
 
 
 def read_language_export(export_root: Path) -> LanguageExport:
@@ -459,15 +494,44 @@ def _language_provenance(export: LanguageExport) -> str:
     )
 
 
+def _split_coverage_percent(split_count: int, detected_count: int) -> str:
+    """Format split coverage as a share of detected values, or ``n/a``."""
+    if detected_count <= 0:
+        return "n/a"
+    return f"{split_count / detected_count * 100:.4f}%"
+
+
+def _unsupported_language_rows(stats: LanguageStats) -> str:
+    """Render the languages the splitter does not support, largest first."""
+    if not stats.top_unsupported_languages:
+        return "Every detected language was inside the supported set."
+    header = "Largest groups left unsplit:\n\n| Language | Annotations |\n| --- | ---: |"
+    rows = "\n".join(f"| `{code}` | {count} |" for code, count in stats.top_unsupported_languages)
+    return f"{header}\n{rows}"
+
+
+def _top_language_rows(stats: LanguageStats) -> str:
+    """Render the published top-language table, or a note when there is none."""
+    if not stats.top_languages:
+        return "No language was detected in this run."
+    header = "| Language | Annotations |\n| --- | ---: |"
+    rows = "\n".join(f"| `{code}` | {count} |" for code, count in stats.top_languages)
+    return f"{header}\n{rows}"
+
+
 def render_language_card_section(export: LanguageExport) -> str:
     """Render the dataset-card section from validated, exported counts only."""
     stats = export.stats
+    eligible = stats.split_count + stats.unsupported_language_count
     return f"""## Language annotations (`{LANGUAGE_CONFIG_NAME}`)
 
-This optional configuration adds a language label to each description value when
-the detector meets its confidence policy, plus sentence splits. It has one row
-per *description value*—not per polygon. The default configuration and its files
-are unchanged.
+This optional configuration adds a language label to each description value the
+detector resolves, plus sentence splits. It has one row per *description
+value*—not per polygon. The default configuration and its files are unchanged.
+
+Detection is **not** gated on a confidence threshold: a value is labelled
+whenever the cascade settles on a language, and `language_code` is left null
+when it stays uncertain or carries no letters.
 
 | Measure | Value |
 | --- | ---: |
@@ -478,6 +542,33 @@ are unchanged.
 | Distinct languages | {stats.distinct_language_count} |
 | Split into sentences | {stats.split_count} |
 | Sentences | {stats.sentence_count} |
+| Not split — language unsupported by the splitter | {stats.unsupported_language_count} |
+| Not split — no language detected | {stats.not_detected_count} |
+
+**Sentence-splitting coverage.** The splitter is applied only to the
+{len(SAT_SUPPORTED_LANGUAGES)} languages it was trained on. A value is
+*eligible* for splitting once a language is detected; if that language is
+outside the supported set the value is published unsplit with the reason
+recorded per row, and nothing is guessed. Values with no detected language are
+not eligible and are excluded from these figures.
+
+| Measure | Value |
+| --- | ---: |
+| Eligible text units | {eligible} |
+| Split (language supported) | {stats.split_count} |
+| Unsplit (language unsupported) | {stats.unsupported_language_count} |
+| Coverage | {_split_coverage_percent(stats.split_count, eligible)} |
+| Unsupported | {_split_coverage_percent(stats.unsupported_language_count, eligible)} |
+| Distinct unsupported languages | {stats.unsupported_distinct_count} |
+
+For completeness, {stats.not_detected_count} further values carry no detected
+language and are therefore never eligible for splitting.
+
+{_unsupported_language_rows(stats)}
+
+**Most frequent detected languages.**
+
+{_top_language_rows(stats)}
 
 **Models and provenance.** {_language_provenance(export)}
 

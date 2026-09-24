@@ -239,6 +239,39 @@ def test_run_with_retry_forwards_command_timeout_and_injected_runner(
     assert seen == [(["hf", "upload"], 12.5, sentinel)]
 
 
+def test_default_runner_with_retry_forwards_the_complete_retry_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    received: dict[str, object] = {}
+
+    def run_with_retry(command: list[str], **kwargs: object) -> None:
+        received.update(command=command, **kwargs)
+
+    monkeypatch.setattr(upload, "_run_with_retry", run_with_retry)
+
+    upload.default_runner_with_retry(
+        ["hf", "upload"],
+        max_retries=4,
+        backoff_seconds=1.5,
+        backoff_factor=2.5,
+        backoff_cap_seconds=9.0,
+        timeout=12.0,
+        _runner=lambda _command, _timeout: None,
+        retry_observer=lambda **_event: None,
+    )
+
+    assert received == {
+        "command": ["hf", "upload"],
+        "max_retries": 4,
+        "backoff_seconds": 1.5,
+        "backoff_factor": 2.5,
+        "backoff_cap_seconds": 9.0,
+        "timeout": 12.0,
+        "_runner": received["_runner"],
+        "retry_observer": received["retry_observer"],
+    }
+
+
 def test_require_confirmation_reports_exact_errors(tmp_path: Path) -> None:
     plan = _plan(tmp_path)
 
@@ -266,7 +299,7 @@ def test_run_default_upload_forwards_all_arguments(
     def runner(command: list[str], **kwargs: object) -> None:
         seen.append((command, kwargs))
 
-    monkeypatch.setattr(upload, "_default_runner_with_retry", runner)
+    monkeypatch.setattr(upload, "default_runner_with_retry", runner)
     upload._run_default_upload(["hf", "upload"], 12.5, observer)
 
     assert seen == [
@@ -290,7 +323,7 @@ def test_run_default_upload_supports_legacy_runner_without_observer(
     def observer(**_event: object) -> None:
         return None
 
-    monkeypatch.setattr(upload, "_default_runner_with_retry", legacy_runner)
+    monkeypatch.setattr(upload, "default_runner_with_retry", legacy_runner)
     upload._run_default_upload(["hf", "upload"], 12.5, observer)
 
     assert seen == [
@@ -312,7 +345,7 @@ def test_run_default_upload_does_not_swallow_unrelated_type_errors(
         calls += 1
         raise TypeError("runner body failed")
 
-    monkeypatch.setattr(upload, "_default_runner_with_retry", runner)
+    monkeypatch.setattr(upload, "default_runner_with_retry", runner)
 
     with pytest.raises(TypeError, match="^runner body failed$"):
         upload._run_default_upload(["hf", "upload"], None, None)
@@ -456,7 +489,7 @@ def test_execute_upload_wraps_final_subprocess_failures(
     def fail(*_args: object, **_kwargs: object) -> None:
         raise failure
 
-    monkeypatch.setattr(upload, "_default_runner_with_retry", fail)
+    monkeypatch.setattr(upload, "default_runner_with_retry", fail)
 
     with pytest.raises(PublicationError, match=_exact(message)):
         upload.execute_upload(plan, confirmation=plan.identity_sha256)

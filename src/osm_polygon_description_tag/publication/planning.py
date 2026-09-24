@@ -385,7 +385,7 @@ def create_upload_plan(data_root: Path) -> UploadPlan:
     return _finalize_upload_plan(resolved_root, items)
 
 
-def _build_per_pbf_upload_plan(data_root: Path, source_name: str) -> UploadPlan:
+def build_per_pbf_upload_plan(data_root: Path, source_name: str) -> UploadPlan:
     """Build an :class:`UploadPlan` for one PBF containing exactly 7 files.
 
     The plan items are always:
@@ -425,7 +425,7 @@ def _build_per_pbf_upload_plan(data_root: Path, source_name: str) -> UploadPlan:
     return _finalize_upload_plan(data_root, items)
 
 
-def _build_metadata_only_upload_plan(data_root: Path) -> UploadPlan:
+def build_metadata_only_upload_plan(data_root: Path) -> UploadPlan:
     """Build an :class:`UploadPlan` containing the dataset card metadata.
 
     The plan includes ``README.md``, ``stats.json``, and every required
@@ -454,11 +454,11 @@ def per_pbf_command(data_root: Path, source_name: str) -> list[str]:
     default runner and any injected test runner. Production and tests
     must not diverge on the upload contents.
     """
-    plan = _build_per_pbf_upload_plan(data_root, source_name)
+    plan = build_per_pbf_upload_plan(data_root, source_name)
     return _build_command(plan)
 
 
 def metadata_only_command(data_root: Path) -> list[str]:
     """Build the canonical metadata-only ``hf upload-large-folder`` command."""
-    plan = _build_metadata_only_upload_plan(data_root)
+    plan = build_metadata_only_upload_plan(data_root)
     return _build_command(plan)

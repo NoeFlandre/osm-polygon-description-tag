@@ -221,7 +221,7 @@ def test_preflight_denial_prevents_any_subprocess_or_filesystem_mutation(
 
     monkeypatch.setattr("osm_polygon_description_tag.workflow.orchestrator.build_one", forbidden)
     monkeypatch.setattr(
-        "osm_polygon_description_tag.publication.upload._default_runner_with_retry", forbidden
+        "osm_polygon_description_tag.publication.upload.default_runner_with_retry", forbidden
     )
 
     # Snapshot the data root before invocation.

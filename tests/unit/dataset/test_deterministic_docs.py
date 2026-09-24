@@ -421,10 +421,10 @@ def test_identical_regeneration_does_not_invalidate_metadata_state(
     _plant_metadata(data_root)
     _publish_full_run(monkeypatch, source_root, data_root)
 
-    from osm_polygon_description_tag.publication import _build_metadata_only_upload_plan
+    from osm_polygon_description_tag.publication import build_metadata_only_upload_plan
     from osm_polygon_description_tag.workflow.orchestrator import PUBLICATION_STATE_FILENAME
 
-    plan = _build_metadata_only_upload_plan(data_root)
+    plan = build_metadata_only_upload_plan(data_root)
     state_path = data_root / PUBLICATION_STATE_FILENAME
     state = json.loads(state_path.read_text(encoding="utf-8"))
     assert state["metadata"]["identity_sha256"] == plan.identity_sha256
@@ -559,7 +559,7 @@ def _install_subprocess_recorder(monkeypatch: pytest.MonkeyPatch, *, action: str
 
         return f
 
-    monkeypatch.setattr(pub, "_default_runner_with_retry", runner)
+    monkeypatch.setattr(pub, "default_runner_with_retry", runner)
     monkeypatch.setattr(preflight_module.subprocess, "run", preflight_runner)
     monkeypatch.setattr(preflight_module.shutil, "which", lambda executable: executable)
     monkeypatch.setattr(orch, "default_hub_verifier_factory", verifier_factory)

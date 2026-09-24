@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from osm_polygon_description_tag.workflow.grid_commands import (
+from osm_polygon_description_tag.language_cli import (
     _prepare_retrieval_directory,
     _remote_child,
     _require_retrieved_run_dir,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ from shapely.geometry import MultiPolygon, Point, Polygon
 import osm_polygon_description_tag.dataset.stats as stats_module
 from osm_polygon_description_tag.dataset.manifest import ManifestError
 from tests.helpers.dataset import write_reporting_fixture
+from tests.helpers.messages import exactly
 
 
 def test_new_connection_uses_a_reentrant_disk_backed_temp_directory(
@@ -776,3 +778,393 @@ def test_build_stats_payload_preserves_public_fields_and_zero_rate_fallback() ->
         ]
         == 0.0
     )
+
+
+def _spatial_batch(rows: list[dict[str, object]]) -> pa.RecordBatch:
+    """Build a spatial batch from explicit per-row values."""
+    return pa.record_batch(
+        [
+            pa.array([row["source_pbf"] for row in rows]),
+            pa.array(["way"] * len(rows)),
+            pa.array([index for index, _ in enumerate(rows)], type=pa.int64()),
+            pa.array([row["geometry_type"] for row in rows]),
+            pa.array([row.get("area", 1.0) for row in rows], type=pa.float64()),
+            pa.array([row["min_x"] for row in rows], type=pa.float64()),
+            pa.array([row["min_y"] for row in rows], type=pa.float64()),
+            pa.array([row["max_x"] for row in rows], type=pa.float64()),
+            pa.array([row["max_y"] for row in rows], type=pa.float64()),
+            pa.array([row["wkb"] for row in rows], type=pa.binary()),
+        ],
+        names=stats_module._SPATIAL_COLUMNS,
+    )
+
+
+def _square(x: float, y: float) -> Polygon:
+    return Polygon([(x, y), (x, y + 1), (x + 1, y + 1), (x + 1, y)])
+
+
+def test_the_batch_extent_takes_each_edge_from_its_own_column() -> None:
+    """Deliberately asymmetric so swapping a column index cannot go unnoticed."""
+    rows = [
+        {
+            "source_pbf": "region.parquet",
+            "geometry_type": "Polygon",
+            "min_x": -30.0,
+            "min_y": -20.0,
+            "max_x": 40.0,
+            "max_y": 50.0,
+            "wkb": to_wkb(_square(0, 0)),
+        },
+        {
+            "source_pbf": "region.parquet",
+            "geometry_type": "Polygon",
+            "min_x": -10.0,
+            "min_y": -60.0,
+            "max_x": 70.0,
+            "max_y": 15.0,
+            "wkb": to_wkb(_square(2, 2)),
+        },
+    ]
+
+    summary = stats_module._summarize_spatial_batch(
+        _spatial_batch(rows), source_name="region.parquet", row_offset=0
+    )
+
+    assert summary.dataset_bbox == (-30.0, -60.0, 70.0, 50.0)
+
+
+def test_multipolygon_components_accumulate_across_the_batch() -> None:
+    """Assignment instead of accumulation would report only the final row."""
+    multi_two = MultiPolygon([_square(0, 0), _square(5, 5)])
+    multi_three = MultiPolygon([_square(0, 0), _square(5, 5), _square(10, 10)])
+    rows = [
+        {
+            "source_pbf": "region.parquet",
+            "geometry_type": "MultiPolygon",
+            "min_x": 0.0,
+            "min_y": 0.0,
+            "max_x": 6.0,
+            "max_y": 6.0,
+            "wkb": to_wkb(multi_two),
+        },
+        {
+            "source_pbf": "region.parquet",
+            "geometry_type": "MultiPolygon",
+            "min_x": 0.0,
+            "min_y": 0.0,
+            "max_x": 11.0,
+            "max_y": 11.0,
+            "wkb": to_wkb(multi_three),
+        },
+    ]
+
+    summary = stats_module._summarize_spatial_batch(
+        _spatial_batch(rows), source_name="region.parquet", row_offset=0
+    )
+
+    assert summary.multipolygon_components_total == 5
+
+
+def test_an_invalid_bounding_box_names_its_source_and_row() -> None:
+    """The row index is offset by the batch, which is how an operator finds it."""
+    rows = [
+        {
+            "source_pbf": "region.parquet",
+            "geometry_type": "Polygon",
+            "min_x": float("inf"),
+            "min_y": 0.0,
+            "max_x": 1.0,
+            "max_y": 1.0,
+            "wkb": to_wkb(_square(0, 0)),
+        }
+    ]
+
+    with pytest.raises(
+        stats_module.ReportingError,
+        match=exactly("invalid bounding box in region.parquet at row 7"),
+    ):
+        stats_module._summarize_spatial_batch(
+            _spatial_batch(rows), source_name="region.parquet", row_offset=7
+        )
+
+
+def test_merge_bboxes_takes_each_edge_from_its_own_position() -> None:
+    """Every coordinate differs, so a swapped index cannot produce the answer."""
+    current = (-10.0, -20.0, 30.0, 40.0)
+    addition = (-5.0, -25.0, 35.0, 15.0)
+
+    assert stats_module._merge_bboxes(current, addition) == (-10.0, -25.0, 35.0, 40.0)
+    assert stats_module._merge_bboxes(None, addition) == addition
+    assert stats_module._merge_bboxes(current, None) == current
+    assert stats_module._merge_bboxes(None, None) is None
+
+
+def test_spatial_totals_accumulate_across_every_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A single batch cannot tell accumulation from assignment.
+
+    Each counter starts at zero, so with one batch ``total += value`` and
+    ``total = value`` agree exactly. Two batches are not enough either when
+    only the last one contributes. Three batches, each carrying multipolygon
+    parts, separate the two, and the row offset only diverges once a third
+    batch has to start after the sum of the first two.
+    """
+
+    def _multi(parts: int, *, min_x: float, min_y: float, max_x: float, max_y: float) -> dict:
+        squares = [_square(4 * i, 4 * i) for i in range(parts)]
+        return {
+            "source_pbf": "unique.parquet",
+            "geometry_type": "MultiPolygon",
+            "min_x": min_x,
+            "min_y": min_y,
+            "max_x": max_x,
+            "max_y": max_y,
+            "wkb": to_wkb(MultiPolygon(squares)),
+        }
+
+    batches = [
+        _spatial_batch([_multi(2, min_x=-10.0, min_y=-20.0, max_x=5.0, max_y=8.0)]),
+        _spatial_batch(
+            [
+                _multi(3, min_x=-3.0, min_y=-40.0, max_x=60.0, max_y=7.0),
+                _multi(4, min_x=0.0, min_y=0.0, max_x=1.0, max_y=1.0),
+            ]
+        ),
+        _spatial_batch([_multi(5, min_x=2.0, min_y=3.0, max_x=4.0, max_y=90.0)]),
+    ]
+    offsets: list[int] = []
+    real = stats_module._summarize_spatial_batch
+
+    def _record(batch: object, *, source_name: str, row_offset: int):  # type: ignore[no-untyped-def]
+        offsets.append(row_offset)
+        return real(batch, source_name=source_name, row_offset=row_offset)
+
+    monkeypatch.setattr(stats_module, "_summarize_spatial_batch", _record)
+    monkeypatch.setattr(
+        stats_module, "iter_unique_parquet_batches", lambda *_a, **_k: iter(batches)
+    )
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    artifact = SimpleNamespace(parquet=data_dir / "unique.parquet")
+
+    summary = stats_module._collect_spatial_summary((artifact,))
+
+    # 1 + 2 + 1 rows, so the third batch must start at 3, not at 2.
+    assert summary.rows == 4
+    assert offsets == [0, 1, 3]
+    # 2 + (3 + 4) + 5 parts: assignment would report only the last batch's 5.
+    assert summary.multipolygon_components_total == 14
+    # every square is one ring, so the rings total tracks the parts total
+    assert summary.geometry_rings_total == 14
+    # four corners per ring: the closing point is not counted twice
+    assert summary.geometry_vertices_total == 14 * 4
+    assert summary.dataset_bbox == (-10.0, -40.0, 60.0, 90.0)
+
+
+def test_hole_counts_accumulate_across_batches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Holes need their own case: a dataset of solid squares never has any.
+
+    With every batch reporting zero holes, assignment and accumulation agree,
+    so the running total is only pinned once two batches each contribute one.
+    """
+    holed = Polygon(
+        [(0, 0), (0, 10), (10, 10), (10, 0)],
+        [[(2, 2), (2, 4), (4, 4), (4, 2)]],
+    )
+
+    def _row_with_hole(source: str) -> dict:
+        return {
+            "source_pbf": source,
+            "geometry_type": "Polygon",
+            "min_x": 0.0,
+            "min_y": 0.0,
+            "max_x": 10.0,
+            "max_y": 10.0,
+            "wkb": to_wkb(holed),
+        }
+
+    batches = [
+        _spatial_batch([_row_with_hole("a.parquet")]),
+        _spatial_batch([_row_with_hole("b.parquet")]),
+    ]
+    monkeypatch.setattr(
+        stats_module, "iter_unique_parquet_batches", lambda *_a, **_k: iter(batches)
+    )
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    summary = stats_module._collect_spatial_summary(
+        (SimpleNamespace(parquet=data_dir / "unique.parquet"),)
+    )
+
+    assert summary.geometry_holes_total == 2
+    assert summary.geometry_rings_total == 4
+
+
+def test_a_row_is_named_by_its_own_source_column_when_present() -> None:
+    """Unique-row batches span files, so the row's own source is what names it.
+
+    Falling back to the caller's name here would point an operator at the batch
+    rather than at the file the bad row actually came from.
+    """
+    rows = [
+        {
+            "source_pbf": "shard-a.parquet",
+            "geometry_type": "Polygon",
+            "min_x": float("inf"),
+            "min_y": 0.0,
+            "max_x": 1.0,
+            "max_y": 1.0,
+            "wkb": to_wkb(_square(0, 0)),
+        }
+    ]
+
+    with pytest.raises(
+        stats_module.ReportingError,
+        match=exactly("invalid bounding box in shard-a.parquet at row 3"),
+    ):
+        stats_module._summarize_spatial_batch(
+            _spatial_batch(rows), source_name="region.parquet", row_offset=3
+        )
+
+
+def _good_row(source: str) -> dict[str, object]:
+    return {
+        "source_pbf": source,
+        "geometry_type": "Polygon",
+        "min_x": 0.0,
+        "min_y": 0.0,
+        "max_x": 1.0,
+        "max_y": 1.0,
+        "wkb": to_wkb(_square(0, 0)),
+    }
+
+
+@pytest.mark.parametrize(
+    ("broken", "message"),
+    [
+        pytest.param({"area": float("nan")}, "invalid area in", id="area"),
+        pytest.param({"geometry_type": None}, "missing geometry type in", id="geometry-type"),
+        pytest.param(
+            {"geometry_type": "MultiPolygon"},
+            "invalid geometry in",
+            id="geometry-measurement",
+        ),
+    ],
+)
+def test_every_row_validator_is_told_which_row_it_is_looking_at(
+    broken: dict[str, object], message: str
+) -> None:
+    """Each validator names the failing row's own file and absolute index.
+
+    The bad row is the second of the batch and the batch starts at row 3, so an
+    index that ignored the offset, or subtracted it, would name row 1 or row 2.
+    Its source column differs from the caller's name, so a validator handed the
+    batch name instead of the row's would name the wrong file.
+    """
+    rows = [_good_row("shard-a.parquet"), _good_row("shard-b.parquet") | broken]
+
+    with pytest.raises(
+        stats_module.ReportingError,
+        match=rf"\A{re.escape(message)} shard-b\.parquet at row 4(:|\Z)",
+    ):
+        stats_module._summarize_spatial_batch(
+            _spatial_batch(rows), source_name="region.parquet", row_offset=3
+        )
+
+
+def test_hole_counts_accumulate_across_rows_of_one_batch() -> None:
+    """Within a batch too, each row adds to the running total.
+
+    The cross-batch test cannot see this: it uses one row per batch, so
+    assigning and adding agree there. Here the last row has fewer holes than
+    the batch as a whole, so assignment reports the last row's count.
+    """
+    two_holes = Polygon(
+        [(0, 0), (0, 10), (10, 10), (10, 0)],
+        [[(1, 1), (1, 2), (2, 2), (2, 1)], [(5, 5), (5, 6), (6, 6), (6, 5)]],
+    )
+    one_hole = Polygon(
+        [(0, 0), (0, 10), (10, 10), (10, 0)],
+        [[(3, 3), (3, 4), (4, 4), (4, 3)]],
+    )
+    rows = [
+        _good_row("region.parquet") | {"wkb": to_wkb(geometry)}
+        for geometry in (two_holes, one_hole)
+    ]
+
+    summary = stats_module._summarize_spatial_batch(
+        _spatial_batch(rows), source_name="region.parquet", row_offset=0
+    )
+
+    assert summary.geometry_holes_total == 3
+
+
+def test_a_batch_without_a_source_column_falls_back_to_the_given_name() -> None:
+    """A per-file batch has no source column, so the caller's name is used."""
+    batch = pa.record_batch(
+        [
+            pa.array(["way"]),
+            pa.array([1], type=pa.int64()),
+            pa.array(["Polygon"]),
+            pa.array([1.0], type=pa.float64()),
+            pa.array([float("inf")], type=pa.float64()),
+            pa.array([0.0], type=pa.float64()),
+            pa.array([1.0], type=pa.float64()),
+            pa.array([1.0], type=pa.float64()),
+            pa.array([to_wkb(_square(0, 0))], type=pa.binary()),
+        ],
+        names=[name for name in stats_module._SPATIAL_COLUMNS if name != "source_pbf"],
+    )
+
+    with pytest.raises(
+        stats_module.ReportingError,
+        match=exactly("invalid bounding box in region.parquet at row 3"),
+    ):
+        stats_module._summarize_spatial_batch(batch, source_name="region.parquet", row_offset=3)
+
+
+def test_a_malformed_geometry_names_its_source_and_row() -> None:
+    """The row's identity travels down into every measurement failure."""
+    with pytest.raises(
+        stats_module.ReportingError,
+        match=r"\Amalformed geometry in region\.parquet at row 9: .*\Z",
+    ):
+        stats_module._geometry_measurements(
+            b"not wkb", "Polygon", source_name="region.parquet", row_index=9
+        )
+
+
+def test_an_unsupported_geometry_type_names_its_source_and_row() -> None:
+    with pytest.raises(
+        stats_module.ReportingError,
+        match=exactly("unsupported geometry in region.parquet at row 4: 'Point'"),
+    ):
+        stats_module._geometry_measurements(
+            to_wkb(Point(0, 0)), "Point", source_name="region.parquet", row_index=4
+        )
+
+
+def test_holes_accumulate_across_polygon_components() -> None:
+    """Assignment would report only the last component's holes.
+
+    Every existing fixture used solid squares, where each component reports
+    zero and the two forms agree.
+    """
+    holed = Polygon(
+        [(0, 0), (0, 10), (10, 10), (10, 0)],
+        [[(1, 1), (1, 2), (2, 2), (2, 1)], [(4, 4), (4, 5), (5, 5), (5, 4)]],
+    )
+    other = Polygon(
+        [(20, 20), (20, 30), (30, 30), (30, 20)], [[(21, 21), (21, 22), (22, 22), (22, 21)]]
+    )
+
+    vertices, rings, holes = stats_module._polygon_measurements((holed, other))
+
+    assert holes == 3
+    assert rings == 5
+    assert vertices == 20

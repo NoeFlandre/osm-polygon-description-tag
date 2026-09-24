@@ -15,7 +15,6 @@ from types import SimpleNamespace
 import pytest
 
 from osm_polygon_description_tag.workflow import grid_operator as operator
-from osm_polygon_description_tag.workflow import grid_staging, grid_state
 from osm_polygon_description_tag.workflow.grid_operator import (
     GridOperatorError,
     prepare_portable_job,
@@ -24,9 +23,6 @@ from osm_polygon_description_tag.workflow.grid_scheduler import CommandResult, S
 from tests.helpers.messages import exactly
 from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH
 from tests.unit.workflow.test_grid_operator import SHARD
-from tests.unit.workflow.test_grid_operator import collection_runs as collection_runs
-from tests.unit.workflow.test_grid_operator import portable_prepared as portable_prepared
-from tests.unit.workflow.test_grid_operator import prepared as prepared
 
 _REMOTE_BUNDLE = "/scratch/lang-bundle"
 
@@ -111,7 +107,7 @@ def test_collection_validates_only_the_shard_it_was_asked_about(
         seen.append((run_dir, shards))
         return SimpleNamespace()
 
-    monkeypatch.setattr(grid_state, "validate_run", fake_validate_run)
+    monkeypatch.setattr(operator, "validate_run", fake_validate_run)
 
     operator.collect_results(run, SHARD)
 
@@ -124,13 +120,13 @@ def test_a_payload_is_materialised_inside_the_job_directory(
     """A temporary elsewhere could not be renamed into place atomically."""
     project, source, run, snapshot = request.getfixturevalue("portable_prepared")
     seen: list[object] = []
-    real_mkdtemp = tempfile.mkdtemp
+    real_temporary_directory = tempfile.TemporaryDirectory
 
-    def recording_mkdtemp(*args: object, **kwargs: object) -> str:
+    def recording_temporary_directory(*args: object, **kwargs: object) -> object:
         seen.append(kwargs)
-        return real_mkdtemp(*args, **kwargs)  # type: ignore[arg-type]
+        return real_temporary_directory(*args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(tempfile, "mkdtemp", recording_mkdtemp)
+    monkeypatch.setattr(operator.tempfile, "TemporaryDirectory", recording_temporary_directory)
 
     prepared_job = prepare_portable_job(
         run,
@@ -248,7 +244,7 @@ def test_the_payload_root_is_selected_for_the_bundle_being_staged(
         seen.append(bundle)
         return real(payload_root, bundle, fingerprint)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(grid_staging, "_existing_payload_for_resume", recording)
+    monkeypatch.setattr(operator, "_existing_payload_for_resume", recording)
 
     prepared_job = prepare_portable_job(
         run,
@@ -276,7 +272,7 @@ def test_a_prepared_view_describes_the_job_and_bundle_that_were_staged(
         seen.append((paths, bundle))
         return real(paths, bundle, payload_root)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(grid_staging, "_prepared_view", recording)
+    monkeypatch.setattr(operator, "_prepared_view", recording)
 
     prepare_portable_job(
         run,
@@ -442,7 +438,7 @@ def test_restaging_an_unchanged_payload_reports_this_jobs_own_paths(
         seen.append((paths, bundle))
         return real(paths, bundle, payload_root)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(grid_staging, "_prepared_view", recording)
+    monkeypatch.setattr(operator, "_prepared_view", recording)
 
     second = prepare_portable_job(
         run,

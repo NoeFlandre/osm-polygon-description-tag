@@ -1,69 +1,51 @@
-"""Identity, intent, and path models shared by every Grid'5000 operator step."""
+"""Shared Grid operator models, constants, and scalar validation."""
+
+from __future__ import annotations
 
 import hashlib
-import json
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 from typing import Final, cast
 
+from osm_polygon_description_tag.dataset.languages.atomic import canonical_json_bytes
 from osm_polygon_description_tag.dataset.languages.paths import relative_posix_path
 from osm_polygon_description_tag.dataset.languages.payloads import PayloadReader, require_object
-from osm_polygon_description_tag.dataset.languages.snapshot import (
-    SnapshotManifest,
-)
-from osm_polygon_description_tag.runtime.serialization import canonical_json_bytes
-from osm_polygon_description_tag.runtime.validation import validate_fingerprint
-from osm_polygon_description_tag.workflow.grid_scheduler import (
-    JobState,
-    SubmissionOutcome,
-)
+from osm_polygon_description_tag.dataset.languages.snapshot import SnapshotManifest
+from osm_polygon_description_tag.workflow.grid_scheduler import JobState, SubmissionOutcome
 
 JobNameResolver = Callable[[str], int | None]
 
-
 INTENT_FILENAME: Final = "submission-intent.json"
-
 
 BUNDLE_FILENAME: Final = "bundle.json"
 
-
 JOB_SCRIPT_FILENAME: Final = "job.sh"
-
 
 INTENT_SCHEMA_VERSION: Final = 1
 
-
 BUNDLE_SCHEMA_VERSION: Final = 1
-
 
 STAGE_SCHEMA_VERSION: Final = 1
 
-
 JOB_CONFIG_SCHEMA_VERSION: Final = 1
-
 
 GRID_SUBMISSION_LOCK_FILENAME: Final = ".grid-submission.lock"
 
-
 STAGE_MANIFEST_FILENAME: Final = "stage.json"
-
 
 JOB_CONFIG_FILENAME: Final = "job-config.json"
 
-
 STAGE_PROJECT_DIRNAME: Final = "project"
-
 
 STAGE_SOURCE_DIRNAME: Final = "source"
 
-
 STAGE_RUN_DIRNAME: Final = "run"
-
 
 QUARANTINE_DIRNAME: Final = "quarantine"
 
+_FINGERPRINT_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 
 _THREAD_LIMIT_VARIABLES: Final = (
     "OMP_NUM_THREADS",
@@ -123,7 +105,7 @@ class JobBundle:
         return {"bundle_id": self.bundle_id, **self._identity_payload()}
 
     @classmethod
-    def from_payload(cls, payload: object) -> "JobBundle":
+    def from_payload(cls, payload: object) -> JobBundle:
         """Rebuild a bundle, rejecting a payload whose identity does not hold."""
         reader = require_object(payload, error=GridOperatorError, label="bundle")
         if reader.integer("bundle_schema_version") != BUNDLE_SCHEMA_VERSION:
@@ -158,7 +140,9 @@ def bundle_for_shard(snapshot: SnapshotManifest, shard: str) -> JobBundle:
     )
 
 
-_validate_fingerprint = partial(validate_fingerprint, error=GridOperatorError)
+def _validate_fingerprint(value: object, label: str) -> None:
+    if not isinstance(value, str) or _FINGERPRINT_PATTERN.fullmatch(value) is None:
+        raise GridOperatorError(f"{label} must be a lowercase SHA-256 hex fingerprint")
 
 
 def _validate_non_negative_int(value: object, label: str) -> None:
@@ -241,7 +225,7 @@ class SubmissionIntent:
         }
 
     @classmethod
-    def from_payload(cls, payload: object) -> "SubmissionIntent":
+    def from_payload(cls, payload: object) -> SubmissionIntent:
         """Rebuild an intent, rejecting any malformed field."""
         reader = require_object(payload, error=GridOperatorError, label="intent")
         _validate_intent_schema(reader)
@@ -404,7 +388,7 @@ class StagedFile:
         }
 
     @classmethod
-    def from_payload(cls, payload: object) -> "StagedFile":
+    def from_payload(cls, payload: object) -> StagedFile:
         reader = require_object(payload, error=GridOperatorError, label="staged file")
         return cls(
             relative_path=reader.text("relative_path"),
@@ -416,35 +400,3 @@ class StagedFile:
 def jobs_root(run_dir: Path) -> Path:
     """Return the single directory that owns every prepared job."""
     return run_dir / "jobs"
-
-
-def job_paths(run_dir: Path, bundle: JobBundle) -> JobPaths:
-    """Return deterministic owned job paths without creating anything."""
-    root = jobs_root(run_dir) / bundle.bundle_id[:32]
-    return JobPaths(
-        root,
-        root / BUNDLE_FILENAME,
-        root / INTENT_FILENAME,
-        root / JOB_SCRIPT_FILENAME,
-    )
-
-
-def read_bundle(path: Path) -> JobBundle:
-    """Read and validate one prepared bundle."""
-    return JobBundle.from_payload(_read_json(path, "bundle"))
-
-
-def read_intent(path: Path) -> SubmissionIntent:
-    """Read and validate one durable submission intent."""
-    return SubmissionIntent.from_payload(_read_json(path, "intent"))
-
-
-def _read_json(path: Path, label: str) -> object:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))  # pragma: no mutate - codec alias only
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise GridOperatorError(f"cannot read {label} {path}: {error}") from error
-
-
-def remote_child(base: str, name: str) -> str:
-    return f"/{name}" if base == "/" else f"{base}/{name}"

@@ -32,8 +32,8 @@ from osm_polygon_description_tag.dataset.manifest import (
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import (
     REPO_ID,
-    _build_metadata_only_upload_plan,
-    _build_per_pbf_upload_plan,
+    build_metadata_only_upload_plan,
+    build_per_pbf_upload_plan,
     per_pbf_command,
 )
 from osm_polygon_description_tag.runtime.config import Paths
@@ -128,7 +128,7 @@ def test_per_pbf_plan_contains_exactly_five_items(tmp_path: Path) -> None:
     _plant_metadata(paths)
 
     # Sanity: the plan builder produces exactly seven items.
-    plan = _build_per_pbf_upload_plan(paths.data_root, "a.osm.pbf")
+    plan = build_per_pbf_upload_plan(paths.data_root, "a.osm.pbf")
     expected_relative = sorted([item.relative_path for item in plan.files])
     assert expected_relative == sorted(
         [
@@ -163,7 +163,7 @@ def test_no_test_production_divergence_default_runner(
     (source_root / "b.osm.pbf").unlink()
     _plant_resumable_artifact(paths, source_root, "a.osm.pbf")
     _plant_metadata(paths)
-    plan = _build_per_pbf_upload_plan(paths.data_root, "a.osm.pbf")
+    plan = build_per_pbf_upload_plan(paths.data_root, "a.osm.pbf")
 
     captured: list[list[str]] = []
 
@@ -172,7 +172,7 @@ def test_no_test_production_divergence_default_runner(
 
     import osm_polygon_description_tag.publication.upload as pub
 
-    monkeypatch.setattr(pub, "_default_runner_with_retry", fake_subprocess)
+    monkeypatch.setattr(pub, "default_runner_with_retry", fake_subprocess)
 
     def _stub_exporter(source_path: Path, _cfg: Path) -> object:
         raise AssertionError("exporter must not be called when artifact is reusable")
@@ -289,7 +289,7 @@ def test_metadata_only_plan_contains_exactly_three_items(tmp_path: Path) -> None
     """The metadata-only UploadPlan contains the README, stats, and all visual assets."""
     paths, source_root, data_root = _setup_two_sources(tmp_path)
     _plant_metadata(paths)
-    plan = _build_metadata_only_upload_plan(paths.data_root)
+    plan = build_metadata_only_upload_plan(paths.data_root)
     relative = sorted([item.relative_path for item in plan.files])
     assert relative == sorted(
         [

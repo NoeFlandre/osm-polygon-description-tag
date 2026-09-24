@@ -1,4 +1,6 @@
-"""Render and validate the generated Grid'5000 job script."""
+"""Grid operator script responsibilities."""
+
+from __future__ import annotations
 
 import shlex
 from pathlib import Path
@@ -8,18 +10,33 @@ from osm_polygon_description_tag.dataset.languages.models import (
     CASCADE_DETECTOR_NAME,
     LINGUA_DETECTOR_NAME,
 )
-from osm_polygon_description_tag.dataset.languages.snapshot import (
-    SnapshotManifest,
-)
-from osm_polygon_description_tag.workflow.grid_models import (
-    _THREAD_LIMIT_VARIABLES,
-    GridOperatorError,
-    JobBundle,
-)
+from osm_polygon_description_tag.dataset.languages.snapshot import SnapshotManifest
 from osm_polygon_description_tag.workflow.grid_policy import (
     MAX_PROCESSING_SECONDS,
     MAX_WALLTIME_SECONDS,
 )
+
+from .models import (
+    _THREAD_LIMIT_VARIABLES,
+    BUNDLE_FILENAME,
+    INTENT_FILENAME,
+    JOB_SCRIPT_FILENAME,
+    GridOperatorError,
+    JobBundle,
+    JobPaths,
+    jobs_root,
+)
+
+
+def job_paths(run_dir: Path, bundle: JobBundle) -> JobPaths:
+    """Return deterministic owned job paths without creating anything."""
+    root = jobs_root(run_dir) / bundle.bundle_id[:32]
+    return JobPaths(
+        root,
+        root / BUNDLE_FILENAME,
+        root / INTENT_FILENAME,
+        root / JOB_SCRIPT_FILENAME,
+    )
 
 
 def _validated_script_inputs(

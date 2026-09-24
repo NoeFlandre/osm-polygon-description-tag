@@ -16,11 +16,14 @@ from typing import Any
 import pytest
 
 from scripts.run_language_grid import (
+    _UNREADABLE_CHECKPOINT,
     DriverError,
     Remote,
     _cli,
     _parse_args,
     _shard_slug,
+    awaiting_collection,
+    checkpointed_shards,
     selected_shards,
     shards_of,
     submit,
@@ -348,3 +351,111 @@ def test_the_driver_never_shells_out_through_uv() -> None:
     assert "uv" not in argv
     assert Path(argv[0]).name == "osm-polygon-description-tag"
     assert Path(argv[0]).parent == Path(sys.executable).parent
+
+
+def _write_checkpoint(run_dir: Path, slug: str, payload: object) -> Path:
+    shard_dir = run_dir / "shards" / slug
+    shard_dir.mkdir(parents=True)
+    checkpoint = shard_dir / "checkpoint.json"
+    if isinstance(payload, str):
+        checkpoint.write_text(payload, encoding="utf-8")
+    else:
+        checkpoint.write_text(json.dumps(payload), encoding="utf-8")
+    return checkpoint
+
+
+def test_checkpointed_shards_is_empty_without_a_shards_directory(tmp_path: Path) -> None:
+    """A run that has never written a shard cannot have a complete one."""
+    assert checkpointed_shards(tmp_path) == frozenset()
+
+
+def test_checkpointed_shards_reports_every_checkpointed_shard_name(tmp_path: Path) -> None:
+    _write_checkpoint(tmp_path, "aaa", {"shard": "albania-latest.parquet", "status": "complete"})
+    _write_checkpoint(tmp_path, "bbb", {"shard": "angola-latest.parquet", "status": "partial"})
+
+    assert checkpointed_shards(tmp_path) == frozenset(
+        {"albania-latest.parquet", "angola-latest.parquet"}
+    )
+
+
+def test_checkpointed_shards_reports_a_partial_checkpoint_too(tmp_path: Path) -> None:
+    """The scan narrows who is asked; it must not judge completeness itself."""
+    _write_checkpoint(tmp_path, "aaa", {"shard": "albania-latest.parquet", "status": "partial"})
+
+    assert "albania-latest.parquet" in checkpointed_shards(tmp_path)
+
+
+def test_an_unreadable_checkpoint_forces_the_cli_to_be_asked(tmp_path: Path) -> None:
+    """Unreadable is not absent: never treat it as an unstarted shard."""
+    _write_checkpoint(tmp_path, "aaa", "{not json")
+
+    assert _UNREADABLE_CHECKPOINT in checkpointed_shards(tmp_path)
+
+
+def test_a_checkpoint_without_a_shard_name_contributes_nothing(tmp_path: Path) -> None:
+    _write_checkpoint(tmp_path, "aaa", {"status": "complete"})
+
+    assert checkpointed_shards(tmp_path) == frozenset()
+
+
+def _intent(**overrides: object) -> str:
+    payload = {
+        "outcome": "submitted",
+        "result_acknowledged": False,
+        "job_id": 1234,
+        "shard": "angola-latest.parquet",
+    }
+    payload.update(overrides)
+    return json.dumps(payload)
+
+
+def _stub_ssh(monkeypatch: pytest.MonkeyPatch, stdout: str) -> None:
+    class _Completed:
+        def __init__(self) -> None:
+            self.stdout = stdout
+            self.returncode = 0
+
+    monkeypatch.setattr("scripts.run_language_grid.subprocess.run", lambda *a, **k: _Completed())
+
+
+def test_an_unacknowledged_submission_is_resumed_not_restaged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-staging would overwrite the checkpoint the finished job committed."""
+    _stub_ssh(monkeypatch, _intent())
+
+    assert awaiting_collection(_remote(), "angola-latest.parquet") is True
+
+
+def test_an_acknowledged_submission_is_not_resumed(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_ssh(monkeypatch, _intent(result_acknowledged=True))
+
+    assert awaiting_collection(_remote(), "angola-latest.parquet") is False
+
+
+def test_a_rejected_submission_is_not_resumed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A rejected submission produced no results, so there is nothing to collect."""
+    _stub_ssh(monkeypatch, _intent(outcome="rejected", job_id=None))
+
+    assert awaiting_collection(_remote(), "angola-latest.parquet") is False
+
+
+def test_no_recorded_submission_is_not_resumed(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_ssh(monkeypatch, "")
+
+    assert awaiting_collection(_remote(), "angola-latest.parquet") is False
+
+
+def test_several_recorded_attempts_are_never_resumed_automatically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """More than one attempt is ambiguous; an operator must look at it."""
+    _stub_ssh(monkeypatch, _intent() + "\n" + _intent(job_id=5678))
+
+    assert awaiting_collection(_remote(), "angola-latest.parquet") is False
+
+
+def test_unparseable_intent_is_not_resumed(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_ssh(monkeypatch, "{not json")
+
+    assert awaiting_collection(_remote(), "angola-latest.parquet") is False

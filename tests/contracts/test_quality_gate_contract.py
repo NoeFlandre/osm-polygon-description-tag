@@ -554,8 +554,16 @@ def test_static_cast_pragmas_are_attached_to_mutatable_statement_lines() -> None
     from libcst import MetadataWrapper, parse_module
     from mutmut.mutation.pragma_handling import get_ignored_lines
 
+    candidates: list[tuple[Path, str]] = []
     for path in sorted((PROJECT_ROOT / "src").rglob("*.py")):
         source = path.read_text(encoding="utf-8")
+        if not any(
+            "cast(" in line and "# pragma: no mutate" in line for line in source.splitlines()
+        ):
+            continue
+        candidates.append((path, source))
+
+    for path, source in candidates:
         ignored = get_ignored_lines(
             str(path), source, MetadataWrapper(parse_module(source))
         ).no_mutate_lines
@@ -576,7 +584,6 @@ def test_quality_recipes_and_required_mutation_gate_are_publicly_wired() -> None
     assert "run_mutation_gate" in justfile
     assert "uv run python -m scripts.run_mutation_gate" in justfile
     assert "--changed-lines-file" in justfile
-    assert "--test-selection-file" in justfile
     assert "--max-crap-score 6" in justfile
     assert "--pattern" not in justfile
     assert "planning.x*__mutmut_*" not in justfile
@@ -588,7 +595,6 @@ def test_quality_recipes_and_required_mutation_gate_are_publicly_wired() -> None
     assert "just mutation-scope" in workflow
     assert "--unified=0" in workflow
     assert "scripts/**/*.py" in workflow
-    assert "tests/**/*.py" in workflow
     assert "mutation-scope:" in workflow
     assert "mutation-all:" in workflow
     assert "run: just risk" in workflow
@@ -649,6 +655,20 @@ def test_shard_scopes_together_cover_every_mutant(tmp_path: Path) -> None:
     )
 
 
+def test_the_forced_fail_probe_follows_the_runs_test_selection() -> None:
+    """A narrowed run must probe with tests that reach the code it mutates.
+
+    The probe proves the harness can still observe a failure. A fixed smoke
+    file cannot fail for a scope it never imports, which surfaces as
+    ``Unable to force test failures`` and looks like a broken harness rather
+    than an out-of-scope probe.
+    """
+    selection = ["tests/unit/dataset/languages/test_detector.py"]
+
+    assert run_mutation_gate._probe_selection(selection) == selection
+    assert run_mutation_gate._probe_selection(()) == run_mutation_gate.SMOKE_TEST_SELECTION
+
+
 def test_sharded_mutation_gate_keeps_the_full_strictness() -> None:
     """Sharding may split which modules are mutated, never how strict the gate is."""
     justfile = (PROJECT_ROOT / "justfile").read_text(encoding="utf-8")
@@ -670,16 +690,26 @@ def test_sharded_mutation_gate_keeps_the_full_strictness() -> None:
     assert len([entry for entry in matrix.split(",") if entry.strip()]) == shard_count
 
 
-def test_scoped_mutation_recipe_does_not_collect_all_test_contexts() -> None:
-    """PR mutation must not spend the gate timeout rebuilding the full map."""
-    justfile = (PROJECT_ROOT / "justfile").read_text(encoding="utf-8")
-    scope_recipe = justfile.split("mutation-scope scope_file test_scope_file:", 1)[1].split(
-        "\n\n", 1
-    )[0]
+def test_scoped_mutation_selects_tests_from_the_coverage_map() -> None:
+    """PR mutation selects by what covers the function, not by what the branch touched.
 
-    assert "mutation-contexts" not in scope_recipe
-    assert "--coverage-file" not in scope_recipe
+    This reverses an earlier rule that kept the map out of the scoped gate to
+    protect the timeout. Measured on a pull request changing 69 test files and
+    303 source functions, the file-based rule ran 2,047 tests per mutant --
+    620,241 test-executions for one mutant each -- against 20,745 from the map,
+    which costs 2m37s to record. It is also the sounder rule: a mutant killable
+    only by a test the branch did not touch survives the file-based one.
+    """
+    justfile = (PROJECT_ROOT / "justfile").read_text(encoding="utf-8")
+    header, _, body = justfile.partition("mutation-scope scope_file:")
+    scope_recipe = body.split("\n\n", 1)[0]
+    del header
+
+    # The map has to be recorded before the recipe reads it.
+    assert scope_recipe.splitlines()[0].strip() == "mutation-contexts"
+    assert "--coverage-file" in scope_recipe
     assert "--changed-lines-file" in scope_recipe
+    assert "--test-selection-file" not in scope_recipe
 
 
 def test_mutation_scope_parser_keeps_only_added_or_modified_new_lines() -> None:
@@ -753,7 +783,7 @@ def test_mutation_gate_resets_state_before_first_escalation(monkeypatch) -> None
             or FakeRunner()
         ),
     )
-    monkeypatch.setattr(gate, "_verify_mutmut_can_fail", lambda _runner: None)
+    monkeypatch.setattr(gate, "_verify_mutmut_can_fail", lambda *_args: None)
     monkeypatch.setattr(
         gate,
         "recorded_associations",
@@ -761,6 +791,7 @@ def test_mutation_gate_resets_state_before_first_escalation(monkeypatch) -> None
     )
     monkeypatch.setattr(gate, "coverage_selection", lambda _path, _durations: {})
     monkeypatch.setattr(gate, "escalation_stages", lambda _budget: (1,))
+    monkeypatch.setattr(gate, "mutated_function_names", lambda _root: {"pkg.mod.x_function"})
     monkeypatch.setattr(gate, "_read_stats", lambda: stats)
     monkeypatch.setattr(gate, "_write_stats", lambda _stats: events.append("write"))
     monkeypatch.setattr(gate, "unresolved_mutants", lambda _root: ["mutant"])
@@ -1092,3 +1123,92 @@ def test_the_mutation_gate_reads_test_selection_file(
         "tests/unit/publication/test_release.py",
         "tests/unit/publication/test_upload_helpers.py",
     )
+
+
+def test_the_metadata_report_names_every_unresolved_mutant(tmp_path: Path) -> None:
+    """A failing gate must say which mutants to kill, not only how many."""
+    meta = tmp_path / "src" / "pkg" / "mod.py.meta"
+    meta.parent.mkdir(parents=True)
+    meta.write_text(
+        json.dumps(
+            {
+                "exit_code_by_key": {
+                    "x_mod__mutmut_1": 1,  # killed
+                    "x_mod__mutmut_2": 0,  # survived
+                    "x_mod__mutmut_3": 0,  # survived
+                    "x_mod__mutmut_4": 5,  # no_tests
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = check_mutation_score.build_metadata_report(tmp_path, [], 100.0)
+
+    assert report["unresolved"]["survived"] == 2
+    assert report["unresolved_mutants"]["survived"] == [
+        "x_mod__mutmut_2",
+        "x_mod__mutmut_3",
+    ]
+    assert report["unresolved_mutants"]["no_tests"] == ["x_mod__mutmut_4"]
+
+
+def test_a_fully_killed_report_names_no_unresolved_mutant(tmp_path: Path) -> None:
+    meta = tmp_path / "src" / "pkg" / "mod.py.meta"
+    meta.parent.mkdir(parents=True)
+    meta.write_text(
+        json.dumps({"exit_code_by_key": {"x_mod__mutmut_1": 1, "x_mod__mutmut_2": 3}}),
+        encoding="utf-8",
+    )
+
+    report = check_mutation_score.build_metadata_report(tmp_path, [], 100.0)
+
+    assert report["passed"] is True
+    assert report["unresolved_mutants"] == {}
+
+
+def test_a_mutant_name_resolves_to_its_function_module_and_id() -> None:
+    """Names are split from the right: a module path may contain underscores."""
+    from scripts.show_mutant import split_mutant_name
+
+    assert split_mutant_name("a.b.c.x_func__mutmut_3") == ("a.b.c", "x_func", "3")
+    assert split_mutant_name("a.b.xǁCǁm__mutmut_12") == ("a.b", "xǁCǁm", "12")
+
+    for rejected in ("no_marker_here", "x_func__mutmut_1", "__mutmut_1"):
+        with pytest.raises(ValueError, match="not a mutant name"):
+            split_mutant_name(rejected)
+
+
+def test_a_module_resolves_to_a_file_or_its_package_init(tmp_path: Path) -> None:
+    """Packages are named by their dotted path, not by ``__init__``."""
+    from scripts.show_mutant import module_path
+
+    (tmp_path / "pkg" / "sub").mkdir(parents=True)
+    (tmp_path / "pkg" / "__init__.py").write_text("")
+    (tmp_path / "pkg" / "sub" / "__init__.py").write_text("")
+    (tmp_path / "pkg" / "mod.py").write_text("")
+
+    assert module_path("pkg.mod", source_root=tmp_path) == tmp_path / "pkg" / "mod.py"
+    assert module_path("pkg.sub", source_root=tmp_path) == tmp_path / "pkg" / "sub" / "__init__.py"
+
+    with pytest.raises(FileNotFoundError, match="pkg.missing"):
+        module_path("pkg.missing", source_root=tmp_path)
+
+
+def test_the_diff_shows_the_mutation_and_not_the_renamed_definition() -> None:
+    """Every mutant renames its def, which would otherwise be the whole diff."""
+    from scripts.show_mutant import mutant_diff
+
+    source = (
+        "def x_f__mutmut_orig(a):\n    return a + 1\n\ndef x_f__mutmut_1(a):\n    return a - 1\n"
+    )
+
+    assert mutant_diff(source, "x_f", "1") == "-    return a + 1\n+    return a - 1"
+
+    identical = "def x_g__mutmut_orig(a):\n    return a\n\ndef x_g__mutmut_1(a):\n    return a\n"
+    assert "equivalent mutant" in mutant_diff(identical, "x_g", "1")
+
+    with pytest.raises(KeyError, match="no mutant 9"):
+        mutant_diff(source, "x_f", "9")
+    with pytest.raises(KeyError, match="no mutants generated"):
+        mutant_diff(source, "x_missing", "1")

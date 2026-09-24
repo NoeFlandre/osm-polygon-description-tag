@@ -87,7 +87,7 @@ def test_an_unsupported_language_publishes_no_sentences_and_says_why() -> None:
 
 
 def test_an_undetected_description_is_distinguishable_from_an_unsupported_one() -> None:
-    undetected = LanguageResult(None, None, None, None, LanguageStatus.UNCERTAIN, "below_min_score")
+    undetected = LanguageResult(None, None, None, None, LanguageStatus.UNCERTAIN, "tie")
     annotation = DescriptionAnnotation(
         _entry(), undetected, not_detected_result(str(LanguageStatus.UNCERTAIN))
     )

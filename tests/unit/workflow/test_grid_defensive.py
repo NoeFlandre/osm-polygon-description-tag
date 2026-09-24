@@ -59,34 +59,6 @@ def _write_project(project: Path, *, readme: bool = False) -> None:
         (project / "README.md").write_text("# synthetic\n", encoding="utf-8")
 
 
-@pytest.fixture
-def inputs(tmp_path: Path) -> tuple[Path, Path, Path, SnapshotManifest]:
-    source = tmp_path / "source"
-    source.mkdir()
-    write_geoparquet(
-        iter(
-            [
-                make_record_dict(
-                    Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-                    {"description": "A portable description"},
-                )
-            ]
-        ),
-        source / SHARD,
-        batch_size=1,
-    )
-    project = tmp_path / "project"
-    _write_project(project)
-    run = tmp_path / "run"
-    snapshot = prepare_snapshot(
-        source,
-        run,
-        code_fingerprint=fingerprint_project_source(project),
-        lock_fingerprint=fingerprint_lockfile(project),
-    )
-    return project, source, run, snapshot
-
-
 def _stage(inputs: tuple[Path, Path, Path, SnapshotManifest]) -> object:
     project, source, run, snapshot = inputs
     return prepare_portable_job(

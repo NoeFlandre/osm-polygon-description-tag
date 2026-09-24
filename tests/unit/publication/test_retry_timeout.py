@@ -17,9 +17,9 @@ from pathlib import Path
 import pytest
 
 from osm_polygon_description_tag.publication import (
-    _classify_failure,
-    _default_runner_with_retry,
+    default_runner_with_retry,
 )
+from osm_polygon_description_tag.publication.upload import _classify_failure
 
 
 def test_long_running_upload_is_not_killed_at_300_seconds() -> None:
@@ -34,7 +34,7 @@ def test_long_running_upload_is_not_killed_at_300_seconds() -> None:
         time.sleep(0.05)
         assert timeout is None  # the runner received no timeout
 
-    _default_runner_with_retry(["ignored"], max_retries=1, timeout=None, _runner=fake_runner)
+    default_runner_with_retry(["ignored"], max_retries=1, timeout=None, _runner=fake_runner)
     assert started
 
 
@@ -50,7 +50,7 @@ def test_retryable_failure_is_retried() -> None:
             error.completed = completed  # type: ignore[attr-defined]
             raise error
 
-    # We can't intercept _default_runner_with_retry directly because it calls
+    # We can't intercept default_runner_with_retry directly because it calls
     # subprocess.run, so we test the retry classification and behavior via a
     # wrapper that uses subprocess.run with a known-good command.
     completed_process = subprocess.CompletedProcess([], returncode=429)
@@ -80,7 +80,7 @@ def test_keyboard_interrupt_is_never_retried() -> None:
         raise KeyboardInterrupt()
 
     with pytest.raises(KeyboardInterrupt):
-        _default_runner_with_retry(["ignored"], max_retries=3, timeout=None, _runner=fake_runner)
+        default_runner_with_retry(["ignored"], max_retries=3, timeout=None, _runner=fake_runner)
     assert attempts["count"] == 1  # Ctrl-C must not loop
 
 
