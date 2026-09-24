@@ -33,7 +33,7 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
 from osm_polygon_description_tag.dataset.languages.validation import validate_run
 from osm_polygon_description_tag.dataset.languages.worker import ProcessingBudget, process_shard
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
-from osm_polygon_description_tag.workflow import grid_operator
+from osm_polygon_description_tag.workflow import grid_state
 from osm_polygon_description_tag.workflow.grid_operator import (
     QUARANTINE_DIRNAME,
     GridOperatorError,
@@ -265,8 +265,8 @@ def test_initialization_holds_the_submission_lock_before_the_worker_lock(
 ) -> None:
     _, run, snapshot = prepared
     order: list[str] = []
-    original_submission = grid_operator.submission_lock
-    original_worker = grid_operator.exclusive_worker_lock
+    original_submission = grid_state.submission_lock
+    original_worker = grid_state.exclusive_worker_lock
 
     def traced_submission(target: Path) -> object:
         order.append("submission")
@@ -276,8 +276,8 @@ def test_initialization_holds_the_submission_lock_before_the_worker_lock(
         order.append("worker")
         return original_worker(target)
 
-    monkeypatch.setattr(grid_operator, "submission_lock", traced_submission)
-    monkeypatch.setattr(grid_operator, "exclusive_worker_lock", traced_worker)
+    monkeypatch.setattr(grid_state, "submission_lock", traced_submission)
+    monkeypatch.setattr(grid_state, "exclusive_worker_lock", traced_worker)
 
     prepare_job(run, snapshot, SHARD, batch_size=2, **REMOTE)
 

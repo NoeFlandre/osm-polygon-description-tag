@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,6 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
     prepare_snapshot,
 )
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
-from osm_polygon_description_tag.workflow import grid_operator
 from osm_polygon_description_tag.workflow.grid_operator import (
     JOB_CONFIG_FILENAME,
     MAX_PROCESSING_SECONDS,
@@ -404,7 +404,7 @@ def test_prepare_portable_job_cleans_temporary_payload_after_copy_failure(
     def fail_copy(source_path: Path, destination: Path) -> None:
         raise OSError("simulated copy failure")
 
-    monkeypatch.setattr(grid_operator.shutil, "copyfile", fail_copy)
+    monkeypatch.setattr(shutil, "copyfile", fail_copy)
     bundle = bundle_for_shard(snapshot, SHARD)
     paths = job_paths(run, bundle)
     with pytest.raises(GridOperatorError, match="cannot stage"):
@@ -427,7 +427,7 @@ def test_prepare_portable_job_cleans_temporary_payload_after_rename_failure(
     project, source, run, snapshot = portable_inputs
     bundle = bundle_for_shard(snapshot, SHARD)
     paths = job_paths(run, bundle)
-    original_replace = grid_operator.os.replace
+    original_replace = os.replace
 
     def fail_payload_replace(source_path: object, destination: object) -> None:
         destination_path = Path(destination)
@@ -435,7 +435,7 @@ def test_prepare_portable_job_cleans_temporary_payload_after_rename_failure(
             raise OSError("simulated payload rename failure")
         original_replace(source_path, destination)
 
-    monkeypatch.setattr(grid_operator.os, "replace", fail_payload_replace)
+    monkeypatch.setattr(os, "replace", fail_payload_replace)
     with pytest.raises(OSError, match="payload rename failure"):
         prepare_portable_job(
             run,

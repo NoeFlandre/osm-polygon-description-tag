@@ -680,7 +680,7 @@ def test_interrupted_collection_keeps_the_old_checkpoint_and_can_retry(
     collection_runs: tuple[Path, Path, Path, SnapshotManifest],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from osm_polygon_description_tag.workflow import grid_operator
+    from osm_polygon_description_tag.workflow import grid_collection
 
     source, local, incoming, snapshot = collection_runs
     _process_collection_fixture(
@@ -689,19 +689,19 @@ def test_interrupted_collection_keeps_the_old_checkpoint_and_can_retry(
     _process_collection_fixture(source, incoming, snapshot)
     checkpoint = shard_paths(local, SHARD).checkpoint
     before = checkpoint.read_bytes()
-    original = grid_operator.atomic_write_bytes
+    original = grid_collection.atomic_write_bytes
 
     def interrupt_checkpoint(path: Path, content: bytes) -> None:
         if path == checkpoint:
             raise KeyboardInterrupt
         original(path, content)
 
-    monkeypatch.setattr(grid_operator, "atomic_write_bytes", interrupt_checkpoint)
+    monkeypatch.setattr(grid_collection, "atomic_write_bytes", interrupt_checkpoint)
     with pytest.raises(KeyboardInterrupt):
         import_retrieved_results(local, incoming, SHARD)
     assert checkpoint.read_bytes() == before
 
-    monkeypatch.setattr(grid_operator, "atomic_write_bytes", original)
+    monkeypatch.setattr(grid_collection, "atomic_write_bytes", original)
     assert import_retrieved_results(local, incoming, SHARD).is_complete
 
 

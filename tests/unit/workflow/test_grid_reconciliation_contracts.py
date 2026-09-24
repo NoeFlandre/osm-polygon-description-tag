@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from osm_polygon_description_tag.workflow import grid_operator as operator
+from osm_polygon_description_tag.workflow import grid_staging
 from osm_polygon_description_tag.workflow.grid_operator import (
     GridOperatorError,
     JobState,
@@ -243,7 +244,7 @@ def test_a_failed_materialisation_reports_its_own_cause_not_its_cleanup(
     def fail_after_rename(_path: Path) -> None:
         raise OSError("the volume went away")
 
-    monkeypatch.setattr(operator, "_fsync_directory", fail_after_rename)
+    monkeypatch.setattr(grid_staging, "_fsync_directory", fail_after_rename)
 
     with pytest.raises(OSError, match="the volume went away"):
         operator.prepare_portable_job(
