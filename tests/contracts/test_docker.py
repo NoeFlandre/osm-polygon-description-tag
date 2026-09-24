@@ -65,7 +65,8 @@ def test_justfile_exposes_one_safe_resumable_container_command() -> None:
     assert "run-and-publish" in justfile
     assert "--source-root /data/raw" in justfile
     assert "--data-root /data" in justfile
-    assert "--confirm-repo NoeFlandre/osm-polygon-description-tag" in justfile
+    assert 'repo_id := "NoeFlandre/osm-polygon-description-tag"' in justfile
+    assert "--confirm-repo {{repo_id}}" in justfile
 
 
 def test_docs_describe_the_container_boundary_and_resume_contract() -> None:

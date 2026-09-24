@@ -126,25 +126,20 @@ jobs:
       - name: Install Python
         run: uv python install 3.12
 
-      - name: Install osmium
+      - name: Install osmium and just
         run: |
           sudo apt-get update
-          sudo apt-get install -y osmium-tool
+          sudo apt-get install -y osmium-tool just
 
       - name: Sync locked environment
         run: uv sync --frozen
-
-      - name: Install just
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y just
 
       - name: Run all-source CRAP budget gate
         run: just risk
 
       - name: Upload CRAP reports
         if: always()
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: crap-report
           path: |
@@ -176,18 +171,13 @@ jobs:
       - name: Install Python
         run: uv python install 3.12
 
-      - name: Install osmium
+      - name: Install osmium and just
         run: |
           sudo apt-get update
-          sudo apt-get install -y osmium-tool
+          sudo apt-get install -y osmium-tool just
 
       - name: Sync locked environment
         run: uv sync --frozen
-
-      - name: Install just
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y just
 
       - name: Select changed source scope
         id: scope
@@ -222,7 +212,7 @@ jobs:
 
       - name: Upload mutation report
         if: always() && steps.scope.outputs.changed == 'true'
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: mutation-score-scope
           path: reports/mutation-summary.json
@@ -258,18 +248,13 @@ jobs:
       - name: Install Python
         run: uv python install 3.12
 
-      - name: Install osmium
+      - name: Install osmium and just
         run: |
           sudo apt-get update
-          sudo apt-get install -y osmium-tool
+          sudo apt-get install -y osmium-tool just
 
       - name: Sync locked environment
         run: uv sync --frozen
-
-      - name: Install just
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y just
 
       - name: Select this shard's source files
         env:
@@ -306,7 +291,7 @@ jobs:
 
       - name: Upload mutation report
         if: always()
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: mutation-score-shard-${{ matrix.shard }}
           path: reports/mutation-summary.json

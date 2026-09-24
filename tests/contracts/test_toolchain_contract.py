@@ -74,7 +74,7 @@ def test_pre_commit_and_just_are_configured() -> None:
         "test-integration:",
         "build:",
         "check:",
-        "run-and-publish:",
+        "run-and-publish ",
     ):
         assert recipe in justfile
     assert '"/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw"' in justfile

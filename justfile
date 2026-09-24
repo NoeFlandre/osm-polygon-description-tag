@@ -1,5 +1,11 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
+# The Hugging Face dataset repository every publishing recipe confirms against.
+repo_id := "NoeFlandre/osm-polygon-description-tag"
+
+# Coverage flags shared by `test` and `risk`, so the two gates cannot drift.
+coverage_flags := "--cov=osm_polygon_description_tag --cov-branch --cov-fail-under=90"
+
 sync:
     uv sync --frozen
 
@@ -14,7 +20,7 @@ typecheck:
     uv run ty check
 
 test:
-    uv run pytest --cov=osm_polygon_description_tag --cov-branch --cov-report=term-missing --cov-fail-under=90
+    uv run pytest {{coverage_flags}} --cov-report=term-missing
 
 test-integration:
     uv run pytest tests/integration -q
@@ -22,7 +28,7 @@ test-integration:
 # Generate deterministic CRAP risk reports from test coverage and Radon.
 risk:
     mkdir -p reports
-    uv run pytest --cov=osm_polygon_description_tag --cov-branch --cov-report=json:reports/coverage.json --cov-fail-under=90
+    uv run pytest {{coverage_flags}} --cov-report=json:reports/coverage.json
     uv run radon cc src/osm_polygon_description_tag -s -j > reports/radon.json
     uv run python scripts/quality_metrics.py crap \
         --coverage-json reports/coverage.json \
@@ -93,12 +99,12 @@ mutation-scope scope_file test_scope_file:
 # Compute and validate the dataset card and statistics report without uploading.
 release-stats-dry-run:
     uv run osm-polygon-description-tag release-stats \
-        --confirm-repo NoeFlandre/osm-polygon-description-tag
+        --confirm-repo {{repo_id}}
 
 # Compute, validate, publish, and verify only the card and statistics report.
 release-stats:
     uv run osm-polygon-description-tag release-stats \
-        --confirm-repo NoeFlandre/osm-polygon-description-tag --apply
+        --confirm-repo {{repo_id}} --apply
 
 build:
     uv build
@@ -134,19 +140,19 @@ docker-run data_root: docker-build
         run-and-publish \
         --source-root /data/raw \
         --data-root /data \
-        --confirm-repo NoeFlandre/osm-polygon-description-tag
+        --confirm-repo {{repo_id}}
 
-check:
+# Run every local quality gate. The lint, typecheck and test recipes run first,
+# as dependencies, so `check` cannot drift from them.
+check: lint typecheck test
     uv lock --check
     uv run pre-commit run --all-files
-    uv run ruff format --check .
-    uv run ruff check .
-    uv run ty check
-    uv run pytest --cov=osm_polygon_description_tag --cov-branch --cov-report=term-missing --cov-fail-under=90
     uv build
 
-run-and-publish:
+# Run and publish locally; override the paths with
+# `just run-and-publish source_root=... data_root=...`.
+run-and-publish source_root="/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw" data_root="/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root":
     uv run osm-polygon-description-tag run-and-publish \
-      --source-root "/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw" \
-      --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root" \
-      --confirm-repo NoeFlandre/osm-polygon-description-tag
+      --source-root "{{source_root}}" \
+      --data-root "{{data_root}}" \
+      --confirm-repo {{repo_id}}
