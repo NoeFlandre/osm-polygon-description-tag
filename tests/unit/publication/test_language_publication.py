@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pyarrow.parquet as pq
 import pytest
@@ -52,10 +53,11 @@ from osm_polygon_description_tag.publication.language_upload import (
     PublishStatus,
     RemoteFile,
     publish_language_export,
-    read_publication_state,
+    read_language_publication_state,
     verify_language_publication,
 )
 from osm_polygon_description_tag.publication.models import UploadPlan
+from osm_polygon_description_tag.runtime.logging import RunLogger
 from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
 from tests.helpers.messages import exactly
@@ -171,7 +173,7 @@ def test_interrupted_upload_has_durable_intent_and_is_not_repeated(
 
     class InterruptedHub(_FakeHub):
         def upload(self, plan: UploadPlan, *, parent_revision: str | None = None) -> None:
-            observed.append(read_publication_state(state))
+            observed.append(read_language_publication_state(state))
             super().upload(plan, parent_revision=parent_revision)
             raise KeyboardInterrupt
 
@@ -199,7 +201,9 @@ def test_library_publication_uses_durable_state_without_an_explicit_state_path(
 
     outcome = publish_language_export(plan, hub, baseline_revision="rev-1", apply=True)
 
-    assert read_publication_state(export.export_root / PUBLICATION_STATE_FILENAME) == outcome
+    assert (
+        read_language_publication_state(export.export_root / PUBLICATION_STATE_FILENAME) == outcome
+    )
 
 
 def test_concurrent_publication_is_refused_before_contacting_the_hub(
@@ -698,7 +702,38 @@ def test_a_failed_upload_is_ambiguous_and_recorded(export: LanguageExport, tmp_p
 
     assert outcome.status is PublishStatus.AMBIGUOUS
     assert any("verify the repository" in issue for issue in outcome.issues)
-    assert read_publication_state(state) == outcome
+    assert "upload error: RuntimeError: network died mid-upload" in outcome.issues
+    assert read_language_publication_state(state) == outcome
+
+
+def test_a_failed_upload_is_logged_with_its_cause(export: LanguageExport, tmp_path: Path) -> None:
+    plan = build_language_upload_plan(export, REPO, confirm_repo=REPO)
+    events: list[tuple[str, str, dict[str, object]]] = []
+
+    class _Logger:
+        def event(self, name: str, *, level: str = "INFO", **fields: object) -> None:
+            events.append((name, level, fields))
+
+    publish_language_export(
+        plan,
+        _FakeHub(fail_upload=True),
+        baseline_revision="rev-1",
+        apply=True,
+        state_path=tmp_path / "state.json",
+        logger=cast(RunLogger, _Logger()),
+    )
+
+    assert events == [
+        (
+            "language_publication_upload_failed",
+            "WARNING",
+            {
+                "result": "ambiguous",
+                "reason": "RuntimeError: network died mid-upload",
+                "identity_sha256": plan.identity_sha256,
+            },
+        )
+    ]
 
 
 def test_an_ambiguous_attempt_verifies_instead_of_re_uploading(
@@ -805,8 +840,8 @@ def test_publication_state_round_trips(tmp_path: Path) -> None:
     state = tmp_path / "state.json"
     state.write_text(json.dumps(outcome.to_payload()), encoding="utf-8")
 
-    assert read_publication_state(state) == outcome
-    assert read_publication_state(tmp_path / "absent.json") is None
+    assert read_language_publication_state(state) == outcome
+    assert read_language_publication_state(tmp_path / "absent.json") is None
 
 
 @pytest.mark.parametrize(
@@ -827,7 +862,7 @@ def test_a_malformed_publication_state_is_rejected(
     state.write_text(json.dumps({**outcome.to_payload(), **mutation}), encoding="utf-8")
 
     with pytest.raises(LanguagePublicationError, match=message):
-        read_publication_state(state)
+        read_language_publication_state(state)
 
 
 def test_an_unreadable_publication_state_is_reported(tmp_path: Path) -> None:
@@ -835,7 +870,7 @@ def test_an_unreadable_publication_state_is_reported(tmp_path: Path) -> None:
     state.write_text("{not-json", encoding="utf-8")
 
     with pytest.raises(LanguagePublicationError, match="cannot read publication state"):
-        read_publication_state(state)
+        read_language_publication_state(state)
 
 
 def test_a_state_for_another_plan_does_not_resume(export: LanguageExport, tmp_path: Path) -> None:

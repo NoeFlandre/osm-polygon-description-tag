@@ -10,13 +10,19 @@ instead of being quietly accepted.
 not pull in a network-authenticated dependency at import time.
 """
 
-import hashlib
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, cast
 
+from osm_polygon_description_tag.dataset.manifest import file_sha256
+from osm_polygon_description_tag.publication.hub_client import (
+    _huggingface_hub,
+    commit_operation_add,
+    create_dataset_commit,
+    new_hf_api,
+)
 from osm_polygon_description_tag.publication.language import (
     LANGUAGE_REMOTE_PREFIX,
     LanguageExport,
@@ -27,7 +33,6 @@ from osm_polygon_description_tag.publication.language import (
 from osm_polygon_description_tag.publication.language_card import install_language_card
 from osm_polygon_description_tag.publication.language_upload import RemoteFile
 from osm_polygon_description_tag.publication.models import UploadPlan
-from osm_polygon_description_tag.publication.verification import _huggingface_hub
 
 REPO_TYPE: Final = "dataset"
 README_PATH: Final = "README.md"
@@ -68,8 +73,7 @@ class HuggingFaceLanguageHub:
     def api(self) -> Any:
         """Return the ``HfApi`` instance, resolving it lazily."""
         if self._api is None:
-            api_class: Any = _huggingface_hub.HfApi
-            self._api = api_class()
+            self._api = new_hf_api()
         return self._api
 
     def repo_revision(self, repo_id: str) -> str:
@@ -105,10 +109,10 @@ class HuggingFaceLanguageHub:
         readme_bytes = updated.encode("utf-8")  # pragma: no mutate - codec alias only
         operations.append(self._operation(README_PATH, readme_bytes))
         try:
-            self.api.create_commit(
+            create_dataset_commit(
+                self.api,
                 repo_id=plan.repo_id,
                 operations=operations,
-                repo_type=REPO_TYPE,
                 commit_message=COMMIT_MESSAGE,
                 parent_commit=revision,
             )
@@ -139,8 +143,7 @@ class HuggingFaceLanguageHub:
 
     def _operation(self, path: str, content: object) -> Any:
         try:
-            operation_class: Any = _huggingface_hub.CommitOperationAdd
-            return operation_class(path_in_repo=path, path_or_fileobj=content)
+            return commit_operation_add(path, content)
         except Exception as error:
             raise LanguagePublicationError(
                 f"cannot prepare language publication file {path}: {error}"
@@ -181,7 +184,7 @@ class HuggingFaceLanguageHub:
             revision=revision,
             cache_dir=None if self._cache_dir is None else str(self._cache_dir),
         )
-        return hashlib.sha256(Path(local).read_bytes()).hexdigest()
+        return file_sha256(Path(local))
 
     def dataset_configs(self, repo_id: str, revision: str) -> tuple[str, ...]:
         """Return ready train configs from the unversioned Viewer endpoint.

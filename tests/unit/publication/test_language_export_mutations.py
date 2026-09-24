@@ -31,7 +31,7 @@ from osm_polygon_description_tag.publication.language_upload import (
     PublishStatus,
     RemoteFile,
     publish_language_export,
-    read_publication_state,
+    read_language_publication_state,
     verify_language_publication,
 )
 from osm_polygon_description_tag.publication.models import UploadItem, UploadPlan
@@ -295,6 +295,7 @@ def test_publication_records_exact_outcome_and_forwards_hub_arguments(
         "ambiguous": (
             "the upload did not report success; verify the repository "
             "before attempting to publish again",
+            "upload error: RuntimeError: synthetic upload failure",
         ),
         "drifted": (
             "repository moved from old to before; "
@@ -323,7 +324,7 @@ def test_publication_records_exact_outcome_and_forwards_hub_arguments(
             ]
         )
     assert hub.calls == calls
-    assert read_publication_state(state) == (None if mode == "planned" else expected)
+    assert read_language_publication_state(state) == (None if mode == "planned" else expected)
 
 
 def test_verification_keeps_all_file_issues_and_sorts_verified_paths(tmp_path: Path) -> None:
