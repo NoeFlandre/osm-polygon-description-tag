@@ -4,7 +4,7 @@ A living record of the `language-v1` cascade rollout: what is finished, what is
 not, and what the next operator has to do. Update it in the same commit as the
 work it describes.
 
-**Last updated:** 2026-09-14 · **Code:** `main`
+**Last updated:** 2026-09-23 · **Code:** `main`
 
 ## Summary
 
@@ -16,7 +16,21 @@ work it describes.
 | Mutation gate at 100 % | **Done** — 18 140 / 18 140 killed |
 | Grid'5000 operator environment | **Done** — the NumPy baseline blocker is resolved |
 | Grid'5000 full-dataset run | **Done** — 386 / 386 shards, 906 631 rows, 919 126 annotations |
-| Hugging Face publication | **Done** — revision `fec858b6`, 388 files under `language-v1/` |
+| Hugging Face publication | **Done** — revision `7a9c6782` (baseline `fec858b6`), 388 files under `language-v1/` |
+| Confidence ungating (`d63d82b`) | **Pending merge** — on `feat/ungate-language-confidence`; once merged, the published run must be recomputed |
+
+## Outstanding
+
+- **Recompute `language-v1` after confidence ungating.** `d63d82b` (*stop
+  gating detection on confidence*, on `feat/ungate-language-confidence`, not
+  yet on `main`) removes `min_score`, `min_margin`, the `low_confidence` and
+  `low_margin` reasons and the `v2` preset. That moves the cascade
+  configuration fingerprint from `5d87faaf…` to `1d6f31e2…`, so once it merges
+  the published `language-v1` run (revision `7a9c6782`) no longer matches the
+  current configuration and has to be recomputed and republished, not reused.
+  The same merge must update the confidence wording in this file,
+  `language-detection.md`, the languages package README and the v2 design
+  note's banner, and the performance notes below, which predate it.
 
 ## Done
 
