@@ -18,7 +18,6 @@ The raw PBF source root is never read or modified.
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
@@ -32,11 +31,14 @@ import pyarrow.parquet as pq
 
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
-    _fsync_dir,
     _manifest_path_for,
     output_identity_for,
     read_manifest,
     write_manifest,
+)
+from osm_polygon_description_tag.dataset.migration import (
+    _promote_migrated_parquet,
+    _require_migration_directories,
 )
 from osm_polygon_description_tag.dataset.schema import SCHEMA, geo_metadata
 from osm_polygon_description_tag.dataset.storage import (
@@ -197,13 +199,6 @@ def _requires_text_migration(path: Path) -> bool:
     return False
 
 
-def _promote_migrated_parquet(temporary: Path, target: Path) -> None:
-    with open(temporary, "rb") as handle:
-        os.fsync(handle.fileno())
-    os.replace(temporary, target)
-    _fsync_dir(target.parent)
-
-
 def _migrate_parquet_text(path: Path) -> int | None:
     """Repair one artifact, returning dropped rows, or ``None`` when clean."""
     if not _requires_text_migration(path):
@@ -262,11 +257,6 @@ def _heal_output_identity(manifest: Manifest, parquet: Path, manifest_path: Path
     return 1
 
 
-def _require_migration_directories(data_dir: Path, manifests_dir: Path, data_root: Path) -> None:
-    if not data_dir.is_dir() or not manifests_dir.is_dir():
-        raise TextMigrationError(f"missing data/ or manifests/ under {data_root}")
-
-
 def _artifact_pair(parquet: Path, data_root: Path) -> tuple[Path, Path]:
     return parquet, _manifest_path_for(parquet.name, data_root)
 
@@ -284,7 +274,7 @@ def migrate_dataset_text(data_root: Path, *, max_workers: int | None = None) -> 
     """
     data_dir = data_root / "data"
     manifests_dir = data_root / "manifests"
-    _require_migration_directories(data_dir, manifests_dir, data_root)
+    _require_migration_directories(data_dir, manifests_dir, data_root, error=TextMigrationError)
     pairs = [
         _artifact_pair(parquet, data_root)
         for parquet in sorted(data_dir.glob("*.parquet"), key=lambda path: path.name)

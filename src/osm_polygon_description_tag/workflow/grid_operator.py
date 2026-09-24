@@ -16,7 +16,6 @@ import fcntl
 import hashlib
 import json
 import os
-import re
 import shlex
 import shutil
 import tempfile
@@ -24,15 +23,10 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Final, TextIO, cast
 
-from osm_polygon_description_tag.dataset.languages.atomic import (
-    atomic_write_bytes,
-    atomic_write_json,
-    atomic_write_via,
-    canonical_json_bytes,
-)
 from osm_polygon_description_tag.dataset.languages.checkpoint import (
     CheckpointError,
     ShardCheckpoint,
@@ -70,6 +64,14 @@ from osm_polygon_description_tag.dataset.languages.validation import (
     validate_run,
 )
 from osm_polygon_description_tag.dataset.manifest import file_sha256
+from osm_polygon_description_tag.runtime.atomic import (
+    atomic_write_bytes,
+    atomic_write_json,
+    atomic_write_via,
+    fsync_dir,
+)
+from osm_polygon_description_tag.runtime.serialization import canonical_json_bytes
+from osm_polygon_description_tag.runtime.validation import FINGERPRINT_PATTERN, validate_fingerprint
 from osm_polygon_description_tag.workflow.grid_policy import (
     MAX_PROCESSING_SECONDS,
     MAX_WALLTIME_SECONDS,
@@ -108,7 +110,6 @@ STAGE_PROJECT_DIRNAME: Final = "project"
 STAGE_SOURCE_DIRNAME: Final = "source"
 STAGE_RUN_DIRNAME: Final = "run"
 QUARANTINE_DIRNAME: Final = "quarantine"
-_FINGERPRINT_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 _THREAD_LIMIT_VARIABLES: Final = (
     "OMP_NUM_THREADS",
     "OPENBLAS_NUM_THREADS",
@@ -202,9 +203,7 @@ def bundle_for_shard(snapshot: SnapshotManifest, shard: str) -> JobBundle:
     )
 
 
-def _validate_fingerprint(value: object, label: str) -> None:
-    if not isinstance(value, str) or _FINGERPRINT_PATTERN.fullmatch(value) is None:
-        raise GridOperatorError(f"{label} must be a lowercase SHA-256 hex fingerprint")
+_validate_fingerprint = partial(validate_fingerprint, error=GridOperatorError)
 
 
 def _validate_non_negative_int(value: object, label: str) -> None:
@@ -1041,9 +1040,9 @@ def prepare_portable_job(
     """
     _validate_remote_path(remote_bundle_dir, "remote bundle directory")
     base = remote_bundle_dir.rstrip("/") or "/"
-    remote_project = _remote_child(base, STAGE_PROJECT_DIRNAME)
-    remote_source = _remote_child(base, STAGE_SOURCE_DIRNAME)
-    remote_run = _remote_child(base, STAGE_RUN_DIRNAME)
+    remote_project = remote_child(base, STAGE_PROJECT_DIRNAME)
+    remote_source = remote_child(base, STAGE_SOURCE_DIRNAME)
+    remote_run = remote_child(base, STAGE_RUN_DIRNAME)
     with submission_lock(run_dir):
         bundle, paths = prepare_job(
             run_dir,
@@ -1063,7 +1062,7 @@ def prepare_portable_job(
         return _stage_portable_payload(paths, bundle, project_root, source_dir, snapshot)
 
 
-def _remote_child(base: str, name: str) -> str:
+def remote_child(base: str, name: str) -> str:
     return f"/{name}" if base == "/" else f"{base}/{name}"
 
 
@@ -1397,7 +1396,7 @@ def _staged_resume_fingerprint(payload_root: Path) -> str | None:
     if stage_path.is_symlink() or not stage_path.is_file():
         return None
     value = _read_staged_resume_field(stage_path)
-    return value if isinstance(value, str) and _FINGERPRINT_PATTERN.fullmatch(value) else None
+    return value if isinstance(value, str) and FINGERPRINT_PATTERN.fullmatch(value) else None
 
 
 def _read_staged_resume_field(stage_path: Path) -> object:
@@ -1643,11 +1642,7 @@ def _verify_staged_resume(run_root: Path, shard: str) -> None:
 
 def _fsync_directory(path: Path) -> None:
     try:
-        descriptor = os.open(path, os.O_RDONLY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+        fsync_dir(path)
     except OSError as error:
         raise GridOperatorError(f"cannot fsync directory {path}: {error}") from error
 
@@ -2635,6 +2630,7 @@ __all__ = [
     "read_bundle",
     "read_intent",
     "reconcile_job",
+    "remote_child",
     "render_job_script",
     "resolve_job_name",
     "submission_lock",

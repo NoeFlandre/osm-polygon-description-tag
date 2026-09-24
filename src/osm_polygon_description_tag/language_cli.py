@@ -85,6 +85,9 @@ from osm_polygon_description_tag.workflow.grid_operator import (
     submit_job,
     verify_prepared_bundle,
 )
+from osm_polygon_description_tag.workflow.grid_operator import (
+    remote_child as _remote_child,
+)
 from osm_polygon_description_tag.workflow.grid_policy import (
     MAX_PROCESSING_SECONDS,
     MAX_WALLTIME_SECONDS,
@@ -767,10 +770,6 @@ def _portable_remote_paths(remote_bundle_dir: str) -> dict[str, str]:
         "remote_run_dir": _remote_child(base, "run"),
         "remote_source_dir": _remote_child(base, "source"),
     }
-
-
-def _remote_child(base: str, name: str) -> str:
-    return f"/{name}" if base == "/" else f"{base}/{name}"
 
 
 def _seed_retrieval_snapshot(local_run_dir: Path, retrieved_run_dir: Path) -> None:

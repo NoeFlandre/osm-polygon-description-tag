@@ -16,6 +16,7 @@ from osm_polygon_description_tag.dataset.canonical_rows import (
     canonical_geometry_wkb_sql,
     canonical_rows_sql,
 )
+from osm_polygon_description_tag.dataset.text import sql_literal
 
 _BATCH_SIZE = 4096
 _REQUIRED_COLUMNS = frozenset(("source_pbf", "osm_type", "osm_id", "geometry"))
@@ -61,10 +62,6 @@ def unique_rows_sql(
     if require_successful_text:
         options["require_successful_text"] = True
     return canonical_rows_sql(relation, columns, **options)
-
-
-def _sql_literal(value: str) -> str:
-    return "'" + value.replace("'", "''") + "'"
 
 
 def _missing_parquet_column_expression(
@@ -126,7 +123,7 @@ def _parquet_select(
         )
         for column in input_columns
     ]
-    parquet_literal = _sql_literal(str(path))
+    parquet_literal = sql_literal(str(path))
     return (
         f"SELECT {', '.join(expressions)} "  # noqa: S608 - internal SQL fragments
         f"FROM read_parquet({parquet_literal})"

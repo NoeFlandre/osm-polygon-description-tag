@@ -30,7 +30,6 @@ from shapely.errors import ShapelyError
 from osm_polygon_description_tag.dataset.manifest import (
     MANIFEST_SCHEMA_VERSION,
     ManifestError,
-    _fsync_dir,
     _manifest_path_for,
     output_identity_for,
     read_manifest,
@@ -46,6 +45,7 @@ from osm_polygon_description_tag.dataset.text import (
     is_nonempty_text,
     is_trimmed_nonempty_text,
 )
+from osm_polygon_description_tag.runtime.atomic import fsync_dir as _fsync_dir
 
 _DICTIONARY_COLUMNS = ["source_pbf", "osm_type", "geometry_type"]
 _VALID_GEOMETRY_TYPES = {"Polygon", "MultiPolygon"}

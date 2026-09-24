@@ -6,16 +6,15 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import cast
 
+from osm_polygon_description_tag.runtime.validation import required_text
+
 
 class DescriptionRecordError(ValueError):
     """Raised when an Arrow description-tag record is malformed."""
 
 
 def _required_text(row: Mapping[str, object], name: str) -> str:
-    value = row.get(name)
-    if not isinstance(value, str) or not value:
-        raise DescriptionRecordError(f"{name} must be a non-empty string")
-    return value
+    return required_text(row.get(name), name, error=DescriptionRecordError)
 
 
 def _required_id(row: Mapping[str, object]) -> int:

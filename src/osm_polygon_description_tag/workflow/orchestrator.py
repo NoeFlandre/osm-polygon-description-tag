@@ -96,6 +96,7 @@ from osm_polygon_description_tag.workflow.source_runner import (
     OrchestratorError,
     SourceOutcome,
     _call_publication_state,
+    read_publication_state,
 )
 from osm_polygon_description_tag.workflow.source_runner import (
     local_artifact_is_complete as _local_artifact_is_complete,  # noqa: F401
@@ -110,10 +111,6 @@ from osm_polygon_description_tag.workflow.source_runner import (
 INTERRUPT_EXIT_CODE = 130
 
 STATUS_FAILED = "failed"
-
-
-def read_publication_state(data_root: Path) -> dict[str, object]:
-    return _call_publication_state(_state_read_publication_state, data_root)
 
 
 def _write_publication_state(*args: Any, **kwargs: Any) -> dict[str, object]:

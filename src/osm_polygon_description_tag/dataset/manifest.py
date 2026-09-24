@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from osm_polygon_description_tag.dataset.schema import GEOPARQUET_VERSION, SCHEMA_VERSION
+from osm_polygon_description_tag.runtime.atomic import fsync_dir as _fsync_dir
 from osm_polygon_description_tag.runtime.resources import (
     osmium_export_config,
     project_code_revision,
@@ -50,14 +51,6 @@ def file_sha256(path: Path) -> str:
                 break
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def _fsync_dir(directory: Path) -> None:
-    fd = os.open(str(directory), os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
 
 
 @dataclass(frozen=True)

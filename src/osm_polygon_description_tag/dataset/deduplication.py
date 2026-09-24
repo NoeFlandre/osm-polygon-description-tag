@@ -45,6 +45,7 @@ from osm_polygon_description_tag.dataset.storage import (
     validate_geoparquet,
     write_geoparquet,
 )
+from osm_polygon_description_tag.dataset.text import sql_literal as _sql_literal
 
 DEDUPLICATION_POLICY_VERSION = CANONICAL_ROW_POLICY_VERSION
 DUPLICATE_REJECTION_REASON = "duplicate_osm_object"
@@ -81,10 +82,6 @@ class _DeduplicationContext:
     manifests: dict[str, Manifest]
     inputs: dict[str, str]
     input_rows: int
-
-
-def _sql_literal(value: str) -> str:
-    return "'" + value.replace("'", "''") + "'"
 
 
 def _read_state(path: Path) -> dict[str, Any] | None:

@@ -5,10 +5,10 @@ import pytest
 
 from osm_polygon_description_tag.dataset.text import (
     _localized_values,
-    _sql_literal,
     _valid_localized_values,
     description_row_has_successful_text,
     has_successful_description_text,
+    sql_literal,
     successful_description_text_sql,
     trimmed_nonempty_text,
 )
@@ -100,7 +100,7 @@ def test_description_row_predicate_forwards_both_text_columns() -> None:
 
 
 def test_sql_literal_escapes_apostrophes() -> None:
-    assert _sql_literal("L'auteur") == "'L''auteur'"
+    assert sql_literal("L'auteur") == "'L''auteur'"
 
 
 def test_successful_description_text_sql_requires_trimmed_nonempty_values() -> None:

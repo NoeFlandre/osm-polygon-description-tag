@@ -37,6 +37,7 @@ from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import IO, Any
 
+from osm_polygon_description_tag.runtime.atomic import fsync_dir
 from osm_polygon_description_tag.runtime.time import utc_now_iso
 
 _REDACTED = "[REDACTED]"
@@ -163,14 +164,8 @@ def _create_active_log(subdir: Path, active_name: str) -> Path:
 
 
 def _fsync_directory(directory: Path) -> None:
-    try:
-        dir_fd = os.open(str(directory), os.O_RDONLY)
-        try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
-    except OSError:
-        pass
+    with contextlib.suppress(OSError):
+        fsync_dir(directory)
 
 
 class RunLogger:

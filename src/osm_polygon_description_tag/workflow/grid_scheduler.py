@@ -17,8 +17,11 @@ import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import partial
 from pathlib import Path
 from typing import Final, cast
+
+from osm_polygon_description_tag.runtime.validation import required_text
 
 DEFAULT_COMMAND_TIMEOUT: Final = 120.0
 REQUIRED_CORES: Final = 1
@@ -130,10 +133,7 @@ def _validate_positive_int(value: object, message: str) -> None:
         raise SchedulerError(message)
 
 
-def _required_text(value: object, label: str) -> str:
-    if not isinstance(value, str) or not value:
-        raise SchedulerError(f"{label} must be a non-empty string")
-    return value
+_required_text = partial(required_text, error=SchedulerError)
 
 
 def _validate_argument(value: object, label: str) -> str:

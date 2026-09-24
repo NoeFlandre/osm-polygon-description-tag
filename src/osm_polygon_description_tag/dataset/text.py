@@ -42,12 +42,13 @@ _PYTHON_STRIP_CHARACTERS = "".join(
 )
 
 
-def _sql_literal(value: str) -> str:
+def sql_literal(value: str) -> str:
+    """Return ``value`` quoted as a SQL string literal."""
     return "'" + value.replace("'", "''") + "'"
 
 
 def _trim_sql(column: str) -> str:
-    return f"trim({column}, {_sql_literal(_PYTHON_STRIP_CHARACTERS)})"
+    return f"trim({column}, {sql_literal(_PYTHON_STRIP_CHARACTERS)})"
 
 
 def is_nonempty_text(value: object) -> TypeGuard[str]:
@@ -160,6 +161,7 @@ __all__ = [
     "has_successful_description_text",
     "is_nonempty_text",
     "is_trimmed_nonempty_text",
+    "sql_literal",
     "successful_description_text_sql",
     "trimmed_nonempty_text",
 ]
