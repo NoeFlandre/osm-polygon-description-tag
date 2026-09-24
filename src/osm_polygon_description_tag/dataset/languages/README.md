@@ -3,13 +3,13 @@
 ## Purpose
 
 Annotate every actual OpenStreetMap description value with deterministic,
-conservative, resumable processing. Lingua 2.2 is primary; the pinned GlotLID v3
+resumable processing. Confidence is not gated: scores are recorded, not thresholded. Lingua 2.2 is primary; the pinned GlotLID v3
 model is consulted only when Lingua returns `uncertain`.
 
 ## Responsibilities
 
 Own the immutable input snapshot, the pinned detector adapter and its
-conservative policy, the per-description record contracts, the frozen
+structural policy, the per-description record contracts, the frozen
 annotation schema, durable checkpoints and receipts, the bounded streaming
 worker, and read-only completeness validation.
 
