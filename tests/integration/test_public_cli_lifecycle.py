@@ -40,9 +40,9 @@ from pathlib import Path
 import pytest
 
 from osm_polygon_description_tag.cli import run as cli_run
-from osm_polygon_description_tag.config import Paths
-from osm_polygon_description_tag.orchestrator import PUBLICATION_STATE_FILENAME
 from osm_polygon_description_tag.publication import REPO_ID
+from osm_polygon_description_tag.runtime.config import Paths
+from osm_polygon_description_tag.workflow.orchestrator import PUBLICATION_STATE_FILENAME
 
 
 def _sha256_text(text: str) -> str:
@@ -209,7 +209,7 @@ def test_run_two_resumes_and_publishes_remaining_and_metadata(
     # one pending" baseline.
     from shapely.geometry import Polygon
 
-    from osm_polygon_description_tag.manifest import (
+    from osm_polygon_description_tag.dataset.manifest import (
         Manifest,
         RunCounts,
         current_area_policy_sha256,
@@ -219,8 +219,8 @@ def test_run_two_resumes_and_publishes_remaining_and_metadata(
         source_identity_for,
         write_manifest,
     )
+    from osm_polygon_description_tag.dataset.storage import write_geoparquet
     from osm_polygon_description_tag.publication import _build_per_pbf_upload_plan
-    from osm_polygon_description_tag.storage import write_geoparquet
     from tests.conftest import make_record_dict
 
     # Plant a pre-published first PBF to set up the resume scenario.
@@ -321,7 +321,7 @@ def test_run_three_is_pure_no_op(
 
     from shapely.geometry import Polygon
 
-    from osm_polygon_description_tag.manifest import (
+    from osm_polygon_description_tag.dataset.manifest import (
         Manifest,
         RunCounts,
         current_area_policy_sha256,
@@ -331,11 +331,11 @@ def test_run_three_is_pure_no_op(
         source_identity_for,
         write_manifest,
     )
+    from osm_polygon_description_tag.dataset.storage import write_geoparquet
     from osm_polygon_description_tag.publication import (
         _build_metadata_only_upload_plan,
         _build_per_pbf_upload_plan,
     )
-    from osm_polygon_description_tag.storage import write_geoparquet
     from tests.conftest import make_record_dict
 
     write_geoparquet(
@@ -419,8 +419,8 @@ def test_run_three_is_pure_no_op(
     # Plant the canonical card that ``generate_dataset_docs`` would
     # produce so the metadata identity remains stable after the
     # orchestrator's refresh step.
-    from osm_polygon_description_tag._resources import dataset_card_template
     from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
+    from osm_polygon_description_tag.runtime.resources import dataset_card_template
 
     generate_dataset_docs(
         data_root,

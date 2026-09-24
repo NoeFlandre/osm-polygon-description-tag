@@ -164,7 +164,7 @@ def test_resumption_requires_matching_source_and_output() -> None:
 
     # Ensure the project checkout revision is treated as either matching or
     # unavailable in the test environment.
-    from osm_polygon_description_tag._resources import project_code_revision
+    from osm_polygon_description_tag.runtime.resources import project_code_revision
 
     manifest = Manifest(
         manifest_schema_version=manifest.manifest_schema_version,
@@ -237,7 +237,7 @@ def test_write_and_read_manifest_roundtrip(tmp_path: Path) -> None:
 
     assert restored == manifest
     # Rebuild with the project checkout revision so resumption agrees.
-    from osm_polygon_description_tag._resources import project_code_revision
+    from osm_polygon_description_tag.runtime.resources import project_code_revision
 
     aligned = Manifest(
         manifest_schema_version=restored.manifest_schema_version,

@@ -24,8 +24,6 @@ from pathlib import Path
 import pytest
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag._resources import dataset_card_template, project_code_revision
-from osm_polygon_description_tag.config import Paths
 from osm_polygon_description_tag.dataset.geography import H3_MAP_TITLE
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
@@ -38,11 +36,16 @@ from osm_polygon_description_tag.dataset.manifest import (
     write_manifest,
 )
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
-from osm_polygon_description_tag.orchestrator import (
+from osm_polygon_description_tag.publication import REPO_ID
+from osm_polygon_description_tag.runtime.config import Paths
+from osm_polygon_description_tag.runtime.resources import (
+    dataset_card_template,
+    project_code_revision,
+)
+from osm_polygon_description_tag.workflow.orchestrator import (
     PUBLICATION_STATE_FILENAME,
     run_and_publish,
 )
-from osm_polygon_description_tag.publication import REPO_ID
 from tests.conftest import make_record_dict
 
 _CLOCK = "2026-07-30T00:00:00+00:00"

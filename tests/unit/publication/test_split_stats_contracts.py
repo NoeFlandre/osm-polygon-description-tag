@@ -15,11 +15,11 @@ from shapely.geometry import Polygon
 from osm_polygon_description_tag.dataset.languages.models import LanguageResult, LanguageStatus
 from osm_polygon_description_tag.dataset.languages.snapshot import prepare_snapshot
 from osm_polygon_description_tag.dataset.languages.worker import process_shard
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication.language import (
     export_language_annotations,
     render_language_card_section,
 )
-from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
 from tests.helpers.sentences import fake_splitter
 

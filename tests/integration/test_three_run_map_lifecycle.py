@@ -30,13 +30,13 @@ import pytest
 from shapely import to_wkb
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag.config import Paths
-from osm_polygon_description_tag.extraction import ExportRecord
-from osm_polygon_description_tag.orchestrator import (
+from osm_polygon_description_tag.osm.extraction import ExportRecord
+from osm_polygon_description_tag.publication import REPO_ID
+from osm_polygon_description_tag.runtime.config import Paths
+from osm_polygon_description_tag.workflow.orchestrator import (
     PUBLICATION_STATE_FILENAME,
     run_and_publish,
 )
-from osm_polygon_description_tag.publication import REPO_ID
 
 _CLOCK = "2026-07-30T00:00:00+00:00"
 

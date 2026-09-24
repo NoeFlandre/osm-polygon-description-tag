@@ -20,9 +20,7 @@ from pathlib import Path
 import pytest
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag._resources import project_code_revision
-from osm_polygon_description_tag.config import Paths
-from osm_polygon_description_tag.manifest import (
+from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     RunCounts,
     current_area_policy_sha256,
@@ -31,17 +29,19 @@ from osm_polygon_description_tag.manifest import (
     source_identity_for,
     write_manifest,
 )
-from osm_polygon_description_tag.orchestrator import (
-    PUBLICATION_STATE_FILENAME,
-    run_and_publish,
-)
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import (
     REPO_ID,
     _build_metadata_only_upload_plan,
     _build_per_pbf_upload_plan,
     per_pbf_command,
 )
-from osm_polygon_description_tag.storage import write_geoparquet
+from osm_polygon_description_tag.runtime.config import Paths
+from osm_polygon_description_tag.runtime.resources import project_code_revision
+from osm_polygon_description_tag.workflow.orchestrator import (
+    PUBLICATION_STATE_FILENAME,
+    run_and_publish,
+)
 from tests.conftest import make_record_dict
 
 _CLOCK = "2026-07-27T00:00:00+00:00"

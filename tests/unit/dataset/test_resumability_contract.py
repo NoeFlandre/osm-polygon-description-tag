@@ -23,7 +23,6 @@ import pytest
 from shapely import to_wkb
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag.config import Paths
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     RunCounts,
@@ -35,8 +34,9 @@ from osm_polygon_description_tag.dataset.manifest import (
     write_manifest,
 )
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
-from osm_polygon_description_tag.discovery import Source
-from osm_polygon_description_tag.extraction import ExportRecord
+from osm_polygon_description_tag.osm.discovery import Source
+from osm_polygon_description_tag.osm.extraction import ExportRecord
+from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.workflow.orchestrator import (
     PUBLICATION_STATE_FILENAME,
     OrchestratorError,
@@ -340,7 +340,7 @@ def test_run_and_publish_complete_check_rejects_missing_manifest(tmp_path: Path)
     write_geoparquet(iter([record]), data_root / "data" / "a.parquet", batch_size=10)
     # Bypass the orchestrator's pre-build check by directly invoking completeness
     # on the inconsistent state.
-    from osm_polygon_description_tag.discovery import discover_sources
+    from osm_polygon_description_tag.osm.discovery import discover_sources
     from osm_polygon_description_tag.workflow.orchestrator import _verify_final_completeness
 
     sources = discover_sources(paths.source_root)

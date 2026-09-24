@@ -18,9 +18,7 @@ import pytest
 from shapely.geometry import Polygon
 
 import osm_polygon_description_tag.dataset.docs as docs_module
-from osm_polygon_description_tag._resources import dataset_card_template
 from osm_polygon_description_tag.cli import run as cli_run
-from osm_polygon_description_tag.config import Paths
 from osm_polygon_description_tag.dataset.docs import (
     _fmt_bytes,
     _fmt_median,
@@ -41,6 +39,8 @@ from osm_polygon_description_tag.dataset.manifest import (
 )
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import REPO_ID
+from osm_polygon_description_tag.runtime.config import Paths
+from osm_polygon_description_tag.runtime.resources import dataset_card_template
 from tests.conftest import make_record_dict
 from tests.helpers.dataset import write_finalized_dataset
 
@@ -421,8 +421,8 @@ def test_identical_regeneration_does_not_invalidate_metadata_state(
     _plant_metadata(data_root)
     _publish_full_run(monkeypatch, source_root, data_root)
 
-    from osm_polygon_description_tag.orchestrator import PUBLICATION_STATE_FILENAME
     from osm_polygon_description_tag.publication import _build_metadata_only_upload_plan
+    from osm_polygon_description_tag.workflow.orchestrator import PUBLICATION_STATE_FILENAME
 
     plan = _build_metadata_only_upload_plan(data_root)
     state_path = data_root / PUBLICATION_STATE_FILENAME

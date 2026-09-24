@@ -32,6 +32,7 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
     prepare_snapshot,
 )
 from osm_polygon_description_tag.dataset.languages.worker import process_shard
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import language as language_module
 from osm_polygon_description_tag.publication.language import (
     LANGUAGE_CONFIG_NAME,
@@ -58,7 +59,6 @@ from osm_polygon_description_tag.publication.language_upload import (
 )
 from osm_polygon_description_tag.publication.models import UploadPlan
 from osm_polygon_description_tag.runtime.logging import RunLogger
-from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
 from tests.helpers.messages import exactly
 from tests.helpers.sentences import fake_splitter

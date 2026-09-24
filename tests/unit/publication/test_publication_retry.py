@@ -8,13 +8,14 @@ from pathlib import Path
 import pytest
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag.manifest import (
+from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     RunCounts,
     output_identity_for,
     source_identity_for,
     write_manifest,
 )
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import (
     PublicationError,
     _classify_failure,
@@ -22,7 +23,6 @@ from osm_polygon_description_tag.publication import (
     create_upload_plan,
     execute_upload,
 )
-from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
 from tests.helpers.messages import exactly
 

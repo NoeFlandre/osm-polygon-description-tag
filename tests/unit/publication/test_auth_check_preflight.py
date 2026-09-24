@@ -28,8 +28,8 @@ from typing import Any
 
 import pytest
 
-from osm_polygon_description_tag.config import Paths
-from osm_polygon_description_tag.orchestrator import (
+from osm_polygon_description_tag.runtime.config import Paths
+from osm_polygon_description_tag.workflow.orchestrator import (
     PreflightError,
     default_preflight,
 )

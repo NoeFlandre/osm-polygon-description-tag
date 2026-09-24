@@ -16,9 +16,9 @@ from osm_polygon_description_tag.cli import (
     handle_validate,
     run,
 )
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import PublicationError
 from osm_polygon_description_tag.runtime import config as runtime_config
-from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
 
 COMMANDS = (

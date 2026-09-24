@@ -23,12 +23,12 @@ from typing import Any
 
 import pytest
 
-from osm_polygon_description_tag.config import Paths
-from osm_polygon_description_tag.orchestrator import (
+from osm_polygon_description_tag.publication import REPO_ID, UploadItem
+from osm_polygon_description_tag.runtime.config import Paths
+from osm_polygon_description_tag.workflow.orchestrator import (
     PUBLICATION_STATE_FILENAME,
     default_hub_verifier_factory,
 )
-from osm_polygon_description_tag.publication import REPO_ID, UploadItem
 
 
 class _FakeRepo:
@@ -180,7 +180,7 @@ def _fake_exporter() -> object:
         from shapely import to_wkb
         from shapely.geometry import Polygon
 
-        from osm_polygon_description_tag.extraction import ExportRecord
+        from osm_polygon_description_tag.osm.extraction import ExportRecord
 
         stem = source_path.name.removesuffix(".osm.pbf")
         geom = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
@@ -313,8 +313,7 @@ def test_cli_run_and_publish_invokes_default_verifier(
     """The public CLI's run-and-publish selects the default production verifier."""
     from shapely.geometry import Polygon
 
-    from osm_polygon_description_tag._resources import project_code_revision
-    from osm_polygon_description_tag.manifest import (
+    from osm_polygon_description_tag.dataset.manifest import (
         Manifest,
         RunCounts,
         current_area_policy_sha256,
@@ -323,7 +322,8 @@ def test_cli_run_and_publish_invokes_default_verifier(
         source_identity_for,
         write_manifest,
     )
-    from osm_polygon_description_tag.storage import write_geoparquet
+    from osm_polygon_description_tag.dataset.storage import write_geoparquet
+    from osm_polygon_description_tag.runtime.resources import project_code_revision
     from tests.conftest import make_record_dict
 
     paths, source_root, data_root = _setup_workspace(tmp_path)
@@ -474,8 +474,7 @@ def test_no_state_written_before_verifier_succeeds(
     """publication-state.json is written only after the verifier confirms the SHA."""
     from shapely.geometry import Polygon
 
-    from osm_polygon_description_tag._resources import project_code_revision
-    from osm_polygon_description_tag.manifest import (
+    from osm_polygon_description_tag.dataset.manifest import (
         Manifest,
         RunCounts,
         current_area_policy_sha256,
@@ -484,7 +483,8 @@ def test_no_state_written_before_verifier_succeeds(
         source_identity_for,
         write_manifest,
     )
-    from osm_polygon_description_tag.storage import write_geoparquet
+    from osm_polygon_description_tag.dataset.storage import write_geoparquet
+    from osm_polygon_description_tag.runtime.resources import project_code_revision
     from tests.conftest import make_record_dict
 
     paths, source_root, data_root = _setup_workspace(tmp_path)
@@ -579,7 +579,7 @@ def test_default_verifier_fails_closed_on_empty_identity(
 
     monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
 
-    from osm_polygon_description_tag.orchestrator import HubVerificationError
+    from osm_polygon_description_tag.workflow.orchestrator import HubVerificationError
 
     with pytest.raises(HubVerificationError, match="identity"):
         factory(REPO_ID, items)
@@ -603,7 +603,7 @@ def test_default_verifier_fails_closed_on_repo_info_error(
 
     monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
 
-    from osm_polygon_description_tag.orchestrator import HubVerificationError
+    from osm_polygon_description_tag.workflow.orchestrator import HubVerificationError
 
     with pytest.raises(HubVerificationError, match="not accessible"):
         factory(REPO_ID, items)
@@ -630,7 +630,7 @@ def test_default_verifier_fails_closed_on_empty_revision(
 
     monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
 
-    from osm_polygon_description_tag.orchestrator import HubVerificationError
+    from osm_polygon_description_tag.workflow.orchestrator import HubVerificationError
 
     with pytest.raises(HubVerificationError, match="empty revision"):
         factory(REPO_ID, items)
@@ -667,7 +667,7 @@ def test_default_verifier_fails_closed_on_size_mismatch(
 
     monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
 
-    from osm_polygon_description_tag.orchestrator import HubVerificationError
+    from osm_polygon_description_tag.workflow.orchestrator import HubVerificationError
 
     with pytest.raises(HubVerificationError, match="size mismatch"):
         factory(REPO_ID, items)
@@ -704,7 +704,7 @@ def test_default_verifier_fails_closed_on_lfs_sha_mismatch(
 
     monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
 
-    from osm_polygon_description_tag.orchestrator import HubVerificationError
+    from osm_polygon_description_tag.workflow.orchestrator import HubVerificationError
 
     with pytest.raises(HubVerificationError, match="LFS SHA mismatch"):
         factory(REPO_ID, items)
@@ -751,7 +751,7 @@ def test_default_verifier_fails_closed_on_download_error(
 
     monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
 
-    from osm_polygon_description_tag.orchestrator import HubVerificationError
+    from osm_polygon_description_tag.workflow.orchestrator import HubVerificationError
 
     with pytest.raises(HubVerificationError, match="download failed"):
         factory(REPO_ID, items)

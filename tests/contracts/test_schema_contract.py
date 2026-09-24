@@ -1,6 +1,6 @@
 import pyarrow as pa
 
-from osm_polygon_description_tag.schema import SCHEMA, SCHEMA_VERSION, geo_metadata
+from osm_polygon_description_tag.dataset.schema import SCHEMA, SCHEMA_VERSION, geo_metadata
 
 
 def test_arrow_schema_is_frozen() -> None:

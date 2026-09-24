@@ -57,7 +57,7 @@ def two_jobs(tmp_path: Path) -> tuple[Path, tuple[object, object], tuple[object,
     from shapely.geometry import Polygon
 
     from osm_polygon_description_tag.dataset.languages.snapshot import prepare_snapshot
-    from osm_polygon_description_tag.storage import write_geoparquet
+    from osm_polygon_description_tag.dataset.storage import write_geoparquet
     from tests.conftest import make_record_dict
 
     source = tmp_path / "source"

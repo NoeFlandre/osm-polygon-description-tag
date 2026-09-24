@@ -34,8 +34,7 @@ import pytest
 from shapely.geometry import Polygon
 
 from osm_polygon_description_tag.cli import run as cli_run
-from osm_polygon_description_tag.config import Paths
-from osm_polygon_description_tag.manifest import (
+from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     RunCounts,
     current_area_policy_sha256,
@@ -45,15 +44,16 @@ from osm_polygon_description_tag.manifest import (
     source_identity_for,
     write_manifest,
 )
-from osm_polygon_description_tag.orchestrator import (
-    PUBLICATION_STATE_FILENAME,
-    read_publication_state,
-)
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import (
     REPO_ID,
     _build_metadata_only_upload_plan,
 )
-from osm_polygon_description_tag.storage import write_geoparquet
+from osm_polygon_description_tag.runtime.config import Paths
+from osm_polygon_description_tag.workflow.orchestrator import (
+    PUBLICATION_STATE_FILENAME,
+    read_publication_state,
+)
 from tests.conftest import make_record_dict
 
 _CLOCK = "2026-07-27T00:00:00+00:00"
@@ -384,7 +384,7 @@ def test_metadata_verification_failure_leaves_state_incomplete(
 
     def verifier_factory_failing():
         def f(_repo_id: str, _files: object) -> str:
-            from osm_polygon_description_tag.orchestrator import HubVerificationError
+            from osm_polygon_description_tag.workflow.orchestrator import HubVerificationError
 
             raise HubVerificationError("verifier failed")
 

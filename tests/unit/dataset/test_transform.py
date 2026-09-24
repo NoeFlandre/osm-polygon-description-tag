@@ -14,7 +14,7 @@ from osm_polygon_description_tag.dataset.transform import (
     geodesic_area_m2,
     transform_record,
 )
-from osm_polygon_description_tag.extraction import ExportRecord
+from osm_polygon_description_tag.osm.extraction import ExportRecord
 
 
 def test_descriptions_preserve_base_suffixes_and_values() -> None:

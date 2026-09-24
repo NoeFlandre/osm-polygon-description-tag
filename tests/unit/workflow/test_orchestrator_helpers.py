@@ -13,8 +13,8 @@ from unittest.mock import Mock
 import pytest
 
 import osm_polygon_description_tag.workflow.orchestrator as orchestrator
-from osm_polygon_description_tag.config import Paths
 from osm_polygon_description_tag.osm.discovery import Source
+from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.workflow.source_runner import (
     STATUS_BUILT,
     STATUS_PUBLISHED,

@@ -20,7 +20,6 @@ import pytest
 from shapely.geometry import Polygon
 
 import osm_polygon_description_tag.dataset.geography.card as card_module
-from osm_polygon_description_tag._resources import dataset_card_template
 from osm_polygon_description_tag.dataset.geography import (
     H3_MAP_ASSET_RELATIVE_PATH,
     H3_MAP_DESCRIPTION,
@@ -37,6 +36,7 @@ from osm_polygon_description_tag.dataset.geography.card import (
     write_map_block_marker_to_template,
 )
 from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
+from osm_polygon_description_tag.runtime.resources import dataset_card_template
 from osm_polygon_description_tag.workflow.orchestrator import _build_metadata_only_upload_plan
 from tests.conftest import make_record_dict
 from tests.helpers.dataset import write_finalized_dataset

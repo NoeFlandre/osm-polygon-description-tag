@@ -88,12 +88,12 @@ def test_publication_state_written_only_after_remote_verification(tmp_path: Path
     """If the upload fails before remote verification, no state is written."""
     from shapely.geometry import Polygon
 
-    from osm_polygon_description_tag.config import Paths
-    from osm_polygon_description_tag.orchestrator import (
+    from osm_polygon_description_tag.dataset.storage import write_geoparquet
+    from osm_polygon_description_tag.runtime.config import Paths
+    from osm_polygon_description_tag.workflow.orchestrator import (
         PUBLICATION_STATE_FILENAME,
         run_and_publish,
     )
-    from osm_polygon_description_tag.storage import write_geoparquet
     from tests.conftest import make_record_dict
 
     source_root = tmp_path / "raw"

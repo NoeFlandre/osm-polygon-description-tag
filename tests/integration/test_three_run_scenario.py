@@ -18,9 +18,9 @@ from pathlib import Path
 
 import pytest
 
-from osm_polygon_description_tag.config import Paths
-from osm_polygon_description_tag.extraction import ExportRecord
-from osm_polygon_description_tag.orchestrator import (
+from osm_polygon_description_tag.osm.extraction import ExportRecord
+from osm_polygon_description_tag.runtime.config import Paths
+from osm_polygon_description_tag.workflow.orchestrator import (
     PUBLICATION_STATE_FILENAME,
     run_and_publish,
 )
@@ -222,7 +222,7 @@ def test_run_and_publish_completeness_uses_full_resumability(tmp_path: Path) -> 
     is rebuilt from scratch (not classified as resumable)."""
     from shapely.geometry import Polygon
 
-    from osm_polygon_description_tag.manifest import (
+    from osm_polygon_description_tag.dataset.manifest import (
         Manifest,
         current_area_policy_sha256,
         current_code_revision,
@@ -231,7 +231,7 @@ def test_run_and_publish_completeness_uses_full_resumability(tmp_path: Path) -> 
         source_identity_for,
         write_manifest,
     )
-    from osm_polygon_description_tag.storage import write_geoparquet
+    from osm_polygon_description_tag.dataset.storage import write_geoparquet
     from tests.conftest import make_record_dict
 
     paths, source_root, data_root = _setup_workspace(tmp_path)
@@ -264,7 +264,7 @@ def test_run_and_publish_completeness_uses_full_resumability(tmp_path: Path) -> 
             started_at="2026-07-27T00:00:00+00:00",
             completed_at="2026-07-27T00:01:00+00:00",
             counts=__import__(
-                "osm_polygon_description_tag.manifest", fromlist=["RunCounts"]
+                "osm_polygon_description_tag.dataset.manifest", fromlist=["RunCounts"]
             ).RunCounts(emitted_features=1, included_rows=1, rejections={}),
         ),
         data_root / "manifests" / "a.manifest.json",

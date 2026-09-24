@@ -6,13 +6,14 @@ from types import SimpleNamespace
 import pytest
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag.manifest import (
+from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     RunCounts,
     output_identity_for,
     source_identity_for,
     write_manifest,
 )
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import (
     PublicationError,
     create_upload_plan,
@@ -47,7 +48,6 @@ from osm_polygon_description_tag.publication.planning import (
     _validate_uploader_cache,
     file_sha256_bytes,
 )
-from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
 
 

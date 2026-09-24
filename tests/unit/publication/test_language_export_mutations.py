@@ -17,6 +17,7 @@ from osm_polygon_description_tag.dataset.languages.checkpoint import (
 from osm_polygon_description_tag.dataset.languages.models import LanguageResult, LanguageStatus
 from osm_polygon_description_tag.dataset.languages.snapshot import prepare_snapshot
 from osm_polygon_description_tag.dataset.languages.worker import process_shard
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import language as export_module
 from osm_polygon_description_tag.publication.language import (
     LanguageExport,
@@ -35,7 +36,6 @@ from osm_polygon_description_tag.publication.language_upload import (
     verify_language_publication,
 )
 from osm_polygon_description_tag.publication.models import UploadItem, UploadPlan
-from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
 from tests.helpers.sentences import fake_splitter
 
