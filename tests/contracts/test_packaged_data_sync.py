@@ -7,11 +7,13 @@ copies the repository also maintains elsewhere.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
-PACKAGED = Path("src/osm_polygon_description_tag/_data")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+PACKAGED = REPO_ROOT / "src" / "osm_polygon_description_tag" / "_data"
 
 MIRRORS = [
     ("osmium-export.json", Path("config/osmium-export.json")),
@@ -23,4 +25,6 @@ MIRRORS = [
 
 @pytest.mark.parametrize(("packaged_name", "mirror"), MIRRORS, ids=lambda value: str(value))
 def test_packaged_file_is_byte_identical_to_its_mirror(packaged_name: str, mirror: Path) -> None:
-    assert (PACKAGED / packaged_name).read_bytes() == mirror.read_bytes()
+    if "MUTANT_UNDER_TEST" in os.environ:
+        pytest.skip("repository copies are checked on the canonical source tree")
+    assert (PACKAGED / packaged_name).read_bytes() == (REPO_ROOT / mirror).read_bytes()
