@@ -25,6 +25,7 @@ from osm_polygon_description_tag.dataset.deduplication import (
     DeduplicationError,
     DeduplicationResult,
     _assert_known_sources,
+    _batches_for_source,
     _canonical_relation,
     _complete_result,
     _DeduplicationContext,
@@ -37,7 +38,6 @@ from osm_polygon_description_tag.dataset.deduplication import (
     _read_state,
     _recorded_input_hashes,
     _resume_staged,
-    _rows_for_source,
     _skipped_result,
     _sql_literal,
     _stage_changes,
@@ -144,7 +144,7 @@ def test_stage_source_writes_reduced_parquet_and_manifest(
     )
     stage_root = data_root / ".work" / "stage"
     seen: dict[str, object] = {}
-    real_writer = dedup_module.write_geoparquet
+    real_writer = dedup_module.write_geoparquet_batches
     real_manifest_writer = dedup_module.write_manifest
 
     def writer(*args: object, **kwargs: object) -> int:
@@ -156,7 +156,7 @@ def test_stage_source_writes_reduced_parquet_and_manifest(
         seen["manifest_target"] = target
         real_manifest_writer(actual_manifest, target)
 
-    monkeypatch.setattr(dedup_module, "write_geoparquet", writer)
+    monkeypatch.setattr(dedup_module, "write_geoparquet_batches", writer)
     monkeypatch.setattr(dedup_module, "write_manifest", manifest_writer)
 
     connection = duckdb.connect()
@@ -225,7 +225,7 @@ def test_stage_source_treats_missing_count_row_as_zero(
         target.write_bytes(b"staged")
         return 0
 
-    monkeypatch.setattr(dedup_module, "write_geoparquet", fake_writer)
+    monkeypatch.setattr(dedup_module, "write_geoparquet_batches", fake_writer)
 
     new_rows, entry = _stage_source(Connection(), parquet, manifest, stage_root)
 
@@ -562,7 +562,7 @@ def test_assert_known_sources_queries_the_deduplicated_relation() -> None:
     assert queries == ["SELECT DISTINCT source_pbf FROM deduplicated"]
 
 
-def test_rows_for_source_filters_and_orders_canonical_rows(tmp_path: Path) -> None:
+def test_batches_for_source_filters_and_orders_canonical_rows(tmp_path: Path) -> None:
     parquet = tmp_path / "rows.parquet"
     records = _two_records()
     records.reverse()
@@ -581,7 +581,8 @@ def test_rows_for_source_filters_and_orders_canonical_rows(tmp_path: Path) -> No
             "INSERT INTO deduplicated SELECT * FROM read_parquet(?)",
             [str(other)],
         )
-        rows = tuple(_rows_for_source(connection, "a.osm.pbf"))
+        batches = _batches_for_source(connection, "a.osm.pbf")
+        rows = [row for batch in batches for row in batch.to_pylist()]
     finally:
         connection.close()
 
@@ -589,7 +590,7 @@ def test_rows_for_source_filters_and_orders_canonical_rows(tmp_path: Path) -> No
     assert {row["source_pbf"] for row in rows} == {"a.osm.pbf"}
 
 
-def test_rows_for_source_builds_the_expected_filter_query() -> None:
+def test_batches_for_source_builds_the_expected_filter_query() -> None:
     queries: list[tuple[str, list[str]]] = []
 
     class Result:
@@ -602,7 +603,7 @@ def test_rows_for_source_builds_the_expected_filter_query() -> None:
             queries.append((query, parameters))
             return Result()
 
-    assert tuple(_rows_for_source(Connection(), "a.osm.pbf")) == ()  # type: ignore[arg-type]
+    assert tuple(_batches_for_source(Connection(), "a.osm.pbf")) == ()  # type: ignore[arg-type]
     assert queries == [
         (
             f"SELECT {', '.join(SCHEMA.names)} FROM deduplicated "  # noqa: S608
@@ -910,8 +911,19 @@ def test_resume_staged_promotes_state_and_returns_deduplicated_result(
     assert writes[0][1]["status"] == "complete"
     assert "stage_dir" not in writes[0][1]
     assert writes[0][1]["outputs"] == {"a.parquet": "output-sha"}
-    assert hashed_paths == [output, output]
+    # Promotion reuses the verified and staged hashes instead of rereading files.
+    assert hashed_paths == [output]
     assert result == DeduplicationResult("deduplicated", 8, 6, 2, 1)
+
+
+def test_promoted_output_hashes_prefer_staged_hashes_and_sort_names() -> None:
+    current = {"b.parquet": "b-current", "a.parquet": "a-input"}
+    staged = {"b.parquet": "b-staged"}
+
+    outputs = dedup_module._promoted_output_hashes(current, staged)
+
+    assert outputs == {"a.parquet": "a-input", "b.parquet": "b-staged"}
+    assert list(outputs) == ["a.parquet", "b.parquet"]
 
 
 def test_resume_staged_accepts_state_without_a_stage_directory(

@@ -21,8 +21,10 @@ from pathlib import Path
 from typing import Any, cast
 
 import duckdb
+import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+import shapely
 from shapely import from_wkb
 from shapely.errors import ShapelyError
 from shapely.geometry import MultiPolygon, Polygon
@@ -599,13 +601,129 @@ def _coerce_bbox_values(values: tuple[object, ...]) -> tuple[float, ...] | None:
     return coordinates
 
 
+_FAST_GEOMETRY_TYPE_IDS = {"Polygon": 3, "MultiPolygon": 6}
+_BBOX_COLUMNS = ("bbox_min_x", "bbox_min_y", "bbox_max_x", "bbox_max_y")
+
+
 def _summarize_spatial_batch(
     batch: pa.RecordBatch,
     *,
     source_name: str,
     row_offset: int,
 ) -> _SpatialSummary:
-    """Validate and summarize one bounded spatial Arrow batch."""
+    """Validate and summarize one bounded spatial Arrow batch.
+
+    A vectorized pass handles batches that are entirely valid; any batch it
+    cannot vouch for goes through the per-row pass, which alone reports errors.
+    """
+    summary = _vectorized_spatial_summary(batch)
+    if summary is not None:
+        return summary
+    return _summarize_spatial_batch_rows(batch, source_name=source_name, row_offset=row_offset)
+
+
+def _finite_float_column(batch: pa.RecordBatch, name: str) -> np.ndarray | None:
+    column = batch.column(name)
+    if column.type != pa.float64() or column.null_count:
+        return None
+    values = column.to_numpy()
+    return values if bool(np.isfinite(values).all()) else None
+
+
+def _first_extreme(values: np.ndarray, *, pick_min: bool) -> float:
+    value = float(values.min() if pick_min else values.max())
+    if value == 0.0:
+        # Signed zeros compare equal; Python's min/max keep the first one seen.
+        listed = values.tolist()
+        return float(min(listed) if pick_min else max(listed))
+    return value
+
+
+def _expected_type_ids(batch: pa.RecordBatch) -> np.ndarray | None:
+    geometry_types = batch.column("geometry_type")
+    if geometry_types.null_count:
+        return None
+    type_names = geometry_types.to_pylist()
+    if not set(type_names) <= _FAST_GEOMETRY_TYPE_IDS.keys():
+        return None
+    return np.array([_FAST_GEOMETRY_TYPE_IDS[name] for name in type_names])
+
+
+def _decoded_wkbs(batch: pa.RecordBatch) -> np.ndarray | None:
+    wkbs = batch.column("geometry")
+    if wkbs.null_count or wkbs.type != pa.binary():
+        return None
+    try:
+        return shapely.from_wkb(wkbs.to_numpy(zero_copy_only=False))
+    except (ValueError, ShapelyError):
+        return None
+
+
+def _vectorized_geometries(batch: pa.RecordBatch) -> np.ndarray | None:
+    """Decode the batch's geometry when every row would pass ``_decode_geometry``."""
+    expected_ids = _expected_type_ids(batch)
+    geometries = None if expected_ids is None else _decoded_wkbs(batch)
+    if geometries is None:
+        return None
+    valid = (
+        ~shapely.is_empty(geometries)
+        & shapely.is_valid(geometries)
+        & (shapely.get_type_id(geometries) == expected_ids)
+    )
+    return geometries if bool(valid.all()) else None
+
+
+def _finite_bbox_columns(batch: pa.RecordBatch) -> list[np.ndarray] | None:
+    columns = [_finite_float_column(batch, name) for name in _BBOX_COLUMNS]
+    if any(values is None for values in columns):
+        return None
+    return cast(list[np.ndarray], columns)
+
+
+def _vectorized_spatial_summary(batch: pa.RecordBatch) -> _SpatialSummary | None:
+    """Summarize ``batch`` without per-row Python, or return ``None`` to fall back."""
+    if batch.num_rows == 0:
+        return None
+    areas = _finite_float_column(batch, "area_m2")
+    bboxes = _finite_bbox_columns(batch)
+    geometries = None if areas is None or bboxes is None else _vectorized_geometries(batch)
+    if geometries is None:
+        return None
+    return _measured_summary(cast(np.ndarray, areas), cast(list[np.ndarray], bboxes), geometries)
+
+
+def _measured_summary(
+    areas: np.ndarray, bboxes: list[np.ndarray], geometries: np.ndarray
+) -> _SpatialSummary:
+    polygons = shapely.get_parts(geometries)
+    holes = int(shapely.get_num_interior_rings(polygons).sum())
+    rings = len(polygons) + holes
+    multipolygons = shapely.get_type_id(geometries) == _FAST_GEOMETRY_TYPE_IDS["MultiPolygon"]
+    min_x, min_y, max_x, max_y = (
+        _first_extreme(values, pick_min=name.startswith("bbox_min"))
+        for values, name in zip(bboxes, _BBOX_COLUMNS, strict=True)
+    )
+    return _SpatialSummary(
+        rows=len(geometries),
+        area_total_m2=math.fsum(areas.tolist()),
+        area_mean_m2=None,
+        dataset_bbox=(min_x, min_y, max_x, max_y),
+        geometry_vertices_total=int(shapely.get_num_coordinates(polygons).sum()) - rings,
+        geometry_rings_total=rings,
+        geometry_holes_total=holes,
+        multipolygon_components_total=int(
+            shapely.get_num_geometries(geometries[multipolygons]).sum()
+        ),
+    )
+
+
+def _summarize_spatial_batch_rows(
+    batch: pa.RecordBatch,
+    *,
+    source_name: str,
+    row_offset: int,
+) -> _SpatialSummary:
+    """Validate and summarize one spatial Arrow batch row by row."""
     areas = batch.column("area_m2").to_pylist()
     geometry_types = batch.column("geometry_type").to_pylist()
     bbox_values = zip(
