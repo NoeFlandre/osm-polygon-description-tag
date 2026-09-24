@@ -105,18 +105,26 @@ def _check_entry_metadata(item: UploadItem, entry: Any, revision: str) -> bool:
         raise _RemoteFileMismatch(
             f"remote file missing in revision {revision}: {item.relative_path}"
         )
+    _check_entry_size(item, entry)
+    return _lfs_sha_settles(item, entry)
+
+
+def _check_entry_size(item: UploadItem, entry: Any) -> None:
     size = getattr(entry, "size", None)
     if size is not None and int(size) != int(item.size_bytes):
         raise _RemoteFileMismatch(
             f"remote size mismatch for {item.relative_path}: local={item.size_bytes}, remote={size}"
         )
+
+
+def _lfs_sha_settles(item: UploadItem, entry: Any) -> bool:
     lfs_info = getattr(entry, "lfs", None)
     lfs_sha = getattr(lfs_info, "sha256", None) if lfs_info is not None else None
-    if lfs_sha:
-        if str(lfs_sha).lower() != str(item.sha256).lower():
-            raise _RemoteFileMismatch(f"remote LFS SHA mismatch for {item.relative_path}")
-        return True
-    return False
+    if not lfs_sha:
+        return False
+    if str(lfs_sha).lower() != str(item.sha256).lower():
+        raise _RemoteFileMismatch(f"remote LFS SHA mismatch for {item.relative_path}")
+    return True
 
 
 def _download_for_hash(
@@ -276,6 +284,10 @@ def _reconcile_managed_files(repo_id: str, expected_paths: set[str]) -> str | No
         repo_type="dataset",
         commit_message="Remove stale generated dataset artifacts",
     )
+    return _deletion_revision(api, repo_id, commit)
+
+
+def _deletion_revision(api: Any, repo_id: str, commit: Any) -> str | None:
     revision = getattr(commit, "oid", None)
     if revision:
         return str(revision)
