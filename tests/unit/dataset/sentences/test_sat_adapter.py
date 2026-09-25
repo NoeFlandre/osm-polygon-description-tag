@@ -289,13 +289,19 @@ def test_an_unhashable_model_path_is_reported_by_its_own_path(
     _install_fake_runtime(monkeypatch, _FakeModel())
     model_dir = _pinned_model(tmp_path, monkeypatch)
     weights = model_dir / "model.safetensors"
-    weights.chmod(0o000)
+    # ``chmod(0o000)`` does not stop root from reading the file, so the read
+    # failure is injected at ``Path.open`` to hold on every user account.
+    real_open = Path.open
 
-    try:
-        with pytest.raises(SentenceSplitterError) as caught:
-            build_sat_splitter(model_dir=model_dir)
-    finally:
-        weights.chmod(0o600)
+    def _refuse_weights(self: Path, *args: object, **kwargs: object) -> object:
+        if self == weights:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_open(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "open", _refuse_weights)
+
+    with pytest.raises(SentenceSplitterError) as caught:
+        build_sat_splitter(model_dir=model_dir)
 
     assert str(caught.value) == f"could not hash the SaT model: {weights}"
 
