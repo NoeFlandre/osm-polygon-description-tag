@@ -632,6 +632,21 @@ def test_an_existing_marked_section_is_replaced_in_place(
             "---\nconfigs:\n- config_name: a\n  same: 1\n  same: 2\n---\nbody\n",
             "dataset card front matter is malformed: duplicate YAML key: 'same'",
         ),
+        pytest.param(
+            "---\n# only a comment\n---\nbody\n",
+            "dataset card front matter must be a mapping",
+            id="comment-only",
+        ),
+        pytest.param(
+            "---\n!!set\nconfigs:\n---\nbody\n",
+            "dataset card front matter must be a mapping",
+            id="set-shaped-like-a-mapping",
+        ),
+        pytest.param(
+            "---\nconfigs: &self [*self]\n---\nbody\n",
+            "dataset card configs entries must be mappings",
+            id="recursive-alias-loads-then-fails-shape",
+        ),
     ],
 )
 def test_a_malformed_front_matter_is_refused_with_an_exact_message(
@@ -687,6 +702,27 @@ def test_a_malformed_generated_section_is_refused_with_an_exact_message(
 
     with pytest.raises(LanguagePublicationError, match=exactly(message)):
         install_language_card(readme, export)
+
+
+def test_a_marker_after_a_bare_carriage_return_starts_a_line(export: LanguageExport) -> None:
+    readme = f"{_BLOCK_FRONT}---\nintro\n\r{_START}\n{_HEADING}\n{_END}\n"
+
+    updated = install_language_card(readme, export)
+
+    assert updated.count(_START) == 1
+    assert updated.endswith(f"intro\n\r\n\n{_section(export)}")
+
+
+def test_a_bare_carriage_return_card_gets_its_config_on_its_own_line(
+    export: LanguageExport,
+) -> None:
+    readme = "---\nconfigs:\r- config_name: default\rother: 1\n---\n# T\n"
+
+    updated = install_language_card(readme, export)
+
+    assert updated.startswith(
+        f"---\nconfigs:\r- config_name: default\r{_block_entry('')}\nother: 1\n---\n"
+    )
 
 
 def test_markers_at_the_start_of_crlf_lines_are_accepted(export: LanguageExport) -> None:
