@@ -9,10 +9,10 @@ path, and both would corrupt a 386-shard run silently.
 
 import json
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 
 import pytest
-from shapely.geometry import Polygon
 
 from osm_polygon_description_tag.dataset.languages import worker as worker_module
 from osm_polygon_description_tag.dataset.languages.checkpoint import (
@@ -27,9 +27,8 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
     prepare_snapshot,
 )
 from osm_polygon_description_tag.dataset.languages.worker import MAX_BATCH_SIZE, process_shard
-from osm_polygon_description_tag.storage import write_geoparquet
-from tests.conftest import make_record_dict
 from tests.helpers.messages import exactly
+from tests.helpers.parquet import write_description_shard
 from tests.helpers.sentences import fake_splitter
 
 SHARD = "region.parquet"
@@ -42,17 +41,7 @@ def _detector(text: str) -> LanguageResult:
     return LanguageResult("eng", 0.9, 0.1, 0.8, LanguageStatus.DETECTED, "detected")
 
 
-def _write_shard(path: Path, count: int, *, start: int = 0) -> None:
-    records = (
-        make_record_dict(
-            Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-            {"description": f"A synthetic description number {index}"},
-            osm_id=index + 1,
-        )
-        for index in range(start, start + count)
-    )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    write_geoparquet(records, path, batch_size=_BATCH)
+_write_shard = partial(write_description_shard, batch_size=_BATCH)
 
 
 def _prepare(
