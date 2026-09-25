@@ -38,12 +38,12 @@ from pathlib import Path
 from typing import Any, cast
 
 from osm_polygon_description_tag.dataset.deduplication import deduplicate_dataset
+from osm_polygon_description_tag.dataset.docs import generate_dataset_docs
 from osm_polygon_description_tag.dataset.manifest import (
     output_identity_for,
     read_manifest,
     source_identity_for,
 )
-from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
 from osm_polygon_description_tag.observability.trackio import TrackioRecorder
 from osm_polygon_description_tag.osm.discovery import Source, discover_sources
 from osm_polygon_description_tag.osm.extraction import ExportRecord

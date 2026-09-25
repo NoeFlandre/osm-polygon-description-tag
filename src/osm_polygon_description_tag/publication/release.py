@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
+from osm_polygon_description_tag.dataset.docs import generate_dataset_docs
 from osm_polygon_description_tag.publication.models import (
     REPO_ID,
     PublicationError,

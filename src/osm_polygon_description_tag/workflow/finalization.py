@@ -11,6 +11,7 @@ import subprocess
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
+from osm_polygon_description_tag.dataset.docs import generate_dataset_docs
 from osm_polygon_description_tag.dataset.manifest import (
     ManifestError,
     _manifest_path_for,
@@ -20,7 +21,6 @@ from osm_polygon_description_tag.dataset.manifest import (
     read_manifest,
     source_identity_for,
 )
-from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
 from osm_polygon_description_tag.dataset.storage import StorageError, validate_geoparquet
 from osm_polygon_description_tag.osm.discovery import Source
 from osm_polygon_description_tag.publication.artifacts import (

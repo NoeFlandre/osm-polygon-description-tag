@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 from urllib.parse import quote
 
-from osm_polygon_description_tag.dataset.reporting import collect_stats
+from osm_polygon_description_tag.dataset.stats import collect_stats
 
 DEFAULT_TRACKIO_PROJECT = "osm-polygon-description-tag"
 DEFAULT_TRACKIO_SPACE_ID = "NoeFlandre/osm-polygon-description-tag-trackio"
