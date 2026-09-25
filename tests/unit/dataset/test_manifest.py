@@ -320,3 +320,21 @@ def test_write_manifest_is_atomic_and_never_partial(tmp_path: Path) -> None:
     # No leftover owned temporary files.
     assert list(tmp_path.glob(".*.tmp")) == []
     assert len(path.read_text(encoding="utf-8")) > 0
+
+
+@pytest.mark.parametrize("stored", [None, ""])
+def test_a_manifest_without_policy_digests_reads_them_as_the_empty_digest(
+    stored: str | None,
+) -> None:
+    """Legacy manifests predate both digests; they read back as sha256 of nothing."""
+    payload = _manifest().to_payload()
+    for key in ("area_policy_sha256", "output_algorithm_revision"):
+        if stored is None:
+            del payload[key]
+        else:
+            payload[key] = stored
+
+    restored = Manifest.from_payload(payload)
+
+    assert restored.area_policy_sha256 == hashlib.sha256(b"").hexdigest()
+    assert restored.output_algorithm_revision == hashlib.sha256(b"").hexdigest()

@@ -184,6 +184,7 @@ def test_keyboard_interrupt_escapes_immediately() -> None:
     assert len(calls) == 1, "exactly once; never retried"
 
 
+@pytest.mark.usefixtures("fake_osmium")
 def test_keyboardinterrupt_through_cli_returns_130(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

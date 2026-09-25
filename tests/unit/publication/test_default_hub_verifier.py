@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -308,6 +309,7 @@ def test_default_verifier_succeeds_when_remote_matches(
     assert factory(REPO_ID, items) == "verified-sha-9999"
 
 
+@pytest.mark.usefixtures("fake_osmium")
 def test_cli_run_and_publish_invokes_default_verifier(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -469,6 +471,7 @@ def test_cli_run_and_publish_invokes_default_verifier(
     assert sentry["ran"] is True, "default verifier must call HfApi.repo_info"
 
 
+@pytest.mark.usefixtures("fake_osmium")
 def test_no_state_written_before_verifier_succeeds(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -944,3 +947,18 @@ def test_a_failed_inventory_lookup_names_the_revision_it_used(
         default_hub_verifier_factory().verify_inventory(
             REPO_ID, (UploadItem(relative_path="data/a.parquet", size_bytes=1, sha256="a" * 64),)
         )
+
+
+def test_default_hub_verifier_factory_uses_lazy_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    import osm_polygon_description_tag.publication.verification as verification
+
+    class _Api:
+        def whoami(self) -> dict[str, str]:
+            return {"name": "tester"}
+
+        def repo_info(self, _repo_id: str, **_kwargs: object) -> SimpleNamespace:
+            return SimpleNamespace(sha="revision")
+
+    monkeypatch.setattr(verification._huggingface_hub, "HfApi", _Api)
+    verifier = verification.default_hub_verifier_factory()
+    assert verifier("owner/dataset", ()) == "revision"

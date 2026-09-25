@@ -75,6 +75,7 @@ def test_dummy_osmium_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         )
 
 
+@pytest.mark.usefixtures("fake_osmium")
 def test_preflight_reports_osmium_version(tmp_path: Path) -> None:
     """The preflight report includes the verified osmium version line."""
     paths = _paths(tmp_path)
@@ -90,6 +91,7 @@ def test_preflight_reports_osmium_version(tmp_path: Path) -> None:
     assert "libosmium" in report["osmium_version"] or "osmium version" in report["osmium_version"]
 
 
+@pytest.mark.usefixtures("fake_osmium")
 def test_preflight_reports_required_identifiers(tmp_path: Path) -> None:
     """The preflight report includes all required identifiers."""
     paths = _paths(tmp_path)
@@ -126,6 +128,7 @@ def test_preflight_requires_exact_confirm_repo(tmp_path: Path) -> None:
         )
 
 
+@pytest.mark.usefixtures("fake_osmium")
 def test_preflight_requires_hf_whoami_success(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

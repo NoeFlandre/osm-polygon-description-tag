@@ -2005,3 +2005,23 @@ def test_run_and_publish_uses_the_stable_default_progress_interval(
     orchestrator.run_and_publish(confirm_repo="owner/dataset", logger=logger)
 
     assert captured["progress_interval"] == 100_000
+
+
+def test_orchestrator_subprocess_bridge_restores_upload_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import osm_polygon_description_tag.publication.upload as publication_upload
+
+    original = publication_upload.default_runner_with_retry
+    commands: list[list[str]] = []
+
+    def fake_run_and_publish(**_kwargs: object) -> str:
+        publication_upload.default_runner_with_retry(["hf", "upload"], timeout=1)
+        return "ok"
+
+    monkeypatch.setattr(orchestrator, "_run_and_publish", fake_run_and_publish)
+    result = orchestrator._run_with_subprocess_bridge(commands.append)
+
+    assert result == "ok"
+    assert commands == [["hf", "upload"]]
+    assert publication_upload.default_runner_with_retry is original

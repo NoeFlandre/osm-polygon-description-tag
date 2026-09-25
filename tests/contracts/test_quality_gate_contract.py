@@ -669,6 +669,14 @@ def test_the_forced_fail_probe_follows_the_runs_test_selection() -> None:
     assert run_mutation_gate._probe_selection(()) == run_mutation_gate.SMOKE_TEST_SELECTION
 
 
+def test_the_whole_repository_probe_runs_tests_that_exist_and_reach_the_canary() -> None:
+    """Every shard mutates the dataset text canary, so the smoke tests must import it."""
+    for selected in run_mutation_gate.SMOKE_TEST_SELECTION:
+        smoke = PROJECT_ROOT / selected
+        assert smoke.is_file(), selected
+        assert "osm_polygon_description_tag.dataset.text" in smoke.read_text(encoding="utf-8")
+
+
 def test_sharded_mutation_gate_keeps_the_full_strictness() -> None:
     """Sharding may split which modules are mutated, never how strict the gate is."""
     justfile = (PROJECT_ROOT / "justfile").read_text(encoding="utf-8")

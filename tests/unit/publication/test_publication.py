@@ -19,7 +19,7 @@ from osm_polygon_description_tag.publication import (
     execute_upload,
     planning,
 )
-from osm_polygon_description_tag.publication.models import UploadItem
+from osm_polygon_description_tag.publication.models import PublishRetry, UploadItem
 from osm_polygon_description_tag.publication.planning import (
     _build_item,
     _collect_data_items,
@@ -50,6 +50,7 @@ from osm_polygon_description_tag.publication.planning import (
 )
 from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
+from tests.helpers.messages import exactly
 
 
 def _make_dataset(data_root: Path) -> None:
@@ -890,3 +891,89 @@ def test_execute_upload_invokes_runner_with_subprocess_run_by_default(tmp_path: 
         execute_upload(plan, confirmation=plan.identity_sha256)
     finally:
         publication.subprocess.run = original  # type: ignore[assignment]
+
+
+def test_execute_upload_rejects_missing_confirmation(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    _make_dataset(data_root)
+    plan = create_upload_plan(data_root)
+
+    with pytest.raises(
+        PublicationError,
+        match=exactly("confirmation required (must match freshly computed plan identity)"),
+    ):
+        execute_upload(plan, confirmation=None, runner=lambda _: None)
+
+
+def test_execute_upload_rejects_empty_manifest(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    _make_dataset(data_root)
+    # Replace the manifest with a placeholder "{}" to simulate stale state.
+    (data_root / "manifests" / "a-latest.manifest.json").write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(PublicationError, match="manifest"):
+        create_upload_plan(data_root)
+
+
+def test_execute_upload_rejects_invalid_manifest_json(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    _make_dataset(data_root)
+    (data_root / "manifests" / "a-latest.manifest.json").write_text("{not valid}", encoding="utf-8")
+
+    with pytest.raises(PublicationError, match="invalid manifest"):
+        create_upload_plan(data_root)
+
+
+def test_execute_upload_rejects_mismatched_parquet(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    _make_dataset(data_root)
+    # Mutate the parquet after writing the manifest so the output identity drifts.
+    (data_root / "data" / "a-latest.parquet").write_bytes(b"different")
+
+    with pytest.raises(PublicationError, match="identity"):
+        create_upload_plan(data_root)
+
+
+def test_publication_state_written_only_after_remote_verification(tmp_path: Path) -> None:
+    """If remote verification fails after the upload, no state is written."""
+    from osm_polygon_description_tag.config import Paths
+    from osm_polygon_description_tag.orchestrator import (
+        PUBLICATION_STATE_FILENAME,
+        run_and_publish,
+    )
+
+    source_root = tmp_path / "raw"
+    data_root = tmp_path / "generated"
+    source_root.mkdir()
+    data_root.mkdir()
+    (source_root / "a.osm.pbf").write_bytes(b"a-bytes")
+    paths = Paths(source_root=source_root, data_root=data_root)
+    record = make_record_dict(
+        Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+        {"description": "x"},
+        osm_id=1,
+        source_pbf="a.osm.pbf",
+    )
+    write_geoparquet(iter([record]), data_root / "data" / "a.parquet", batch_size=10)
+
+    def verifier(repo_id: str, files: tuple[object, ...]) -> str:
+        raise RuntimeError("hub unreachable")
+
+    with pytest.raises(Exception, match="hub unreachable"):
+        run_and_publish(
+            paths=paths,
+            confirm_repo="NoeFlandre/osm-polygon-description-tag",
+            preflight=lambda: {"preflight": "stub", "source_count": 1},
+            upload_runner=lambda command: "stdout-ignored",
+            clock=lambda: "2026-07-27T00:00:00+00:00",
+            exporter=lambda src, cfg: iter([]),
+            verifier=verifier,
+        )
+    assert not (data_root / PUBLICATION_STATE_FILENAME).is_file()
+
+
+def test_publish_retry_preserves_public_error_context() -> None:
+    error = PublishRetry("retry", exit_code=503, kind="http")
+    assert str(error) == "retry"
+    assert error.exit_code == 503
+    assert error.kind == "http"

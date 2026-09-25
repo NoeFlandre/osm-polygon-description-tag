@@ -337,7 +337,7 @@ jobs:
           import os
           import pathlib
 
-          # mutmut's forced-fail probe runs tests/unit/test_mutation_surface.py,
+          # mutmut's forced-fail probe runs tests/unit/dataset/test_text.py,
           # so every shard has to mutate something those tests reach. The canary
           # is mutated by all shards but scored only by the shard that owns it,
           # which keeps the scoring a clean partition of the source tree.
