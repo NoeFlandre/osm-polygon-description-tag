@@ -133,6 +133,7 @@ def _stub_hf_api_factory():
     return _factory
 
 
+@pytest.mark.usefixtures("fake_osmium")
 def test_three_run_scenario_through_public_cli(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -216,6 +217,7 @@ def test_three_run_scenario_through_public_cli(
     assert file_sha256(data_root / PUBLICATION_STATE_FILENAME) == snapshot_state
 
 
+@pytest.mark.usefixtures("fake_osmium")
 def test_three_run_partial_then_complete(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Run 1: first PBF published, second's runner raises. Run 2: completes the second."""
     paths, source_root, data_root = _setup_workspace(tmp_path)
@@ -325,6 +327,7 @@ def test_three_run_partial_then_complete(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert sentry["verified"] == 0
 
 
+@pytest.mark.usefixtures("fake_osmium")
 def test_publication_plan_invariant_under_repeated_runs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

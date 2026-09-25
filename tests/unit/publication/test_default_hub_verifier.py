@@ -308,6 +308,7 @@ def test_default_verifier_succeeds_when_remote_matches(
     assert factory(REPO_ID, items) == "verified-sha-9999"
 
 
+@pytest.mark.usefixtures("fake_osmium")
 def test_cli_run_and_publish_invokes_default_verifier(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -469,6 +470,7 @@ def test_cli_run_and_publish_invokes_default_verifier(
     assert sentry["ran"] is True, "default verifier must call HfApi.repo_info"
 
 
+@pytest.mark.usefixtures("fake_osmium")
 def test_no_state_written_before_verifier_succeeds(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

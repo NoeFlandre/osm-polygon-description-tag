@@ -261,6 +261,7 @@ def test_unrelated_hidden_files_remain_rejected(tmp_path: Path) -> None:
         _collect_allowlisted_files(data_root)
 
 
+@pytest.mark.usefixtures("fake_osmium")
 def test_uploader_cache_survives_across_runs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
