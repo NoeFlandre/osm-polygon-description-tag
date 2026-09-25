@@ -41,6 +41,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from osm_polygon_description_tag.dataset.languages.worker import DEFAULT_BATCH_SIZE
+from osm_polygon_description_tag.workflow.grid_policy import (
+    MAX_PROCESSING_SECONDS,
+    MAX_WALLTIME_SECONDS,
+)
+
 DEFAULT_SITE = "nancy"
 DEFAULT_POLL_SECONDS = 20
 DEFAULT_JOB_TIMEOUT_SECONDS = 2400
@@ -453,9 +459,9 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--remote-sat-model-path", required=True)
     parser.add_argument("--remote-operator-dir", required=True)
     parser.add_argument("--remote-cli", required=True)
-    parser.add_argument("--walltime-seconds", type=int, default=1800)
-    parser.add_argument("--processing-seconds", type=int, default=1200)
-    parser.add_argument("--batch-size", type=int, default=512)
+    parser.add_argument("--walltime-seconds", type=int, default=MAX_WALLTIME_SECONDS)
+    parser.add_argument("--processing-seconds", type=int, default=MAX_PROCESSING_SECONDS)
+    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--poll-seconds", type=int, default=DEFAULT_POLL_SECONDS)
     parser.add_argument("--job-timeout-seconds", type=int, default=DEFAULT_JOB_TIMEOUT_SECONDS)
     parser.add_argument("--max-shards", type=int, default=0)
