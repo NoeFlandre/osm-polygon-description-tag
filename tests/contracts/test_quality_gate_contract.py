@@ -29,6 +29,7 @@ from scripts.run_mutation_gate import (
     parse_changed_lines,
     recorded_associations,
     trim_associations,
+    with_probe_canary,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -1101,7 +1102,37 @@ def test_the_mutation_gate_reads_changed_lines_file(
 
     run_mutation_gate.main()
 
-    assert captured["changed_lines"] == {"src/example.py": (2, 3)}
+    canary = run_mutation_gate.PROBE_CANARY
+    canary_lines = len((PROJECT_ROOT / canary).read_text(encoding="utf-8").splitlines())
+    assert captured["changed_lines"] == {
+        "src/example.py": (2, 3),
+        canary: tuple(range(1, canary_lines + 1)),
+    }
+    assert captured["only_mutate"] == ("src/example.py", canary)
+
+
+def test_the_changed_lines_gate_mutates_the_whole_probe_canary(tmp_path: Path) -> None:
+    """Without the canary, mutmut finds no test for any mutant and stops early."""
+    canary = tmp_path / run_mutation_gate.PROBE_CANARY
+    canary.parent.mkdir(parents=True)
+    canary.write_text("a = 1\nb = 2\nc = 3\n", encoding="utf-8")
+
+    assert with_probe_canary({"src/example.py": (4,)}, tmp_path) == {
+        "src/example.py": (4,),
+        run_mutation_gate.PROBE_CANARY: (1, 2, 3),
+    }
+
+
+def test_a_changed_canary_keeps_only_its_changed_lines(tmp_path: Path) -> None:
+    scoped = {run_mutation_gate.PROBE_CANARY: (7,)}
+
+    assert with_probe_canary(scoped, tmp_path) == scoped
+
+
+def test_the_canary_the_gates_share_is_the_one_the_probe_tests_import() -> None:
+    workflow = (PROJECT_ROOT / ".github" / "workflows" / "quality.yml").read_text(encoding="utf-8")
+
+    assert f'CANARY = "{run_mutation_gate.PROBE_CANARY}"' in workflow
 
 
 def test_the_mutation_gate_reads_test_selection_file(
