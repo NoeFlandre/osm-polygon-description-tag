@@ -14,12 +14,15 @@ from typing import IO, cast
 
 import orjson
 
+from osm_polygon_description_tag.runtime.units import KIB
+
 # ---------------------------------------------------------------------------
 # Public types
 # ---------------------------------------------------------------------------
 
 #: Maximum bytes of child stderr retained for diagnostics.
 STDERR_CAP_BYTES = 1 << 20
+_STDERR_READ_CHUNK_BYTES = 64 * KIB
 
 _COPY_ESCAPES = {
     ord("t"): 0x09,
@@ -282,7 +285,7 @@ def _drain_stderr(stream: IO[bytes], buffer: bytearray, cap: int) -> None:
     """Read child stderr to EOF, retaining at most ``cap`` bytes for diagnostics."""
     try:
         while True:
-            chunk = stream.read(65536)
+            chunk = stream.read(_STDERR_READ_CHUNK_BYTES)
             if not chunk:
                 # pragma: no mutate start - return and break both execute finally close
                 break

@@ -31,6 +31,7 @@ from osm_polygon_description_tag.dataset.canonical_rows import (
     canonical_rows_sql,
     select_canonical_row,
 )
+from osm_polygon_description_tag.dataset.constants import DEFAULT_ARROW_BATCH_SIZE
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     _manifest_path_for,
@@ -54,7 +55,7 @@ _row_fingerprint = _canonical_rows._row_fingerprint
 _timestamp_rank = _canonical_rows._timestamp_rank
 _version = _canonical_rows._version
 _STATE_RELATIVE_PATH = Path(".work") / "dedup-state.json"
-_BATCH_SIZE = 4096
+_BATCH_SIZE = DEFAULT_ARROW_BATCH_SIZE
 
 
 class DeduplicationError(RuntimeError):
