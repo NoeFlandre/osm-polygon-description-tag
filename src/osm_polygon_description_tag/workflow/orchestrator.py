@@ -81,6 +81,7 @@ from osm_polygon_description_tag.publication.verification import (
 from osm_polygon_description_tag.runtime.cleanup import cleanup_stale_owned_temps
 from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.runtime.logging import RunLogger
+from osm_polygon_description_tag.runtime.time import utc_now_iso as _default_clock
 from osm_polygon_description_tag.workflow import finalization
 from osm_polygon_description_tag.workflow.artifacts import source_artifact_paths
 from osm_polygon_description_tag.workflow.build import build_one  # noqa: F401
@@ -855,12 +856,6 @@ def _upload_final_metadata(
         logger=logger,
         plan_validator=create_upload_plan,
     )
-
-
-def _default_clock() -> str:
-    from datetime import UTC, datetime
-
-    return datetime.now(UTC).isoformat()
 
 
 __all__ = [

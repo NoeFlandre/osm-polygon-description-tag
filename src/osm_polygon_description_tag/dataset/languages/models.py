@@ -1,7 +1,5 @@
 """Immutable contracts for conservative language detection."""
 
-import hashlib
-import json
 import math
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -11,6 +9,7 @@ from osm_polygon_description_tag.dataset.sentences import sat
 from osm_polygon_description_tag.dataset.sentences.languages import (
     supported_languages_fingerprint,
 )
+from osm_polygon_description_tag.runtime.serialization import sha256_json
 
 LINGUA_LIBRARY_NAME: Final = "lingua-language-detector"
 PINNED_LINGUA_VERSION: Final = "2.2.0"
@@ -220,7 +219,7 @@ class LanguageModelIdentity:
         scope = _validated_scope(self.language_scope)
         policy_payload = _policy_payload(self.policy)
         object.__setattr__(self, "language_scope", scope)
-        object.__setattr__(self, "policy_fingerprint", _sha256_json(policy_payload))
+        object.__setattr__(self, "policy_fingerprint", sha256_json(policy_payload))
         object.__setattr__(self, "splitter_name", sat.SPLITTER_NAME)
         object.__setattr__(self, "splitter_revision", sat.SAT_MODEL_REVISION)
         object.__setattr__(
@@ -275,7 +274,7 @@ def _set_lingua_identity(
     object.__setattr__(
         identity,
         "config_fingerprint",
-        _sha256_json(
+        sha256_json(
             {
                 "library_name": LINGUA_LIBRARY_NAME,
                 "library_version": PINNED_LINGUA_VERSION,
@@ -313,7 +312,7 @@ def _set_cascade_identity(
 
 
 def _glotlid_fingerprint(scope: tuple[str, ...], policy: dict[str, object]) -> str:
-    return _sha256_json(
+    return sha256_json(
         {
             "detector_name": GLOTLID_DETECTOR_NAME,
             "library_name": GLOTLID_LIBRARY_NAME,
@@ -332,7 +331,7 @@ def _glotlid_fingerprint(scope: tuple[str, ...], policy: dict[str, object]) -> s
 
 
 def _cascade_fingerprint(scope: tuple[str, ...], policy: dict[str, object]) -> str:
-    return _sha256_json(
+    return sha256_json(
         {
             "detector_name": CASCADE_DETECTOR_NAME,
             "primary_library_name": LINGUA_LIBRARY_NAME,
@@ -360,18 +359,6 @@ def _policy_payload(policy: LanguagePolicy) -> dict[str, object]:
         "min_alphabetic_chars": policy.min_alphabetic_chars,
         "tie_epsilon": policy.tie_epsilon,
     }
-
-
-def _sha256_json(payload: object) -> str:
-    # pragma: no mutate start - ensure_ascii=None equals False; exact fingerprints are tested
-    encoded = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode()
-    # pragma: no mutate end
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def _validated_scope(language_scope: tuple[str, ...]) -> tuple[str, ...]:

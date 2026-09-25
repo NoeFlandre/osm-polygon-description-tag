@@ -1,6 +1,5 @@
 """Strict adapter and loader for the pinned GlotLID v3 fallback model."""
 
-import hashlib
 import importlib
 import importlib.metadata as metadata
 import math
@@ -24,6 +23,7 @@ from osm_polygon_description_tag.dataset.languages.models import (
     LanguagePolicy,
     glotlid_model_identity,
 )
+from osm_polygon_description_tag.dataset.manifest import file_sha256
 
 GLOTLID_TOP_K: Final = 8
 _LABEL_PATTERN: Final = re.compile(r"__label__(?P<code>[a-z]{3})_(?P<script>[A-Za-z]{4})\Z")
@@ -133,12 +133,8 @@ def _download_model() -> Path:
 
 
 def _file_sha256(path: Path) -> str:
-    # ``hashlib`` resolves digest names case-insensitively, so an upper-case spelling
-    # selects the same algorithm and cannot change the digest this returns.
-    digest_name = "sha256"  # pragma: no mutate - digest names are case-insensitive
     try:
-        with path.open("rb") as handle:
-            return hashlib.file_digest(handle, digest_name).hexdigest()
+        return file_sha256(path)
     except OSError as error:
         raise LanguageDetectionError(f"could not hash the GlotLID model: {path}") from error
 
