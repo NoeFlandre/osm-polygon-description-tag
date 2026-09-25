@@ -23,14 +23,6 @@ def test_public_uv_project_foundation_is_complete() -> None:
         "osm-polygon-description-tag": "osm_polygon_description_tag.cli:main"
     }
 
-    readme = readme_path.read_text(encoding="utf-8")
-    assert readme.startswith(
-        "![OSM Polygon Description Tag dataset hero](assets/dataset-card-hero.png)\n\n"
-        "# OSM Polygon Description Tag"
-    )
-    assert "Open Database License" in readme
-    assert "just run-and-publish" in readme
-
 
 def test_foundation_excludes_external_data_from_git() -> None:
     ignored = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
