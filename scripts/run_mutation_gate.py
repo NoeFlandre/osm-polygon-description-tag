@@ -36,6 +36,26 @@ DEFAULT_MUTATION_BATCH_SIZE: int | None = None
 _ESCALATION_FACTOR = 8
 
 
+# mutmut only records which tests reach mutated code, and its forced-fail probe
+# only observes a failure, when the run also mutates code the probe tests import.
+# The sharded gate always mutates this module for that reason; the changed-lines
+# gate needs it too, or a pull request that leaves it untouched stops before the
+# first mutant with "could not find any test case for any mutant".
+PROBE_CANARY = "src/osm_polygon_description_tag/dataset/text.py"
+
+
+def with_probe_canary(
+    changed_lines: Mapping[str, tuple[int, ...]], root: Path = Path()
+) -> dict[str, tuple[int, ...]]:
+    """Return the changed lines plus every line of the canary module."""
+
+    scoped = dict(changed_lines)
+    if PROBE_CANARY not in scoped:
+        line_count = len((root / PROBE_CANARY).read_text(encoding="utf-8").splitlines())
+        scoped[PROBE_CANARY] = tuple(range(1, line_count + 1))
+    return scoped
+
+
 def parse_changed_lines(diff: str) -> dict[str, tuple[int, ...]]:
     """Parse added/modified new-file lines from a zero-context git diff."""
 
@@ -732,9 +752,10 @@ def main() -> None:
             changed_lines = parse_changed_lines(args.changed_lines_file.read_text(encoding="utf-8"))
         except OSError as error:
             raise SystemExit(f"cannot read changed lines file: {error}") from error
-        only_mutate = tuple(changed_lines)
-        if not only_mutate:
+        if not changed_lines:
             raise SystemExit("changed lines file contains no Python source changes")
+        changed_lines = with_probe_canary(changed_lines)
+        only_mutate = tuple(changed_lines)
     run_gate(
         max_children=args.max_children,
         fast_tests_per_function=args.fast_tests_per_function,
