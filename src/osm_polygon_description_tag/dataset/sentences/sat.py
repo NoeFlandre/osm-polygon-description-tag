@@ -19,13 +19,13 @@ whole module is importable on a machine that has neither wtpsplit nor torch.
 
 from __future__ import annotations
 
-import hashlib
 import importlib
 from collections.abc import Iterable
 from importlib import metadata
 from pathlib import Path
 from typing import Final, Protocol, cast
 
+from osm_polygon_description_tag.dataset.manifest import file_sha256
 from osm_polygon_description_tag.dataset.sentences.languages import SAT_SUPPORTED_LANGUAGES
 
 SPLITTER_NAME: Final = "sat-3l-sm"
@@ -64,12 +64,8 @@ def _installed_wtpsplit_version() -> str:
 
 
 def _file_sha256(path: Path) -> str:
-    # ``hashlib`` resolves digest names case-insensitively, so an upper-case spelling
-    # selects the same algorithm and cannot change the digest this returns.
-    digest_name = "sha256"  # pragma: no mutate - digest names are case-insensitive
     try:
-        with path.open("rb") as handle:
-            return hashlib.file_digest(handle, digest_name).hexdigest()
+        return file_sha256(path)
     except OSError as error:
         raise SentenceSplitterError(f"could not hash the SaT model: {path}") from error
 

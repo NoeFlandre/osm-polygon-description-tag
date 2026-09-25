@@ -256,10 +256,10 @@ def test_grid_operator_is_split_into_cohesive_package_modules() -> None:
     assert {path.name for path in modules} >= {
         "__init__.py",
         "bundle.py",
-        "intent.py",
+        "models.py",
         "script.py",
-        "submit.py",
-        "validation.py",
+        "submission.py",
+        "verify.py",
     }
     assert all(len(path.read_text(encoding="utf-8").splitlines()) <= 500 for path in modules)
 
