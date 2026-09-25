@@ -208,6 +208,12 @@ def test_account_wide_job_states_are_parsed_strictly() -> None:
         parse_account_job_states('[{"Job_Id":123,"state":"Running"}]')
 
 
+@pytest.mark.parametrize("text", ["", "\n", " \n"])
+def test_account_parser_keeps_blank_output_strict(text: str) -> None:
+    with pytest.raises(SchedulerError, match="valid JSON"):
+        parse_account_job_states(text)
+
+
 def test_account_wide_job_states_reject_inconsistent_json_identity() -> None:
     with pytest.raises(SchedulerError, match="job id"):
         parse_account_job_states('{"123":{"Job_Id":124,"state":"Running"}}')

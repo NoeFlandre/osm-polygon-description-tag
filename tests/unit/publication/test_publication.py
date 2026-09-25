@@ -19,7 +19,7 @@ from osm_polygon_description_tag.publication import (
     execute_upload,
     planning,
 )
-from osm_polygon_description_tag.publication.models import UploadItem
+from osm_polygon_description_tag.publication.models import PublishRetry, UploadItem
 from osm_polygon_description_tag.publication.planning import (
     _build_item,
     _collect_data_items,
@@ -970,3 +970,10 @@ def test_publication_state_written_only_after_remote_verification(tmp_path: Path
             verifier=verifier,
         )
     assert not (data_root / PUBLICATION_STATE_FILENAME).is_file()
+
+
+def test_publish_retry_preserves_public_error_context() -> None:
+    error = PublishRetry("retry", exit_code=503, kind="http")
+    assert str(error) == "retry"
+    assert error.exit_code == 503
+    assert error.kind == "http"

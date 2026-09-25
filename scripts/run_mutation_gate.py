@@ -504,7 +504,7 @@ def _prepare_mutmut(
     return runner
 
 
-SMOKE_TEST_SELECTION = ["tests/unit/test_mutation_surface.py"]
+SMOKE_TEST_SELECTION = ["tests/unit/dataset/test_text.py"]
 
 
 def _probe_selection(test_selection: Sequence[str]) -> list[str]:
