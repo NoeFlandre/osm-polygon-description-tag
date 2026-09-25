@@ -29,7 +29,12 @@ from osm_polygon_description_tag.publication.artifacts import (
     H3_MAP_ARTIFACT,
     metadata_paths,
 )
-from osm_polygon_description_tag.publication.models import REPO_ID, PublicationError, UploadPlan
+from osm_polygon_description_tag.publication.models import (
+    REPO_ID,
+    PublicationError,
+    Runner,
+    UploadPlan,
+)
 from osm_polygon_description_tag.publication.planning import (
     build_metadata_only_upload_plan,
     create_upload_plan,
@@ -202,6 +207,7 @@ def upload_final_metadata(
     clock: Callable[[], str],
     logger: RunLogger | None = None,
     plan_validator: Callable[[Path], object] = create_upload_plan,
+    subprocess_runner: Runner | None = None,
 ) -> str | None:
     """Upload and verify final metadata, updating state only after success."""
     data_dir = paths.data_root / "data"
@@ -214,7 +220,14 @@ def upload_final_metadata(
     if skipped is not None:
         return skipped
     _log_metadata_start(logger)
-    _upload_metadata(metadata_plan, paths, upload_runner, upload_timeout, logger)
+    _upload_metadata(
+        metadata_plan,
+        paths,
+        upload_runner,
+        upload_timeout,
+        logger,
+        subprocess_runner=subprocess_runner,
+    )
     verified = _verify_metadata(metadata_plan, verifier, logger)
     _persist_metadata_state(paths.data_root, metadata_plan, verified, clock)
     _log_metadata_state(logger, verified)
@@ -247,6 +260,8 @@ def _upload_metadata(
     upload_runner: Callable[[list[str]], str] | None,
     upload_timeout: float | None,
     logger: RunLogger | None,
+    *,
+    subprocess_runner: Runner | None = None,
 ) -> None:
     try:
         _run_metadata_upload(
@@ -255,6 +270,7 @@ def _upload_metadata(
             upload_runner,
             upload_timeout,
             logger,
+            subprocess_runner=subprocess_runner,
         )
     except (PublicationError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         raise OrchestratorError(f"final metadata upload failed: {error}") from error
@@ -268,11 +284,14 @@ def _run_metadata_upload(
     upload_runner: Callable[[list[str]], str] | None,
     upload_timeout: float | None,
     logger: RunLogger | None,
+    *,
+    subprocess_runner: Runner | None = None,
 ) -> None:
     if upload_runner is None:
         execute_upload(
             metadata_plan,
             confirmation=metadata_plan.identity_sha256,
+            runner=subprocess_runner,
             timeout=upload_timeout,
             retry_observer=_metadata_retry_observer(logger),
         )
