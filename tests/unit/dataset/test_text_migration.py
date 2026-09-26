@@ -681,32 +681,26 @@ def test_empty_required_directories_are_a_noop(tmp_path: Path) -> None:
     assert text_migration.migrate_dataset_text(data_root) == 0
 
 
-def test_empty_migration_pass_still_validates_and_uses_the_artifact_pairs(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_artifact_pair_planning_validates_both_migration_directories(tmp_path: Path) -> None:
+    data_root = tmp_path / "missing-manifests"
+    (data_root / "data").mkdir(parents=True)
+
+    with pytest.raises(
+        text_migration.TextMigrationError,
+        match=exactly(f"missing data/ or manifests/ under {data_root}"),
+    ):
+        text_migration._migration_artifact_pairs(data_root)
+
+
+def test_empty_migration_pass_plans_no_artifact_pairs(tmp_path: Path) -> None:
     data_root = tmp_path / "empty"
     data_dir = data_root / "data"
     manifests_dir = data_root / "manifests"
     data_dir.mkdir(parents=True)
     manifests_dir.mkdir()
-    calls: list[tuple[Path, Path, Path, type[Exception]]] = []
-    original = text_migration._require_migration_directories
 
-    def observe(
-        candidate_data_dir: Path,
-        candidate_manifests_dir: Path,
-        candidate_root: Path,
-        *,
-        error: type[Exception],
-    ) -> None:
-        calls.append((candidate_data_dir, candidate_manifests_dir, candidate_root, error))
-        original(candidate_data_dir, candidate_manifests_dir, candidate_root, error=error)
-
-    monkeypatch.setattr(text_migration, "_require_migration_directories", observe)
-
+    assert text_migration._migration_artifact_pairs(data_root) == []
     assert text_migration.migrate_dataset_text(data_root) == 0
-    assert calls == [(data_dir, manifests_dir, data_root, text_migration.TextMigrationError)]
 
 
 def test_dropped_rows_are_added_to_an_existing_rejection_count(tmp_path: Path) -> None:

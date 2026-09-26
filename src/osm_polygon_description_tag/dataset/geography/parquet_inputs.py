@@ -148,7 +148,9 @@ def _valid_polygonal_geometries(batch: Any) -> Any:
     if wkbs.null_count or wkbs.type != pa.binary():
         return None
     try:
+        # pragma: no mutate start - None and False both request non-zero-copy conversion
         geometries = shapely.from_wkb(wkbs.to_numpy(zero_copy_only=False))
+        # pragma: no mutate end
     except (ValueError, ShapelyError):
         return None
     polygonal = np.isin(shapely.get_type_id(geometries), _POLYGONAL_IDS)
