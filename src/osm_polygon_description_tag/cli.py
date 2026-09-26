@@ -18,10 +18,11 @@ import typer
 from typer import rich_utils
 from typer._click.exceptions import ClickException, Exit, UsageError
 
+from osm_polygon_description_tag.dataset.docs import generate_dataset_docs
 from osm_polygon_description_tag.dataset.languages.detector import LanguageDetectionError
 from osm_polygon_description_tag.dataset.manifest import ManifestError
 from osm_polygon_description_tag.dataset.migration import MigrationError, migrate_dataset_schema
-from osm_polygon_description_tag.dataset.reporting import ReportingError, generate_dataset_docs
+from osm_polygon_description_tag.dataset.stats import ReportingError
 from osm_polygon_description_tag.dataset.storage import StorageError, validate_geoparquet
 from osm_polygon_description_tag.dataset.text_migration import (
     TextMigrationError,

@@ -30,6 +30,7 @@ from typing import cast
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from osm_polygon_description_tag.dataset.constants import DEFAULT_ARROW_BATCH_SIZE
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     _fsync_dir,
@@ -52,7 +53,7 @@ from osm_polygon_description_tag.dataset.text import (
 
 REJECTION_REASON = "no_nonempty_description"
 
-_BATCH_SIZE = 4096
+_BATCH_SIZE = DEFAULT_ARROW_BATCH_SIZE
 
 
 class TextMigrationError(RuntimeError):

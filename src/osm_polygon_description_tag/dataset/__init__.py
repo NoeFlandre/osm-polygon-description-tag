@@ -90,10 +90,9 @@ _LAZY_EXPORTS = {
         "osm_polygon_description_tag.dataset.migration",
         "migrate_dataset_schema",
     ),
-    **{
-        name: ("osm_polygon_description_tag.dataset.reporting", name)
-        for name in ("ReportingError", "collect_stats", "generate_dataset_docs")
-    },
+    "ReportingError": ("osm_polygon_description_tag.dataset.stats", "ReportingError"),
+    "collect_stats": ("osm_polygon_description_tag.dataset.stats", "collect_stats"),
+    "generate_dataset_docs": ("osm_polygon_description_tag.dataset.docs", "generate_dataset_docs"),
     **{
         name: ("osm_polygon_description_tag.dataset.schema", name)
         for name in ("GEOPARQUET_VERSION", "SCHEMA", "SCHEMA_VERSION", "geo_metadata")

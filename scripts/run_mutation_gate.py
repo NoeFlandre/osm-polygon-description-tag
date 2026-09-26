@@ -28,7 +28,7 @@ from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any, cast
 
-from scripts.check_mutation_score import STATUS_BY_EXIT_CODE
+from scripts.check_mutation_score import STATUS_BY_EXIT_CODE, iter_mutant_exit_codes
 
 DEFAULT_MAX_CHILDREN = 8
 DEFAULT_FAST_TESTS_PER_FUNCTION = 1
@@ -387,26 +387,20 @@ def _module_neighbourhood(
 def unresolved_mutants(mutants_root: Path) -> list[str]:
     """Return every mutant whose metadata is not a killed result."""
 
-    names: list[str] = []
-    for metadata_path in sorted(mutants_root.glob("src/**/*.py.meta")):
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        for name, exit_code in metadata.get("exit_code_by_key", {}).items():
-            if STATUS_BY_EXIT_CODE.get(exit_code, "suspicious") != "killed":
-                names.append(name)
-    return sorted(names)
+    return sorted(
+        name
+        for name, exit_code in iter_mutant_exit_codes(mutants_root)
+        if STATUS_BY_EXIT_CODE.get(exit_code, "suspicious") != "killed"
+    )
 
 
 def mutated_function_names(mutants_root: Path) -> set[str]:
     """Return function names represented by the generated mutant metadata."""
 
-    names: set[str] = set()
-    for metadata_path in sorted(mutants_root.glob("src/**/*.py.meta")):
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        names.update(
-            mutant_name.rsplit("__mutmut_", 1)[0]
-            for mutant_name in metadata.get("exit_code_by_key", {})
-        )
-    return names
+    return {
+        mutant_name.rsplit("__mutmut_", 1)[0]
+        for mutant_name, _exit_code in iter_mutant_exit_codes(mutants_root)
+    }
 
 
 def _stats_path() -> Path:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,40 @@ STATUS_BY_EXIT_CODE = {
 }
 
 
+def scoped_metadata_paths(mutants_root: Path, scope_file: Path | None) -> list[Path]:
+    """Return the mutmut result files to score.
+
+    A sharded run only executes the mutants of the sources in its shard, so it
+    must score exactly those. Scoring the whole tree would count another
+    shard's untouched mutants as unkilled.
+    """
+    if scope_file is None:
+        return sorted(mutants_root.glob("src/**/*.py.meta"))
+    sources = [
+        line.strip() for line in scope_file.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
+    paths = [mutants_root / f"{source}.meta" for source in sources]
+    return sorted(path for path in paths if path.is_file())
+
+
+def iter_mutant_exit_codes(
+    mutants_root: Path, scope_file: Path | None = None
+) -> Iterator[tuple[str, Any]]:
+    """Yield ``(mutant_name, exit_code)`` pairs, file by file, in sorted order."""
+    for metadata_path in scoped_metadata_paths(mutants_root, scope_file):
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        yield from sorted(metadata.get("exit_code_by_key", {}).items())
+
+
+def write_json_report(path: Path, payload: dict[str, Any]) -> None:
+    """Write ``payload`` as stable, pretty, UTF-8 JSON, creating parent dirs."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def build_report(stats: dict[str, Any], minimum_score: float) -> dict[str, Any]:
     total = int(stats.get("total", 0))
     killed = int(stats.get("killed", 0))
@@ -56,22 +91,6 @@ def build_report(stats: dict[str, Any], minimum_score: float) -> dict[str, Any]:
     }
 
 
-def scoped_metadata_paths(mutants_root: Path, scope_file: Path | None) -> list[Path]:
-    """Return the mutmut result files to score.
-
-    A sharded run only executes the mutants of the sources in its shard, so it
-    must score exactly those. Scoring the whole tree would count another
-    shard's untouched mutants as unkilled.
-    """
-    if scope_file is None:
-        return sorted(mutants_root.glob("src/**/*.py.meta"))
-    sources = [
-        line.strip() for line in scope_file.read_text(encoding="utf-8").splitlines() if line.strip()
-    ]
-    paths = [mutants_root / f"{source}.meta" for source in sources]
-    return sorted(path for path in paths if path.is_file())
-
-
 def build_metadata_report(
     mutants_root: Path,
     patterns: list[str],
@@ -80,16 +99,14 @@ def build_metadata_report(
 ) -> dict[str, Any]:
     stats = {"killed": 0, "total": 0}
     unresolved: dict[str, list[str]] = {}
-    for metadata_path in scoped_metadata_paths(mutants_root, scope_file):
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        for mutant_name, exit_code in sorted(metadata.get("exit_code_by_key", {}).items()):
-            if patterns and not any(fnmatch.fnmatch(mutant_name, pattern) for pattern in patterns):
-                continue
-            status = STATUS_BY_EXIT_CODE.get(exit_code, "suspicious")
-            stats[status] = int(stats.get(status, 0)) + 1
-            stats["total"] += 1
-            if status in STATUS_KEYS:
-                unresolved.setdefault(status, []).append(mutant_name)
+    for mutant_name, exit_code in iter_mutant_exit_codes(mutants_root, scope_file):
+        if patterns and not any(fnmatch.fnmatch(mutant_name, pattern) for pattern in patterns):
+            continue
+        status = STATUS_BY_EXIT_CODE.get(exit_code, "suspicious")
+        stats[status] = int(stats.get(status, 0)) + 1
+        stats["total"] += 1
+        if status in STATUS_KEYS:
+            unresolved.setdefault(status, []).append(mutant_name)
     report = build_report(stats, minimum_score)
     report["patterns"] = patterns
     # Name what survived. The score alone says a gate failed but not which
@@ -129,11 +146,7 @@ def main() -> None:
             args.minimum_score,
             scope_file=args.scope_file,
         )
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    write_json_report(args.output, report)
     print(
         f"mutation score: {report['mutation_score_percent']:.2f}% "
         f"({report['killed']}/{report['total']}); minimum {args.minimum_score:.2f}%"

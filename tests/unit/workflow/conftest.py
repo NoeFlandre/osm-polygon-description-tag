@@ -19,6 +19,7 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
 from osm_polygon_description_tag.storage import write_geoparquet
 from osm_polygon_description_tag.workflow.grid_operator import prepare_job
 from tests.conftest import make_record_dict
+from tests.helpers.project import write_project as _write_project
 
 SHARD = "region.parquet"
 REMOTE = {
@@ -44,13 +45,6 @@ def _write_rows(source: Path, *, count: int, description: str, batch_size: int =
         source / SHARD,
         batch_size=batch_size,
     )
-
-
-def _write_project(project: Path) -> None:
-    (project / "src").mkdir(parents=True)
-    (project / "src" / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
-    (project / "pyproject.toml").write_text("[project]\nname = 'synthetic'\n", encoding="utf-8")
-    (project / "uv.lock").write_text("version = 1\n", encoding="utf-8")
 
 
 def _prepare_snapshot(source: Path, run: Path) -> SnapshotManifest:

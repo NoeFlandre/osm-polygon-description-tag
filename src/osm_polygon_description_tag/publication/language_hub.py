@@ -28,13 +28,14 @@ from osm_polygon_description_tag.publication.language_card import install_langua
 from osm_polygon_description_tag.publication.language_upload import RemoteFile
 from osm_polygon_description_tag.publication.models import UploadPlan
 from osm_polygon_description_tag.publication.verification import _huggingface_hub
+from osm_polygon_description_tag.runtime.units import MIB
 
 REPO_TYPE: Final = "dataset"
 README_PATH: Final = "README.md"
 DATASET_VIEWER_BASE_URL: Final = "https://datasets-server.huggingface.co"
 DEFAULT_VIEWER_TIMEOUT_SECONDS: Final = 10.0
 MAX_VIEWER_TIMEOUT_SECONDS: Final = 60.0
-MAX_INLINE_HASH_BYTES: Final = 32 * 1024 * 1024
+MAX_INLINE_HASH_BYTES: Final = 32 * MIB
 COMMIT_MESSAGE: Final = f"Add additive {LANGUAGE_REMOTE_PREFIX} language annotations"
 
 

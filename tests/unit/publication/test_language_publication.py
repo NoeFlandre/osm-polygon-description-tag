@@ -4,6 +4,7 @@ import hashlib
 import json
 from collections.abc import Sequence
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -61,6 +62,7 @@ from osm_polygon_description_tag.publication.models import UploadItem, UploadPla
 from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
 from tests.helpers.messages import exactly
+from tests.helpers.parquet import write_description_shard
 from tests.helpers.sentences import fake_splitter
 
 REPO = "NoeFlandre/osm-polygon-description-tag"
@@ -85,13 +87,7 @@ def _tags(index: int) -> dict[str, str]:
     return tags
 
 
-def _write_shard(path: Path, count: int, *, start: int = 0) -> None:
-    records = (
-        make_record_dict(Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]), _tags(index), osm_id=index + 1)
-        for index in range(start, start + count)
-    )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    write_geoparquet(records, path, batch_size=3)
+_write_shard = partial(write_description_shard, batch_size=3, tags=_tags)
 
 
 @pytest.fixture
