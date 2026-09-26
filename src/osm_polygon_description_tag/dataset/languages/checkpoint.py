@@ -365,9 +365,10 @@ def validate_receipt_chain(
     receipt_list = tuple(receipts)
     _validate_receipt_count(checkpoint, receipt_list)
     expected_cursor = 0
-    # Length equality is validated above with the domain-specific diagnostic;
-    # strict=True only restates that invariant.
-    for part_name, receipt in zip(checkpoint.completed_parts, receipt_list, strict=True):
+    # Length equality was checked above with the domain-specific diagnostic.
+    for part_name, receipt in zip(
+        checkpoint.completed_parts, receipt_list, strict=True
+    ):  # pragma: no mutate - the count check above provides the domain error
         _validate_receipt_binding(
             receipt,
             checkpoint,

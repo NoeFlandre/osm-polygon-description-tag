@@ -70,6 +70,12 @@ def test_key_order_check_accepts_singleton_lists_through_the_final_offset() -> N
     assert storage._pairs_are_canonical(singleton_lists)
 
 
+def test_key_order_check_does_not_skip_a_bad_pair_after_an_empty_first_list() -> None:
+    values = _key_list([[], [("z", "1"), ("a", "2")]])
+
+    assert not storage._pairs_are_canonical(values)
+
+
 def test_stream_batches_writes_one_empty_batch_and_returns_empty_summary() -> None:
     writer = _RecordingWriter()
 
@@ -120,6 +126,22 @@ def test_batches_default_matches_row_writer_batch_size_and_bytes(tmp_path: Path)
 
     assert row_count == batch_count == DEFAULT_WRITE_BATCH_SIZE + 1
     assert _sha256(row_path) == _sha256(batch_path)
+
+
+def test_batches_passes_the_row_writer_default_batch_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observed: list[int] = []
+
+    def capture_batch_size(_stream, _target, *, batch_size, validator):  # type: ignore[no-untyped-def]
+        observed.append(batch_size)
+        return 0
+
+    monkeypatch.setattr(storage, "_write_geoparquet_with", capture_batch_size)
+
+    storage.write_geoparquet_batches([], tmp_path / "unused.parquet")
+
+    assert observed == [DEFAULT_WRITE_BATCH_SIZE]
 
 
 def test_batches_default_validator_rejects_duplicate_identities(tmp_path: Path) -> None:

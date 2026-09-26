@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pyarrow as pa
 import pytest
 from shapely.geometry import GeometryCollection, Point, Polygon
@@ -91,3 +92,37 @@ def test_vectorized_spatial_summary_keeps_low_order_area_contributions() -> None
     )
 
     assert summary.area_total_m2 == 10_000_000_000_000_002.0
+
+
+def test_spatial_summary_uses_the_vectorized_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    batch = _spatial_batch([_SQUARE], [1.0])
+
+    def row_fallback(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("a valid batch must use the vectorized summary")
+
+    monkeypatch.setattr(stats_module, "_summarize_spatial_batch_rows", row_fallback)
+
+    summary = stats_module._summarize_spatial_batch(
+        batch,
+        source_name="region.parquet",
+        row_offset=0,
+    )
+
+    assert summary is not None
+    assert summary.rows == 1
+    assert summary.area_total_m2 == 1.0
+
+
+def test_measured_summary_rejects_extra_bbox_columns() -> None:
+    batch = _spatial_batch([_SQUARE], [1.0])
+    geometries = stats_module._vectorized_geometries(batch)
+    assert geometries is not None
+
+    with pytest.raises(ValueError, match=r"zip\(\).*shorter"):
+        stats_module._measured_summary(
+            np.array([1.0]),
+            [np.array([0.0])] * 5,
+            geometries,
+        )

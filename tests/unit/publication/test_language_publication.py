@@ -726,6 +726,42 @@ def test_upload_starts_only_after_the_ambiguous_state_is_durable(
     assert outcome.status is PublishStatus.VERIFIED
 
 
+def test_first_apply_records_the_current_plan_as_ambiguous_before_upload(
+    export: LanguageExport,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = build_language_upload_plan(export, REPO, confirm_repo=REPO)
+    state = tmp_path / "state.json"
+    expected = PublicationOutcome(
+        PublishStatus.VERIFIED, REPO, plan.identity_sha256, "rev-2", (), ()
+    )
+    ambiguous_calls: list[tuple[Path, UploadPlan, str]] = []
+
+    def record_ambiguous(path: Path, candidate: UploadPlan, revision: str, failure=None):  # type: ignore[no-untyped-def]
+        ambiguous_calls.append((path, candidate, revision))
+
+    monkeypatch.setattr(language_upload_module, "_ambiguous", record_ambiguous)
+    monkeypatch.setattr(language_upload_module, "_upload", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        language_upload_module,
+        "_verified_outcome",
+        lambda *_args, **_kwargs: expected,
+    )
+
+    result = language_upload_module._apply_publication(
+        plan,
+        _FakeHub(),
+        state,
+        resumed=None,
+        current="rev-2",
+        logger=None,
+    )
+
+    assert result is expected
+    assert ambiguous_calls == [(state, plan, "rev-2")]
+
+
 def test_publish_checks_resume_state_at_the_requested_path(
     export: LanguageExport,
     tmp_path: Path,

@@ -656,7 +656,9 @@ def _decoded_wkbs(batch: pa.RecordBatch) -> np.ndarray | None:
     if wkbs.null_count or wkbs.type != pa.binary():
         return None
     try:
+        # pragma: no mutate start - None and False both request the same non-zero-copy conversion
         return shapely.from_wkb(wkbs.to_numpy(zero_copy_only=False))
+        # pragma: no mutate end
     except (ValueError, ShapelyError):
         return None
 
@@ -679,7 +681,7 @@ def _finite_bbox_columns(batch: pa.RecordBatch) -> list[np.ndarray] | None:
     columns = [_finite_float_column(batch, name) for name in _BBOX_COLUMNS]
     if any(values is None for values in columns):
         return None
-    return cast(list[np.ndarray], columns)
+    return cast(list[np.ndarray], columns)  # pragma: no mutate - static narrowing after the guard
 
 
 def _vectorized_spatial_summary(batch: pa.RecordBatch) -> _SpatialSummary | None:
@@ -688,10 +690,12 @@ def _vectorized_spatial_summary(batch: pa.RecordBatch) -> _SpatialSummary | None
         return None
     areas = _finite_float_column(batch, "area_m2")
     bboxes = _finite_bbox_columns(batch)
-    geometries = None if areas is None or bboxes is None else _vectorized_geometries(batch)
+    if areas is None or bboxes is None:
+        return None
+    geometries = _vectorized_geometries(batch)
     if geometries is None:
         return None
-    return _measured_summary(cast(np.ndarray, areas), cast(list[np.ndarray], bboxes), geometries)
+    return _measured_summary(areas, bboxes, geometries)
 
 
 def _measured_summary(

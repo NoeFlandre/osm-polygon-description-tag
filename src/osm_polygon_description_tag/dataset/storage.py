@@ -215,7 +215,9 @@ def _keys_strictly_increase(array: pa.ListArray, keys: pa.Array) -> bool:
     if size < 1:
         return True
     # Object arrays compare as Python strings, exactly as ``sorted`` does.
+    # pragma: no mutate start - None and False both request the same non-zero-copy conversion
     key_values = keys.to_numpy(zero_copy_only=False)
+    # pragma: no mutate end
     increasing = key_values[:-1] < key_values[1:]
     offsets = array.offsets.to_numpy()
     ends = offsets[1:] - offsets[0]

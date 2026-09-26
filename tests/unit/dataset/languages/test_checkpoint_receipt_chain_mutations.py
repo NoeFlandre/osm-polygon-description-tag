@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+import osm_polygon_description_tag.dataset.languages.checkpoint as checkpoint_module
 from osm_polygon_description_tag.dataset.languages.checkpoint import (
     CheckpointError,
     PartReceipt,
@@ -74,6 +75,30 @@ def test_receipt_chain_accepts_a_bound_contiguous_chain_ending_at_checkpoint_cur
         )
         is None
     )
+
+
+def test_receipt_chain_checks_count_against_the_same_checkpoint_and_receipts(
+    checkpoint: ShardCheckpoint,
+    valid_receipts: tuple[PartReceipt, PartReceipt],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[ShardCheckpoint, tuple[PartReceipt, ...]]] = []
+    original = checkpoint_module._validate_receipt_count
+
+    def observe(candidate: ShardCheckpoint, receipts: tuple[PartReceipt, ...]) -> None:
+        calls.append((candidate, receipts))
+        original(candidate, receipts)
+
+    monkeypatch.setattr(checkpoint_module, "_validate_receipt_count", observe)
+
+    validate_receipt_chain(
+        checkpoint,
+        iter(valid_receipts),
+        source_sha256=_SOURCE_SHA256,
+        source_schema_fingerprint=_SOURCE_SCHEMA_FINGERPRINT,
+    )
+
+    assert calls == [(checkpoint, valid_receipts)]
 
 
 @pytest.mark.parametrize(

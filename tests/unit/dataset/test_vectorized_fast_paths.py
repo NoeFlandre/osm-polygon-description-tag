@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import math
 from pathlib import Path
+from types import SimpleNamespace
 
 import pyarrow as pa
 import pytest
@@ -292,11 +293,71 @@ def _centroid_batch(geometries: list[object]) -> pa.RecordBatch:
 def test_vectorized_centroids_equal_the_row_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     batch = _centroid_batch([_SQUARE.wkb, _MULTI.wkb, _HOLED.wkb])
     paths = {"a.osm.pbf": Path("data/a.parquet")}
+    vectorized = parquet_inputs._vectorized_centroids(batch)
+    assert vectorized is not None
+    assert len(vectorized[0]) == len(vectorized[1]) == batch.num_rows
     fast = list(parquet_inputs._iter_centroid_batch(batch, paths))
     monkeypatch.setattr(parquet_inputs, "_vectorized_centroids", lambda _batch: None)
     rows = list(parquet_inputs._iter_centroid_batch(batch, paths))
     assert fast == rows
     assert fast[1][0] == Path("b.osm.pbf")
+
+
+@pytest.mark.parametrize(
+    ("shape", "expected"),
+    [
+        (Polygon([(179, 0), (179, 1), (181, 1), (181, 0)]), ([180.0], [0.5])),
+        (Polygon([(0, 89), (0, 91), (1, 91), (1, 89)]), ([0.5], [90.0])),
+    ],
+    ids=["longitude-limit", "latitude-limit"],
+)
+def test_vectorized_centroids_accept_coordinate_limits(
+    shape: Polygon, expected: tuple[list[float], list[float]]
+) -> None:
+    centroids = parquet_inputs._vectorized_centroids(_centroid_batch([shape.wkb]))
+
+    assert centroids == expected
+
+
+def test_vectorized_centroids_rejects_non_polygonal_geometry_without_row_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    batch = _centroid_batch([_SQUARE.wkb])
+
+    def row_fallback(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("the centroid batch should use the vectorized path")
+
+    monkeypatch.setattr(parquet_inputs, "_centroid_row", row_fallback)
+
+    assert list(parquet_inputs._iter_centroid_batch(batch, {})) == [(Path("a.osm.pbf"), 0.5, 0.5)]
+
+
+def test_iter_centroid_batch_rejects_misaligned_vectorized_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    batch = _centroid_batch([_SQUARE.wkb])
+    monkeypatch.setattr(parquet_inputs, "_vectorized_centroids", lambda _batch: ([0.5], []))
+
+    with pytest.raises(ValueError, match=r"zip\(\) argument .* shorter"):
+        list(parquet_inputs._iter_centroid_batch(batch, {}))
+
+
+def test_iter_centroid_batch_rejects_misaligned_fallback_columns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    values = {
+        "geometry": [_SQUARE.wkb],
+        "osm_id": [],
+        "source_pbf": ["a.osm.pbf"],
+    }
+    batch = SimpleNamespace(
+        num_rows=1,
+        column=lambda name: SimpleNamespace(to_pylist=lambda: values[name]),
+    )
+    monkeypatch.setattr(parquet_inputs, "_vectorized_centroids", lambda _batch: None)
+
+    with pytest.raises(ValueError, match=r"zip\(\) argument .* shorter"):
+        list(parquet_inputs._iter_centroid_batch(batch, {}))
 
 
 @pytest.mark.parametrize(
