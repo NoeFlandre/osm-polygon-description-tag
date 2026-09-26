@@ -227,7 +227,8 @@ def _read_file(repo_id: str, path: str, revision: str, cache_dir: Path | None) -
             repo_type="dataset",
             **({"cache_dir": cache_dir} if cache_dir is not None else {}),
         )
-        return Path(local_path).read_text(encoding="utf-8")
+        text = Path(local_path).read_bytes().decode()
+        return text.replace("\r\n", "\n").replace("\r", "\n")
     except Exception as error:
         raise HubVerificationError(
             f"could not read {path} from {repo_id}@{revision}: {error}"

@@ -11,7 +11,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from shapely.geometry import Polygon
 
 from osm_polygon_description_tag.dataset.languages.checkpoint import (
     ShardCheckpoint,
@@ -30,7 +29,6 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
 )
 from osm_polygon_description_tag.dataset.languages.validation import validate_run
 from osm_polygon_description_tag.dataset.languages.worker import ProcessingBudget, process_shard
-from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.workflow import grid_operator
 from osm_polygon_description_tag.workflow.grid_operator import (
     QUARANTINE_DIRNAME,
@@ -55,7 +53,7 @@ from osm_polygon_description_tag.workflow.grid_policy import (
     PolicyVerdict,
 )
 from osm_polygon_description_tag.workflow.grid_scheduler import CommandResult, JobState
-from tests.conftest import make_record_dict
+from tests.helpers.parquet import write_description_shard
 from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH, fake_splitter
 
 SHARD = "region.parquet"
@@ -91,17 +89,11 @@ def _unbound_value(field: str) -> object:
 
 
 def _write_shard(path: Path, rows: int) -> None:
-    write_geoparquet(
-        (
-            make_record_dict(
-                Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-                {"description": f"A synthetic description {index}"},
-                osm_id=index + 1,
-            )
-            for index in range(rows)
-        ),
+    write_description_shard(
         path,
+        rows,
         batch_size=2,
+        tags=lambda index: {"description": f"A synthetic description {index}"},
     )
 
 

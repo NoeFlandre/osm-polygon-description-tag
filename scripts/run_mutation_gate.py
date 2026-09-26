@@ -28,12 +28,32 @@ from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any, cast
 
-from scripts.check_mutation_score import STATUS_BY_EXIT_CODE
+from scripts.check_mutation_score import STATUS_BY_EXIT_CODE, iter_mutant_exit_codes
 
 DEFAULT_MAX_CHILDREN = 8
 DEFAULT_FAST_TESTS_PER_FUNCTION = 1
 DEFAULT_MUTATION_BATCH_SIZE: int | None = None
 _ESCALATION_FACTOR = 8
+
+
+# mutmut only records which tests reach mutated code, and its forced-fail probe
+# only observes a failure, when the run also mutates code the probe tests import.
+# The sharded gate always mutates this module for that reason; the changed-lines
+# gate needs it too, or a pull request that leaves it untouched stops before the
+# first mutant with "could not find any test case for any mutant".
+PROBE_CANARY = "src/osm_polygon_description_tag/dataset/text.py"
+
+
+def with_probe_canary(
+    changed_lines: Mapping[str, tuple[int, ...]], root: Path = Path()
+) -> dict[str, tuple[int, ...]]:
+    """Return the changed lines plus every line of the canary module."""
+
+    scoped = dict(changed_lines)
+    if PROBE_CANARY not in scoped:
+        line_count = len((root / PROBE_CANARY).read_text(encoding="utf-8").splitlines())
+        scoped[PROBE_CANARY] = tuple(range(1, line_count + 1))
+    return scoped
 
 
 def parse_changed_lines(diff: str) -> dict[str, tuple[int, ...]]:
@@ -367,26 +387,20 @@ def _module_neighbourhood(
 def unresolved_mutants(mutants_root: Path) -> list[str]:
     """Return every mutant whose metadata is not a killed result."""
 
-    names: list[str] = []
-    for metadata_path in sorted(mutants_root.glob("src/**/*.py.meta")):
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        for name, exit_code in metadata.get("exit_code_by_key", {}).items():
-            if STATUS_BY_EXIT_CODE.get(exit_code, "suspicious") != "killed":
-                names.append(name)
-    return sorted(names)
+    return sorted(
+        name
+        for name, exit_code in iter_mutant_exit_codes(mutants_root)
+        if STATUS_BY_EXIT_CODE.get(exit_code, "suspicious") != "killed"
+    )
 
 
 def mutated_function_names(mutants_root: Path) -> set[str]:
     """Return function names represented by the generated mutant metadata."""
 
-    names: set[str] = set()
-    for metadata_path in sorted(mutants_root.glob("src/**/*.py.meta")):
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        names.update(
-            mutant_name.rsplit("__mutmut_", 1)[0]
-            for mutant_name in metadata.get("exit_code_by_key", {})
-        )
-    return names
+    return {
+        mutant_name.rsplit("__mutmut_", 1)[0]
+        for mutant_name, _exit_code in iter_mutant_exit_codes(mutants_root)
+    }
 
 
 def _stats_path() -> Path:
@@ -504,7 +518,7 @@ def _prepare_mutmut(
     return runner
 
 
-SMOKE_TEST_SELECTION = ["tests/unit/test_mutation_surface.py"]
+SMOKE_TEST_SELECTION = ["tests/unit/dataset/test_text.py"]
 
 
 def _probe_selection(test_selection: Sequence[str]) -> list[str]:
@@ -732,9 +746,10 @@ def main() -> None:
             changed_lines = parse_changed_lines(args.changed_lines_file.read_text(encoding="utf-8"))
         except OSError as error:
             raise SystemExit(f"cannot read changed lines file: {error}") from error
-        only_mutate = tuple(changed_lines)
-        if not only_mutate:
+        if not changed_lines:
             raise SystemExit("changed lines file contains no Python source changes")
+        changed_lines = with_probe_canary(changed_lines)
+        only_mutate = tuple(changed_lines)
     run_gate(
         max_children=args.max_children,
         fast_tests_per_function=args.fast_tests_per_function,

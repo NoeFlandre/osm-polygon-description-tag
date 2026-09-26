@@ -10,6 +10,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from osm_polygon_description_tag.dataset.constants import DEFAULT_WRITE_BATCH_SIZE
 from osm_polygon_description_tag.dataset.manifest import (
     MANIFEST_SCHEMA_VERSION,
     TRANSFORM_ALGORITHM_VERSION,
@@ -252,7 +253,7 @@ def build_one(
     exporter: Exporter | None = None,
     writer: Writer | None = None,
     clock: Clock | None = None,
-    batch_size: int = 1024,
+    batch_size: int = DEFAULT_WRITE_BATCH_SIZE,
     progress_interval: int = 100_000,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> BuildResult:

@@ -124,6 +124,29 @@ def _fail_closed_hf_subprocess_guard(
     yield
 
 
+FAKE_OSMIUM_VERSION = "osmium version 1.19.1"
+
+
+@pytest.fixture
+def fake_osmium(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Put a stand-in ``osmium`` first on ``PATH`` for tests that pass preflight.
+
+    Preflight only resolves the executable and reads ``--version``. Unit tests
+    that go through it must not depend on osmium-tool being installed, so this
+    script answers the version probe the way the real binary does.
+    """
+    bin_dir = tmp_path / "fake-osmium-bin"
+    bin_dir.mkdir()
+    script = bin_dir / "osmium"
+    script.write_text(
+        f"#!/bin/sh\necho '{FAKE_OSMIUM_VERSION}'\necho 'libosmium version 2.20.0'\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    return script
+
+
 def _ewkb_hex(geom: object) -> str:
     return to_wkb(geom, include_srid=True, flavor="extended", byte_order=1).hex()  # type: ignore[arg-type]
 

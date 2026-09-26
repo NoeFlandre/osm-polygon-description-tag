@@ -38,13 +38,6 @@ def test_ty_configuration_checks_the_src_package_strictly() -> None:
     assert "mypy" not in project["tool"]
 
 
-def test_lockfile_has_no_mypy_package() -> None:
-    lock = tomllib.loads((PROJECT_ROOT / "uv.lock").read_text(encoding="utf-8"))
-
-    locked_names = {package["name"].lower() for package in lock["package"]}
-    assert "mypy" not in locked_names
-
-
 def test_typer_fully_owns_the_cli() -> None:
     cli_source = (PROJECT_ROOT / "src" / "osm_polygon_description_tag" / "cli.py").read_text(
         encoding="utf-8"

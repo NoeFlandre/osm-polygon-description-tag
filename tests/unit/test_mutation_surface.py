@@ -19,7 +19,6 @@ from typer._click.exceptions import ClickException, UsageError
 
 import osm_polygon_description_tag.cli as cli
 import osm_polygon_description_tag.runtime.presentation as presentation
-import osm_polygon_description_tag.workflow.orchestrator as orchestrator
 from osm_polygon_description_tag.dataset.manifest import _empty_policy_hash
 from osm_polygon_description_tag.dataset.text import trimmed_nonempty_text
 
@@ -605,26 +604,6 @@ def test_cli_main_delegates_to_run(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_empty_policy_hash_is_sha256_of_empty_bytes() -> None:
     assert _empty_policy_hash() == hashlib.sha256(b"").hexdigest()
-
-
-def test_orchestrator_subprocess_bridge_restores_upload_runner(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import osm_polygon_description_tag.publication.upload as publication_upload
-
-    original = publication_upload.default_runner_with_retry
-    commands: list[list[str]] = []
-
-    def fake_run_and_publish(**_kwargs: object) -> str:
-        publication_upload.default_runner_with_retry(["hf", "upload"], timeout=1)
-        return "ok"
-
-    monkeypatch.setattr(orchestrator, "_run_and_publish", fake_run_and_publish)
-    result = orchestrator._run_with_subprocess_bridge(commands.append)
-
-    assert result == "ok"
-    assert commands == [["hf", "upload"]]
-    assert publication_upload.default_runner_with_retry is original
 
 
 def test_default_hub_verifier_factory_uses_lazy_api(monkeypatch: pytest.MonkeyPatch) -> None:

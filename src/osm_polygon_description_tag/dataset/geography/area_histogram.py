@@ -89,7 +89,11 @@ def _add_bucket_counts(counts: list[int], column: pa.Array) -> None:
         return
     values = column.drop_null().to_numpy()
     indices = np.maximum(np.searchsorted(_EDGES, values, side="right") - 1, 0)
-    for index, count in enumerate(np.bincount(indices, minlength=AREA_BUCKET_COUNT).tolist()):
+    bucket_counts = np.bincount(
+        indices,
+        minlength=AREA_BUCKET_COUNT,  # pragma: no mutate - omitted trailing bins are zero
+    ).tolist()
+    for index, count in enumerate(bucket_counts):
         counts[index] += count
 
 

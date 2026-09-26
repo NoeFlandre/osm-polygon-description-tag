@@ -35,21 +35,23 @@ import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from osm_polygon_description_tag.dataset.deduplication import deduplicate_dataset
+from osm_polygon_description_tag.dataset.docs import generate_dataset_docs
 from osm_polygon_description_tag.dataset.manifest import (
     output_identity_for,
     read_manifest,
     source_identity_for,
 )
-from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
 from osm_polygon_description_tag.observability.trackio import TrackioRecorder
 from osm_polygon_description_tag.osm.discovery import Source, discover_sources
 from osm_polygon_description_tag.osm.extraction import ExportRecord
 from osm_polygon_description_tag.publication.models import (
     REPO_ID,
     PublicationError,
+    Runner,
+    UploadPlan,
 )
 from osm_polygon_description_tag.publication.planning import (
     build_metadata_only_upload_plan,  # noqa: F401
@@ -81,6 +83,7 @@ from osm_polygon_description_tag.publication.verification import (
 from osm_polygon_description_tag.runtime.cleanup import cleanup_stale_owned_temps
 from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.runtime.logging import RunLogger
+from osm_polygon_description_tag.runtime.time import utc_now_iso as _default_clock
 from osm_polygon_description_tag.workflow import finalization
 from osm_polygon_description_tag.workflow.artifacts import source_artifact_paths
 from osm_polygon_description_tag.workflow.build import build_one  # noqa: F401
@@ -156,6 +159,7 @@ def _execute_publication(
     timeout: float | None,
     upload_runner: Callable[[list[str]], str] | None,
     logger: RunLogger | None = None,
+    subprocess_runner: Runner | None = None,
 ) -> str:
     """Build the per-PBF plan, execute the upload, verify remote, return the SHA.
 
@@ -174,22 +178,26 @@ def _execute_publication(
         timeout=timeout,
         upload_runner=upload_runner,
         logger=logger,
+        subprocess_runner=subprocess_runner,
     )
     return _verify_source_plan(plan, source, verifier=verifier, logger=logger)
 
 
 def _upload_source_plan(
-    plan: Any,
+    plan: UploadPlan,
     paths: Paths,
     source: Source,
     *,
     timeout: float | None,
     upload_runner: Callable[[list[str]], str] | None,
     logger: RunLogger | None,
+    subprocess_runner: Runner | None = None,
 ) -> None:
     try:
         if upload_runner is None:
-            _run_default_source_upload(plan, timeout=timeout, logger=logger)
+            _run_default_source_upload(
+                plan, timeout=timeout, logger=logger, subprocess_runner=subprocess_runner
+            )
         else:
             _run_injected_source_upload(paths, source, upload_runner)
     except (PublicationError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
@@ -197,14 +205,16 @@ def _upload_source_plan(
 
 
 def _run_default_source_upload(
-    plan: Any,
+    plan: UploadPlan,
     *,
     timeout: float | None,
     logger: RunLogger | None,
+    subprocess_runner: Runner | None = None,
 ) -> None:
     execute_upload(
         plan,
         confirmation=plan.identity_sha256,
+        runner=subprocess_runner,
         timeout=timeout,
         retry_observer=_source_retry_observer(logger),
     )
@@ -227,7 +237,7 @@ def _run_injected_source_upload(
 
 
 def _verify_source_plan(
-    plan: Any,
+    plan: UploadPlan,
     source: Source,
     *,
     verifier: HubVerifier | None,
@@ -248,7 +258,7 @@ def _log_verification_start(logger: RunLogger | None, source: Source) -> None:
 
 
 def _call_source_verifier(
-    plan: Any,
+    plan: UploadPlan,
     source: Source,
     verifier: HubVerifier,
 ) -> str:
@@ -289,6 +299,7 @@ def _publish_source_if_needed(
     logger: RunLogger,
     source_index: int,
     source_total: int,
+    subprocess_runner: Runner | None = None,
 ) -> tuple[SourceOutcome, bool]:
     """Upload one final deduplicated source artifact when its state is stale."""
     output_path, manifest_path = source_artifact_paths(paths, source)
@@ -321,6 +332,7 @@ def _publish_source_if_needed(
             timeout=upload_timeout,
             upload_runner=upload_runner,
             logger=logger,
+            subprocess_runner=subprocess_runner,
         )
     except OrchestratorError as error:
         outcome.status = STATUS_FAILED
@@ -393,8 +405,7 @@ def run_and_publish(
     clock = _resolve_clock(clock)
     logger, owns_logger = _ensure_logger(logger, paths=paths, data_root=data_root, clock=clock)
     try:
-        return _run_with_optional_subprocess_bridge(
-            subprocess_runner,
+        return _run_and_publish(
             source_root=source_root,
             data_root=data_root,
             confirm_repo=confirm_repo,
@@ -410,6 +421,7 @@ def run_and_publish(
             logger=logger,
             tracker=tracker,
             osmium_executable=osmium_executable,
+            subprocess_runner=subprocess_runner,
         )
     except KeyboardInterrupt:
         logger.event("interrupted", level="WARNING", stage="run-and-publish")
@@ -448,57 +460,6 @@ def _ensure_logger(
     )
 
 
-def _run_with_optional_subprocess_bridge(
-    subprocess_runner: Callable[[list[str]], None] | None,
-    **kwargs: Any,
-) -> OrchestrationReport:
-    if subprocess_runner is None:
-        return _run_and_publish(**kwargs)
-    return _run_with_subprocess_bridge(subprocess_runner, **kwargs)
-
-
-def _run_with_subprocess_bridge(
-    subprocess_runner: Callable[[list[str]], None],
-    **kwargs: Any,
-) -> OrchestrationReport:
-    import osm_polygon_description_tag.publication.upload as pub
-
-    original_runner = pub.default_runner_with_retry
-
-    def _bridge(
-        command: list[str],
-        *,
-        max_retries: int = 3,
-        backoff_seconds: float = 2.0,
-        backoff_factor: float = 2.0,
-        backoff_cap_seconds: float = 60.0,
-        timeout: float | None = None,
-        _runner: Callable[[list[str], float | None], None] | None = None,
-        retry_observer: Callable[..., None] | None = None,
-    ) -> None:
-        subprocess_runner(command)
-        # pragma: no mutate start - compatibility-only retry parameters are intentionally ignored
-        _ = (
-            max_retries,
-            backoff_seconds,
-            backoff_factor,
-            backoff_cap_seconds,
-            timeout,
-            _runner,
-            retry_observer,
-        )
-        # pragma: no mutate end
-
-    # ``pub`` is a module, so its attribute keeps the declared function's own
-    # type; rebinding it for the duration of the call needs a dynamic view.
-    patched = cast(Any, pub)  # pragma: no mutate - static cast
-    patched.default_runner_with_retry = _bridge
-    try:
-        return _run_and_publish(**kwargs)
-    finally:
-        patched.default_runner_with_retry = original_runner
-
-
 def _run_and_publish(
     *,
     source_root: Path | None,
@@ -516,6 +477,7 @@ def _run_and_publish(
     logger: RunLogger,
     tracker: TrackioRecorder | None,
     osmium_executable: str,
+    subprocess_runner: Runner | None = None,
 ) -> OrchestrationReport:
     paths = _resolve_paths(paths, source_root, data_root)
     preflight_report = _run_preflight(
@@ -558,6 +520,7 @@ def _run_and_publish(
         clock=clock,
         logger=logger,
         tracker=tracker,
+        subprocess_runner=subprocess_runner,
     )
     _reconcile_remote(paths, active_verifier, logger)
     report.final_remote_revision = _publish_final_metadata(
@@ -567,6 +530,7 @@ def _run_and_publish(
         upload_timeout=upload_timeout,
         clock=clock,
         logger=logger,
+        subprocess_runner=subprocess_runner,
     )
     logger.event(
         "run_summary",
@@ -738,6 +702,7 @@ def _publish_sources(
     clock: Callable[[], str],
     logger: RunLogger,
     tracker: TrackioRecorder | None,
+    subprocess_runner: Runner | None = None,
 ) -> None:
     cumulative_rows = 0
     cumulative_output_bytes = 0
@@ -753,6 +718,7 @@ def _publish_sources(
             logger=logger,
             source_index=index,
             source_total=len(sources),
+            subprocess_runner=subprocess_runner,
         )
         report.outcomes.append(outcome)
         cumulative_rows += outcome.included_rows
@@ -785,7 +751,7 @@ def _reconcile_remote(
     )
 
 
-def _call_remote_reconcile(reconcile: Callable[..., object], plan: Any) -> object:
+def _call_remote_reconcile(reconcile: Callable[..., object], plan: UploadPlan) -> object:
     try:
         return reconcile(REPO_ID, {item.relative_path for item in plan.files})
     except Exception as error:
@@ -800,6 +766,7 @@ def _publish_final_metadata(
     upload_timeout: float | None,
     clock: Callable[[], str],
     logger: RunLogger,
+    subprocess_runner: Runner | None = None,
 ) -> str | None:
     return _upload_final_metadata(
         paths,
@@ -808,6 +775,7 @@ def _publish_final_metadata(
         upload_timeout=upload_timeout,
         clock=clock,
         logger=logger,
+        subprocess_runner=subprocess_runner,
     )
 
 
@@ -839,6 +807,7 @@ def _upload_final_metadata(
     upload_timeout: float | None = None,
     clock: Callable[[], str] | None = None,
     logger: RunLogger | None = None,
+    subprocess_runner: Runner | None = None,
 ) -> str | None:
     """Compatibility wrapper for final metadata publication."""
     if clock is None:
@@ -851,13 +820,8 @@ def _upload_final_metadata(
         clock=clock,
         logger=logger,
         plan_validator=create_upload_plan,
+        subprocess_runner=subprocess_runner,
     )
-
-
-def _default_clock() -> str:
-    from datetime import UTC, datetime
-
-    return datetime.now(UTC).isoformat()
 
 
 __all__ = [

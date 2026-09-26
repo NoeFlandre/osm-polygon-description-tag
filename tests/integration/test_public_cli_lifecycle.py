@@ -33,7 +33,6 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
-import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -43,6 +42,7 @@ from osm_polygon_description_tag.cli import run as cli_run
 from osm_polygon_description_tag.publication import REPO_ID
 from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.workflow.orchestrator import PUBLICATION_STATE_FILENAME
+from tests.helpers.osmium import write_pbf as _write_pbf
 
 
 def _sha256_text(text: str) -> str:
@@ -51,17 +51,6 @@ def _sha256_text(text: str) -> str:
 
 def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
-
-
-def _write_pbf(executable: str, source: Path, pbf_path: Path) -> None:
-    completed = subprocess.run(  # noqa: S603 - controlled argument array, no shell
-        [executable, "cat", str(source), "-o", str(pbf_path), "--overwrite"],
-        check=True,
-        capture_output=True,
-        shell=False,
-        timeout=30,
-    )
-    assert completed.returncode == 0, completed.stderr.decode("utf-8", errors="replace")
 
 
 @pytest.fixture

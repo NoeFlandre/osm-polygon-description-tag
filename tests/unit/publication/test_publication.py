@@ -49,6 +49,7 @@ from osm_polygon_description_tag.publication.planning import (
     file_sha256_bytes,
 )
 from tests.conftest import make_record_dict
+from tests.helpers.messages import exactly
 
 
 def _make_dataset(data_root: Path) -> None:
@@ -874,3 +875,44 @@ def test_execute_upload_invokes_runner_with_subprocess_run_by_default(tmp_path: 
         execute_upload(plan, confirmation=plan.identity_sha256)
     finally:
         publication.subprocess.run = original  # type: ignore[assignment]
+
+
+def test_execute_upload_rejects_missing_confirmation(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    _make_dataset(data_root)
+    plan = create_upload_plan(data_root)
+
+    with pytest.raises(
+        PublicationError,
+        match=exactly("confirmation required (must match freshly computed plan identity)"),
+    ):
+        execute_upload(plan, confirmation=None, runner=lambda _: None)
+
+
+def test_execute_upload_rejects_empty_manifest(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    _make_dataset(data_root)
+    # Replace the manifest with a placeholder "{}" to simulate stale state.
+    (data_root / "manifests" / "a-latest.manifest.json").write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(PublicationError, match="manifest"):
+        create_upload_plan(data_root)
+
+
+def test_execute_upload_rejects_invalid_manifest_json(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    _make_dataset(data_root)
+    (data_root / "manifests" / "a-latest.manifest.json").write_text("{not valid}", encoding="utf-8")
+
+    with pytest.raises(PublicationError, match="invalid manifest"):
+        create_upload_plan(data_root)
+
+
+def test_execute_upload_rejects_mismatched_parquet(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    _make_dataset(data_root)
+    # Mutate the parquet after writing the manifest so the output identity drifts.
+    (data_root / "data" / "a-latest.parquet").write_bytes(b"different")
+
+    with pytest.raises(PublicationError, match="identity"):
+        create_upload_plan(data_root)

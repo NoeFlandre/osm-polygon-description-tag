@@ -20,14 +20,16 @@ import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Final, cast
+from typing import Any, Final, TypedDict, cast
 
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 from shapely import from_wkb
 from shapely.errors import ShapelyError
+from shapely.geometry.base import BaseGeometry
 
+from osm_polygon_description_tag.dataset.constants import DEFAULT_WRITE_BATCH_SIZE
 from osm_polygon_description_tag.dataset.manifest import (
     MANIFEST_SCHEMA_VERSION,
     ManifestError,
@@ -348,7 +350,7 @@ def write_geoparquet(
     records: Iterable[dict[str, object]],
     target: Path,
     *,
-    batch_size: int = 1024,
+    batch_size: int = DEFAULT_WRITE_BATCH_SIZE,
     validator: Callable[[Path], int] | None = None,
 ) -> int:
     """Stream ``records`` into a validated GeoParquet file atomically promoted to ``target``."""
@@ -706,7 +708,7 @@ def _validate_geometry(geometry: bytes | None, geometry_type: str) -> None:
         raise StorageError(f"geometry_type/WKB mismatch or invalid geometry: {decoded.geom_type}")
 
 
-def _decode_geometry(geometry: bytes):
+def _decode_geometry(geometry: bytes) -> BaseGeometry:
     try:
         return from_wkb(geometry)
     except ShapelyError as error:
@@ -821,7 +823,14 @@ def validate_geoparquet(path: Path, *, require_successful_text: bool = True) -> 
         raise StorageError(f"cannot read GeoParquet {path}: {error}") from error
 
 
-def validate_finalized_artifacts(data_root):
+class FinalizedArtifacts(TypedDict):
+    """Result of :func:`validate_finalized_artifacts`."""
+
+    parquets: tuple[Path, ...]
+    manifests: tuple[Path, ...]
+
+
+def validate_finalized_artifacts(data_root: Path) -> FinalizedArtifacts:
     """Validate every finalized Parquet/manifest pair under data_root.
 
     The validation is intentionally minimal: it only checks that every
@@ -880,7 +889,7 @@ def _validate_manifest_pair(parquet: Path, manifests_dir: Path) -> Path:
     return manifest_path
 
 
-def validate_finalized_artifacts_strict(data_root):
+def validate_finalized_artifacts_strict(data_root: Path) -> FinalizedArtifacts:
     """Run :func:`validate_finalized_artifacts` followed by :func:`validate_geoparquet`.
 
     Use this when downstream code is about to load the validated

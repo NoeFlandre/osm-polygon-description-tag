@@ -20,7 +20,8 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 from urllib.parse import quote
 
-from osm_polygon_description_tag.dataset.reporting import collect_stats
+from osm_polygon_description_tag.dataset.stats import collect_stats
+from osm_polygon_description_tag.runtime.units import GIB, MIB
 
 DEFAULT_TRACKIO_PROJECT = "osm-polygon-description-tag"
 DEFAULT_TRACKIO_SPACE_ID = "NoeFlandre/osm-polygon-description-tag-trackio"
@@ -151,8 +152,8 @@ def _per_pbf_row(entry: Mapping[str, Any]) -> dict[str, object]:
     return {
         "source": str(entry.get("source_pbf", entry.get("parquet", ""))),
         "rows": included,
-        "input_pbf_gib": source_bytes / (1024**3),
-        "output_parquet_mib": output_bytes / (1024**2),
+        "input_pbf_gib": source_bytes / GIB,
+        "output_parquet_mib": output_bytes / MIB,
         "description_candidate_rate": rates[0],
         "technical_acceptance_rate": rates[1],
         "output_bytes_per_row": rates[2],
@@ -173,7 +174,7 @@ def _pbf_rates(
     output_bytes: int,
     technical_rejections: int,
 ) -> tuple[float, float, float, float, float]:
-    input_gib = source_bytes / (1024**3)
+    input_gib = source_bytes / GIB
     return (
         _ratio(candidates, emitted),
         _ratio(included, candidates),
@@ -224,7 +225,7 @@ def build_dataset_summary(stats: Mapping[str, Any]) -> list[dict[str, object]]:
         },
         {
             "metric": "Output size (GiB)",
-            "value": _integer(stats.get("output_bytes_total")) / (1024**3),
+            "value": _integer(stats.get("output_bytes_total")) / GIB,
         },
         {"metric": "PBFs", "value": _integer(stats.get("output_files"))},
         {"metric": "Total technical rejections", "value": technical_rejections},

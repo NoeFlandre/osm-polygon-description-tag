@@ -38,6 +38,7 @@ from osm_polygon_description_tag.workflow.grid_operator import (
 )
 from tests.conftest import make_record_dict
 from tests.helpers.messages import exactly
+from tests.helpers.project import write_project as _write_project
 from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH, fake_splitter
 
 SHARD = "region.parquet"
@@ -48,15 +49,6 @@ REMOTE = {
     "remote_run_dir": "/scratch/staging/run",
     "sat_model_path": "/home/user/models/sat-3l-sm/model.safetensors",
 }
-
-
-def _write_project(project: Path, *, readme: bool = False) -> None:
-    (project / "src").mkdir(parents=True)
-    (project / "src" / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
-    (project / "pyproject.toml").write_text("[project]\nname = 'synthetic'\n", encoding="utf-8")
-    (project / "uv.lock").write_text("version = 1\n", encoding="utf-8")
-    if readme:
-        (project / "README.md").write_text("# synthetic\n", encoding="utf-8")
 
 
 def _stage(inputs: tuple[Path, Path, Path, SnapshotManifest]) -> object:

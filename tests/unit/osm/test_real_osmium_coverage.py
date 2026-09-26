@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -55,6 +54,7 @@ from osm_polygon_description_tag.runtime.resources import (
     osmium_export_config,
 )
 from osm_polygon_description_tag.workflow.build import build_one
+from tests.helpers.osmium import write_pbf as _write_pbf
 
 FIXTURE = Path("tests/fixtures/amendment_coverage.osm")
 EXPECTED_INCLUDED = {1100, 1101, 1102, 1103, 1104, 1105, 1106, 1300, 1500}
@@ -67,17 +67,6 @@ def _real_osmium() -> Iterator[str]:
     if executable is None:
         pytest.skip("osmium binary not installed")
     yield executable
-
-
-def _write_pbf(executable: str, osm_path: Path, pbf_path: Path) -> None:
-    completed = subprocess.run(  # noqa: S603 - controlled argument array, no shell
-        [executable, "cat", str(osm_path), "-o", str(pbf_path), "--overwrite"],
-        check=True,
-        capture_output=True,
-        shell=False,
-        timeout=30,
-    )
-    assert completed.returncode == 0, completed.stderr.decode("utf-8", errors="replace")
 
 
 def _build_dataset(tmp_path: Path, executable: str) -> tuple[Paths, Path, Path]:

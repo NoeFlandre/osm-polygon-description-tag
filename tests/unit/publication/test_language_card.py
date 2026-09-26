@@ -418,3 +418,405 @@ def test_install_moves_an_existing_end_section_before_general_limitations(
     assert updated.count(LANGUAGE_CARD_SECTION_START) == 1
     assert updated.count(LANGUAGE_CARD_SECTION_END) == 1
     assert install_language_card(updated, export) == updated
+
+
+# ---------------------------------------------------------------------------
+# Exact README -> README contracts of the section installer.
+#
+# Every boundary below decides whether a byte of someone else's card survives,
+# so each case pins the whole resulting README (or the whole refusal message)
+# rather than a shape.
+# ---------------------------------------------------------------------------
+
+_START = LANGUAGE_CARD_SECTION_START
+_END = LANGUAGE_CARD_SECTION_END
+_HEADING = f"## Language annotations (`{LANGUAGE_CONFIG_NAME}`)"
+_REGION = f"{LANGUAGE_DATA_PREFIX}/region.parquet"
+_FLOW_ENTRY = (
+    f"{{config_name: {LANGUAGE_CONFIG_NAME}, data_files: [{{split: train, path: [{_REGION}]}}]}}"
+)
+
+
+def _block_entry(indent: str, newline: str = "\n") -> str:
+    lines = (
+        f"- config_name: {LANGUAGE_CONFIG_NAME}",
+        "  data_files:",
+        "  - split: train",
+        "    path:",
+        f"    - {_REGION}",
+    )
+    return newline.join(f"{indent}{line}" for line in lines)
+
+
+def _section(export: LanguageExport, newline: str = "\n") -> str:
+    body = render_language_card_section(export).rstrip("\n").replace("\n", newline)
+    return f"{_START}{newline}{body}{newline}{_END}{newline}"
+
+
+_BLOCK_FRONT = "---\nconfigs:\n- config_name: default\n"
+
+
+@pytest.mark.parametrize(
+    ("front", "expected_front"),
+    [
+        pytest.param(
+            "configs: [{config_name: default}]\n",
+            f"configs: [{{config_name: default}}, {_FLOW_ENTRY}]\n",
+            id="flow",
+        ),
+        pytest.param(
+            "configs: [{config_name: default}, ]\n",
+            f"configs: [{{config_name: default}},  {_FLOW_ENTRY}]\n",
+            id="flow-trailing-comma-keeps-its-space",
+        ),
+        pytest.param(
+            "configs: [{config_name: default},]\n",
+            f"configs: [{{config_name: default}},{_FLOW_ENTRY}]\n",
+            id="flow-trailing-comma-without-space",
+        ),
+        pytest.param(
+            "configs: [ {config_name: default} ]\n",
+            f"configs: [ {{config_name: default}} , {_FLOW_ENTRY}]\n",
+            id="flow-padded",
+        ),
+        pytest.param(
+            "configs: [{config_name: default},\n  ]\n",
+            f"configs: [{{config_name: default}},\n  , {_FLOW_ENTRY}]\n",
+            id="flow-multiline-keeps-its-newline",
+        ),
+        pytest.param(
+            "configs:\n- config_name: default\n",
+            f"configs:\n- config_name: default\n{_block_entry('')}\n",
+            id="block-at-end",
+        ),
+        pytest.param(
+            "configs:\n  - config_name: default\nother: 1\n",
+            f"configs:\n  - config_name: default\n{_block_entry('  ')}\nother: 1\n",
+            id="block-indented-before-another-key",
+        ),
+    ],
+)
+def test_the_language_config_is_appended_without_touching_existing_yaml(
+    export: LanguageExport, front: str, expected_front: str
+) -> None:
+    readme = f"---\n{front}---\n# T\n"
+
+    assert install_language_card(readme, export) == (
+        f"---\n{expected_front}---\n# T\n\n{_section(export)}"
+    )
+
+
+def test_a_crlf_card_keeps_crlf_in_its_config_and_its_section(export: LanguageExport) -> None:
+    readme = "---\r\nconfigs:\r\n- config_name: default\r\n---\r\n# T\r\n"
+
+    assert install_language_card(readme, export) == (
+        "---\r\nconfigs:\r\n- config_name: default\r\n"
+        f"{_block_entry('', '\r\n')}\r\n---\r\n# T\r\n\r\n{_section(export, '\r\n')}"
+    )
+
+
+def test_the_appended_flow_config_stays_on_one_line_and_keeps_unicode(
+    export: LanguageExport,
+) -> None:
+    files = tuple(f"{LANGUAGE_DATA_PREFIX}/réunion-{i:03}.parquet" for i in range(10))
+    readme = "---\nconfigs: [{config_name: default}]\n---\n# T\n"
+
+    updated = install_language_card(readme, replace(export, files=files))
+
+    config_line = updated.splitlines()[1]
+    assert config_line == (
+        f"configs: [{{config_name: default}}, {{config_name: {LANGUAGE_CONFIG_NAME}, "
+        f"data_files: [{{split: train, path: [{', '.join(files)}]}}]}}]"
+    )
+
+
+def test_a_long_flow_value_is_still_wrapped_past_the_serializer_width(
+    export: LanguageExport,
+) -> None:
+    """The width is wide, not unbounded: one very long line still wraps."""
+    files = tuple(f"{LANGUAGE_DATA_PREFIX}/{'a' * 60}-{i:03}.parquet" for i in range(20))
+    readme = "---\nconfigs: [{config_name: default}]\n---\n# T\n"
+
+    updated = install_language_card(readme, replace(export, files=files))
+
+    front = updated.split("---\n", 2)[1]
+    assert front.count("\n") > 1
+    assert yaml.safe_load(front)["configs"][-1]["data_files"][0]["path"] == list(files)
+
+
+def test_an_appended_block_config_keeps_unicode_unescaped(export: LanguageExport) -> None:
+    files = (f"{LANGUAGE_DATA_PREFIX}/réunion.parquet",)
+
+    updated = install_language_card(_BLOCK_FRONT + "---\n# T\n", replace(export, files=files))
+
+    assert f"    - {LANGUAGE_DATA_PREFIX}/réunion.parquet\n" in updated
+    assert "\\u" not in updated
+
+
+@pytest.mark.parametrize(
+    ("body", "expected_body"),
+    [
+        pytest.param("intro", "intro\n\n{section}", id="no-trailing-newline"),
+        pytest.param("intro\n", "intro\n\n{section}", id="one-trailing-newline"),
+        pytest.param("intro\n\n", "intro\n\n{section}", id="blank-line-already-there"),
+        pytest.param(
+            "introXX\n\n## Limitations\nbody\n",
+            "introXX\n\n{section}\n## Limitations\nbody\n",
+            id="before-limitations",
+        ),
+        pytest.param(
+            "introXX  \n\n\n## Limitations\nbody\n",
+            "introXX  \n\n{section}\n## Limitations\nbody\n",
+            id="hard-line-break-before-limitations-survives",
+        ),
+    ],
+)
+def test_the_section_is_placed_with_exactly_one_blank_line_before_it(
+    export: LanguageExport, body: str, expected_body: str
+) -> None:
+    updated = install_language_card(_BLOCK_FRONT + "---\n" + body, export)
+
+    assert updated.split("---\n", 2)[2] == expected_body.format(section=_section(export))
+
+
+@pytest.mark.parametrize(
+    ("old_section", "trailing"),
+    [
+        pytest.param(f"{_START}\n{_HEADING}\nold\n{_END}\n", "tail\n", id="lf"),
+        pytest.param(f"{_START}\n{_HEADING}\nold\n{_END}", "", id="end-of-file"),
+        pytest.param(f"{_START}\r\n{_HEADING}\r\nold\r\n{_END}\r\n", "tail\n", id="crlf-markers"),
+    ],
+)
+def test_an_existing_marked_section_is_replaced_in_place(
+    export: LanguageExport, old_section: str, trailing: str
+) -> None:
+    front = f"---\nconfigs:\n- config_name: default\n{_block_entry('')}\n---\n"
+    readme = f"{front}intro\n\n{old_section}{trailing}"
+
+    updated = install_language_card(readme, export)
+
+    assert updated == f"{front}intro\n\n{trailing}" + (
+        f"\n{_section(export)}" if trailing else _section(export)
+    )
+
+
+@pytest.mark.parametrize(
+    ("readme", "message"),
+    [
+        ("no front matter\n", "dataset card must start with YAML front matter"),
+        ("---\nconfigs: []\n", "dataset card has no closing YAML front matter delimiter"),
+        ("---\n  \n---\nbody\n", "dataset card front matter is empty"),
+        ("---\n- item\n---\nbody\n", "dataset card front matter must be a mapping"),
+        ("---\nitem\n---\nbody\n", "dataset card front matter must be a mapping"),
+        ("---\nother: []\n---\nbody\n", "dataset card must contain a configs sequence"),
+        ("---\nconfigs: {}\n---\nbody\n", "dataset card must contain a configs sequence"),
+        ("---\nconfigs: []\n---\nbody\n", "dataset card must contain a non-empty configs list"),
+        ("---\nconfigs:\n- nope\n---\nbody\n", "dataset card configs entries must be mappings"),
+        (
+            "---\nconfigs:\n- config_name: ''\n---\nbody\n",
+            "dataset card configs entries need a non-empty config_name",
+        ),
+        (
+            "---\nconfigs:\n- config_name: 7\n---\nbody\n",
+            "dataset card configs entries need a non-empty config_name",
+        ),
+        (
+            "---\nconfigs:\n- config_name: a\n- config_name: a\n---\nbody\n",
+            "dataset card contains duplicate configuration 'a'",
+        ),
+        (
+            f"---\nconfigs:\n- config_name: {LANGUAGE_CONFIG_NAME}\n  data_files: []\n---\nbody\n",
+            "dataset card contains a conflicting language-v1 configuration",
+        ),
+        (
+            "---\nconfigs:\n- config_name: a\n  same: 1\n  same: 2\n---\nbody\n",
+            "dataset card front matter is malformed: duplicate YAML key: 'same'",
+        ),
+        pytest.param(
+            "---\n# only a comment\n---\nbody\n",
+            "dataset card front matter must be a mapping",
+            id="comment-only",
+        ),
+        pytest.param(
+            "---\n!!set\nconfigs:\n---\nbody\n",
+            "dataset card front matter must be a mapping",
+            id="set-shaped-like-a-mapping",
+        ),
+        pytest.param(
+            "---\nconfigs: &self [*self]\n---\nbody\n",
+            "dataset card configs entries must be mappings",
+            id="recursive-alias-loads-then-fails-shape",
+        ),
+    ],
+)
+def test_a_malformed_front_matter_is_refused_with_an_exact_message(
+    export: LanguageExport, readme: str, message: str
+) -> None:
+    with pytest.raises(LanguagePublicationError, match=exactly(message)):
+        install_language_card(readme, export)
+
+
+_MARKERS = "dataset card has malformed language-v1 section markers"
+_LINES = "dataset card language-v1 section markers must occupy complete lines"
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        pytest.param(f"{_START}\n{_HEADING}\n", _MARKERS, id="only-start"),
+        pytest.param(f"{_HEADING}\n{_END}\n", _MARKERS, id="only-end"),
+        pytest.param(f"{_END}\n{_HEADING}\n{_START}\n", _MARKERS, id="inverted"),
+        pytest.param(
+            f"{_START}\n{_HEADING}\n{_END}\n{_START}\n{_END}\n", _MARKERS, id="two-sections"
+        ),
+        pytest.param(f"prefix {_START}\n{_HEADING}\n{_END}\n", _LINES, id="start-prefix"),
+        pytest.param(f"{_START} trailing\n{_HEADING}\n{_END}\n", _LINES, id="start-suffix"),
+        pytest.param(f"{_START}\n{_HEADING}\n {_END}\n", _LINES, id="end-prefix"),
+        pytest.param(f"{_START}\n{_HEADING}\n{_END} tail\n", _LINES, id="end-suffix"),
+        pytest.param(
+            f"{_START}\n## Other\n{_END}\n",
+            "dataset card has a malformed language-v1 card section",
+            id="no-heading-inside",
+        ),
+        pytest.param(
+            f"{_HEADING}\n{_START}\n## Other\n{_END}\n",
+            "dataset card language-v1 section markers do not contain the section heading",
+            id="heading-outside",
+        ),
+        pytest.param(
+            f"{_HEADING}\n{_START}\n{_HEADING}\n{_END}\n",
+            "dataset card has a malformed language-v1 card section",
+            id="heading-twice",
+        ),
+        pytest.param(
+            f"{_HEADING}\nHandwritten.\n",
+            "dataset card contains an unmarked language-v1 card section",
+            id="unmarked-heading",
+        ),
+    ],
+)
+def test_a_malformed_generated_section_is_refused_with_an_exact_message(
+    export: LanguageExport, body: str, message: str
+) -> None:
+    readme = f"{_BLOCK_FRONT}---\nintro\n{body}"
+
+    with pytest.raises(LanguagePublicationError, match=exactly(message)):
+        install_language_card(readme, export)
+
+
+def test_a_marker_after_a_bare_carriage_return_starts_a_line(export: LanguageExport) -> None:
+    readme = f"{_BLOCK_FRONT}---\nintro\n\r{_START}\n{_HEADING}\n{_END}\n"
+
+    updated = install_language_card(readme, export)
+
+    assert updated.count(_START) == 1
+    assert updated.endswith(f"intro\n\r\n\n{_section(export)}")
+
+
+def test_a_bare_carriage_return_card_gets_its_config_on_its_own_line(
+    export: LanguageExport,
+) -> None:
+    readme = "---\nconfigs:\r- config_name: default\rother: 1\n---\n# T\n"
+
+    updated = install_language_card(readme, export)
+
+    assert updated.startswith(
+        f"---\nconfigs:\r- config_name: default\r{_block_entry('')}\nother: 1\n---\n"
+    )
+
+
+def test_markers_at_the_start_of_crlf_lines_are_accepted(export: LanguageExport) -> None:
+    readme = f"{_BLOCK_FRONT}---\nintro\r\n{_START}\r\n{_HEADING}\r\n{_END}\r\n"
+
+    updated = install_language_card(readme, export)
+
+    assert updated.count(_START) == 1
+    assert updated.endswith(_section(export))
+
+
+# ---------------------------------------------------------------------------
+# Rendered section content.
+# ---------------------------------------------------------------------------
+
+
+def _stats(**overrides: object) -> LanguageStats:
+    base: dict[str, object] = dict(
+        annotation_count=100,
+        object_count=90,
+        base_description_count=80,
+        localized_description_count=20,
+        detected_count=60,
+        uncertain_count=30,
+        non_linguistic_count=10,
+        distinct_language_count=5,
+        top_languages=(("eng", 273435), ("deu", 138912)),
+        split_count=45,
+        unsupported_language_count=15,
+        unsupported_distinct_count=3,
+        top_unsupported_languages=(("tso", 10), ("vec", 5)),
+        not_detected_count=25,
+        sentence_count=70,
+    )
+    base.update(overrides)
+    return LanguageStats(**base)  # type: ignore[arg-type]
+
+
+def test_the_card_states_that_detection_is_not_gated_on_confidence(
+    export: LanguageExport,
+) -> None:
+    """The card must not describe a policy the run no longer applies."""
+    section = render_language_card_section(export)
+
+    assert "meets its confidence policy" not in section
+    assert "Detection is **not** gated on a confidence threshold" in section
+
+
+@pytest.mark.parametrize(
+    ("split", "unsupported", "coverage", "share"),
+    [
+        (45, 15, "75.0000%", "25.0000%"),
+        (840897, 44843, "94.9372%", "5.0628%"),
+        (1, 0, "100.0000%", "0.0000%"),
+        (0, 1, "0.0000%", "100.0000%"),
+        (0, 0, "n/a", "n/a"),
+    ],
+)
+def test_coverage_is_a_share_of_eligible_units_only(
+    export: LanguageExport, split: int, unsupported: int, coverage: str, share: str
+) -> None:
+    """Values with no detected language were never candidates for splitting."""
+    stats = _stats(split_count=split, unsupported_language_count=unsupported)
+
+    section = render_language_card_section(replace(export, stats=stats))
+
+    assert f"| Eligible text units | {split + unsupported} |\n" in section
+    assert f"| Coverage | {coverage} |\n| Unsupported | {share} |\n" in section
+
+
+def test_the_language_tables_list_every_published_language_in_order(
+    export: LanguageExport,
+) -> None:
+    section = render_language_card_section(replace(export, stats=_stats()))
+
+    assert (
+        "\n\nLargest groups left unsplit:\n\n"
+        "| Language | Annotations |\n| --- | ---: |\n| `tso` | 10 |\n| `vec` | 5 |\n\n"
+    ) in section
+    assert (
+        "**Most frequent detected languages.**\n\n"
+        "| Language | Annotations |\n| --- | ---: |\n| `eng` | 273435 |\n| `deu` | 138912 |\n\n"
+    ) in section
+
+
+def test_empty_language_tables_say_so_rather_than_rendering_a_header(
+    export: LanguageExport,
+) -> None:
+    stats = _stats(top_languages=(), top_unsupported_languages=(), unsupported_language_count=0)
+
+    section = render_language_card_section(replace(export, stats=stats))
+
+    assert "\n\nEvery detected language was inside the supported set.\n\n" in section
+    assert "**Most frequent detected languages.**\n\nNo language was detected in this run.\n" in (
+        section
+    )
+    assert "| Language | Annotations |" not in section

@@ -44,6 +44,7 @@ from osm_polygon_description_tag.dataset.languages.worker import (
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from tests.conftest import make_record_dict
 from tests.helpers.messages import exactly
+from tests.helpers.parquet import write_description_shard
 from tests.helpers.sentences import fake_splitter
 
 SHARD = "region.parquet"
@@ -79,16 +80,7 @@ def _tags_for(index: int) -> dict[str, str]:
 
 
 def _write_shard(path: Path, count: int, *, row_group_size: int = 4) -> None:
-    records = (
-        make_record_dict(
-            Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-            _tags_for(index),
-            osm_id=index + 1,
-        )
-        for index in range(count)
-    )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    write_geoparquet(records, path, batch_size=row_group_size)
+    write_description_shard(path, count, batch_size=row_group_size, tags=_tags_for)
     _set_row_group_size(path, row_group_size)
 
 

@@ -323,6 +323,7 @@ def test_publish_sources_forwards_each_source_and_tracks_cumulative_progress(
                 "logger": logger,
                 "source_index": 1,
                 "source_total": 2,
+                "subprocess_runner": None,
             },
         ),
         (
@@ -335,6 +336,7 @@ def test_publish_sources_forwards_each_source_and_tracks_cumulative_progress(
                 "logger": logger,
                 "source_index": 2,
                 "source_total": 2,
+                "subprocess_runner": None,
             },
         ),
     ]
@@ -1201,6 +1203,7 @@ def test_run_and_publish_executes_stages_in_order_and_finishes_tracker(
             "clock": clock,
             "logger": logger,
             "tracker": tracker,
+            "subprocess_runner": None,
         },
     )
     assert captured["reconcile_remote"] == ((paths, verifier, logger), {})
@@ -1212,6 +1215,7 @@ def test_run_and_publish_executes_stages_in_order_and_finishes_tracker(
             "upload_timeout": 5.0,
             "clock": clock,
             "logger": logger,
+            "subprocess_runner": None,
         },
     )
     assert logger.events == [
@@ -1422,11 +1426,20 @@ def test_default_upload_forwards_identity_timeout_and_retry_callback(
     assert args == (plan,)
     assert kwargs["confirmation"] == "plan-identity"
     assert kwargs["timeout"] == 12.5
+    assert kwargs["runner"] is None
     retry_observer = kwargs["retry_observer"]
     assert callable(retry_observer)
     retry_observer(attempt=2, reason="timeout")  # type: ignore[operator]
     assert logger.events == [("upload_retry", {"attempt": 2, "reason": "timeout"})]
     assert orchestrator._source_retry_observer(None) is None
+
+    def subprocess_runner(_command: list[str]) -> None:
+        return None
+
+    orchestrator._run_default_source_upload(
+        plan, timeout=None, logger=None, subprocess_runner=subprocess_runner
+    )
+    assert calls[1][1]["runner"] is subprocess_runner
 
 
 def test_injected_source_upload_forwards_canonical_command_and_rejects_empty_revision(
@@ -1514,8 +1527,11 @@ def test_upload_source_plan_dispatches_branches_and_wraps_upload_errors(
         timeout=7.0,
         upload_runner=None,
         logger=logger,
+        subprocess_runner=print,
     )
-    default_upload.assert_called_once_with(plan, timeout=7.0, logger=logger)
+    default_upload.assert_called_once_with(
+        plan, timeout=7.0, logger=logger, subprocess_runner=print
+    )
     injected_upload.assert_not_called()
 
     def runner(_command):
@@ -1603,6 +1619,7 @@ def test_execute_publication_builds_validates_uploads_and_verifies_in_order(
                     "timeout": 9.0,
                     "upload_runner": None,
                     "logger": logger,
+                    "subprocess_runner": None,
                 },
             ),
         ),
@@ -1674,6 +1691,7 @@ def test_orchestrator_compatibility_wrappers_forward_all_metadata_arguments(
         upload_timeout=4.0,
         clock=clock,
         logger=logger,
+        subprocess_runner=None,
     )
 
 
@@ -1720,6 +1738,7 @@ def test_upload_final_metadata_uses_default_clock_and_canonical_validator(
             "clock": orchestrator._default_clock,
             "logger": logger,
             "plan_validator": orchestrator.create_upload_plan,
+            "subprocess_runner": None,
         },
     )
 
@@ -1757,92 +1776,6 @@ def test_reconcile_remote_logs_empty_revision_as_empty_string(
             {"level": "INFO", "verified_revision": ""},
         ),
     ]
-
-
-def test_optional_subprocess_bridge_selects_exact_execution_path(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    report = object()
-    direct_calls: list[dict[str, object]] = []
-    bridge_calls: list[tuple[object, dict[str, object]]] = []
-
-    def direct(**kwargs: object) -> object:
-        direct_calls.append(kwargs)
-        return report
-
-    def bridged(runner: object, **kwargs: object) -> object:
-        bridge_calls.append((runner, kwargs))
-        return report
-
-    monkeypatch.setattr(orchestrator, "_run_and_publish", direct)
-    monkeypatch.setattr(orchestrator, "_run_with_subprocess_bridge", bridged)
-    assert orchestrator._run_with_optional_subprocess_bridge(None, option=1) is report
-    runner = object()
-    assert orchestrator._run_with_optional_subprocess_bridge(runner, option=2) is report
-    assert direct_calls == [{"option": 1}]
-    assert bridge_calls == [(runner, {"option": 2})]
-
-
-def test_subprocess_bridge_forwards_command_restores_runner_and_keeps_signature(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import osm_polygon_description_tag.publication.upload as publication_upload
-
-    original_runner = publication_upload.default_runner_with_retry
-    subprocess_calls: list[list[str]] = []
-    captured: dict[str, object] = {}
-    report = object()
-
-    def subprocess_runner(command: list[str]) -> None:
-        subprocess_calls.append(command)
-
-    def run_and_publish(**kwargs: object) -> object:
-        bridge = publication_upload.default_runner_with_retry
-        parameters = inspect.signature(bridge).parameters
-        captured["defaults"] = {
-            name: parameters[name].default
-            for name in (
-                "max_retries",
-                "backoff_seconds",
-                "backoff_factor",
-                "backoff_cap_seconds",
-                "timeout",
-                "_runner",
-                "retry_observer",
-            )
-        }
-        bridge(
-            ["osmium", "export"],
-            max_retries=9,
-            backoff_seconds=4.0,
-            backoff_factor=3.0,
-            backoff_cap_seconds=11.0,
-            timeout=8.0,
-            _runner=lambda *_args: None,
-            retry_observer=lambda **_fields: None,
-        )
-        captured["kwargs"] = kwargs
-        return report
-
-    monkeypatch.setattr(orchestrator, "_run_and_publish", run_and_publish)
-    result = orchestrator._run_with_subprocess_bridge(
-        subprocess_runner,
-        option="value",
-    )
-
-    assert result is report
-    assert subprocess_calls == [["osmium", "export"]]
-    assert captured["kwargs"] == {"option": "value"}
-    assert captured["defaults"] == {
-        "max_retries": 3,
-        "backoff_seconds": 2.0,
-        "backoff_factor": 2.0,
-        "backoff_cap_seconds": 60.0,
-        "timeout": None,
-        "_runner": None,
-        "retry_observer": None,
-    }
-    assert publication_upload.default_runner_with_retry is original_runner
 
 
 def test_run_and_publish_forwards_all_options_and_closes_owned_resources(
@@ -1888,13 +1821,13 @@ def test_run_and_publish_forwards_all_options_and_closes_owned_resources(
         captured["ensure_logger"] = (actual, kwargs)
         return owned_logger, True
 
-    def run_optional(actual_runner: object, **kwargs: object) -> object:
-        captured["run_optional"] = (actual_runner, kwargs)
+    def run_and_publish(**kwargs: object) -> object:
+        captured["run_and_publish"] = kwargs
         return report
 
     monkeypatch.setattr(orchestrator, "_resolve_clock", resolve_clock)
     monkeypatch.setattr(orchestrator, "_ensure_logger", ensure_logger)
-    monkeypatch.setattr(orchestrator, "_run_with_optional_subprocess_bridge", run_optional)
+    monkeypatch.setattr(orchestrator, "_run_and_publish", run_and_publish)
 
     returned = orchestrator.run_and_publish(
         source_root=source.path.parent,
@@ -1921,9 +1854,7 @@ def test_run_and_publish_forwards_all_options_and_closes_owned_resources(
         provided_logger,
         {"paths": paths, "data_root": paths.data_root, "clock": resolved_clock},
     )
-    actual_runner, kwargs = captured["run_optional"]
-    assert actual_runner is subprocess_runner
-    assert kwargs == {
+    assert captured["run_and_publish"] == {
         "source_root": source.path.parent,
         "data_root": paths.data_root,
         "confirm_repo": "owner/dataset",
@@ -1939,6 +1870,7 @@ def test_run_and_publish_forwards_all_options_and_closes_owned_resources(
         "logger": owned_logger,
         "tracker": tracker,
         "osmium_executable": "osmium-custom",
+        "subprocess_runner": subprocess_runner,
     }
     owned_logger.close.assert_called_once_with()
     tracker.finish.assert_called_once_with()
@@ -1967,7 +1899,7 @@ def test_run_and_publish_logs_interrupt_and_finishes_tracker(
     def interrupted(*_args: object, **_kwargs: object) -> object:
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(orchestrator, "_run_with_optional_subprocess_bridge", interrupted)
+    monkeypatch.setattr(orchestrator, "_run_and_publish", interrupted)
 
     with pytest.raises(KeyboardInterrupt):
         orchestrator.run_and_publish(confirm_repo="owner/dataset", tracker=tracker)
@@ -1997,11 +1929,11 @@ def test_run_and_publish_uses_the_stable_default_progress_interval(
         lambda _logger, **_kwargs: (logger, False),
     )
 
-    def run_optional(_runner: object, **kwargs: object) -> object:
+    def run_and_publish(**kwargs: object) -> object:
         captured.update(kwargs)
         return object()
 
-    monkeypatch.setattr(orchestrator, "_run_with_optional_subprocess_bridge", run_optional)
+    monkeypatch.setattr(orchestrator, "_run_and_publish", run_and_publish)
 
     orchestrator.run_and_publish(confirm_repo="owner/dataset", logger=logger)
 

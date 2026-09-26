@@ -39,8 +39,10 @@ from typing import IO, Any
 
 from osm_polygon_description_tag.runtime.atomic import fsync_dir
 from osm_polygon_description_tag.runtime.time import utc_now_iso
+from osm_polygon_description_tag.runtime.units import MIB
 
 _REDACTED = "[REDACTED]"
+_ROTATE_MAX_BYTES = 10 * MIB
 
 # Allowlisted field names safe to write through. Any key not in this
 # set is dropped before the event is rendered (callers can opt in by
@@ -197,7 +199,7 @@ class RunLogger:
         self._buffer_preflight = buffer_preflight
         self._stderr = stderr if stderr is not None else sys.stderr
         self._observer = observer
-        self._max_bytes = 10 * 1024 * 1024
+        self._max_bytes = _ROTATE_MAX_BYTES
         self._backups = 5
         self._path: Path | None = None
         self._handle: IO[bytes] | None = None

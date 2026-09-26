@@ -1823,6 +1823,55 @@ def test_production_job_name_resolver_uses_account_json_without_resubmitting() -
     assert observed == [("oarstat", "-u", "-J")]
 
 
+@pytest.mark.parametrize(
+    ("account", "expected"),
+    [
+        pytest.param(CommandResult((), 0, "", ""), "{}", id="empty-success-is-no-jobs"),
+        pytest.param(CommandResult((), 1, "", "oarstat failed"), None, id="failed-is-unknown"),
+        pytest.param(CommandResult((), 0, "", "", timed_out=True), None, id="timeout-is-unknown"),
+    ],
+)
+def test_policy_evidence_treats_only_a_successful_empty_account_listing_as_no_jobs(
+    account: CommandResult, expected: str | None
+) -> None:
+    observed: list[tuple[str, ...]] = []
+    runner = _runner(
+        [CommandResult((), 0, "policy", ""), CommandResult((), 0, "quota", ""), account],
+        observed,
+    )
+
+    assert gather_policy_evidence("nancy", runner=runner) == (  # type: ignore[arg-type]
+        "policy",
+        "quota",
+        expected,
+    )
+    assert observed == [
+        ("usagepolicycheck", "-t", "--sites", "nancy", "--json"),
+        ("quota", "-p", "-w"),
+        ("oarstat", "-u", "-J"),
+    ]
+
+
+def test_job_name_resolver_treats_successful_empty_account_output_as_no_match() -> None:
+    observed: list[tuple[str, ...]] = []
+    runner = _runner([CommandResult((), 0, "", "")], observed)
+
+    assert resolve_job_name("lang-target", runner=runner) is None  # type: ignore[arg-type]
+    assert observed == [("oarstat", "-u", "-J")]
+
+
+def test_job_name_resolver_keeps_successful_whitespace_output_strict() -> None:
+    runner = _runner([CommandResult((), 0, " \n", "")])
+
+    with pytest.raises(
+        GridOperatorError,
+        match=exactly(
+            "cannot resolve account job by name: account-wide oarstat output must be valid JSON"
+        ),
+    ):
+        resolve_job_name("lang-target", runner=runner)  # type: ignore[arg-type]
+
+
 def test_reconciliation_queries_the_scheduler_only_behind_the_apply_gate(
     prepared: tuple[Path, Path, SnapshotManifest],
 ) -> None:

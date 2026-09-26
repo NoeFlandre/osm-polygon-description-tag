@@ -376,6 +376,8 @@ def test_upload_final_metadata_forwards_every_stage_argument(
         actual_runner: object,
         actual_timeout: float,
         actual_logger: object,
+        *,
+        subprocess_runner: object,
     ) -> None:
         calls.append(
             (
@@ -385,6 +387,7 @@ def test_upload_final_metadata_forwards_every_stage_argument(
                 actual_runner,
                 actual_timeout,
                 actual_logger,
+                subprocess_runner,
             )
         )
 
@@ -426,6 +429,7 @@ def test_upload_final_metadata_forwards_every_stage_argument(
             clock=clock,
             logger=logger,
             plan_validator=validator,
+            subprocess_runner=print,
         )
         == "verified"
     )
@@ -434,7 +438,7 @@ def test_upload_final_metadata_forwards_every_stage_argument(
         ("validate", paths.data_root),
         ("skip", paths.data_root, plan, logger),
         ("start", logger),
-        ("upload", plan, paths, upload_runner, 12.5, logger),
+        ("upload", plan, paths, upload_runner, 12.5, logger, print),
         ("verify", plan, verifier, logger),
         ("persist", paths.data_root, plan, "verified", clock),
         ("state", logger, "verified"),
@@ -482,12 +486,12 @@ def test_upload_metadata_delegates_and_logs_completion(
     monkeypatch.setattr(
         finalization_module,
         "_run_metadata_upload",
-        lambda *args: calls.append(args),
+        lambda *args, **kwargs: calls.append((*args, kwargs)),
     )
 
     _upload_metadata(plan, paths, upload_runner, 4.0, logger)  # type: ignore[arg-type]
 
-    assert calls == [(plan, paths, upload_runner, 4.0, logger)]
+    assert calls == [(plan, paths, upload_runner, 4.0, logger, {"subprocess_runner": None})]
     assert logger.events == [("metadata_upload_complete", {"level": "INFO"})]
 
 
@@ -507,7 +511,7 @@ def test_upload_metadata_wraps_expected_upload_failures(
     monkeypatch.setattr(
         finalization_module,
         "_run_metadata_upload",
-        lambda *_args: (_ for _ in ()).throw(error),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(error),
     )
 
     with pytest.raises(OrchestratorError, match="final metadata upload failed"):
@@ -902,6 +906,7 @@ def test_run_metadata_upload_uses_default_executor_with_confirmation(
     assert seen == {
         "plan": plan,
         "confirmation": "plan-id",
+        "runner": None,
         "timeout": 12.0,
         "retry_observer": seen["retry_observer"],
     }

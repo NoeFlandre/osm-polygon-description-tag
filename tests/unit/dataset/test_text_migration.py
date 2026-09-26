@@ -673,6 +673,14 @@ def test_either_missing_directory_refuses_the_migration(tmp_path: Path) -> None:
             text_migration.migrate_dataset_text(root)
 
 
+def test_empty_required_directories_are_a_noop(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    (data_root / "data").mkdir(parents=True)
+    (data_root / "manifests").mkdir()
+
+    assert text_migration.migrate_dataset_text(data_root) == 0
+
+
 def test_dropped_rows_are_added_to_an_existing_rejection_count(tmp_path: Path) -> None:
     """The reason may already have a count, and this repair adds to it."""
     data_root, parquet, manifest_path = _prepare(

@@ -8,6 +8,7 @@ cannot vouch for rather than segmenting it anyway.
 
 from __future__ import annotations
 
+import builtins
 import hashlib
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -289,13 +290,19 @@ def test_an_unhashable_model_path_is_reported_by_its_own_path(
     _install_fake_runtime(monkeypatch, _FakeModel())
     model_dir = _pinned_model(tmp_path, monkeypatch)
     weights = model_dir / "model.safetensors"
-    weights.chmod(0o000)
+    # ``chmod(0o000)`` does not stop root from reading the file, so the read
+    # failure is injected at ``open`` to hold on every user account.
+    real_open = builtins.open
 
-    try:
-        with pytest.raises(SentenceSplitterError) as caught:
-            build_sat_splitter(model_dir=model_dir)
-    finally:
-        weights.chmod(0o600)
+    def _refuse_weights(file: object, *args: object, **kwargs: object) -> object:
+        if file == weights:
+            raise PermissionError(13, "Permission denied", str(file))
+        return real_open(file, *args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(builtins, "open", _refuse_weights)
+
+    with pytest.raises(SentenceSplitterError) as caught:
+        build_sat_splitter(model_dir=model_dir)
 
     assert str(caught.value) == f"could not hash the SaT model: {weights}"
 

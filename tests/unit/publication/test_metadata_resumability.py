@@ -184,6 +184,7 @@ def _patch_external_boundaries(
     return call_log
 
 
+@pytest.mark.usefixtures("fake_osmium")
 def test_metadata_retried_after_interrupted_first_run(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -291,6 +292,7 @@ def test_metadata_retried_after_interrupted_first_run(
     assert file_sha256(data_root / "stats.json") == snapshot_stats
 
 
+@pytest.mark.usefixtures("fake_osmium")
 def test_metadata_state_records_required_fields(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -331,6 +333,7 @@ def test_metadata_state_records_required_fields(
     assert metadata["completed_at"] == _CLOCK
 
 
+@pytest.mark.usefixtures("fake_osmium")
 def test_metadata_upload_failure_leaves_state_incomplete(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -373,6 +376,7 @@ def test_metadata_upload_failure_leaves_state_incomplete(
     assert "verified_revision" not in metadata
 
 
+@pytest.mark.usefixtures("fake_osmium")
 def test_metadata_verification_failure_leaves_state_incomplete(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -414,6 +418,7 @@ def test_metadata_verification_failure_leaves_state_incomplete(
     assert "verified_revision" not in metadata
 
 
+@pytest.mark.usefixtures("fake_osmium")
 def test_metadata_retry_is_idempotent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """The metadata upload is safe to invoke multiple times (idempotent)."""
     paths, source_root, data_root = _setup_workspace(tmp_path)
@@ -473,6 +478,7 @@ def test_metadata_retry_is_idempotent(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert file_sha256(data_root / PUBLICATION_STATE_FILENAME) == snapshot_state
 
 
+@pytest.mark.usefixtures("fake_osmium")
 def test_metadata_uploaded_when_no_per_pbf_uploads(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

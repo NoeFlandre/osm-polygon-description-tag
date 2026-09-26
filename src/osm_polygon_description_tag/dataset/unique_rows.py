@@ -16,9 +16,10 @@ from osm_polygon_description_tag.dataset.canonical_rows import (
     canonical_geometry_wkb_sql,
     canonical_rows_sql,
 )
+from osm_polygon_description_tag.dataset.constants import DEFAULT_ARROW_BATCH_SIZE
 from osm_polygon_description_tag.dataset.text import sql_literal
 
-_BATCH_SIZE = 4096
+_BATCH_SIZE = DEFAULT_ARROW_BATCH_SIZE
 _REQUIRED_COLUMNS = frozenset(("source_pbf", "osm_type", "osm_id", "geometry"))
 _OPTIONAL_RANK_COLUMN_TYPES = {
     "version": "INTEGER",
@@ -152,7 +153,7 @@ def _unique_rows_query(
     return unique_rows_sql(f"({_parquet_relation(paths, columns)})", columns, **options)
 
 
-def _open_unique_rows_connection(data_root: Path):
+def _open_unique_rows_connection(data_root: Path) -> duckdb.DuckDBPyConnection:
     work_root = data_root / ".work" / "duckdb"
     work_root.mkdir(parents=True, exist_ok=True)
     connection = duckdb.connect(":memory:")

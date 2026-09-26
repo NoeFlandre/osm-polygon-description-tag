@@ -365,3 +365,16 @@ def test_bucket_counts_match_bisect(values: list[object], data_type: pa.DataType
     counts = [1] * area_histogram.AREA_BUCKET_COUNT
     area_histogram._add_bucket_counts(counts, pa.array(values, type=data_type))
     assert counts == [count + 1 for count in _row_counts(values)]
+
+
+def test_float64_bucket_counts_use_the_vectorized_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    counts = [0] * area_histogram.AREA_BUCKET_COUNT
+    values = pa.array([0.5, 1.0, 10.0, 100.0], type=pa.float64())
+
+    def scalar_bucket(_value: float) -> int:
+        pytest.fail("float64 batches must use vectorized bucketing")
+
+    monkeypatch.setattr(area_histogram, "_bucket_index", scalar_bucket)
+    area_histogram._add_bucket_counts(counts, values)
+
+    assert counts == [1, 1, 1, 1, *([0] * (area_histogram.AREA_BUCKET_COUNT - 4))]

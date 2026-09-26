@@ -6,7 +6,6 @@ payload deliberately excludes the absolute source root, so staging a shard on
 another machine does not change its identity.
 """
 
-import hashlib
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -34,6 +33,7 @@ from osm_polygon_description_tag.dataset.languages.paths import relative_posix_p
 from osm_polygon_description_tag.dataset.languages.payloads import PayloadReader, require_object
 from osm_polygon_description_tag.dataset.manifest import file_sha256
 from osm_polygon_description_tag.dataset.schema import SCHEMA, SCHEMA_VERSION
+from osm_polygon_description_tag.runtime.serialization import canonical_json_text, sha256_json
 from osm_polygon_description_tag.runtime.validation import validate_fingerprint
 
 SNAPSHOT_SCHEMA_VERSION: Final = 1
@@ -47,14 +47,8 @@ class SnapshotError(ValueError):
     """Raised when a snapshot or its immutable source binding is invalid."""
 
 
-def _canonical_json(payload: object) -> str:
-    # pragma: no mutate start - ensure_ascii=False and None are equivalent; exact bytes tested
-    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    # pragma: no mutate end
-
-
-def _sha256_json(payload: object) -> str:
-    return hashlib.sha256(_canonical_json(payload).encode()).hexdigest()
+_canonical_json = canonical_json_text
+_sha256_json = sha256_json
 
 
 _validate_fingerprint = partial(validate_fingerprint, error=SnapshotError)

@@ -24,19 +24,39 @@ _SECTION_HEADING = f"## Language annotations (`{LANGUAGE_CONFIG_NAME}`)"
 _FRONT_MATTER_OPEN = re.compile(r"\A---[ \t]*(?P<newline>\r?\n)")
 _LIMITATIONS_HEADING = re.compile(r"(?m)^## Limitations[ \t]*(?:\r?\n|\Z)")
 _FRONT_MATTER_CLOSE = re.compile(r"^---[ \t]*(?:\r?\n|\Z)", re.MULTILINE)
+_FLOW_LIST_TAIL = re.compile(r",(?P<space>[ \t]*)\Z")
+_MARKED_SECTION = re.compile(
+    f"{re.escape(LANGUAGE_CARD_SECTION_START)}(?P<body>.*?){re.escape(LANGUAGE_CARD_SECTION_END)}",
+    re.DOTALL,
+)
+# Block entries keep the insertion order of the config; flow entries stay on one
+# line for any realistic file list while still wrapping a pathological one.
+_BLOCK_DUMP_OPTIONS: Final[dict[str, Any]] = {
+    "default_flow_style": False,
+    "sort_keys": False,
+    "allow_unicode": True,
+}
+_FLOW_DUMP_OPTIONS: Final[dict[str, Any]] = {
+    "default_flow_style": True,
+    "sort_keys": False,
+    "width": 1000,
+    "allow_unicode": True,
+}
 
 
 class _UniqueKeyLoader(yaml.SafeLoader):
     """Safe YAML loader that does not silently accept duplicate keys."""
 
 
-def _construct_unique_mapping(loader: Any, node: Any, deep: bool = False) -> dict[object, object]:
+def _construct_unique_mapping(loader: Any, node: Any) -> dict[object, object]:
+    # PyYAML calls registered constructors without ``deep``, so nested
+    # collections are filled lazily, which is what lets recursive aliases load.
     mapping: dict[object, object] = {}
     for key_node, value_node in node.value:
-        key = loader.construct_object(key_node, deep=deep)
+        key = loader.construct_object(key_node)
         if key in mapping:
             raise yaml.YAMLError(f"duplicate YAML key: {key!r}")
-        mapping[key] = loader.construct_object(value_node, deep=deep)
+        mapping[key] = loader.construct_object(value_node)
     return mapping
 
 
@@ -94,10 +114,11 @@ def _parse_config_entries(
 def _load_front_matter(front_matter: str) -> tuple[object, object]:
     loader = _UniqueKeyLoader(front_matter)
     try:
-        payload = loader.get_single_data()
+        root = loader.get_single_node()
+        payload = loader.construct_document(root) if isinstance(root, MappingNode) else None
     finally:
         loader.dispose()
-    return payload, yaml.compose(front_matter, Loader=yaml.SafeLoader)
+    return payload, root
 
 
 def _config_node(root: MappingNode) -> SequenceNode:
@@ -147,9 +168,7 @@ def _install_config(
     if _has_language_config(configs, config):
         return front_matter
 
-    entry_text = yaml.safe_dump(
-        [config], default_flow_style=False, sort_keys=False, allow_unicode=True
-    ).rstrip("\n")
+    entry_text = yaml.safe_dump([config], **_BLOCK_DUMP_OPTIONS)
     return _insert_config(front_matter, config_node, entry_text, config, newline)
 
 
@@ -176,13 +195,11 @@ def _insert_config(
 def _install_block_config(
     front_matter: str, column: int, position: int, entry_text: str, newline: str
 ) -> str:
+    # A block sequence always ends at the start of a line (the next key or the
+    # end of the front matter), so the entry needs only its own line ending.
     indent = " " * column
     entry = newline.join(f"{indent}{line}" for line in entry_text.splitlines())
-    before = front_matter[:position]
-    after = front_matter[position:]
-    before_separator = "" if before.endswith(("\n", "\r")) else newline
-    after_separator = "" if after.startswith(("\n", "\r")) else newline
-    return before + before_separator + entry + after_separator + after
+    return front_matter[:position] + entry + newline + front_matter[position:]
 
 
 def _has_language_config(configs: list[dict[str, object]], expected: Mapping[str, object]) -> bool:
@@ -204,22 +221,21 @@ def _install_flow_config(front_matter: str, position: int, config: Mapping[str, 
     """Append the controlled mapping to a valid flow-style configs list."""
     before = front_matter[:position]
     after = front_matter[position:]
-    inline = yaml.safe_dump(
-        config, default_flow_style=True, sort_keys=False, width=1000, allow_unicode=True
-    ).strip()
-    trimmed = before.rstrip(" \t")
-    separator = _flow_separator(before, trimmed)
-    return before + separator + inline + after
+    inline = yaml.safe_dump(config, **_FLOW_DUMP_OPTIONS).strip()
+    return before + _flow_separator(before) + inline + after
 
 
-def _flow_separator(before: str, trimmed: str) -> str:
-    if trimmed.endswith(("[", ",")):
-        return " " if before != trimmed else ""
-    return ", "
+def _flow_separator(before: str) -> str:
+    # The configs list is never empty here, so only a trailing comma can
+    # already separate the new entry from the previous one.
+    tail = _FLOW_LIST_TAIL.search(before)
+    if tail is None:
+        return ", "
+    return " " if tail.group("space") else ""
 
 
 def _section_block(export: LanguageExport, newline: str) -> str:
-    section = render_language_card_section(export).rstrip("\r\n")
+    section = render_language_card_section(export).removesuffix("\n")
     if newline != "\n":  # pragma: no mutate - newline domain is LF or CRLF
         section = section.replace("\n", newline)
     return (
@@ -248,22 +264,16 @@ def _insert_section(readme: str, block: str, newline: str) -> str:
     return before + newline + newline + block + newline + after
 
 
-def _replace_section(readme: str, block: str, newline: str = "\n") -> str:
-    start, end = _marker_offsets(readme)
-    _require_marker_lines(readme, start, end)
-    end_after = end + len(LANGUAGE_CARD_SECTION_END)
-    if _SECTION_HEADING not in readme[start:end]:
-        raise _card_error("language-v1 section markers do not contain the section heading")
-    end_after = _consume_line_ending(readme, end_after)
-    return _insert_section(readme[:start] + readme[end_after:], block, newline)
-
-
-def _marker_offsets(readme: str) -> tuple[int, int]:
-    start = readme.find(LANGUAGE_CARD_SECTION_START)
-    end = readme.find(LANGUAGE_CARD_SECTION_END)
-    if start < 0 or end < 0 or end < start:  # pragma: no mutate - distinct find offsets
+def _replace_section(readme: str, block: str, newline: str) -> str:
+    section = _MARKED_SECTION.search(readme)
+    if section is None:
         raise _card_error("has malformed language-v1 section markers")
-    return start, end
+    start, end = section.start(), section.end("body")
+    _require_marker_lines(readme, start, end)
+    if _SECTION_HEADING not in section.group("body"):
+        raise _card_error("language-v1 section markers do not contain the section heading")
+    end_after = _consume_line_ending(readme, section.end())
+    return _insert_section(readme[:start] + readme[end_after:], block, newline)
 
 
 def _require_marker_lines(readme: str, start: int, end: int) -> None:
@@ -276,14 +286,11 @@ def _require_marker_lines(readme: str, start: int, end: int) -> None:
 
 
 def _line_prefix(readme: str, position: int) -> bool:
-    line_start = readme.rfind("\n", 0, position) + 1  # pragma: no mutate - rfind starts at zero
-    return readme[line_start:position] in ("", "\r")
+    return readme[:position].rpartition("\n")[2] in ("", "\r")
 
 
 def _line_suffix(readme: str, position: int) -> bool:
-    line_end = readme.find("\n", position)
-    tail = readme[position:] if line_end < 0 else readme[position:line_end]
-    return tail in ("", "\r")
+    return readme[position:].partition("\n")[0] in ("", "\r")
 
 
 def _consume_line_ending(readme: str, position: int) -> int:
@@ -320,7 +327,7 @@ def _replace_marked_section(
     readme: str,
     block: str,
     heading_count: int,
-    newline: str = "\n",
+    newline: str,
 ) -> str:
     if heading_count != 1:
         raise _card_error("has a malformed language-v1 card section")
