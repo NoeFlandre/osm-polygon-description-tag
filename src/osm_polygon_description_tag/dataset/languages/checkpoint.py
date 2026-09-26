@@ -365,10 +365,7 @@ def validate_receipt_chain(
     receipt_list = tuple(receipts)
     _validate_receipt_count(checkpoint, receipt_list)
     expected_cursor = 0
-    # Length equality was checked above with the domain-specific diagnostic.
-    for part_name, receipt in zip(
-        checkpoint.completed_parts, receipt_list, strict=True
-    ):  # pragma: no mutate - the count check above provides the domain error
+    for part_name, receipt in _strict_zip_receipts(checkpoint.completed_parts, receipt_list):
         _validate_receipt_binding(
             receipt,
             checkpoint,
@@ -381,6 +378,12 @@ def validate_receipt_chain(
         expected_cursor = receipt.input_row_end
     if expected_cursor != checkpoint.input_cursor:
         raise CheckpointError("committed receipts do not end at the checkpoint cursor")
+
+
+def _strict_zip_receipts(
+    parts: tuple[str, ...], receipts: tuple[PartReceipt, ...]
+) -> Iterator[tuple[str, PartReceipt]]:
+    return zip(parts, receipts, strict=True)
 
 
 def _validate_receipt_count(checkpoint: ShardCheckpoint, receipts: tuple[PartReceipt, ...]) -> None:

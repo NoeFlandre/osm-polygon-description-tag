@@ -101,6 +101,15 @@ def test_validate_receipt_chain_passes_materialized_receipts_to_count_validation
     assert calls == [(checkpoint, valid_receipts)]
 
 
+def test_strict_receipt_pairing_rejects_mismatched_lengths() -> None:
+    with pytest.raises(ValueError):
+        tuple(
+            checkpoint_module._strict_zip_receipts(
+                ("part",), (_receipt(0, 1, 1), _receipt(1, 2, 1))
+            )
+        )
+
+
 @pytest.mark.parametrize(
     ("override", "expected_message"),
     [
