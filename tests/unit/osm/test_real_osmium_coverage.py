@@ -36,12 +36,7 @@ import pytest
 from shapely import to_wkb
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag._resources import (
-    dataset_card_template,
-    osmium_export_config,
-)
-from osm_polygon_description_tag.config import Paths
-from osm_polygon_description_tag.manifest import (
+from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     RunCounts,
     current_area_policy_sha256,
@@ -50,10 +45,15 @@ from osm_polygon_description_tag.manifest import (
     source_identity_for,
     write_manifest,
 )
+from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.osm.discovery import discover_sources
-from osm_polygon_description_tag.pipeline import build_one
-from osm_polygon_description_tag.reporting import generate_dataset_docs
-from osm_polygon_description_tag.storage import write_geoparquet
+from osm_polygon_description_tag.runtime.config import Paths
+from osm_polygon_description_tag.runtime.resources import (
+    dataset_card_template,
+    osmium_export_config,
+)
+from osm_polygon_description_tag.workflow.build import build_one
 from tests.helpers.osmium import write_pbf as _write_pbf
 
 FIXTURE = Path("tests/fixtures/amendment_coverage.osm")

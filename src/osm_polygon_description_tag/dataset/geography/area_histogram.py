@@ -16,6 +16,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Final
 
+import numpy as np
+import pyarrow as pa
+
 from osm_polygon_description_tag.dataset.unique_rows import iter_unique_parquet_batches
 
 _AREA_HISTOGRAM_SCHEMA_VERSION: Final[int] = 2
@@ -56,6 +59,7 @@ AREA_BUCKET_LABELS: Final[tuple[str, ...]] = (
 )
 
 AREA_BUCKET_COUNT: Final[int] = len(AREA_BUCKET_LABELS)
+_EDGES: Final = np.array(AREA_BUCKET_EDGES, dtype=np.float64)
 
 # Rendering version. Bump when bucket layout or visual constants change
 # to invalidate every cached PNG at once.
@@ -70,6 +74,26 @@ def _bucket_index(area_m2: float) -> int:
     to the last bucket.
     """
     return max(bisect_right(AREA_BUCKET_EDGES, area_m2) - 1, 0)
+
+
+def _add_bucket_counts(counts: list[int], column: pa.Array) -> None:
+    """Add one batch's bucket counts, ignoring null areas.
+
+    ``searchsorted(side="right")`` is ``bisect_right`` over the same edges,
+    NaN included (both place it after every edge).
+    """
+    if column.type != pa.float64():
+        for value in column.to_pylist():
+            if value is not None:
+                counts[_bucket_index(float(value))] += 1
+        return
+    values = column.drop_null().to_numpy()
+    indices = np.maximum(np.searchsorted(_EDGES, values, side="right") - 1, 0)
+    # pragma: no mutate start - omitted bins are zero in the fixed-length accumulator
+    bucket_counts = np.bincount(indices, minlength=AREA_BUCKET_COUNT).tolist()
+    # pragma: no mutate end
+    for index, count in enumerate(bucket_counts):
+        counts[index] += count
 
 
 def aggregate_area_histogram(
@@ -110,10 +134,7 @@ def aggregate_area_histogram(
         batch_size=batch_size,
         require_successful_text=True,
     ):
-        for value in batch.column("area_m2").to_pylist():
-            if value is None:
-                continue
-            counts[_bucket_index(float(value))] += 1
+        _add_bucket_counts(counts, batch.column("area_m2"))
     # pragma: no mutate start - the fixed label and count sequences have equal length
     return dict(zip(AREA_BUCKET_LABELS, counts, strict=False))
     # pragma: no mutate end

@@ -18,15 +18,6 @@ class PublicationError(ValueError):
     """Raised for publication planning or execution failures."""
 
 
-class PublishRetry(PublicationError):
-    """Raised internally to signal a retryable upload failure."""
-
-    def __init__(self, message: str, *, exit_code: int | None, kind: str) -> None:
-        super().__init__(message)
-        self.exit_code = exit_code
-        self.kind = kind
-
-
 @dataclass(frozen=True)
 class UploadItem:
     relative_path: str

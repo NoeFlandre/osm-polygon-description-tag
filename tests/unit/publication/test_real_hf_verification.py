@@ -21,8 +21,8 @@ from typing import Any
 
 import pytest
 
-from osm_polygon_description_tag.orchestrator import default_hub_verifier_factory
 from osm_polygon_description_tag.publication import REPO_ID, UploadItem
+from osm_polygon_description_tag.workflow.orchestrator import default_hub_verifier_factory
 
 
 class _FakeHubApi:

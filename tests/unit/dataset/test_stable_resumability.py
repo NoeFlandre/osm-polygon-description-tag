@@ -122,8 +122,8 @@ def test_full_run_no_rebuild_on_doc_only_commit(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """When the orchestrator runs against a previously published PBF, no upload must occur."""
-    from osm_polygon_description_tag.config import Paths
-    from osm_polygon_description_tag.orchestrator import (
+    from osm_polygon_description_tag.runtime.config import Paths
+    from osm_polygon_description_tag.workflow.orchestrator import (
         PUBLICATION_STATE_FILENAME,
         run_and_publish,
     )
@@ -181,8 +181,8 @@ def test_full_run_no_rebuild_on_doc_only_commit(
     # Plant the canonical card that ``generate_dataset_docs`` would
     # produce so the metadata identity remains stable after the
     # orchestrator's refresh step.
-    from osm_polygon_description_tag._resources import dataset_card_template
     from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
+    from osm_polygon_description_tag.runtime.resources import dataset_card_template
 
     generate_dataset_docs(
         paths.data_root,

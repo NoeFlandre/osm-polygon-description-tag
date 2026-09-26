@@ -13,8 +13,9 @@ from unittest.mock import Mock
 import pytest
 
 import osm_polygon_description_tag.workflow.orchestrator as orchestrator
-from osm_polygon_description_tag.config import Paths
+import osm_polygon_description_tag.workflow.source_runner as source_runner
 from osm_polygon_description_tag.osm.discovery import Source
+from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.workflow.source_runner import (
     STATUS_BUILT,
     STATUS_PUBLISHED,
@@ -1241,7 +1242,7 @@ def test_publication_state_wrappers_preserve_success_and_translate_failures(
         assert_state_calls.append(data_root)
         return state
 
-    monkeypatch.setattr(orchestrator, "_state_read_publication_state", read_state)
+    monkeypatch.setattr(source_runner, "_state_read_publication_state", read_state)
     assert orchestrator.read_publication_state(tmp_path) is state
     assert assert_state_calls == [tmp_path]
 
@@ -1260,7 +1261,7 @@ def test_publication_state_wrappers_preserve_success_and_translate_failures(
     def fail_read(_data_root: Path) -> dict[str, object]:
         raise read_error
 
-    monkeypatch.setattr(orchestrator, "_state_read_publication_state", fail_read)
+    monkeypatch.setattr(source_runner, "_state_read_publication_state", fail_read)
     with pytest.raises(OrchestratorError, match=r"^read is broken$") as read_info:
         orchestrator.read_publication_state(tmp_path)
     assert read_info.value.__cause__ is read_error

@@ -8,10 +8,10 @@ from unittest.mock import Mock, call, patch
 import pytest
 
 import osm_polygon_description_tag.workflow.build as build_module
-from osm_polygon_description_tag.config import Paths
 from osm_polygon_description_tag.dataset.transform import RejectedFeature
-from osm_polygon_description_tag.discovery import Source
-from osm_polygon_description_tag.extraction import ExportRecord
+from osm_polygon_description_tag.osm.discovery import Source
+from osm_polygon_description_tag.osm.extraction import ExportRecord
+from osm_polygon_description_tag.runtime.config import Paths
 
 
 def _source(tmp_path: Path) -> Source:

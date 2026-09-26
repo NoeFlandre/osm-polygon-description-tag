@@ -69,8 +69,7 @@ def _write_resumable_artifact(data_root: Path, source_name: str) -> None:
     """Plant a complete Parquet + manifest so the per-PBF plan can be built."""
     from shapely.geometry import Polygon
 
-    from osm_polygon_description_tag._resources import project_code_revision
-    from osm_polygon_description_tag.manifest import (
+    from osm_polygon_description_tag.dataset.manifest import (
         Manifest,
         RunCounts,
         current_area_policy_sha256,
@@ -79,7 +78,8 @@ def _write_resumable_artifact(data_root: Path, source_name: str) -> None:
         source_identity_for,
         write_manifest,
     )
-    from osm_polygon_description_tag.storage import write_geoparquet
+    from osm_polygon_description_tag.dataset.storage import write_geoparquet
+    from osm_polygon_description_tag.runtime.resources import project_code_revision
     from tests.conftest import make_record_dict
 
     source_root = data_root.parent / "raw"
@@ -268,9 +268,8 @@ def test_uploader_cache_survives_across_runs(
     """The cache directory survives interruption and restart; no cleanup deletes it."""
     from shapely.geometry import Polygon
 
-    from osm_polygon_description_tag._resources import project_code_revision
     from osm_polygon_description_tag.cli import run as cli_run
-    from osm_polygon_description_tag.manifest import (
+    from osm_polygon_description_tag.dataset.manifest import (
         Manifest,
         RunCounts,
         current_area_policy_sha256,
@@ -279,7 +278,8 @@ def test_uploader_cache_survives_across_runs(
         source_identity_for,
         write_manifest,
     )
-    from osm_polygon_description_tag.storage import write_geoparquet
+    from osm_polygon_description_tag.dataset.storage import write_geoparquet
+    from osm_polygon_description_tag.runtime.resources import project_code_revision
     from tests.conftest import make_record_dict
 
     data_root = tmp_path / "generated"

@@ -8,10 +8,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from osm_polygon_description_tag.config import Paths
 from osm_polygon_description_tag.publication import (
     REPO_ID,
 )
+from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.workflow.orchestrator import (
     PUBLICATION_STATE_FILENAME,
     OrchestratorError,
@@ -287,8 +287,7 @@ def test_execute_publication_rejects_empty_revision(
     """An upload runner that returns empty revision is rejected."""
     from shapely.geometry import Polygon
 
-    from osm_polygon_description_tag._resources import project_code_revision
-    from osm_polygon_description_tag.manifest import (
+    from osm_polygon_description_tag.dataset.manifest import (
         Manifest,
         RunCounts,
         current_area_policy_sha256,
@@ -297,7 +296,8 @@ def test_execute_publication_rejects_empty_revision(
         source_identity_for,
         write_manifest,
     )
-    from osm_polygon_description_tag.storage import write_geoparquet
+    from osm_polygon_description_tag.dataset.storage import write_geoparquet
+    from osm_polygon_description_tag.runtime.resources import project_code_revision
     from tests.conftest import make_record_dict
 
     paths = _setup_paths(tmp_path)

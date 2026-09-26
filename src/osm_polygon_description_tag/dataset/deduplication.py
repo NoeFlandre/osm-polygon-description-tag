@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import duckdb
+import pyarrow as pa
 import pyarrow.parquet as pq
 
 from osm_polygon_description_tag.dataset import canonical_rows as _canonical_rows
@@ -44,8 +45,9 @@ from osm_polygon_description_tag.dataset.schema import SCHEMA
 from osm_polygon_description_tag.dataset.storage import (
     validate_finalized_artifacts,
     validate_geoparquet,
-    write_geoparquet,
+    write_geoparquet_batches,
 )
+from osm_polygon_description_tag.dataset.text import sql_literal as _sql_literal
 
 DEDUPLICATION_POLICY_VERSION = CANONICAL_ROW_POLICY_VERSION
 DUPLICATE_REJECTION_REASON = "duplicate_osm_object"
@@ -82,10 +84,6 @@ class _DeduplicationContext:
     manifests: dict[str, Manifest]
     inputs: dict[str, str]
     input_rows: int
-
-
-def _sql_literal(value: str) -> str:
-    return "'" + value.replace("'", "''") + "'"
 
 
 def _read_state(path: Path) -> dict[str, Any] | None:
@@ -162,7 +160,8 @@ def _input_name_drifted(
     return current[name] != expected[name] and current[name] != staged_outputs.get(name)
 
 
-def _verify_staged_inputs(data_root: Path, state: Mapping[str, Any]) -> None:
+def _verify_staged_inputs(data_root: Path, state: Mapping[str, Any]) -> dict[str, str]:
+    """Return the current input hashes after refusing any drift from the staged state."""
     expected_inputs = _recorded_input_hashes(state)
     # pragma: no mutate start - deterministic ordering for byte-stable hashing
     current_inputs = _input_hashes(
@@ -178,6 +177,19 @@ def _verify_staged_inputs(data_root: Path, state: Mapping[str, Any]) -> None:
         raise DeduplicationError(
             "staged deduplication inputs changed; refusing to resume: " + ", ".join(sorted(drifted))
         )
+    return current_inputs
+
+
+def _promoted_output_hashes(
+    current_inputs: Mapping[str, str], staged_outputs: Mapping[str, str]
+) -> dict[str, str]:
+    """Return the post-promotion hashes without rereading any file.
+
+    The drift check guarantees every unstaged input still has its recorded
+    hash, and promotion either moves the staged file (hashed when staged) or
+    verifies the target already has that hash.
+    """
+    return {name: staged_outputs.get(name, current_inputs[name]) for name in sorted(current_inputs)}
 
 
 def _current_output_rows(parquets: Iterable[Path]) -> int:
@@ -259,14 +271,12 @@ def _resume_staged(
     *,
     promotion_hook: Callable[[int], None] | None = None,
 ) -> DeduplicationResult:
-    _verify_staged_inputs(data_root, state)
+    current_inputs = _verify_staged_inputs(data_root, state)
     _promote_staged(data_root, state, promotion_hook=promotion_hook)
     complete = dict(state)
     complete["status"] = "complete"
     complete.pop("stage_dir", None)
-    complete["outputs"] = dict(
-        sorted(_input_hashes(sorted((data_root / "data").glob("*.parquet"))).items())
-    )
+    complete["outputs"] = _promoted_output_hashes(current_inputs, _staged_output_hashes(state))
     _write_state(state_path, complete)
     return DeduplicationResult(
         status="deduplicated",
@@ -297,16 +307,14 @@ def _canonical_relation(connection: duckdb.DuckDBPyConnection, parquets: Sequenc
     connection.execute(f"CREATE TEMP TABLE deduplicated AS {canonical_query}")
 
 
-def _rows_for_source(
+def _batches_for_source(
     connection: duckdb.DuckDBPyConnection, source_name: str
-) -> Iterable[dict[str, object]]:
+) -> Iterable[pa.RecordBatch]:
     query = (
         f"SELECT {', '.join(SCHEMA.names)} FROM deduplicated "
         "WHERE source_pbf = ? ORDER BY osm_type, osm_id"
     )
-    reader = connection.execute(query, [source_name]).to_arrow_reader(_BATCH_SIZE)
-    for batch in reader:
-        yield from batch.to_pylist()
+    yield from connection.execute(query, [source_name]).to_arrow_reader(_BATCH_SIZE)
 
 
 def _skipped_result(
@@ -412,8 +420,8 @@ def _stage_source(
         return new_rows, None
     staged_parquet = stage_root / "data" / parquet.name
     staged_manifest = _manifest_path_for(parquet.name, stage_root)
-    write_geoparquet(
-        _rows_for_source(connection, manifest.source.name),
+    write_geoparquet_batches(
+        _batches_for_source(connection, manifest.source.name),
         staged_parquet,
         batch_size=_BATCH_SIZE,
     )

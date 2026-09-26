@@ -7,6 +7,7 @@ from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -34,7 +35,9 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
     prepare_snapshot,
 )
 from osm_polygon_description_tag.dataset.languages.worker import process_shard
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import language as language_module
+from osm_polygon_description_tag.publication import language_upload as language_upload_module
 from osm_polygon_description_tag.publication.language import (
     LANGUAGE_CONFIG_NAME,
     LANGUAGE_DATA_PREFIX,
@@ -55,11 +58,11 @@ from osm_polygon_description_tag.publication.language_upload import (
     PublishStatus,
     RemoteFile,
     publish_language_export,
-    read_publication_state,
+    read_language_publication_state,
     verify_language_publication,
 )
 from osm_polygon_description_tag.publication.models import UploadItem, UploadPlan
-from osm_polygon_description_tag.storage import write_geoparquet
+from osm_polygon_description_tag.runtime.logging import RunLogger
 from tests.conftest import make_record_dict
 from tests.helpers.messages import exactly
 from tests.helpers.parquet import write_description_shard
@@ -169,7 +172,7 @@ def test_interrupted_upload_has_durable_intent_and_is_not_repeated(
 
     class InterruptedHub(_FakeHub):
         def upload(self, plan: UploadPlan, *, parent_revision: str | None = None) -> None:
-            observed.append(read_publication_state(state))
+            observed.append(read_language_publication_state(state))
             super().upload(plan, parent_revision=parent_revision)
             raise KeyboardInterrupt
 
@@ -197,7 +200,9 @@ def test_library_publication_uses_durable_state_without_an_explicit_state_path(
 
     outcome = publish_language_export(plan, hub, baseline_revision="rev-1", apply=True)
 
-    assert read_publication_state(export.export_root / PUBLICATION_STATE_FILENAME) == outcome
+    assert (
+        read_language_publication_state(export.export_root / PUBLICATION_STATE_FILENAME) == outcome
+    )
 
 
 def test_concurrent_publication_is_refused_before_contacting_the_hub(
@@ -696,7 +701,146 @@ def test_a_failed_upload_is_ambiguous_and_recorded(export: LanguageExport, tmp_p
 
     assert outcome.status is PublishStatus.AMBIGUOUS
     assert any("verify the repository" in issue for issue in outcome.issues)
-    assert read_publication_state(state) == outcome
+    assert "upload error: RuntimeError: network died mid-upload" in outcome.issues
+    assert read_language_publication_state(state) == outcome
+
+
+def test_upload_starts_only_after_the_ambiguous_state_is_durable(
+    export: LanguageExport, tmp_path: Path
+) -> None:
+    plan = build_language_upload_plan(export, REPO, confirm_repo=REPO)
+    state = tmp_path / "state.json"
+
+    class _StateObservingHub(_FakeHub):
+        def upload(self, upload_plan: UploadPlan, *, parent_revision: str | None = None) -> None:
+            recorded = read_language_publication_state(state)
+            assert recorded is not None
+            assert recorded.status is PublishStatus.AMBIGUOUS
+            assert recorded.plan_identity == upload_plan.identity_sha256
+            super().upload(upload_plan, parent_revision=parent_revision)
+
+    outcome = publish_language_export(
+        plan, _StateObservingHub(), baseline_revision="rev-1", apply=True, state_path=state
+    )
+
+    assert outcome.status is PublishStatus.VERIFIED
+
+
+def test_first_apply_records_the_current_plan_as_ambiguous_before_upload(
+    export: LanguageExport,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = build_language_upload_plan(export, REPO, confirm_repo=REPO)
+    state = tmp_path / "state.json"
+    expected = PublicationOutcome(
+        PublishStatus.VERIFIED, REPO, plan.identity_sha256, "rev-2", (), ()
+    )
+    ambiguous_calls: list[tuple[Path, UploadPlan, str]] = []
+
+    def record_ambiguous(path: Path, candidate: UploadPlan, revision: str, failure=None):  # type: ignore[no-untyped-def]
+        ambiguous_calls.append((path, candidate, revision))
+
+    monkeypatch.setattr(language_upload_module, "_ambiguous", record_ambiguous)
+    monkeypatch.setattr(language_upload_module, "_upload", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        language_upload_module,
+        "_verified_outcome",
+        lambda *_args, **_kwargs: expected,
+    )
+
+    result = language_upload_module._apply_publication(
+        plan,
+        _FakeHub(),
+        state,
+        resumed=None,
+        current="rev-2",
+        logger=None,
+    )
+
+    assert result is expected
+    assert ambiguous_calls == [(state, plan, "rev-2")]
+
+
+def test_publish_language_export_uses_the_requested_resume_state_path(
+    export: LanguageExport,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = build_language_upload_plan(export, REPO, confirm_repo=REPO)
+    state = tmp_path / "selected-state.json"
+    observed: list[tuple[Path, UploadPlan]] = []
+    original = language_upload_module._resumed_outcome
+
+    def read_selected_state(path: Path, candidate: UploadPlan) -> PublicationOutcome | None:
+        observed.append((path, candidate))
+        return original(path, candidate)
+
+    monkeypatch.setattr(language_upload_module, "_resumed_outcome", read_selected_state)
+    language_upload_module._publish_language_export(
+        plan,
+        _FakeHub(),
+        baseline_revision="rev-1",
+        apply=True,
+        state_path=state,
+        logger=None,
+    )
+
+    assert observed == [(state, plan)]
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_resumed"),
+    [
+        (PublishStatus.PLANNED, None),
+        (PublishStatus.DRIFTED, None),
+        (PublishStatus.VERIFIED, "recorded"),
+    ],
+)
+def test_resumed_outcome_uses_only_a_matching_completed_state(
+    export: LanguageExport,
+    tmp_path: Path,
+    status: PublishStatus,
+    expected_resumed: str | None,
+) -> None:
+    plan = build_language_upload_plan(export, REPO, confirm_repo=REPO)
+    state = tmp_path / "publication.json"
+    recorded = PublicationOutcome(status, plan.repo_id, plan.identity_sha256, "rev-1", (), ())
+    state.write_text(json.dumps(recorded.to_payload()), encoding="utf-8")
+
+    resumed = language_upload_module._resumed_outcome(state, plan)
+
+    assert resumed == (recorded if expected_resumed == "recorded" else None)
+
+
+def test_a_failed_upload_is_logged_with_its_cause(export: LanguageExport, tmp_path: Path) -> None:
+    plan = build_language_upload_plan(export, REPO, confirm_repo=REPO)
+    events: list[tuple[str, str, dict[str, object]]] = []
+
+    class _Logger:
+        def event(self, name: str, *, level: str = "INFO", **fields: object) -> None:
+            events.append((name, level, fields))
+
+    publish_language_export(
+        plan,
+        _FakeHub(fail_upload=True),
+        baseline_revision="rev-1",
+        apply=True,
+        state_path=tmp_path / "state.json",
+        logger=cast(RunLogger, _Logger()),
+    )
+
+    assert events == [
+        (
+            "language_publication_upload_failed",
+            "WARNING",
+            {
+                "result": "ambiguous",
+                "reason": "RuntimeError: network died mid-upload",
+                "identity_sha256": plan.identity_sha256,
+            },
+        )
+    ]
 
 
 def test_an_ambiguous_attempt_verifies_instead_of_re_uploading(
@@ -803,8 +947,8 @@ def test_publication_state_round_trips(tmp_path: Path) -> None:
     state = tmp_path / "state.json"
     state.write_text(json.dumps(outcome.to_payload()), encoding="utf-8")
 
-    assert read_publication_state(state) == outcome
-    assert read_publication_state(tmp_path / "absent.json") is None
+    assert read_language_publication_state(state) == outcome
+    assert read_language_publication_state(tmp_path / "absent.json") is None
 
 
 @pytest.mark.parametrize(
@@ -825,7 +969,7 @@ def test_a_malformed_publication_state_is_rejected(
     state.write_text(json.dumps({**outcome.to_payload(), **mutation}), encoding="utf-8")
 
     with pytest.raises(LanguagePublicationError, match=message):
-        read_publication_state(state)
+        read_language_publication_state(state)
 
 
 def test_an_unreadable_publication_state_is_reported(tmp_path: Path) -> None:
@@ -833,7 +977,7 @@ def test_an_unreadable_publication_state_is_reported(tmp_path: Path) -> None:
     state.write_text("{not-json", encoding="utf-8")
 
     with pytest.raises(LanguagePublicationError, match="cannot read publication state"):
-        read_publication_state(state)
+        read_language_publication_state(state)
 
 
 def test_a_state_for_another_plan_does_not_resume(export: LanguageExport, tmp_path: Path) -> None:
@@ -1234,6 +1378,7 @@ def test_publication_records_exact_outcome_and_forwards_hub_arguments(
         "ambiguous": (
             "the upload did not report success; verify the repository "
             "before attempting to publish again",
+            "upload error: RuntimeError: synthetic upload failure",
         ),
         "drifted": (
             "repository moved from old to before; "
@@ -1262,7 +1407,7 @@ def test_publication_records_exact_outcome_and_forwards_hub_arguments(
             ]
         )
     assert hub.calls == calls
-    assert read_publication_state(state) == (None if mode == "planned" else expected)
+    assert read_language_publication_state(state) == (None if mode == "planned" else expected)
 
 
 def test_verification_keeps_all_file_issues_and_sorts_verified_paths(tmp_path: Path) -> None:

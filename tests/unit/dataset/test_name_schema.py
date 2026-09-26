@@ -31,7 +31,7 @@ from osm_polygon_description_tag.dataset.transform import (
     names_from_tags,
     transform_record,
 )
-from osm_polygon_description_tag.extraction import ExportRecord
+from osm_polygon_description_tag.osm.extraction import ExportRecord
 
 
 def _record(

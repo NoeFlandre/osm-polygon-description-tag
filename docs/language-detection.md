@@ -54,7 +54,7 @@ One row per description value, in `language-v1/data/*.parquet`:
 
 The production detector is a deterministic cascade:
 
-- Lingua 2.2.0 is the primary detector and applies the conservative policy.
+- Lingua 2.2.0 is the primary detector and applies only structural checks (length, ties, mixed text); confidence is not gated.
 - The pinned GlotLID v3 model is called only when Lingua returns `uncertain`.
 - If GlotLID also returns `uncertain`, the original Lingua result is retained.
 - A fallback-resolved row has `reason=fallback_glotlid_v3`; all other reasons

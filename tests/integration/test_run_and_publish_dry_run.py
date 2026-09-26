@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from osm_polygon_description_tag.config import Paths
-from osm_polygon_description_tag.orchestrator import (
+from osm_polygon_description_tag.runtime.config import Paths
+from osm_polygon_description_tag.workflow.orchestrator import (
     PUBLICATION_STATE_FILENAME,
     OrchestratorError,
     read_publication_state,
@@ -32,7 +32,7 @@ def _fake_exporter_factory(records_per_source: dict[str, int]):
         from shapely import to_wkb
         from shapely.geometry import Polygon
 
-        from osm_polygon_description_tag.extraction import ExportRecord
+        from osm_polygon_description_tag.osm.extraction import ExportRecord
 
         stem = source_path.name.removesuffix(".osm.pbf")
         n = records_per_source[stem]

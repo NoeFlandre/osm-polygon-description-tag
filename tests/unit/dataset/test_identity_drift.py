@@ -13,7 +13,6 @@ from pathlib import Path
 from shapely import to_wkb
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag.config import Paths
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     RunCounts,
@@ -25,8 +24,9 @@ from osm_polygon_description_tag.dataset.manifest import (
     write_manifest,
 )
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
-from osm_polygon_description_tag.discovery import Source
-from osm_polygon_description_tag.extraction import ExportRecord
+from osm_polygon_description_tag.osm.discovery import Source
+from osm_polygon_description_tag.osm.extraction import ExportRecord
+from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.workflow.orchestrator import (
     PUBLICATION_STATE_FILENAME,
     _process_one,

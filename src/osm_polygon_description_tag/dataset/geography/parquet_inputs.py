@@ -15,6 +15,9 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, Final
 
+import numpy as np
+import pyarrow as pa
+import shapely
 from shapely import from_wkb
 from shapely.errors import ShapelyError
 from shapely.geometry.base import BaseGeometry
@@ -35,6 +38,9 @@ PARQUET_INPUT_COLUMNS: Final[tuple[str, ...]] = (
     "geometry",
 )
 BATCH_SIZE: Final[int] = 4096
+_POLYGONAL_IDS: Final = (3, 6)  # shapely type ids of Polygon and MultiPolygon
+_MAX_LAT: Final = 90.0
+_MAX_LON: Final = 180.0
 
 
 class H3AggregationError(RuntimeError):
@@ -136,18 +142,56 @@ def _centroid_row(
     return parquet_path, lon, lat
 
 
+def _valid_polygonal_geometries(batch: Any) -> Any:
+    """Decode the batch's geometry when every row is a valid (Multi)Polygon, else ``None``."""
+    wkbs = batch.column("geometry")
+    if wkbs.null_count or wkbs.type != pa.binary():
+        return None
+    try:
+        # pragma: no mutate start - None and False both request non-zero-copy conversion
+        geometries = shapely.from_wkb(wkbs.to_numpy(zero_copy_only=False))
+        # pragma: no mutate end
+    except (ValueError, ShapelyError):
+        return None
+    polygonal = np.isin(shapely.get_type_id(geometries), _POLYGONAL_IDS)
+    valid = polygonal & ~shapely.is_empty(geometries) & shapely.is_valid(geometries)
+    return geometries if bool(valid.all()) else None
+
+
+def _vectorized_centroids(batch: Any) -> tuple[list[float], list[float]] | None:
+    """Return every row's centroid when the whole batch is valid, else ``None``.
+
+    Only a batch with no possible error takes this path, so the per-row pass
+    remains the single source of error messages. An empty or non-finite
+    centroid fails the range test because NaN compares false.
+    """
+    geometries = _valid_polygonal_geometries(batch)
+    if geometries is None:
+        return None
+    centroids = shapely.centroid(geometries)
+    lons = shapely.get_x(centroids)
+    lats = shapely.get_y(centroids)
+    in_range = (np.abs(lats) <= _MAX_LAT) & (np.abs(lons) <= _MAX_LON)
+    return (lons.tolist(), lats.tolist()) if bool(in_range.all()) else None
+
+
 def _iter_centroid_batch(
     batch: Any, source_paths: Mapping[str, Path]
 ) -> Iterator[tuple[Path, float, float]]:
-    geoms = batch.column("geometry").to_pylist()
-    osm_ids = batch.column("osm_id").to_pylist()
-    names = batch.column("source_pbf").to_pylist()
-    # Arrow gives every column of one record batch the same length, so the
-    # strict zip can never actually fire. It stays as a guard against a future
-    # caller zipping columns from *different* batches, and is excluded from
-    # mutation because no input can distinguish it from a non-strict zip.
-    for wkb, osm_id, name in zip(geoms, osm_ids, names, strict=True):  # pragma: no mutate
-        yield _centroid_row(wkb, osm_id, name, source_paths)
+    centroids = _vectorized_centroids(batch) if batch.num_rows else None
+    if centroids is not None:
+        for source_name, lon, lat in zip(
+            batch.column("source_pbf").to_pylist(), *centroids, strict=True
+        ):
+            yield source_paths.get(str(source_name), Path(str(source_name))), lon, lat
+        return
+    for wkb, osm_id, source_name in zip(
+        batch.column("geometry").to_pylist(),
+        batch.column("osm_id").to_pylist(),
+        batch.column("source_pbf").to_pylist(),
+        strict=True,
+    ):
+        yield _centroid_row(wkb, osm_id, source_name, source_paths)
 
 
 def _validate_unique_centroids(data_root: Path, source_paths: Mapping[str, Path]) -> None:

@@ -18,7 +18,6 @@ The raw PBF source root is never read or modified.
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
@@ -33,11 +32,14 @@ import pyarrow.parquet as pq
 from osm_polygon_description_tag.dataset.constants import DEFAULT_ARROW_BATCH_SIZE
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
-    _fsync_dir,
     _manifest_path_for,
     output_identity_for,
     read_manifest,
     write_manifest,
+)
+from osm_polygon_description_tag.dataset.migration import (
+    _promote_migrated_parquet,
+    _require_migration_directories,
 )
 from osm_polygon_description_tag.dataset.schema import SCHEMA, geo_metadata
 from osm_polygon_description_tag.dataset.storage import (
@@ -204,14 +206,6 @@ def _requires_text_migration(path: Path) -> bool:
     return False
 
 
-def _promote_migrated_parquet(temporary: Path, target: Path) -> None:
-    # The handle is only ever fsynced, never read, so the mode cannot matter.
-    with open(temporary, "rb") as handle:  # pragma: no mutate
-        os.fsync(handle.fileno())
-    os.replace(temporary, target)
-    _fsync_dir(target.parent)
-
-
 def _migrate_parquet_text(path: Path) -> int | None:
     """Repair one artifact, returning dropped rows, or ``None`` when clean."""
     if not _requires_text_migration(path):
@@ -270,13 +264,19 @@ def _heal_output_identity(manifest: Manifest, parquet: Path, manifest_path: Path
     return 1
 
 
-def _require_migration_directories(data_dir: Path, manifests_dir: Path, data_root: Path) -> None:
-    if not data_dir.is_dir() or not manifests_dir.is_dir():
-        raise TextMigrationError(f"missing data/ or manifests/ under {data_root}")
-
-
 def _artifact_pair(parquet: Path, data_root: Path) -> tuple[Path, Path]:
     return parquet, _manifest_path_for(parquet.name, data_root)
+
+
+def _migration_artifact_pairs(data_root: Path) -> list[tuple[Path, Path]]:
+    """Validate the migration roots and return their Parquet/manifest pairs."""
+    data_dir = data_root / "data"
+    manifests_dir = data_root / "manifests"
+    _require_migration_directories(data_dir, manifests_dir, data_root, error=TextMigrationError)
+    # pragma: no mutate start - children share a parent, so name and path order agree
+    artifacts = sorted(data_dir.glob("*.parquet"), key=lambda path: path.name)
+    # pragma: no mutate end
+    return [_artifact_pair(parquet, data_root) for parquet in artifacts]
 
 
 def migrate_dataset_text(data_root: Path, *, max_workers: int | None = None) -> int:
@@ -290,13 +290,7 @@ def migrate_dataset_text(data_root: Path, *, max_workers: int | None = None) -> 
     result does not depend on the worker count: each worker owns one artifact
     and its manifest, and the returned total is order-independent.
     """
-    data_dir = data_root / "data"
-    manifests_dir = data_root / "manifests"
-    _require_migration_directories(data_dir, manifests_dir, data_root)
-    # One directory, so sorting by name and by full path give the same order;
-    # the ordering contract itself is covered by a test.
-    artifacts = sorted(data_dir.glob("*.parquet"), key=lambda path: path.name)  # pragma: no mutate
-    pairs = [_artifact_pair(parquet, data_root) for parquet in artifacts]
+    pairs = _migration_artifact_pairs(data_root)
     if max_workers is not None and max_workers > 1:
         return _migrate_concurrently(pairs, max_workers)
     return sum(_migrate_one_artifact(parquet, manifest) for parquet, manifest in pairs)

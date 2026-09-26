@@ -1,7 +1,10 @@
 """Resolve packaged resources and locate the project checkout.
 
-Resource files (config/osmium-export.json and docs/dataset-card-template.md) are
-copied into ``osm_polygon_description_tag/_data/`` at build time and resolved
+Resource files live, committed, under ``osm_polygon_description_tag/_data/``;
+the build only includes them, it does not copy them. Maintained mirrors outside
+the package (``config/osmium-export.json``, ``docs/dataset-card-template.md``,
+the dataset-card hero PNG) are kept byte-identical by
+``tests/contracts/test_packaged_data_sync.py``. The packaged copies are resolved
 through :func:`importlib.resources.files` regardless of the caller's working
 directory. The code revision is read from the project checkout via the
 ``OSM_POLYGON_DESCRIPTION_TAG_HOME`` environment variable when set, falling

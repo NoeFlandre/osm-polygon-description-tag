@@ -771,7 +771,6 @@ def test_generate_dataset_docs_uses_validate_finalized_artifacts(tmp_path: Path)
     """``generate_dataset_docs`` must use the shared validation primitive."""
     from shapely.geometry import Polygon
 
-    from osm_polygon_description_tag._resources import dataset_card_template
     from osm_polygon_description_tag.dataset.manifest import (
         Manifest,
         RunCounts,
@@ -784,6 +783,7 @@ def test_generate_dataset_docs_uses_validate_finalized_artifacts(tmp_path: Path)
         StorageError,
         write_geoparquet,
     )
+    from osm_polygon_description_tag.runtime.resources import dataset_card_template
 
     data_root = tmp_path / "generated"
     (data_root / "data").mkdir(parents=True)

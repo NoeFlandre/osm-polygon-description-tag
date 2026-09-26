@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from osm_polygon_description_tag.config import Paths
 from osm_polygon_description_tag.publication import UploadItem
+from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.workflow.orchestrator import (
     default_hub_verifier_factory,
     run_and_publish,

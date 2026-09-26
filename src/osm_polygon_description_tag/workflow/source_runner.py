@@ -48,8 +48,6 @@ class OrchestratorError(RuntimeError):
     """Raised for workflow failures after preflight succeeds."""
 
 
-OrchestratorError.__module__ = "osm_polygon_description_tag.orchestrator"
-
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 

@@ -10,9 +10,5 @@ The canonical implementation is organized by operational domain:
 - `workflow`: preflight, resumable builds, completeness, and lifecycle composition;
 - `cli.py`: the stable console entry point.
 
-The domain packages contain the canonical implementation. Existing top-level
-modules are explicit compatibility shims that re-export supported names from
-those packages; they contain no business logic or mutable state.
-
-New internal code uses canonical domain imports. External callers may continue
-using documented compatibility imports.
+The domain packages contain the implementation. The package root holds only
+the console modules; import everything else from its domain package.

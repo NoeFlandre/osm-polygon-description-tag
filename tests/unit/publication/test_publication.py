@@ -6,20 +6,21 @@ from types import SimpleNamespace
 import pytest
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag.manifest import (
+from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     RunCounts,
     output_identity_for,
     source_identity_for,
     write_manifest,
 )
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import (
     PublicationError,
     create_upload_plan,
     execute_upload,
     planning,
 )
-from osm_polygon_description_tag.publication.models import PublishRetry, UploadItem
+from osm_polygon_description_tag.publication.models import UploadItem
 from osm_polygon_description_tag.publication.planning import (
     _build_item,
     _collect_data_items,
@@ -28,7 +29,6 @@ from osm_polygon_description_tag.publication.planning import (
     _read_manifest_for_publication,
     _require_assets_directory_for_plan,
     _require_core_assets,
-    _require_h3_map,
     _require_matching_parquet,
     _require_supported_manifest_version,
     _validate_asset_entry,
@@ -48,7 +48,6 @@ from osm_polygon_description_tag.publication.planning import (
     build_per_pbf_upload_plan,
     file_sha256_bytes,
 )
-from osm_polygon_description_tag.storage import write_geoparquet
 from tests.conftest import make_record_dict
 from tests.helpers.messages import exactly
 
@@ -506,21 +505,6 @@ def test_collect_manifest_items_does_not_scan_case_variant_directory(
     ]
 
 
-def test_h3_compatibility_helper_requires_the_canonical_map(tmp_path: Path) -> None:
-    data_root = tmp_path / "generated"
-    assets = data_root / "assets"
-    assets.mkdir(parents=True)
-    map_path = assets / "description_polygon_density.png"
-    map_path.write_bytes(b"map")
-
-    item = _require_h3_map(data_root)
-    assert item.relative_path == "assets/description_polygon_density.png"
-
-    map_path.unlink()
-    with pytest.raises(PublicationError, match="required file missing for H3 map"):
-        _require_h3_map(data_root)
-
-
 def test_per_pbf_plan_preserves_identity_and_validation_contract(tmp_path: Path) -> None:
     data_root = tmp_path / "generated"
     _make_dataset(data_root)
@@ -932,48 +916,3 @@ def test_execute_upload_rejects_mismatched_parquet(tmp_path: Path) -> None:
 
     with pytest.raises(PublicationError, match="identity"):
         create_upload_plan(data_root)
-
-
-def test_publication_state_written_only_after_remote_verification(tmp_path: Path) -> None:
-    """If remote verification fails after the upload, no state is written."""
-    from osm_polygon_description_tag.config import Paths
-    from osm_polygon_description_tag.orchestrator import (
-        PUBLICATION_STATE_FILENAME,
-        run_and_publish,
-    )
-
-    source_root = tmp_path / "raw"
-    data_root = tmp_path / "generated"
-    source_root.mkdir()
-    data_root.mkdir()
-    (source_root / "a.osm.pbf").write_bytes(b"a-bytes")
-    paths = Paths(source_root=source_root, data_root=data_root)
-    record = make_record_dict(
-        Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-        {"description": "x"},
-        osm_id=1,
-        source_pbf="a.osm.pbf",
-    )
-    write_geoparquet(iter([record]), data_root / "data" / "a.parquet", batch_size=10)
-
-    def verifier(repo_id: str, files: tuple[object, ...]) -> str:
-        raise RuntimeError("hub unreachable")
-
-    with pytest.raises(Exception, match="hub unreachable"):
-        run_and_publish(
-            paths=paths,
-            confirm_repo="NoeFlandre/osm-polygon-description-tag",
-            preflight=lambda: {"preflight": "stub", "source_count": 1},
-            upload_runner=lambda command: "stdout-ignored",
-            clock=lambda: "2026-07-27T00:00:00+00:00",
-            exporter=lambda src, cfg: iter([]),
-            verifier=verifier,
-        )
-    assert not (data_root / PUBLICATION_STATE_FILENAME).is_file()
-
-
-def test_publish_retry_preserves_public_error_context() -> None:
-    error = PublishRetry("retry", exit_code=503, kind="http")
-    assert str(error) == "retry"
-    assert error.exit_code == 503
-    assert error.kind == "http"

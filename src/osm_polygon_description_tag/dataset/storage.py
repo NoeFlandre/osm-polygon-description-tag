@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final, TypedDict, cast
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 from shapely import from_wkb
@@ -32,7 +33,6 @@ from osm_polygon_description_tag.dataset.constants import DEFAULT_WRITE_BATCH_SI
 from osm_polygon_description_tag.dataset.manifest import (
     MANIFEST_SCHEMA_VERSION,
     ManifestError,
-    _fsync_dir,
     _manifest_path_for,
     output_identity_for,
     read_manifest,
@@ -48,6 +48,7 @@ from osm_polygon_description_tag.dataset.text import (
     is_nonempty_text,
     is_trimmed_nonempty_text,
 )
+from osm_polygon_description_tag.runtime.atomic import fsync_dir as _fsync_dir
 
 GEOPARQUET_COMPRESSION: Final = "zstd"
 """Codec every GeoParquet artifact is written with.
@@ -177,6 +178,171 @@ def _stream_records(
     return _RecordStreamSummary(row_count, frozenset(geometry_types), bounds)
 
 
+_BBOX_COLUMNS = ("bbox_min_x", "bbox_min_y", "bbox_max_x", "bbox_max_y")
+
+
+def _is_key_value_list(data_type: pa.DataType) -> bool:
+    if not pa.types.is_list(data_type):
+        return False
+    entry = data_type.value_type
+    return pa.types.is_struct(entry) and _is_string_pair_struct(entry)
+
+
+def _is_string_pair_struct(entry: pa.StructType) -> bool:
+    fields = [entry.field(index) for index in range(entry.num_fields)]
+    return [(item.name, item.type) for item in fields] == [
+        ("key", pa.string()),
+        ("value", pa.string()),
+    ]
+
+
+def _pairs_are_canonical(array: pa.Array) -> bool:
+    """Return whether ``mapping_to_pairs`` would leave every list unchanged.
+
+    That holds when no list, key or value is null and keys strictly increase
+    within each list (UTF-8 byte order equals Python code-point order).
+    """
+    if not _is_key_value_list(array.type) or array.null_count:
+        return False
+    entries = array.flatten()
+    if entries.field("key").null_count or entries.field("value").null_count:
+        return False
+    return _keys_strictly_increase(array, entries.field("key"))
+
+
+def _keys_strictly_increase(array: pa.ListArray, keys: pa.Array) -> bool:
+    size = len(keys) - 1
+    if size < 1:
+        return True
+    # Object arrays compare as Python strings, exactly as ``sorted`` does.
+    # pragma: no mutate start - None and False both request the same non-zero-copy conversion
+    key_values = keys.to_numpy(zero_copy_only=False)
+    # pragma: no mutate end
+    increasing = key_values[:-1] < key_values[1:]
+    offsets = array.offsets.to_numpy()
+    ends = offsets[1:] - offsets[0]
+    ends = ends[(ends > 0) & (ends <= size)]
+    increasing[ends - 1] = True
+    return bool(increasing.all())
+
+
+def _bounds_are_plain(array: pa.Array) -> bool:
+    if array.type != pa.float64() or array.null_count:
+        return False
+    return not bool(np.isnan(array.to_numpy()).any())
+
+
+def _fast_batch_is_exact(batch: pa.RecordBatch) -> bool:
+    """Return whether casting ``batch`` equals the ``_arrow_record`` round trip."""
+    if batch.schema.names != SCHEMA.names or batch.column("geometry_type").null_count:
+        return False
+    return _columns_satisfy(batch, KEY_VALUE_COLUMNS, _pairs_are_canonical) and _columns_satisfy(
+        batch, _BBOX_COLUMNS, _bounds_are_plain
+    )
+
+
+def _columns_satisfy(
+    batch: pa.RecordBatch, names: Sequence[str], predicate: Callable[[pa.Array], bool]
+) -> bool:
+    return all(predicate(batch.column(name)) for name in names)
+
+
+def _fast_batch(batch: pa.RecordBatch) -> pa.RecordBatch | None:
+    """Cast ``batch`` to SCHEMA when that equals the ``_arrow_record`` round trip."""
+    if not _fast_batch_is_exact(batch):
+        return None
+    try:
+        return pa.RecordBatch.from_arrays(
+            [batch.column(name).cast(SCHEMA.field(name).type) for name in SCHEMA.names],
+            schema=SCHEMA,
+        )
+    except (pa.ArrowInvalid, pa.ArrowNotImplementedError):
+        return None
+
+
+def _column_extreme(column: pa.Array, *, pick_min: bool) -> float:
+    values = column.to_numpy()
+    value = float(values.min() if pick_min else values.max())
+    if value == 0.0:
+        # Signed zeros compare equal; Python's min/max keep the first one seen.
+        listed = column.to_pylist()
+        return float(min(listed) if pick_min else max(listed))
+    return value
+
+
+def _batch_bounds(batch: pa.RecordBatch) -> tuple[float, float, float, float]:
+    min_x, min_y, max_x, max_y = (
+        _column_extreme(batch.column(name), pick_min=name.startswith("bbox_min"))
+        for name in _BBOX_COLUMNS
+    )
+    return min_x, min_y, max_x, max_y
+
+
+@dataclass
+class _BatchAccumulator:
+    batch_size: int
+    pending: list[pa.RecordBatch] = field(default_factory=list)
+    pending_rows: int = 0
+    geometry_types: set[str] = field(default_factory=set)
+    bounds: tuple[float, float, float, float] | None = None
+    row_count: int = 0
+
+    def add(self, raw: pa.RecordBatch) -> None:
+        if raw.num_rows == 0:
+            return
+        batch = _fast_batch(raw)
+        if batch is None:
+            batch = self._add_rows(raw.to_pylist())
+        else:
+            self.geometry_types.update(batch.column("geometry_type").unique().to_pylist())
+            self.bounds = _merge_bounds(self.bounds, _batch_bounds(batch))
+        self._pend(batch)
+
+    def _add_rows(self, records: list[dict[str, Any]]) -> pa.RecordBatch:
+        for record in records:
+            self.geometry_types.add(str(record["geometry_type"]))
+            self.bounds = _merge_bounds(self.bounds, _record_bounds(record))
+        return pa.RecordBatch.from_pylist(
+            [_arrow_record(record) for record in records], schema=SCHEMA
+        )
+
+    def _pend(self, batch: pa.RecordBatch) -> None:
+        self.row_count += batch.num_rows
+        self.pending.append(batch)
+        self.pending_rows += batch.num_rows
+
+    def full_chunks(self) -> Iterable[pa.RecordBatch]:
+        while self.pending_rows >= self.batch_size:
+            combined = pa.Table.from_batches(self.pending, schema=SCHEMA).combine_chunks()
+            yield from combined.slice(0, self.batch_size).to_batches()
+            rest = combined.slice(self.batch_size)
+            self.pending = rest.to_batches()
+            self.pending_rows = rest.num_rows
+
+    def remainder(self) -> pa.Table:
+        return pa.Table.from_batches(self.pending, schema=SCHEMA).combine_chunks()
+
+
+def _stream_batches(
+    batches: Iterable[pa.RecordBatch],
+    writer: pq.ParquetWriter,
+    batch_size: int,
+) -> _RecordStreamSummary:
+    """Write ``batches`` re-chunked exactly as :func:`_stream_records` chunks rows."""
+    accumulator = _BatchAccumulator(batch_size)
+    for raw in batches:
+        accumulator.add(raw)
+        for chunk in accumulator.full_chunks():
+            writer.write_batch(chunk)
+    if accumulator.pending_rows:
+        writer.write_table(accumulator.remainder())
+    if accumulator.row_count == 0:
+        writer.write_batch(pa.RecordBatch.from_pylist([], schema=SCHEMA))
+    return _RecordStreamSummary(
+        accumulator.row_count, frozenset(accumulator.geometry_types), accumulator.bounds
+    )
+
+
 def _require_batch_size(batch_size: int) -> None:
     if batch_size <= 0:
         raise ValueError("batch_size must be positive")
@@ -190,6 +356,40 @@ def write_geoparquet(
     validator: Callable[[Path], int] | None = None,
 ) -> int:
     """Stream ``records`` into a validated GeoParquet file atomically promoted to ``target``."""
+    return _write_geoparquet_with(
+        lambda writer: _stream_records(records, writer, batch_size),
+        target,
+        batch_size=batch_size,
+        validator=validator,
+    )
+
+
+def write_geoparquet_batches(
+    batches: Iterable[pa.RecordBatch],
+    target: Path,
+    *,
+    batch_size: int = 1024,
+    validator: Callable[[Path], int] | None = None,
+) -> int:
+    """Like :func:`write_geoparquet`, streaming Arrow batches instead of row mappings.
+
+    The written file is byte-identical to writing ``batch.to_pylist()`` rows.
+    """
+    return _write_geoparquet_with(
+        lambda writer: _stream_batches(batches, writer, batch_size),
+        target,
+        batch_size=batch_size,
+        validator=validator,
+    )
+
+
+def _write_geoparquet_with(
+    stream: Callable[[pq.ParquetWriter], _RecordStreamSummary],
+    target: Path,
+    *,
+    batch_size: int,
+    validator: Callable[[Path], int] | None,
+) -> int:
     if validator is None:
         validator = validate_geoparquet
     _require_batch_size(batch_size)
@@ -203,7 +403,7 @@ def write_geoparquet(
             compression=GEOPARQUET_COMPRESSION,
             use_dictionary=_DICTIONARY_COLUMNS,
         ) as writer:
-            summary = _stream_records(records, writer, batch_size)
+            summary = stream(writer)
 
         bbox = list(summary.bbox) if summary.bbox is not None else []
         _stream_rewrite_with_metadata(

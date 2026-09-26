@@ -5,11 +5,11 @@ from typing import Any
 import pytest
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag.config import Paths
-from osm_polygon_description_tag.discovery import Source, discover_sources
-from osm_polygon_description_tag.extraction import ExportRecord, OsmiumExportError
-from osm_polygon_description_tag.manifest import read_manifest
-from osm_polygon_description_tag.storage import write_geoparquet
+from osm_polygon_description_tag.dataset.manifest import read_manifest
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
+from osm_polygon_description_tag.osm.discovery import Source, discover_sources
+from osm_polygon_description_tag.osm.extraction import ExportRecord, OsmiumExportError
+from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.workflow.build import BuildResult, build_all, build_one
 from tests.conftest import make_export_record
 

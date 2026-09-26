@@ -25,6 +25,7 @@ from osm_polygon_description_tag.dataset.storage import (
     _arrow_record,
     validate_geoparquet,
 )
+from osm_polygon_description_tag.runtime.atomic import fsync_dir as _fsync_dir
 
 
 class MigrationError(RuntimeError):
@@ -87,6 +88,7 @@ def _promote_migrated_parquet(temporary: Path, target: Path) -> None:
     with open(temporary, "rb") as handle:
         os.fsync(handle.fileno())
     os.replace(temporary, target)
+    _fsync_dir(target.parent)
 
 
 def migrate_dataset_schema(data_root: Path) -> int:
@@ -106,9 +108,15 @@ def migrate_dataset_schema(data_root: Path) -> int:
     return migrated
 
 
-def _require_migration_directories(data_dir: Path, manifests_dir: Path, data_root: Path) -> None:
+def _require_migration_directories(
+    data_dir: Path,
+    manifests_dir: Path,
+    data_root: Path,
+    *,
+    error: type[Exception] = MigrationError,
+) -> None:
     if not data_dir.is_dir() or not manifests_dir.is_dir():
-        raise MigrationError(f"missing data/ or manifests/ under {data_root}")
+        raise error(f"missing data/ or manifests/ under {data_root}")
 
 
 def _migrate_one_artifact(parquet: Path, manifest_path: Path) -> int:

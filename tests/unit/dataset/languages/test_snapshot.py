@@ -35,7 +35,7 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
     verify_source_file,
 )
 from osm_polygon_description_tag.dataset.schema import SCHEMA
-from osm_polygon_description_tag.storage import write_geoparquet
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from tests.conftest import make_record_dict
 from tests.helpers.messages import exactly
 

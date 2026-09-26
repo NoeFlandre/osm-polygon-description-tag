@@ -1,6 +1,6 @@
 # Language Detection V2 Design
 
-> Historical design note: this document describes the superseded Lingua-only V2 pilot. The active pipeline uses Lingua 2.2.0 as primary and GlotLID v3 only as a fallback when Lingua is uncertain.
+> Historical design note: this document describes the superseded Lingua-only V2 pilot. The active pipeline uses Lingua 2.2.0 as primary and GlotLID v3 only as a fallback when Lingua is uncertain. The `v2` preset, `min_score` and `min_margin` described below no longer exist: confidence is not gated.
 
 ## Goal
 

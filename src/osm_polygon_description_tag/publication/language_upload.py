@@ -29,6 +29,7 @@ from osm_polygon_description_tag.publication.language import (
     read_language_export,
 )
 from osm_polygon_description_tag.publication.models import UploadItem, UploadPlan
+from osm_polygon_description_tag.runtime.logging import RunLogger
 
 PUBLICATION_STATE_FILENAME: Final = "language-publication.json"
 STATE_SCHEMA_VERSION: Final = 1
@@ -128,7 +129,7 @@ def _status(value: str) -> PublishStatus:
         raise LanguagePublicationError(f"unsupported publication status: {value!r}") from error
 
 
-def read_publication_state(state_path: Path) -> PublicationOutcome | None:
+def read_language_publication_state(state_path: Path) -> PublicationOutcome | None:
     """Read a recorded publication outcome, or ``None`` when absent."""
     if not state_path.is_file():
         return None
@@ -185,7 +186,7 @@ def verify_language_publication(
 
 def _resumed_outcome(state_path: Path, plan: UploadPlan) -> PublicationOutcome | None:
     """Return a recorded outcome for exactly this plan, if one exists."""
-    recorded = read_publication_state(state_path)
+    recorded = read_language_publication_state(state_path)
     if recorded is None or recorded.status in {PublishStatus.PLANNED, PublishStatus.DRIFTED}:
         return None
     if (recorded.plan_identity, recorded.repo_id) != (plan.identity_sha256, plan.repo_id):
@@ -207,24 +208,26 @@ def publish_language_export(
     baseline_revision: str,
     apply: bool = False,
     state_path: Path | None = None,
+    logger: RunLogger | None = None,
 ) -> PublicationOutcome:
     """Publish one additive export behind an explicit gate, then verify it.
 
     Re-invoking after an ambiguous upload verifies the Hub rather than sending
     the files again; a repository whose revision moved away from
     ``baseline_revision`` is refused so a concurrent change is never clobbered.
+    A failed upload is logged through ``logger`` when one is supplied.
     """
     if state_path is None:
         state_path = Path(plan.data_root) / PUBLICATION_STATE_FILENAME
     if apply:
         with exclusive_worker_lock(Path(plan.data_root) / LANGUAGE_REMOTE_PREFIX):
             _require_current_plan(plan)
-            return _publish_language_export(plan, hub, baseline_revision, apply, state_path)
+            return _publish_language_export(plan, hub, baseline_revision, apply, state_path, logger)
     # ``apply`` is falsy on this path and ``_publish_language_export`` only ever tests it
     # for truth, so passing ``None`` here is equivalent. The identical call above keeps
     # the other three arguments' ``None`` variants under test.
     # pragma: no mutate start
-    return _publish_language_export(plan, hub, baseline_revision, apply, state_path)
+    return _publish_language_export(plan, hub, baseline_revision, apply, state_path, logger)
     # pragma: no mutate end
 
 
@@ -241,6 +244,7 @@ def _publish_language_export(
     baseline_revision: str,
     apply: bool,
     state_path: Path,
+    logger: RunLogger | None,
 ) -> PublicationOutcome:
     resumed = _resumed_outcome(state_path, plan)
     current = hub.repo_revision(plan.repo_id)
@@ -251,7 +255,7 @@ def _publish_language_export(
         return PublicationOutcome(
             PublishStatus.PLANNED, plan.repo_id, plan.identity_sha256, current, (), ()
         )
-    return _apply_publication(plan, hub, state_path, resumed, current)
+    return _apply_publication(plan, hub, state_path, resumed, current, logger)
 
 
 def _apply_publication(
@@ -260,11 +264,14 @@ def _apply_publication(
     state_path: Path,
     resumed: PublicationOutcome | None,
     current: str,
+    logger: RunLogger | None,
 ) -> PublicationOutcome:
     if resumed is None:
-        intent = _ambiguous(state_path, plan, current)
-        if not _upload(plan, hub, current):
-            return intent
+        _ambiguous(state_path, plan, current)
+        failure = _upload(plan, hub, current)
+        if failure is not None:
+            _log_upload_failure(logger, plan, failure)
+            return _ambiguous(state_path, plan, current, failure)
     return _verified_outcome(plan, hub, state_path)
 
 
@@ -282,16 +289,36 @@ def _drifted(plan: UploadPlan, baseline: str, current: str) -> PublicationOutcom
     )
 
 
-def _upload(plan: UploadPlan, hub: LanguageHub, parent_revision: str) -> bool:
-    """Attempt the upload, treating any failure as an unknown outcome."""
+def _upload(plan: UploadPlan, hub: LanguageHub, parent_revision: str) -> str | None:
+    """Attempt the upload, returning the failure's text or ``None`` on success.
+
+    Any failure is an unknown outcome: the commit may have landed before the
+    error surfaced, so the next invocation verifies the Hub. The catch stays
+    broad on purpose (tests pin that a generic error is treated as ambiguous);
+    ``BaseException`` subclasses such as ``KeyboardInterrupt`` still propagate.
+    """
     try:
         hub.upload(plan, parent_revision=parent_revision)
-    except Exception:
-        return False
-    return True
+    except Exception as error:
+        return f"{type(error).__name__}: {error}"
+    return None
 
 
-def _ambiguous(state_path: Path, plan: UploadPlan, revision: str) -> PublicationOutcome:
+def _log_upload_failure(logger: RunLogger | None, plan: UploadPlan, failure: str) -> None:
+    if logger is not None:
+        logger.event(
+            "language_publication_upload_failed",
+            level="WARNING",
+            result="ambiguous",
+            reason=failure,
+            identity_sha256=plan.identity_sha256,
+        )
+
+
+def _ambiguous(
+    state_path: Path, plan: UploadPlan, revision: str, failure: str | None = None
+) -> PublicationOutcome:
+    cause = () if failure is None else (f"upload error: {failure}",)
     return _record(
         state_path,
         PublicationOutcome(
@@ -303,6 +330,7 @@ def _ambiguous(state_path: Path, plan: UploadPlan, revision: str) -> Publication
             (
                 "the upload did not report success; verify the repository "
                 "before attempting to publish again",
+                *cause,
             ),
         ),
     )
@@ -326,6 +354,6 @@ __all__ = [
     "PublishStatus",
     "RemoteFile",
     "publish_language_export",
-    "read_publication_state",
+    "read_language_publication_state",
     "verify_language_publication",
 ]

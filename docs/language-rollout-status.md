@@ -4,7 +4,7 @@ A living record of the `language-v1` cascade rollout: what is finished, what is
 not, and what the next operator has to do. Update it in the same commit as the
 work it describes.
 
-**Last updated:** 2026-09-20 · **Code:** `codex/repo-hardening-release`
+**Last updated:** 2026-09-23 · **Code:** `main`
 
 ## Summary
 
@@ -59,7 +59,8 @@ only once a job was already running on a node:
 
 ### Detector cascade
 
-Lingua 2.2.0 stays primary and keeps the conservative policy. The pinned
+Lingua 2.2.0 stays primary; confidence is not gated, so only structural checks
+(length, ties, mixed text) make it `uncertain`. The pinned
 GlotLID v3 model runs only when Lingua returns `uncertain`; a GlotLID result
 that is not `detected` leaves the Lingua result untouched. Fallback-resolved
 rows carry `reason=fallback_glotlid_v3`. The snapshot records the exact GlotLID

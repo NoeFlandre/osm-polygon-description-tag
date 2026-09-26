@@ -10,8 +10,8 @@ from typing import Any
 import pytest
 
 import osm_polygon_description_tag.workflow.preflight as preflight
-from osm_polygon_description_tag.config import Paths
 from osm_polygon_description_tag.publication.models import REPO_ID
+from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.workflow.preflight import PreflightError
 
 

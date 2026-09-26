@@ -22,13 +22,13 @@ from typing import Final
 from osm_polygon_description_tag.dataset.languages.atomic import atomic_write_json
 from osm_polygon_description_tag.dataset.languages.paths import relative_posix_path
 from osm_polygon_description_tag.dataset.languages.payloads import PayloadReader, require_object
+from osm_polygon_description_tag.runtime.validation import FINGERPRINT_PATTERN
 
 CHECKPOINT_SCHEMA_VERSION: Final = 1
 RECEIPT_SCHEMA_VERSION: Final = 1
 ANNOTATION_SCHEMA_VERSION: Final = 1
 MAX_BATCH_SIZE: Final = 4096
 WORKER_LOCK_FILENAME: Final = ".worker.lock"
-_FINGERPRINT_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 _PART_WIDTH: Final = 20
 _PART_PATTERN = re.compile(rf"part-(?P<offset>[0-9]{{{_PART_WIDTH}}})\.parquet\Z")
 _RECEIPT_PATTERN = re.compile(rf"part-[0-9]{{{_PART_WIDTH}}}\.json\Z")
@@ -50,7 +50,7 @@ class ShardStatus(StrEnum):
 
 
 def _validate_fingerprint(value: object, label: str) -> None:
-    if not isinstance(value, str) or _FINGERPRINT_PATTERN.fullmatch(value) is None:
+    if not isinstance(value, str) or FINGERPRINT_PATTERN.fullmatch(value) is None:
         raise CheckpointError(f"{label} must be a lowercase SHA-256 fingerprint")
 
 
@@ -365,8 +365,7 @@ def validate_receipt_chain(
     receipt_list = tuple(receipts)
     _validate_receipt_count(checkpoint, receipt_list)
     expected_cursor = 0
-    # Length equality is validated above with the domain-specific diagnostic.
-    for part_name, receipt in zip(checkpoint.completed_parts, receipt_list):  # noqa: B905
+    for part_name, receipt in _strict_zip_receipts(checkpoint.completed_parts, receipt_list):
         _validate_receipt_binding(
             receipt,
             checkpoint,
@@ -379,6 +378,12 @@ def validate_receipt_chain(
         expected_cursor = receipt.input_row_end
     if expected_cursor != checkpoint.input_cursor:
         raise CheckpointError("committed receipts do not end at the checkpoint cursor")
+
+
+def _strict_zip_receipts(
+    parts: tuple[str, ...], receipts: tuple[PartReceipt, ...]
+) -> Iterator[tuple[str, PartReceipt]]:
+    return zip(parts, receipts, strict=True)
 
 
 def _validate_receipt_count(checkpoint: ShardCheckpoint, receipts: tuple[PartReceipt, ...]) -> None:

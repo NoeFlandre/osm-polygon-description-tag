@@ -34,8 +34,8 @@ container removal because it remains on the host.
 - `workflow` composes preflight, builds, resumability, completeness, and publication.
 - `cli` exposes the Typer command surface, invokes canonical APIs, and reports results.
 
-Compatibility modules at the package root preserve supported historical imports while delegating
-to canonical implementations. They do not introduce a second implementation.
+The package root holds only the console modules (`cli`, `language_cli`); everything else is
+imported from its domain package.
 
 ## End-to-end flow
 

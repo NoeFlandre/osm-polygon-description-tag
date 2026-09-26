@@ -12,8 +12,8 @@ from typing import Any
 import pytest
 from shapely import to_wkb
 
-from osm_polygon_description_tag.extraction import ExportRecord
-from osm_polygon_description_tag.transform import transform_record
+from osm_polygon_description_tag.dataset.transform import transform_record
+from osm_polygon_description_tag.osm.extraction import ExportRecord
 
 
 class NetworkAccessInTestError(RuntimeError):

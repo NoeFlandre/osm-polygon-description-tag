@@ -4,9 +4,14 @@ import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Protocol, cast
 
 from osm_polygon_description_tag.dataset.manifest import file_sha256
+from osm_polygon_description_tag.publication.hub_client import (
+    commit_operation_add,
+    create_dataset_commit,
+    new_hf_api,
+)
 from osm_polygon_description_tag.publication.models import (
     DEFAULT_BACKOFF_CAP_SECONDS,
     DEFAULT_BACKOFF_FACTOR,
@@ -302,25 +307,16 @@ def _run_parented_metadata_commit(plan: UploadPlan, parent_revision: str) -> Non
     publication from being overwritten. Metadata plans are small, so the Hub
     commit API is the safe production path when an anchor is available.
     """
-    from osm_polygon_description_tag.publication.verification import _huggingface_hub
-
     try:
-        api_class: object = _huggingface_hub.HfApi
-        operation_class: object = _huggingface_hub.CommitOperationAdd
-        api = cast(Callable[[], object], api_class)()  # pragma: no mutate - static cast
-        add_op = cast(Callable[..., object], operation_class)  # pragma: no mutate - static cast
+        api = new_hf_api()
         operations = [
-            add_op(
-                path_in_repo=item.relative_path,
-                path_or_fileobj=Path(plan.data_root) / item.relative_path,
-            )
+            commit_operation_add(item.relative_path, Path(plan.data_root) / item.relative_path)
             for item in plan.files
         ]
-        commit = cast(Any, api).create_commit  # pragma: no mutate - static cast
-        commit(
+        create_dataset_commit(
+            api,
             repo_id=plan.repo_id,
             operations=operations,
-            repo_type="dataset",
             commit_message="Update deterministic dataset statistics",
             parent_commit=parent_revision,
         )

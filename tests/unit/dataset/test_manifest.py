@@ -164,7 +164,7 @@ def test_resumption_requires_matching_source_and_output() -> None:
 
     # Ensure the project checkout revision is treated as either matching or
     # unavailable in the test environment.
-    from osm_polygon_description_tag._resources import project_code_revision
+    from osm_polygon_description_tag.runtime.resources import project_code_revision
 
     manifest = Manifest(
         manifest_schema_version=manifest.manifest_schema_version,
@@ -237,7 +237,7 @@ def test_write_and_read_manifest_roundtrip(tmp_path: Path) -> None:
 
     assert restored == manifest
     # Rebuild with the project checkout revision so resumption agrees.
-    from osm_polygon_description_tag._resources import project_code_revision
+    from osm_polygon_description_tag.runtime.resources import project_code_revision
 
     aligned = Manifest(
         manifest_schema_version=restored.manifest_schema_version,
@@ -266,6 +266,24 @@ def test_write_manifest_creates_nested_parent_and_fsyncs_that_directory(tmp_path
 
     assert path.is_file()
     fsync_dir.assert_called_once_with(path.parent)
+
+
+def test_write_manifest_fsyncs_the_directory_after_the_rename(tmp_path: Path) -> None:
+    path = tmp_path / "region.manifest.json"
+    events: list[str] = []
+    real_replace = manifest_module.os.replace
+
+    def replace_then_record(source: Path, destination: Path) -> None:
+        real_replace(source, destination)
+        events.append("replace")
+
+    with (
+        patch.object(manifest_module.os, "replace", replace_then_record),
+        patch.object(manifest_module, "_fsync_dir", lambda _d: events.append("fsync_dir")),
+    ):
+        write_manifest(_manifest(), path)
+
+    assert events == ["replace", "fsync_dir"]
 
 
 def test_write_manifest_serializes_non_ascii_values_as_utf8(tmp_path: Path) -> None:

@@ -36,7 +36,7 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
     prepare_snapshot,
 )
 from osm_polygon_description_tag.dataset.languages.worker import ProcessingBudget, process_shard
-from osm_polygon_description_tag.storage import write_geoparquet
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.workflow import grid_operator
 from osm_polygon_description_tag.workflow.grid_operator import (
     GridOperatorError,

@@ -413,13 +413,21 @@ def test_promote_migrated_parquet_fsyncs_a_binary_handle_before_replace(
         lambda source, destination: observed.setdefault("replace", (source, destination)),
     )
 
+    monkeypatch.setattr(
+        migration,
+        "_fsync_dir",
+        lambda directory: observed.setdefault("fsync_dir", directory),
+    )
+
     migration._promote_migrated_parquet(temporary, target)
 
     assert observed == {
         "open": (temporary, "rb"),
         "fsync": 17,
         "replace": (temporary, target),
+        "fsync_dir": tmp_path,
     }
+    assert list(observed) == ["open", "fsync", "replace", "fsync_dir"]
 
 
 @pytest.mark.parametrize("missing", ["data", "manifests"])

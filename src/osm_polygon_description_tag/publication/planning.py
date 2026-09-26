@@ -43,11 +43,8 @@ _LOCAL_WORK_RELATIVE = ".work"
 # The exact uploader-owned asset filenames that may appear under
 # ``assets/``. The allowlist below rejects every other entry to keep
 # the publication surface explicit and bounded.
-H3_MAP_FILENAME = H3_MAP_ARTIFACT.filename
 H3_MAP_ASSET_RELATIVE = H3_MAP_ARTIFACT.relative_path
-AREA_HISTOGRAM_FILENAME = AREA_HISTOGRAM_ARTIFACT.filename
 AREA_HISTOGRAM_ASSET_RELATIVE = AREA_HISTOGRAM_ARTIFACT.relative_path
-DATASET_CARD_HERO_FILENAME = DATASET_CARD_HERO_ARTIFACT.filename
 DATASET_CARD_HERO_ASSET_RELATIVE = DATASET_CARD_HERO_ARTIFACT.relative_path
 _ALLOWED_ASSET_FILES = frozenset(
     artifact.filename
@@ -386,19 +383,6 @@ def create_upload_plan(data_root: Path) -> UploadPlan:
     resolved_root = data_root.resolve(strict=False)  # pragma: no mutate
     items = _collect_allowlisted_files(resolved_root)
     return _finalize_upload_plan(resolved_root, items)
-
-
-def _require_h3_map(data_root: Path) -> UploadItem:  # pragma: no cover - kept for callers
-    """Return the canonical H3 map upload item, failing if it is missing.
-
-    Deprecated: use :func:`_validate_assets_for_publication` which also
-    requires the area distribution histogram. Kept as a public helper
-    for any external caller that needs only the H3 map item.
-    """
-    map_path = data_root / H3_MAP_ASSET_RELATIVE
-    if not map_path.is_file():
-        raise PublicationError(f"required file missing for H3 map: {map_path}")
-    return _build_item(map_path, H3_MAP_ASSET_RELATIVE)
 
 
 def build_per_pbf_upload_plan(data_root: Path, source_name: str) -> UploadPlan:

@@ -20,8 +20,6 @@ from pathlib import Path
 import pytest
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag._resources import project_code_revision
-from osm_polygon_description_tag.config import Paths
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     RunCounts,
@@ -33,7 +31,6 @@ from osm_polygon_description_tag.dataset.manifest import (
     write_manifest,
 )
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
-from osm_polygon_description_tag.orchestrator import PUBLICATION_STATE_FILENAME
 from osm_polygon_description_tag.publication import (
     REPO_ID,
     PublicationError,
@@ -48,6 +45,9 @@ from osm_polygon_description_tag.publication.state import (
     H3_MAP_ASSET_RELATIVE_PATH,
     _metadata_state_matches,
 )
+from osm_polygon_description_tag.runtime.config import Paths
+from osm_polygon_description_tag.runtime.resources import project_code_revision
+from osm_polygon_description_tag.workflow.orchestrator import PUBLICATION_STATE_FILENAME
 from tests.conftest import make_record_dict
 
 MAP_BYTES_A = b"\x89PNG\r\n\x1a\n" + b"A" * 4096
@@ -451,7 +451,7 @@ def test_unchanged_map_preserves_no_op(tmp_path: Path, monkeypatch: pytest.Monke
         lambda *args, **kwargs: {"rows": 0, "output_files": 0},
     )
     # Stub the per-PBF and metadata upload runners.
-    from osm_polygon_description_tag.orchestrator import run_and_publish
+    from osm_polygon_description_tag.workflow.orchestrator import run_and_publish
 
     captured_uploads: list[list[str]] = []
 
@@ -535,7 +535,7 @@ def test_changed_map_forces_metadata_upload(
         "osm_polygon_description_tag.workflow.orchestrator.generate_dataset_docs",
         lambda *args, **kwargs: {"rows": 0, "output_files": 0},
     )
-    from osm_polygon_description_tag.orchestrator import run_and_publish
+    from osm_polygon_description_tag.workflow.orchestrator import run_and_publish
 
     captured_uploads: list[list[str]] = []
 

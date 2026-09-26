@@ -27,7 +27,7 @@ from osm_polygon_description_tag.dataset.languages.models import (
     cascade_model_identity,
     language_model_identity,
 )
-from osm_polygon_description_tag.storage import write_geoparquet
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from tests.conftest import make_record_dict
 from tests.helpers.messages import exactly
 from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH, fake_splitter

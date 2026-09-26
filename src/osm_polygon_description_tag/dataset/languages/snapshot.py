@@ -7,9 +7,9 @@ another machine does not change its identity.
 """
 
 import json
-import re
 from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Final
 
@@ -34,11 +34,11 @@ from osm_polygon_description_tag.dataset.languages.payloads import PayloadReader
 from osm_polygon_description_tag.dataset.manifest import file_sha256
 from osm_polygon_description_tag.dataset.schema import SCHEMA, SCHEMA_VERSION
 from osm_polygon_description_tag.runtime.serialization import canonical_json_text, sha256_json
+from osm_polygon_description_tag.runtime.validation import validate_fingerprint
 
 SNAPSHOT_SCHEMA_VERSION: Final = 1
 SNAPSHOT_FILENAME: Final = "snapshot.json"
 SOURCE_SCHEMA_VERSION: Final = SCHEMA_VERSION
-_FINGERPRINT_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 _IGNORED_SOURCE_DIRECTORIES: Final = frozenset({"__pycache__"})
 _IGNORED_SOURCE_SUFFIXES: Final = frozenset({".pyc", ".pyo"})
 
@@ -51,9 +51,7 @@ _canonical_json = canonical_json_text
 _sha256_json = sha256_json
 
 
-def _validate_fingerprint(value: object, label: str) -> None:
-    if not isinstance(value, str) or _FINGERPRINT_PATTERN.fullmatch(value) is None:
-        raise SnapshotError(f"{label} must be a lowercase SHA-256 hex fingerprint")
+_validate_fingerprint = partial(validate_fingerprint, error=SnapshotError)
 
 
 def _relative_path_text(value: str | Path) -> str:

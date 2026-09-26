@@ -50,3 +50,49 @@ def test_typer_fully_owns_the_cli() -> None:
         project["project"]["scripts"]["osm-polygon-description-tag"]
         == "osm_polygon_description_tag.cli:main"
     )
+
+
+def test_pre_commit_and_just_are_configured() -> None:
+    pre_commit = (PROJECT_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    justfile = (PROJECT_ROOT / "justfile").read_text(encoding="utf-8")
+
+    for token in ("ruff-format", "ruff-check", "uv run ty check", "uv run pytest"):
+        assert token in pre_commit
+    for recipe in (
+        "sync:",
+        "format:",
+        "lint:",
+        "typecheck:",
+        "test:",
+        "test-integration:",
+        "build:",
+        "check:",
+        "run-and-publish ",
+    ):
+        assert recipe in justfile
+    assert '"/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw"' in justfile
+    assert '"/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root"' in justfile
+    assert "NoeFlandre/osm-polygon-description-tag" in justfile
+
+
+def test_github_actions_runs_complete_quality_gate() -> None:
+    workflow = (PROJECT_ROOT / ".github" / "workflows" / "quality.yml").read_text(encoding="utf-8")
+
+    for token in (
+        "ubuntu-latest",
+        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b",
+        'version: "0.11.16"',
+        "uv python install 3.12",
+        "osmium-tool",
+        "uv sync --frozen",
+        "uv lock --check",
+        "pre-commit run --all-files",
+        "ruff format --check .",
+        "ruff check .",
+        "ty check",
+        "--cov-fail-under=90",
+        "uv build",
+        'HF_HUB_OFFLINE: "1"',
+    ):
+        assert token in workflow

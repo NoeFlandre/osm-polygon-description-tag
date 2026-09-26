@@ -14,13 +14,13 @@ from pathlib import Path
 import pytest
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag.config import Paths
-from osm_polygon_description_tag.orchestrator import run_and_publish
 from osm_polygon_description_tag.publication import (
     REPO_ID,
     default_runner_with_retry,
     execute_upload,
 )
+from osm_polygon_description_tag.runtime.config import Paths
+from osm_polygon_description_tag.workflow.orchestrator import run_and_publish
 
 _CLOCK = "2026-07-27T00:00:00+00:00"
 
@@ -42,7 +42,7 @@ def _fake_exporter_records() -> object:
     def _export(source_path: Path, _cfg: Path) -> object:
         from shapely import to_wkb
 
-        from osm_polygon_description_tag.extraction import ExportRecord
+        from osm_polygon_description_tag.osm.extraction import ExportRecord
 
         geom = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
         ewkb = to_wkb(geom, include_srid=True, flavor="extended", byte_order=1)
@@ -105,8 +105,7 @@ def test_orchestrator_threads_timeout_to_publication(
 
     monkeypatch.setattr(pub, "default_runner_with_retry", fake_subprocess)
 
-    from osm_polygon_description_tag._resources import project_code_revision
-    from osm_polygon_description_tag.manifest import (
+    from osm_polygon_description_tag.dataset.manifest import (
         Manifest,
         RunCounts,
         current_area_policy_sha256,
@@ -115,7 +114,8 @@ def test_orchestrator_threads_timeout_to_publication(
         source_identity_for,
         write_manifest,
     )
-    from osm_polygon_description_tag.storage import write_geoparquet
+    from osm_polygon_description_tag.dataset.storage import write_geoparquet
+    from osm_polygon_description_tag.runtime.resources import project_code_revision
     from tests.conftest import make_record_dict
 
     paths, source_root, data_root = _setup_workspace(tmp_path)
@@ -189,8 +189,7 @@ def test_keyboardinterrupt_through_cli_returns_130(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A KeyboardInterrupt originating in publication escapes with exit 130."""
-    from osm_polygon_description_tag._resources import project_code_revision
-    from osm_polygon_description_tag.manifest import (
+    from osm_polygon_description_tag.dataset.manifest import (
         Manifest,
         RunCounts,
         current_area_policy_sha256,
@@ -199,7 +198,8 @@ def test_keyboardinterrupt_through_cli_returns_130(
         source_identity_for,
         write_manifest,
     )
-    from osm_polygon_description_tag.storage import write_geoparquet
+    from osm_polygon_description_tag.dataset.storage import write_geoparquet
+    from osm_polygon_description_tag.runtime.resources import project_code_revision
     from tests.conftest import make_record_dict
 
     paths, source_root, data_root = _setup_workspace(tmp_path)
