@@ -77,7 +77,7 @@ def test_receipt_chain_accepts_a_bound_contiguous_chain_ending_at_checkpoint_cur
     )
 
 
-def test_receipt_chain_checks_count_against_the_same_checkpoint_and_receipts(
+def test_validate_receipt_chain_passes_materialized_receipts_to_count_validation(
     checkpoint: ShardCheckpoint,
     valid_receipts: tuple[PartReceipt, PartReceipt],
     monkeypatch: pytest.MonkeyPatch,
@@ -91,7 +91,7 @@ def test_receipt_chain_checks_count_against_the_same_checkpoint_and_receipts(
 
     monkeypatch.setattr(checkpoint_module, "_validate_receipt_count", observe)
 
-    validate_receipt_chain(
+    checkpoint_module.validate_receipt_chain(
         checkpoint,
         iter(valid_receipts),
         source_sha256=_SOURCE_SHA256,

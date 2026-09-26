@@ -273,10 +273,10 @@ def _migration_artifact_pairs(data_root: Path) -> list[tuple[Path, Path]]:
     data_dir = data_root / "data"
     manifests_dir = data_root / "manifests"
     _require_migration_directories(data_dir, manifests_dir, data_root, error=TextMigrationError)
-    return [
-        _artifact_pair(parquet, data_root)
-        for parquet in sorted(data_dir.glob("*.parquet"), key=lambda path: path.name)
-    ]
+    # pragma: no mutate start - children share a parent, so name and path order agree
+    artifacts = sorted(data_dir.glob("*.parquet"), key=lambda path: path.name)
+    # pragma: no mutate end
+    return [_artifact_pair(parquet, data_root) for parquet in artifacts]
 
 
 def migrate_dataset_text(data_root: Path, *, max_workers: int | None = None) -> int:

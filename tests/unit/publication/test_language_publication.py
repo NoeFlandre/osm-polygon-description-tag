@@ -762,7 +762,7 @@ def test_first_apply_records_the_current_plan_as_ambiguous_before_upload(
     assert ambiguous_calls == [(state, plan, "rev-2")]
 
 
-def test_publish_checks_resume_state_at_the_requested_path(
+def test_publish_language_export_uses_the_requested_resume_state_path(
     export: LanguageExport,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -777,8 +777,13 @@ def test_publish_checks_resume_state_at_the_requested_path(
         return original(path, candidate)
 
     monkeypatch.setattr(language_upload_module, "_resumed_outcome", read_selected_state)
-    publish_language_export(
-        plan, _FakeHub(), baseline_revision="rev-1", apply=True, state_path=state
+    language_upload_module._publish_language_export(
+        plan,
+        _FakeHub(),
+        baseline_revision="rev-1",
+        apply=True,
+        state_path=state,
+        logger=None,
     )
 
     assert observed == [(state, plan)]
