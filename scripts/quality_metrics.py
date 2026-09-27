@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -44,43 +45,63 @@ def _normalise_path(path: str) -> str:
     return Path(path).as_posix().removeprefix("./")
 
 
-def _coverage_for_block(functions: dict[str, Any], name: str, start_line: int) -> float:
+def _coverage_for_block(functions: dict[str, Any], name: str, start_line: int) -> float | None:
+    """Coverage percent for a qualified block name, or ``None`` when unmatched."""
     exact = functions.get(name)
     if exact is not None:
         return float(exact["summary"]["percent_covered"])
 
+    leaf = name.rsplit(".", 1)[-1]
     candidates = [
         value
         for function_name, value in functions.items()
-        if function_name.rsplit(".", 1)[-1] == name
+        if function_name.rsplit(".", 1)[-1] == leaf
         and int(value.get("start_line", -1)) == start_line
     ]
     if candidates:
         return float(candidates[0]["summary"]["percent_covered"])
-    return 0.0
+    return None
+
+
+def _scored_blocks(blocks: list[dict[str, Any]], parent: str = "") -> Iterator[tuple[str, dict]]:
+    """Yield ``(qualified name, block)`` for every function, method and closure.
+
+    Radon lists nested functions under each block's ``closures``; they are
+    named like coverage.py does (``outer.inner``, ``Class.method``).
+    """
+    # Radon already lists every method at the top level (with ``classname``),
+    # so ``class`` blocks are skipped rather than walked a second time.
+    for block in blocks:
+        if block.get("type") not in {"function", "method"}:
+            continue
+        owner = f"{block['classname']}." if block.get("classname") and not parent else parent
+        name = f"{owner}{block['name']}"
+        yield name, block
+        yield from _scored_blocks(block.get("closures", []), f"{name}.")
 
 
 def build_report(coverage: dict[str, Any], radon: dict[str, Any]) -> dict[str, Any]:
     functions: list[FunctionRisk] = []
+    unmatched: list[str] = []
     coverage_files = coverage.get("files", {})
     for raw_path, blocks in radon.items():
         path = _normalise_path(raw_path)
         file_coverage = coverage_files.get(raw_path) or coverage_files.get(path) or {}
         covered_functions = file_coverage.get("functions", {})
-        for block in blocks:
-            if block.get("type") not in {"function", "method"}:
-                continue
+        for name, block in _scored_blocks(blocks):
             start_line = int(block["lineno"])
+            percent = _coverage_for_block(covered_functions, name, start_line)
+            if percent is None:
+                # Scored as uncovered (the strict choice) and listed, never silent.
+                unmatched.append(f"{path}::{name}")
             functions.append(
                 FunctionRisk(
                     path=path,
-                    name=str(block["name"]),
+                    name=name,
                     start_line=start_line,
                     end_line=int(block.get("endline", start_line)),
                     complexity=int(block["complexity"]),
-                    coverage_percent=_coverage_for_block(
-                        covered_functions, str(block["name"]), start_line
-                    ),
+                    coverage_percent=0.0 if percent is None else percent,
                 )
             )
 
@@ -89,6 +110,7 @@ def build_report(coverage: dict[str, Any], radon: dict[str, Any]) -> dict[str, A
         "schema_version": REPORT_SCHEMA_VERSION,
         "formula": FORMULA,
         "functions": [item.as_dict() for item in functions],
+        "unmatched_coverage": sorted(unmatched),
     }
 
 
@@ -169,6 +191,7 @@ def main() -> None:
     violations = _crap_budget_violations(
         payload, max_score=args.max_crap_score, patterns=args.pattern
     )
+    _report_unmatched(payload)
     if violations:
         print(f"CRAP budget failed: scores must be < {args.max_crap_score:g}")
         for identity, score in violations:
@@ -176,6 +199,14 @@ def main() -> None:
         raise SystemExit(1)
     scope = "selected functions" if args.pattern else "all functions"
     print(f"CRAP budget passed for {scope}: all scores < {args.max_crap_score:g}")
+
+
+def _report_unmatched(payload: dict[str, Any]) -> None:
+    unmatched = payload.get("unmatched_coverage", [])
+    print(f"{len(payload.get('functions', []))} functions scored, including closures")
+    print(f"{len(unmatched)} without a coverage.py match (scored as 0% covered)")
+    for identity in unmatched:
+        print(f"  {identity}")
 
 
 if __name__ == "__main__":
