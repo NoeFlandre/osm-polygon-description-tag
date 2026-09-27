@@ -71,6 +71,20 @@ def test_closures_and_methods_are_scored_with_qualified_names() -> None:
     assert scored["Box.open"]["coverage_percent"] == 50.0
 
 
+def test_methods_nested_only_under_their_class_are_scored_once() -> None:
+    method = {**RADON["src/example.py"][1], "type": "method"}
+    nested_only = {
+        "src/example.py": [
+            {"type": "class", "name": "Box", "lineno": 19, "complexity": 3, "methods": [method]}
+        ]
+    }
+    both = {"src/example.py": [method, nested_only["src/example.py"][0]]}
+
+    for radon in (nested_only, both):
+        names = [item["name"] for item in build_report(COVERAGE, radon)["functions"]]
+        assert sorted(names) == ["Box.open", "Box.open.helper"]
+
+
 def test_unmatched_coverage_is_listed_and_scored_as_uncovered() -> None:
     report = build_report(COVERAGE, RADON)
 

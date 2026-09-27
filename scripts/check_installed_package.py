@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 import importlib
 import importlib.resources
-import pkgutil
 import sys
 from collections.abc import Iterator, Sequence
 from pathlib import Path
@@ -40,14 +39,28 @@ def data_file_problems(source_root: Path, package: str = PACKAGE) -> Iterator[st
             yield f"differs from the source tree: {relative}"
 
 
-def import_problems(package: str = PACKAGE) -> Iterator[str]:
-    """Yield one message per module of ``package`` that fails to import."""
-    root = importlib.import_module(package)
-    for module in pkgutil.walk_packages(root.__path__, prefix=f"{package}."):
+def source_modules(source_root: Path, package: str = PACKAGE) -> list[str]:
+    """Dotted names of every module in the source tree.
+
+    Taken from the source, not the install, so a module dropped from the
+    wheel is still expected and reported.
+    """
+    names = []
+    for path in source_root.rglob("*.py"):
+        parts = list(path.relative_to(source_root).with_suffix("").parts)
+        if parts[-1] == "__init__":
+            parts.pop()
+        names.append(".".join([package, *parts]))
+    return sorted(names)
+
+
+def import_problems(source_root: Path, package: str = PACKAGE) -> Iterator[str]:
+    """Yield one message per source module that fails to import when installed."""
+    for name in source_modules(source_root, package):
         try:
-            importlib.import_module(module.name)
+            importlib.import_module(name)
         except Exception as error:
-            yield f"cannot import {module.name}: {type(error).__name__}: {error}"
+            yield f"cannot import {name}: {type(error).__name__}: {error}"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -55,13 +68,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--source-root", type=Path, default=Path("src") / PACKAGE)
     args = parser.parse_args(argv)
     source_root = args.source_root.resolve()
-    problems = [*import_problems(), *data_file_problems(source_root)]
+    problems = [*import_problems(source_root), *data_file_problems(source_root)]
     for problem in problems:
         print(problem, file=sys.stderr)
     if problems:
         return 1
-    count = len(source_data_files(source_root))
-    print(f"installed package OK: all modules import, {count} data files match")
+    modules, files = len(source_modules(source_root)), len(source_data_files(source_root))
+    print(f"installed package OK: {modules} modules import, {files} data files match")
     return 0
 
 

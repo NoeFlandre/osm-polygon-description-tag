@@ -69,15 +69,26 @@ def _scored_blocks(blocks: list[dict[str, Any]], parent: str = "") -> Iterator[t
     Radon lists nested functions under each block's ``closures``; they are
     named like coverage.py does (``outer.inner``, ``Class.method``).
     """
-    # Radon already lists every method at the top level (with ``classname``),
-    # so ``class`` blocks are skipped rather than walked a second time.
     for block in blocks:
+        if block.get("type") == "class":
+            yield from _scored_blocks(block.get("methods", []), f"{parent}{block['name']}.")
+            continue
         if block.get("type") not in {"function", "method"}:
             continue
         owner = f"{block['classname']}." if block.get("classname") and not parent else parent
         name = f"{owner}{block['name']}"
         yield name, block
         yield from _scored_blocks(block.get("closures", []), f"{name}.")
+
+
+def _unique_blocks(blocks: list[dict[str, Any]]) -> dict[tuple[str, int], dict]:
+    """Scored blocks keyed by ``(name, line)``.
+
+    Radon 6.0 lists each method both at the top level (with ``classname``)
+    and under its class's ``methods``; other versions only nest them. Walking
+    both and de-duplicating scores every method exactly once either way.
+    """
+    return {(name, int(block["lineno"])): block for name, block in _scored_blocks(blocks)}
 
 
 def build_report(coverage: dict[str, Any], radon: dict[str, Any]) -> dict[str, Any]:
@@ -88,7 +99,7 @@ def build_report(coverage: dict[str, Any], radon: dict[str, Any]) -> dict[str, A
         path = _normalise_path(raw_path)
         file_coverage = coverage_files.get(raw_path) or coverage_files.get(path) or {}
         covered_functions = file_coverage.get("functions", {})
-        for name, block in _scored_blocks(blocks):
+        for (name, _line), block in _unique_blocks(blocks).items():
             start_line = int(block["lineno"])
             percent = _coverage_for_block(covered_functions, name, start_line)
             if percent is None:

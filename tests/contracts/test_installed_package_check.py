@@ -25,6 +25,28 @@ def test_the_development_install_passes(capsys: pytest.CaptureFixture[str]) -> N
     assert "data files match" in capsys.readouterr().out
 
 
+def test_source_modules_come_from_the_source_tree() -> None:
+    modules = check.source_modules(SOURCE_ROOT)
+
+    assert "osm_polygon_description_tag" in modules
+    assert "osm_polygon_description_tag.cli" in modules
+    assert "osm_polygon_description_tag.dataset.geography.mpl" in modules
+
+
+def test_a_module_missing_from_the_install_is_reported(tmp_path: Path) -> None:
+    source = tmp_path / "osm_polygon_description_tag"
+    source.mkdir()
+    (source / "__init__.py").write_text("")
+    (source / "dropped_from_wheel.py").write_text("")
+
+    problems = list(check.import_problems(source))
+
+    assert problems == [
+        "cannot import osm_polygon_description_tag.dropped_from_wheel: ModuleNotFoundError: "
+        "No module named 'osm_polygon_description_tag.dropped_from_wheel'"
+    ]
+
+
 def test_missing_and_changed_data_files_are_reported(tmp_path: Path) -> None:
     source = tmp_path / "osm_polygon_description_tag"
     (source / "_data").mkdir(parents=True)
@@ -49,7 +71,7 @@ def test_a_module_that_fails_to_import_is_reported(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(check.importlib, "import_module", flaky)
 
-    problems = list(check.import_problems())
+    problems = list(check.import_problems(SOURCE_ROOT))
 
     assert problems == [
         "cannot import osm_polygon_description_tag.cli: "
