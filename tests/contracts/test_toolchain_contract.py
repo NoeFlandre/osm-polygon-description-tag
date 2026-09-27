@@ -31,9 +31,10 @@ def test_ty_configuration_checks_the_src_package_strictly() -> None:
 
     assert project["tool"]["ty"]["environment"] == {
         "python-version": "3.12",
-        "root": ["./src"],
+        "root": ["./src", "."],
     }
-    assert project["tool"]["ty"]["src"] == {"include": ["src"]}
+    # scripts/ holds the CI gate logic, so it is type-checked too (#72).
+    assert project["tool"]["ty"]["src"] == {"include": ["src", "scripts"]}
     assert project["tool"]["ty"]["terminal"] == {"error-on-warning": True}
     assert "mypy" not in project["tool"]
 
