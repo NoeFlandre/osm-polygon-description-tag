@@ -18,6 +18,9 @@ from osm_polygon_description_tag.runtime.resources import (
     osmium_export_config,
 )
 
+# Seconds each preflight subprocess may run before the check fails closed.
+PROBE_TIMEOUT_SECONDS = 15
+
 
 class PreflightError(RuntimeError):
     """Raised when preflight verification fails before any source is touched."""
@@ -43,9 +46,9 @@ def _run_osmium_version(binary: str, executable: str) -> str:
             shell=False,
             capture_output=True,
             text=True,
-            timeout=15,
+            timeout=PROBE_TIMEOUT_SECONDS,
         )
-    except (FileNotFoundError, subprocess.CalledProcessError) as error:
+    except (OSError, subprocess.SubprocessError) as error:
         raise PreflightError(f"osmium --version failed for {executable}: {error}") from error
     return completed.stdout or completed.stderr or ""
 
@@ -86,9 +89,9 @@ def _hf_cli_identity(resolved_hf: str) -> str:
             shell=False,
             capture_output=True,
             text=True,
-            timeout=15,
+            timeout=PROBE_TIMEOUT_SECONDS,
         )
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+    except (OSError, subprocess.SubprocessError) as error:
         raise PreflightError(f"hf authentication check failed: {error}") from error
     whoami_lines = completed.stdout.splitlines()
     return whoami_lines[0].strip() if whoami_lines else ""
