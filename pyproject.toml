@@ -116,7 +116,7 @@ error-on-warning = true
 
 [tool.coverage.run]
 branch = true
-source = ["osm_polygon_description_tag"]
+source = ["osm_polygon_description_tag", "scripts"]
 
 [tool.coverage.report]
 fail_under = 90

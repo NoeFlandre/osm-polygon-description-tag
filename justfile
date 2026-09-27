@@ -4,7 +4,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 repo_id := "NoeFlandre/osm-polygon-description-tag"
 
 # Coverage flags shared by `test` and `risk`, so the two gates cannot drift.
-coverage_flags := "--cov=osm_polygon_description_tag --cov-branch --cov-fail-under=90"
+coverage_flags := "--cov=osm_polygon_description_tag --cov=scripts --cov-branch --cov-fail-under=90"
 
 sync:
     uv sync --frozen
@@ -31,7 +31,7 @@ test-integration:
 # Build the CRAP report from an existing reports/coverage.json.
 risk-prepared:
     test -f reports/coverage.json
-    uv run radon cc src/osm_polygon_description_tag -s -j > reports/radon.json
+    uv run radon cc src/osm_polygon_description_tag scripts -s -j > reports/radon.json
     uv run python scripts/quality_metrics.py crap \
         --coverage-json reports/coverage.json \
         --radon-json reports/radon.json \
@@ -39,13 +39,14 @@ risk-prepared:
         --markdown-output reports/crap.md
     uv run python scripts/quality_metrics.py check \
         --report reports/crap.json \
-        --max-crap-score 6
+        --max-crap-score 6 \
+        --allowlist scripts/crap-allowlist.json
 
 # Generate deterministic CRAP risk reports from test coverage and Radon.
 risk:
     mkdir -p reports
     uv run pytest {{coverage_flags}} --cov-report=json:reports/coverage.json
-    uv run radon cc src/osm_polygon_description_tag -s -j > reports/radon.json
+    uv run radon cc src/osm_polygon_description_tag scripts -s -j > reports/radon.json
     uv run python scripts/quality_metrics.py crap \
         --coverage-json reports/coverage.json \
         --radon-json reports/radon.json \
@@ -53,7 +54,8 @@ risk:
         --markdown-output reports/crap.md
     uv run python scripts/quality_metrics.py check \
         --report reports/crap.json \
-        --max-crap-score 6
+        --max-crap-score 6 \
+        --allowlist scripts/crap-allowlist.json
 
 # Record which tests execute which source lines. The mutation gate turns this
 # into the exact covering-test set per function, which is what keeps it fast:

@@ -7,6 +7,7 @@ import fnmatch
 import json
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -166,6 +167,30 @@ def _crap_budget_violations(
     return sorted(violations)
 
 
+def apply_allowlist(
+    violations: list[tuple[str, float]], allowlist: dict[str, Any], *, today: date
+) -> tuple[list[tuple[str, float]], list[str]]:
+    """Drop allow-listed violations; return what still fails and any list problems.
+
+    Once the list expires nothing is excused (a problem that fails the gate).
+    Entries whose function is back within budget are returned as warnings.
+    """
+    expires = date.fromisoformat(allowlist["expires"])
+    if today > expires:
+        return violations, [f"CRAP allow-list expired on {expires.isoformat()}"]
+    allowed = set(allowlist["functions"])
+    remaining = [item for item in violations if item[0] not in allowed]
+    return remaining, _stale_entries(allowed, violations)
+
+
+def _stale_entries(allowed: set[str], violations: list[tuple[str, float]]) -> list[str]:
+    within_budget = allowed - {identity for identity, _score in violations}
+    return [
+        f"remove from the CRAP allow-list, now within budget: {name}"
+        for name in sorted(within_budget)
+    ]
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -182,6 +207,11 @@ def _parse_args() -> argparse.Namespace:
         action="append",
         default=[],
         help="optional fnmatch pattern for path::function identities (repeatable)",
+    )
+    check.add_argument(
+        "--allowlist",
+        type=Path,
+        help="JSON {expires, functions} excusing listed violations until it expires",
     )
     return parser.parse_args()
 
@@ -203,13 +233,32 @@ def main() -> None:
         payload, max_score=args.max_crap_score, patterns=args.pattern
     )
     _report_unmatched(payload)
+    violations, problems = _allowlisted(violations, args.allowlist)
+    for problem in problems:
+        print(problem)
+    if any("expired" in problem for problem in problems):
+        raise SystemExit(1)
     if violations:
         print(f"CRAP budget failed: scores must be < {args.max_crap_score:g}")
         for identity, score in violations:
             print(f"{identity}: {score:.6f}")
         raise SystemExit(1)
     scope = "selected functions" if args.pattern else "all functions"
+    if args.allowlist is not None:
+        scope += " not on the allow-list"
     print(f"CRAP budget passed for {scope}: all scores < {args.max_crap_score:g}")
+
+
+def _allowlisted(
+    violations: list[tuple[str, float]], path: Path | None
+) -> tuple[list[tuple[str, float]], list[str]]:
+    if path is None:
+        return violations, []
+    allowlist = json.loads(path.read_text(encoding="utf-8"))
+    remaining, problems = apply_allowlist(violations, allowlist, today=date.today())
+    excused = len(violations) - len(remaining)
+    print(f"{excused} over-budget functions excused by {path} until {allowlist['expires']}")
+    return remaining, problems
 
 
 def _report_unmatched(payload: dict[str, Any]) -> None:
