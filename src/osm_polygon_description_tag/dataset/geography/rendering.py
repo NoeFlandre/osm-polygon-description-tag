@@ -11,16 +11,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
-
-import matplotlib
-
-matplotlib.use("Agg")  # non-interactive backend for CI/macOS terminal runs
-
-import matplotlib.colors as mcolors
-import matplotlib.patches as mpatches
-import matplotlib.pyplot as plt
-import matplotlib.ticker as mtick
+from typing import TYPE_CHECKING, Any, Final
 
 from osm_polygon_description_tag.dataset.geography.atomic import (
     PNG_METADATA_SOFTWARE as _METADATA_SOFTWARE,
@@ -41,6 +32,10 @@ from osm_polygon_description_tag.dataset.geography.card import (
 from osm_polygon_description_tag.dataset.geography.h3_policy import (
     cell_rings,
 )
+from osm_polygon_description_tag.dataset.geography.mpl import pyplot
+
+if TYPE_CHECKING:
+    from matplotlib import colors as mcolors
 
 # Shared world-extent visual constants.
 _OCEAN_COLOR: Final[str] = "#cfe2f3"
@@ -141,11 +136,13 @@ def _draw_cell(
     norm: mcolors.LogNorm,
 ) -> None:
     """Draw a single H3 cell on ``ax`` for the density map."""
+    from matplotlib import patches
+
     facecolor: Any = cmap(norm(max(int(count), 1)))
     for ring in cell_rings(cell):
         if len(ring) < 3:
             continue
-        patch = mpatches.Polygon(
+        patch = patches.Polygon(
             ring,
             closed=True,
             facecolor=facecolor,
@@ -179,6 +176,7 @@ def render_density_map(
     occupied_cells = len(sorted_cells)
     caption = _build_caption(total_rows, occupied_cells)
 
+    plt = pyplot()
     fig, ax = plt.subplots(figsize=_FIGSIZE, dpi=_DPI)
     fig.set_facecolor("white")
     _init_axes(ax)
@@ -229,7 +227,9 @@ def _draw_cells_and_colorbar(
     maximum = max(max(counts), minimum + 1)
     # LogNorm requires vmin < vmax; the guard above guarantees this even
     # for the one-cell case.
-    norm = mcolors.LogNorm(vmin=minimum, vmax=maximum)
+    from matplotlib.colors import LogNorm
+
+    norm = LogNorm(vmin=minimum, vmax=maximum)
     for cell, count in sorted_cells:
         _draw_cell(ax, cell, count=count, cmap=cmap, norm=norm)
     _draw_density_colorbar(fig, ax, cmap, norm)
@@ -238,7 +238,10 @@ def _draw_cells_and_colorbar(
 def _draw_density_colorbar(
     fig: Any, ax: Any, cmap: mcolors.Colormap, norm: mcolors.LogNorm
 ) -> None:
-    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.ticker import FuncFormatter
+
+    sm = ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     colorbar = fig.colorbar(sm, ax=ax, fraction=_COLORBAR_FRACTION, pad=_COLORBAR_PAD)
     colorbar.set_label(
@@ -246,14 +249,17 @@ def _draw_density_colorbar(
         fontsize=8,
         color="#333333",
     )
-    colorbar.ax.yaxis.set_major_formatter(mtick.FuncFormatter(_format_count_tick))
+    colorbar.ax.yaxis.set_major_formatter(FuncFormatter(_format_count_tick))
     colorbar.ax.tick_params(labelsize=_TICK_LABELSIZE)
 
 
 def _draw_empty_colorbar(fig: Any, ax: Any, cmap: mcolors.Colormap) -> None:
     # No cells: still add an empty colorbar to keep layout stable.
-    norm = mcolors.LogNorm(vmin=1, vmax=2)
-    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import LogNorm
+
+    norm = LogNorm(vmin=1, vmax=2)
+    sm = ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     fig.colorbar(sm, ax=ax, fraction=_COLORBAR_FRACTION, pad=_COLORBAR_PAD)
 
