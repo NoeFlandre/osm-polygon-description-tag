@@ -26,6 +26,7 @@ Read the documentation:
 - [CLI reference](docs/cli.md)
 - [Development](docs/development.md)
 - [Architecture](docs/architecture.md)
+- [Contributing](CONTRIBUTING.md) and [security policy](SECURITY.md)
 
 ## Quick start
 

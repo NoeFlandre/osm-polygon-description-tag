@@ -1,0 +1,35 @@
+name: Bug report
+description: Something produced a wrong result, crashed, or failed a gate unexpectedly.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: The exact command you ran (for example `osm-polygon-description-tag run-and-publish ...`).
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: osmium
+    attributes:
+      label: osmium version
+      description: Output of `osmium --version`.
+  - type: textarea
+    id: layout
+    attributes:
+      label: Data root layout
+      description: Output of `ls -R` for the data root (trim large listings).
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error output
+      render: text
