@@ -82,6 +82,17 @@ jobs:
           uv run osm-polygon-description-tag --help
           uv run osm-polygon-description-tag run-and-publish --help
 
+      # `uv run` above uses the editable dev environment. Install only the
+      # built wheel into a clean venv, outside the repository, and check that
+      # every module imports and every packaged data file shipped intact.
+      - name: Smoke-test the built wheel in a clean venv
+        run: |
+          uv venv --python 3.12 /tmp/wheel-venv
+          uv pip install --python /tmp/wheel-venv dist/*.whl
+          /tmp/wheel-venv/bin/osm-polygon-description-tag --help
+          (cd /tmp && /tmp/wheel-venv/bin/python "$GITHUB_WORKSPACE/scripts/check_installed_package.py" \
+            --source-root "$GITHUB_WORKSPACE/src/osm_polygon_description_tag")
+
       # The lockfile only proves the newest versions work. Install the lowest
       # declared direct dependencies (wheels only) and run the built CLI.
       - name: Smoke-test lowest declared dependencies
