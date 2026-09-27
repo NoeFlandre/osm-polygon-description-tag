@@ -136,7 +136,12 @@ def geodesic_area_m2(geometry: BaseGeometry) -> float:
     that holes and every multipolygon component contribute correctly regardless
     of the source ring orientation.
     """
-    area, _perimeter = GEOD.geometry_area_perimeter(orient(geometry))
+    return _geodesic_area_oriented_m2(orient(geometry))
+
+
+def _geodesic_area_oriented_m2(oriented: BaseGeometry) -> float:
+    """Geodesic area of a geometry the caller has already oriented."""
+    area, _perimeter = GEOD.geometry_area_perimeter(oriented)
     return abs(float(area))
 
 
@@ -167,8 +172,10 @@ def _decode_polygon(record: ExportRecord) -> BaseGeometry:
     return geometry
 
 
-def _validate_positive_area(geometry: BaseGeometry) -> float:
-    area = geodesic_area_m2(geometry)
+def _validate_positive_area(oriented: BaseGeometry) -> float:
+    # transform_record orients once; orient() is idempotent, so the area is
+    # bit-identical to geodesic_area_m2 without paying for a second pass.
+    area = _geodesic_area_oriented_m2(oriented)
     if not area > 0:
         raise RejectedFeature("nonpositive_area")
     return area

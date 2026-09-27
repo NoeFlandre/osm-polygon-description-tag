@@ -318,7 +318,8 @@ def test_transform_rejects_nonpositive_area(monkeypatch: pytest.MonkeyPatch) -> 
     # A valid polygon always has positive geodesic area, so exercise the branch directly.
     polygon = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.transform.geodesic_area_m2", lambda _geom: 0.0
+        "osm_polygon_description_tag.dataset.transform._geodesic_area_oriented_m2",
+        lambda _geom: 0.0,
     )
     record = _record(polygon, {"description": "x"})
     with pytest.raises(RejectedFeature) as info:
@@ -329,7 +330,8 @@ def test_transform_rejects_nonpositive_area(monkeypatch: pytest.MonkeyPatch) -> 
 def test_transform_accepts_any_positive_geodesic_area(monkeypatch: pytest.MonkeyPatch) -> None:
     polygon = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.transform.geodesic_area_m2", lambda _geom: 0.5
+        "osm_polygon_description_tag.dataset.transform._geodesic_area_oriented_m2",
+        lambda _geom: 0.5,
     )
     record = _record(polygon, {"description": "small area"})
 
@@ -406,3 +408,47 @@ def test_a_naive_source_timestamp_is_read_as_utc_on_any_machine(
     finally:
         monkeypatch.delenv("TZ", raising=False)
         time.tzset()
+
+
+def _random_polygons(count: int) -> list[Polygon]:
+    import random
+
+    rng = random.Random(85)  # noqa: S311 - deterministic test data, not security
+    polygons = []
+    for _ in range(count):
+        lon, lat = rng.uniform(-170, 170), rng.uniform(-80, 80)
+        size = rng.uniform(0.001, 0.5)
+        shell = [(lon, lat), (lon + size, lat), (lon + size, lat + size), (lon, lat + size)]
+        if rng.random() < 0.5:
+            shell.reverse()  # mixed source orientation
+        holes = []
+        if rng.random() < 0.3:
+            q = size / 4
+            hole = [(lon + q, lat + q), (lon + 2 * q, lat + q), (lon + 2 * q, lat + 2 * q)]
+            holes.append(hole[::-1] if rng.random() < 0.5 else hole)
+        polygons.append(Polygon(shell, holes))
+    return polygons
+
+
+def test_transform_area_is_bit_identical_to_the_public_geodesic_area() -> None:
+    for polygon in _random_polygons(1000):
+        payload = transform_record(_record(polygon, {"description": "x"}), "x.osm.pbf")
+        assert payload["area_m2"] == geodesic_area_m2(polygon)
+
+
+def test_transform_orients_each_geometry_exactly_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    import osm_polygon_description_tag.dataset.transform as transform_module
+
+    calls: list[object] = []
+    real_orient = transform_module.orient
+
+    def spy(geometry: object, *args: object, **kwargs: object) -> object:
+        calls.append(geometry)
+        return real_orient(geometry, *args, **kwargs)
+
+    monkeypatch.setattr(transform_module, "orient", spy)
+    polygon = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
+
+    transform_record(_record(polygon, {"description": "x"}), "x.osm.pbf")
+
+    assert len(calls) == 1
