@@ -17,6 +17,7 @@ jobs:
     env:
       HF_HUB_OFFLINE: "1"
       HF_DATASETS_OFFLINE: "1"
+      HYPOTHESIS_PROFILE: ci
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -146,6 +147,7 @@ jobs:
     env:
       HF_HUB_OFFLINE: "1"
       HF_DATASETS_OFFLINE: "1"
+      HYPOTHESIS_PROFILE: ci
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -195,6 +197,7 @@ jobs:
     env:
       HF_HUB_OFFLINE: "1"
       HF_DATASETS_OFFLINE: "1"
+      HYPOTHESIS_PROFILE: mutation
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -259,6 +262,7 @@ jobs:
     env:
       HF_HUB_OFFLINE: "1"
       HF_DATASETS_OFFLINE: "1"
+      HYPOTHESIS_PROFILE: mutation
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -314,6 +318,7 @@ jobs:
     env:
       HF_HUB_OFFLINE: "1"
       HF_DATASETS_OFFLINE: "1"
+      HYPOTHESIS_PROFILE: mutation
       MUTATION_SHARD_COUNT: "8"
     steps:
       - name: Check out repository

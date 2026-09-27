@@ -10,10 +10,31 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from hypothesis import settings
 from shapely import to_wkb
 
 from osm_polygon_description_tag.dataset.transform import transform_record
 from osm_polygon_description_tag.osm.extraction import ExportRecord
+
+# Hypothesis profiles (#78). "ci" and "mutation" are derandomized with no
+# deadline and no example database, so a property test kills (or misses) the
+# same mutants on every run and runner. mutmut sets MUTANT_UNDER_TEST in each
+# mutant's test process, which selects "mutation" automatically.
+settings.register_profile(
+    "ci", derandomize=True, deadline=None, database=None, print_blob=True, max_examples=100
+)
+settings.register_profile("mutation", parent=settings.get_profile("ci"), max_examples=30)
+settings.register_profile("dev", max_examples=50)
+
+
+def _hypothesis_profile() -> str:
+    explicit = os.environ.get("HYPOTHESIS_PROFILE")
+    if explicit:
+        return explicit
+    return "mutation" if os.environ.get("MUTANT_UNDER_TEST") else "dev"
+
+
+settings.load_profile(_hypothesis_profile())
 
 
 class NetworkAccessInTestError(RuntimeError):
