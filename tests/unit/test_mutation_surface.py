@@ -15,12 +15,12 @@ from types import SimpleNamespace
 
 import pytest
 from click import Command, Context
-from typer._click.exceptions import ClickException, UsageError
 
 import osm_polygon_description_tag.cli as cli
 import osm_polygon_description_tag.runtime.presentation as presentation
 from osm_polygon_description_tag.dataset.manifest import _empty_policy_hash
 from osm_polygon_description_tag.dataset.text import trimmed_nonempty_text
+from osm_polygon_description_tag.runtime.click_compat import ClickException, UsageError
 
 
 def _cli_args(tmp_path: Path, **values: object) -> SimpleNamespace:

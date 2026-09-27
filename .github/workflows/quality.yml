@@ -82,6 +82,16 @@ jobs:
           uv run osm-polygon-description-tag --help
           uv run osm-polygon-description-tag run-and-publish --help
 
+      # The lockfile only proves the newest versions work. Install the lowest
+      # declared direct dependencies (wheels only) and run the built CLI.
+      - name: Smoke-test lowest declared dependencies
+        run: |
+          uv venv --python 3.12 /tmp/lowest
+          uv pip install --python /tmp/lowest --resolution lowest-direct --only-binary :all: -r pyproject.toml
+          uv pip install --python /tmp/lowest --no-deps dist/*.whl
+          /tmp/lowest/bin/osm-polygon-description-tag --help
+          /tmp/lowest/bin/osm-polygon-description-tag run-and-publish --help
+
       - name: Verify wheel contents
         run: >-
           uv run python -c

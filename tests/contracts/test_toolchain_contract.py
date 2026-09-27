@@ -19,7 +19,7 @@ def test_runtime_and_development_dependencies_use_the_standard_toolchain() -> No
     runtime = _requirements_by_name(project["project"]["dependencies"])
     development = _requirements_by_name(project["dependency-groups"]["dev"])
 
-    assert str(runtime["typer"].specifier) == "<1,>=0.12"
+    assert str(runtime["typer"].specifier) == "<1,>=0.26"
     assert str(runtime["rich"].specifier) == "<15,>=13"
     assert str(runtime["tqdm"].specifier) == "<5,>=4.66"
     assert {"ruff", "ty", "pytest", "pytest-cov", "pre-commit"} <= development.keys()

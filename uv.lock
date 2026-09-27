@@ -1677,7 +1677,7 @@ requires-dist = [
     { name = "torch", marker = "sys_platform == 'linux' and extra == 'language'", specifier = ">=2.4,<3" },
     { name = "tqdm", specifier = ">=4.66,<5" },
     { name = "trackio", specifier = ">=0.20,<1" },
-    { name = "typer", specifier = ">=0.12,<1" },
+    { name = "typer", specifier = ">=0.26,<1" },
     { name = "wtpsplit", marker = "sys_platform == 'linux' and extra == 'language'", specifier = "==2.2.1" },
 ]
 provides-extras = ["language"]

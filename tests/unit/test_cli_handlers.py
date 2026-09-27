@@ -15,10 +15,10 @@ from typing import Any
 
 import pytest
 from click import Command, Context
-from typer._click.exceptions import ClickException, UsageError
 
 import osm_polygon_description_tag.cli as cli
 import osm_polygon_description_tag.runtime.presentation as presentation
+from osm_polygon_description_tag.runtime.click_compat import ClickException, UsageError
 
 
 @pytest.fixture

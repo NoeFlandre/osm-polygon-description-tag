@@ -16,7 +16,6 @@ from typing import Annotated, Any
 
 import typer
 from typer import rich_utils
-from typer._click.exceptions import ClickException, Exit, UsageError
 
 from osm_polygon_description_tag.dataset.docs import generate_dataset_docs
 from osm_polygon_description_tag.dataset.languages.detector import LanguageDetectionError
@@ -42,6 +41,7 @@ from osm_polygon_description_tag.publication import (
     release_metadata,
 )
 from osm_polygon_description_tag.publication.verification import HubVerificationError
+from osm_polygon_description_tag.runtime.click_compat import ClickException, Exit, UsageError
 from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.runtime.logging import RunLogger
 from osm_polygon_description_tag.runtime.presentation import TerminalPresenter, print_json
