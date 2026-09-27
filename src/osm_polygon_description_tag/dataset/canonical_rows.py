@@ -192,14 +192,50 @@ def canonical_rows_sql(
     """  # noqa: S608 - relation/columns are internal allowlisted SQL fragments
 
 
+TEXT_CANONICAL_COLUMN = "_text_canonical"
+
+
+def canonical_rows_with_text_flag_sql(relation: str, columns: Sequence[str]) -> str:
+    """Return both canonical views of a relation in one ranked pass.
+
+    Yields every row that is canonical under plain ranking or under
+    text-aware ranking (text filtered before ranking), plus a boolean
+    ``_text_canonical`` column that is true exactly for the rows
+    :func:`canonical_rows_sql` returns with ``require_successful_text``.
+    """
+    selected = tuple(dict.fromkeys(columns))
+    if not selected:
+        raise ValueError("unique-row views require at least one selected column")
+    unknown = set(selected) - set(SCHEMA.names)
+    if unknown:
+        raise ValueError(f"unsupported unique-row columns: {sorted(unknown)}")
+    order = canonical_row_order_sql()
+    text_ok = successful_description_text_sql(localized_is_map=False)
+    return f"""
+        SELECT {", ".join(selected)},
+            (_text_ok AND _text_rank = 1) AS {TEXT_CANONICAL_COLUMN}
+        FROM (
+            SELECT *,
+                ROW_NUMBER() OVER (PARTITION BY osm_type, osm_id ORDER BY {order}) AS _rank,
+                ROW_NUMBER() OVER (
+                    PARTITION BY osm_type, osm_id, _text_ok ORDER BY {order}
+                ) AS _text_rank
+            FROM (SELECT *, COALESCE({text_ok}, FALSE) AS _text_ok FROM {relation})
+        ) ranked
+        WHERE _rank = 1 OR (_text_ok AND _text_rank = 1)
+    """  # noqa: S608 - relation/columns are internal allowlisted SQL fragments
+
+
 __all__ = [
     "CANONICAL_FINGERPRINT_COLUMNS",
     "CANONICAL_RANK_COLUMNS",
     "CANONICAL_ROW_POLICY_SHA256",
     "CANONICAL_ROW_POLICY_VERSION",
+    "TEXT_CANONICAL_COLUMN",
     "canonical_geometry_wkb",
     "canonical_geometry_wkb_sql",
     "canonical_row_order_sql",
     "canonical_rows_sql",
+    "canonical_rows_with_text_flag_sql",
     "select_canonical_row",
 ]

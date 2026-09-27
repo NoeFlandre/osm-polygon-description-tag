@@ -22,6 +22,7 @@ from shapely import from_wkb
 from shapely.errors import ShapelyError
 from shapely.geometry.base import BaseGeometry
 
+from osm_polygon_description_tag.dataset.canonical_rows import TEXT_CANONICAL_COLUMN
 from osm_polygon_description_tag.dataset.geography.h3_policy import (
     assign_h3_cell,
     validate_coordinate,
@@ -29,6 +30,7 @@ from osm_polygon_description_tag.dataset.geography.h3_policy import (
 from osm_polygon_description_tag.dataset.unique_rows import (
     UniqueRowsError,
     iter_unique_parquet_batches,
+    iter_unique_parquet_batches_with_text_flag,
 )
 
 PARQUET_INPUT_COLUMNS: Final[tuple[str, ...]] = (
@@ -194,25 +196,25 @@ def _iter_centroid_batch(
         yield _centroid_row(wkb, osm_id, source_name, source_paths)
 
 
-def _validate_unique_centroids(data_root: Path, source_paths: Mapping[str, Path]) -> None:
-    """Validate geometry and coordinates before the text population filter.
+def _iter_counted_centroids(
+    data_root: Path, source_paths: Mapping[str, Path]
+) -> Iterator[tuple[Path, float, float]]:
+    """Validate every canonical row's geometry; yield only text-canonical centroids.
 
     The map population is text-aware, but malformed geometry must not become
-    invisible merely because its row is ineligible for that population. This
-    bounded preflight preserves the H3 module's historical geometry errors;
-    the subsequent iterator still performs the text-aware canonical read used
-    for counts.
+    invisible merely because its row is ineligible for that population. One
+    ranked pass returns both the plain-canonical rows (validated) and the
+    text-canonical rows (validated and counted), flagged by
+    ``_text_canonical``, instead of running the dedup query twice.
     """
     try:
-        batches = iter_unique_parquet_batches(
-            data_root,
-            columns=PARQUET_INPUT_COLUMNS,
-            batch_size=BATCH_SIZE,
-            require_successful_text=False,
+        batches = iter_unique_parquet_batches_with_text_flag(
+            data_root, columns=PARQUET_INPUT_COLUMNS, batch_size=BATCH_SIZE
         )
         for batch in batches:
-            for _ in _iter_centroid_batch(batch, source_paths):
-                pass
+            counted = batch.column(TEXT_CANONICAL_COLUMN).to_pylist()
+            centroids = _iter_centroid_batch(batch, source_paths)
+            yield from (row for row, flag in zip(centroids, counted, strict=True) if flag)
     except UniqueRowsError as error:
         raise H3AggregationError(str(error)) from error
 
@@ -268,8 +270,8 @@ def collect_h3_counts(
 
     counts: dict[str, int] = {}
     resolution = DEFAULT_H3_RESOLUTION if h3_resolution is None else h3_resolution
-    _validate_unique_centroids(data_root, _source_paths(data_root / "data"))
-    for _path, lon, lat in iter_centroids(data_root):
+    source_paths = _source_paths(require_directory(data_root / "data", label="data"))
+    for _path, lon, lat in _iter_counted_centroids(data_root, source_paths):
         cell = assign_h3_cell(lat, lon, resolution=resolution)
         counts[cell] = counts.get(cell, 0) + 1
     return dict(sorted(counts.items()))

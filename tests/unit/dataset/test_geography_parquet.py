@@ -281,11 +281,12 @@ def test_collect_h3_counts_forwards_exact_resolution_to_assignment(
     observed: list[tuple[float, float, int]] = []
     validated: list[Path] = []
     parquet_path = tmp_path / "data" / "region.parquet"
+    parquet_path.parent.mkdir()
 
     monkeypatch.setattr(
         parquet_inputs_module,
-        "iter_centroids",
-        lambda _root: iter(((parquet_path, 2.0, 1.0), (parquet_path, 4.0, 3.0))),
+        "_iter_counted_centroids",
+        lambda _root, _paths: iter(((parquet_path, 2.0, 1.0), (parquet_path, 4.0, 3.0))),
     )
     monkeypatch.setattr(
         storage_module,
@@ -334,35 +335,26 @@ def test_aggregate_uses_batched_reads_with_pruned_columns(
 ) -> None:
     """Only the required columns are read through bounded unique-row batches."""
     data_root = _plant_two_parquets(tmp_path)
-    observed: list[tuple[Path, tuple[str, ...], int, bool]] = []
-    real_iter_unique = parquet_inputs_module.iter_unique_parquet_batches
+    observed: list[tuple[Path, tuple[str, ...], int]] = []
+    real_iter_flagged = parquet_inputs_module.iter_unique_parquet_batches_with_text_flag
 
-    def guarded_iter_unique(
-        root: Path,
-        *,
-        columns: tuple[str, ...],
-        batch_size: int,
-        require_successful_text: bool,
-    ) -> Any:
-        observed.append((root, columns, batch_size, require_successful_text))
-        return real_iter_unique(
-            root,
-            columns=columns,
-            batch_size=batch_size,
-            require_successful_text=require_successful_text,
-        )
+    def guarded_iter_flagged(root: Path, *, columns: tuple[str, ...], batch_size: int) -> Any:
+        observed.append((root, columns, batch_size))
+        return real_iter_flagged(root, columns=columns, batch_size=batch_size)
 
-    monkeypatch.setattr(parquet_inputs_module, "iter_unique_parquet_batches", guarded_iter_unique)
+    def no_second_pass(*_args: object, **_kwargs: object) -> Any:
+        raise AssertionError("collect_h3_counts must rank rows in a single pass")
+
+    monkeypatch.setattr(
+        parquet_inputs_module, "iter_unique_parquet_batches_with_text_flag", guarded_iter_flagged
+    )
+    monkeypatch.setattr(parquet_inputs_module, "iter_unique_parquet_batches", no_second_pass)
     aggregate_h3_density(data_root)
-    assert observed, "unique-row batches must be invoked"
-    assert [require_text for _root, _columns, _batch_size, require_text in observed] == [
-        False,
-        True,
-    ]
-    for root, columns, batch_size, _require_text in observed:
-        assert root == data_root
-        assert set(columns or set()) <= set(PARQUET_INPUT_COLUMNS)
-        assert batch_size is not None and batch_size > 0
+    assert len(observed) == 1, "exactly one ranked pass over the unique rows"
+    root, columns, batch_size = observed[0]
+    assert root == data_root
+    assert set(columns) <= set(PARQUET_INPUT_COLUMNS)
+    assert batch_size > 0
 
 
 # ---------------------------------------------------------------------------
