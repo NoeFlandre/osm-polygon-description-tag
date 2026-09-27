@@ -42,7 +42,7 @@ from osm_polygon_description_tag.publication import (
 )
 from osm_polygon_description_tag.publication.verification import HubVerificationError
 from osm_polygon_description_tag.runtime.click_compat import ClickException, Exit, UsageError
-from osm_polygon_description_tag.runtime.config import Paths
+from osm_polygon_description_tag.runtime.config import Paths, resolve_data_root
 from osm_polygon_description_tag.runtime.logging import RunLogger
 from osm_polygon_description_tag.runtime.presentation import TerminalPresenter, print_json
 from osm_polygon_description_tag.runtime.resources import (
@@ -71,6 +71,11 @@ Osmium = Annotated[str, typer.Option("--osmium")]
 
 def _resolve_paths(args: SimpleNamespace) -> Paths:
     return Paths.resolve(args.source_root, args.data_root)
+
+
+def _data_root(args: SimpleNamespace) -> Path:
+    """Data-only commands need no source root."""
+    return resolve_data_root(args.data_root)
 
 
 class _Interrupted(Exception):
@@ -167,8 +172,8 @@ def handle_build_all(args: SimpleNamespace) -> int:
 
 
 def handle_validate(args: SimpleNamespace) -> int:
-    paths = _resolve_paths(args)
-    data_dir = paths.data_root / "data"
+    data_root = _data_root(args)
+    data_dir = data_root / "data"
     if not data_dir.is_dir():
         raise ValueError(f"missing data directory: {data_dir}")
     rows_total = 0
@@ -181,8 +186,8 @@ def handle_validate(args: SimpleNamespace) -> int:
 
 
 def handle_card(args: SimpleNamespace) -> int:
-    paths = _resolve_paths(args)
-    stats = generate_dataset_docs(paths.data_root, dataset_card_template())
+    data_root = _data_root(args)
+    stats = generate_dataset_docs(data_root, dataset_card_template())
     print_json(
         {
             "output_files": stats["output_files"],
@@ -195,23 +200,23 @@ def handle_card(args: SimpleNamespace) -> int:
 
 def handle_migrate_schema(args: SimpleNamespace) -> int:
     """Upgrade existing legacy map Parquets without reading raw PBFs."""
-    paths = _resolve_paths(args)
-    migrated = migrate_dataset_schema(paths.data_root)
-    print_json({"data_root": str(paths.data_root), "migrated_files": migrated})
+    data_root = _data_root(args)
+    migrated = migrate_dataset_schema(data_root)
+    print_json({"data_root": str(data_root), "migrated_files": migrated})
     return 0
 
 
 def handle_migrate_text(args: SimpleNamespace) -> int:
     """Repair legacy untrimmed description text without reading raw PBFs."""
-    paths = _resolve_paths(args)
-    migrated = migrate_dataset_text(paths.data_root, max_workers=args.max_workers)
-    print_json({"data_root": str(paths.data_root), "migrated_files": migrated})
+    data_root = _data_root(args)
+    migrated = migrate_dataset_text(data_root, max_workers=args.max_workers)
+    print_json({"data_root": str(data_root), "migrated_files": migrated})
     return 0
 
 
 def handle_publish_plan(args: SimpleNamespace) -> int:
-    paths = _resolve_paths(args)
-    plan = create_upload_plan(paths.data_root)
+    data_root = _data_root(args)
+    plan = create_upload_plan(data_root)
     print_json(
         {
             "repo_id": plan.repo_id,
@@ -225,8 +230,8 @@ def handle_publish_plan(args: SimpleNamespace) -> int:
 
 
 def handle_publish(args: SimpleNamespace) -> int:
-    paths = _resolve_paths(args)
-    plan = create_upload_plan(paths.data_root)
+    data_root = _data_root(args)
+    plan = create_upload_plan(data_root)
     execute_upload(plan, confirmation=args.plan)
     print_json({"repo_id": plan.repo_id, "identity_sha256": plan.identity_sha256})
     return 0
@@ -234,9 +239,9 @@ def handle_publish(args: SimpleNamespace) -> int:
 
 def handle_release_stats(args: SimpleNamespace) -> int:
     """Compute, validate, and publish only the dataset card and stats report."""
-    paths = _resolve_paths(args)
+    data_root = _data_root(args)
     report = release_metadata(
-        paths.data_root,
+        data_root,
         dataset_card_template(),
         confirm_repo=args.confirm_repo,
         apply=args.apply,
@@ -276,9 +281,9 @@ def handle_run_and_publish(args: SimpleNamespace) -> int:
 
 
 def handle_trackio_snapshot(args: SimpleNamespace) -> int:
-    paths = _resolve_paths(args)
+    data_root = _data_root(args)
     report = publish_snapshot(
-        paths.data_root,
+        data_root,
         project=args.project,
         space_id=args.space_id,
         run_name=args.run_name,

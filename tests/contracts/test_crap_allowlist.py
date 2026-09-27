@@ -6,6 +6,9 @@ import json
 from datetime import date
 from pathlib import Path
 
+import pytest
+
+from scripts import quality_metrics
 from scripts.quality_metrics import apply_allowlist
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -34,3 +37,22 @@ def test_the_repository_allowlist_only_names_scripts_and_expires() -> None:
     assert allowlist["functions"]
     assert all(name.startswith("scripts/") for name in allowlist["functions"])
     assert "issues/77" in allowlist["issue"]
+
+
+def test_a_stale_entry_named_expired_is_only_a_warning(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({"functions": []}))
+    allowlist = tmp_path / "allow.json"
+    allowlist.write_text(
+        json.dumps({"expires": "2999-12-31", "functions": ["scripts/cache.py::remove_expired"]})
+    )
+    argv = ["qm", "check", "--report", str(report), "--max-crap-score", "6"]
+    monkeypatch.setattr("sys.argv", [*argv, "--allowlist", str(allowlist)])
+
+    quality_metrics.main()
+
+    out = capsys.readouterr().out
+    assert "now within budget: scripts/cache.py::remove_expired" in out
+    assert "CRAP budget passed" in out

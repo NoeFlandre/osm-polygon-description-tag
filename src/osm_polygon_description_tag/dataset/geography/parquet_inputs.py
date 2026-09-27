@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterator, Mapping
+from itertools import compress
 from pathlib import Path
 from typing import Any, Final
 
@@ -214,7 +215,7 @@ def _iter_counted_centroids(
         for batch in batches:
             counted = batch.column(TEXT_CANONICAL_COLUMN).to_pylist()
             centroids = _iter_centroid_batch(batch, source_paths)
-            yield from (row for row, flag in zip(centroids, counted, strict=True) if flag)
+            yield from compress(centroids, counted)
     except UniqueRowsError as error:
         raise H3AggregationError(str(error)) from error
 

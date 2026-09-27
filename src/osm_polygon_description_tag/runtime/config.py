@@ -57,6 +57,12 @@ class Paths:
         return self
 
 
+def resolve_data_root(data_root: Path | None, env: Mapping[str, str] | None = None) -> Path:
+    """Resolve only the data root, for commands that never read raw sources."""
+    environment = os.environ if env is None else env
+    return _resolve_root(data_root, environment, DATA_ROOT_ENV, "--data-root")
+
+
 def _resolve_root(option: Path | None, env: Mapping[str, str], variable: str, flag: str) -> Path:
     if option is not None:
         return option

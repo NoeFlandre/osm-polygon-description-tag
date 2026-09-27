@@ -1274,6 +1274,12 @@ def test_canonical_row_order_sql_has_stable_keyword_casing() -> None:
     assert order != canonical_rows.canonical_row_order_sql(key_value_columns_are_maps=True)
 
 
+def test_the_text_flag_view_rejects_an_empty_selection() -> None:
+    with pytest.raises(ValueError) as empty:
+        canonical_rows.canonical_rows_with_text_flag_sql("rows", ())
+    assert str(empty.value) == "unique-row views require at least one selected column"
+
+
 def test_canonical_rows_sql_preserves_selection_validation_contract() -> None:
     with pytest.raises(ValueError) as empty:
         canonical_rows.canonical_rows_sql("rows", ())

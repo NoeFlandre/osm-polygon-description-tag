@@ -36,7 +36,11 @@ def paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         assert isinstance(args, SimpleNamespace), f"handler passed {args!r} instead of its args"
         return resolved
 
+    def _data_root(args: object) -> Path:
+        return _resolve(args).data_root
+
     monkeypatch.setattr(cli, "_resolve_paths", _resolve)
+    monkeypatch.setattr(cli, "_data_root", _data_root)
     return resolved
 
 
@@ -151,6 +155,15 @@ def test_cli_resolve_paths_uses_supplied_roots(tmp_path: Path) -> None:
 
     assert paths.source_root == args.source_root
     assert paths.data_root == args.data_root
+
+
+def test_cli_data_root_ignores_a_missing_source_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OSM_POLYGON_SOURCE_ROOT", raising=False)
+    args = SimpleNamespace(source_root=None, data_root=tmp_path)
+
+    assert cli._data_root(args) == tmp_path
 
 
 def test_cli_print_json_is_sorted_and_indented(capsys: pytest.CaptureFixture[str]) -> None:

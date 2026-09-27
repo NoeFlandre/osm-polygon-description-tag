@@ -42,6 +42,9 @@ class FunctionRisk:
         }
 
 
+EXPIRED_PREFIX = "CRAP allow-list expired on"
+
+
 def _normalise_path(path: str) -> str:
     return Path(path).as_posix().removeprefix("./")
 
@@ -177,7 +180,7 @@ def apply_allowlist(
     """
     expires = date.fromisoformat(allowlist["expires"])
     if today > expires:
-        return violations, [f"CRAP allow-list expired on {expires.isoformat()}"]
+        return violations, [f"{EXPIRED_PREFIX} {expires.isoformat()}"]
     allowed = set(allowlist["functions"])
     remaining = [item for item in violations if item[0] not in allowed]
     return remaining, _stale_entries(allowed, violations)
@@ -236,7 +239,7 @@ def main() -> None:
     violations, problems = _allowlisted(violations, args.allowlist)
     for problem in problems:
         print(problem)
-    if any("expired" in problem for problem in problems):
+    if any(problem.startswith(EXPIRED_PREFIX) for problem in problems):
         raise SystemExit(1)
     if violations:
         print(f"CRAP budget failed: scores must be < {args.max_crap_score:g}")

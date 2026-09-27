@@ -193,6 +193,8 @@ def canonical_rows_sql(
 
 
 TEXT_CANONICAL_COLUMN = "_text_canonical"
+# Raw Parquet stores localized descriptions as a list of entries, not a map.
+_RAW_TEXT_OK_SQL = successful_description_text_sql(localized_is_map=False)
 
 
 def canonical_rows_with_text_flag_sql(relation: str, columns: Sequence[str]) -> str:
@@ -210,7 +212,7 @@ def canonical_rows_with_text_flag_sql(relation: str, columns: Sequence[str]) -> 
     if unknown:
         raise ValueError(f"unsupported unique-row columns: {sorted(unknown)}")
     order = canonical_row_order_sql()
-    text_ok = successful_description_text_sql(localized_is_map=False)
+    text_ok = _RAW_TEXT_OK_SQL
     return f"""
         SELECT {", ".join(selected)},
             (_text_ok AND _text_rank = 1) AS {TEXT_CANONICAL_COLUMN}

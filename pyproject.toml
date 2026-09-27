@@ -130,6 +130,7 @@ also_copy = [
     ".dockerignore",
     ".gitignore",
     ".pre-commit-config.yaml",
+    "CHANGELOG.md",
     "CITATION.cff",
     "Dockerfile",
     "README.md",

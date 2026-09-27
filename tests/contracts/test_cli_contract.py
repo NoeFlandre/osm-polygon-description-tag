@@ -363,6 +363,18 @@ def test_a_missing_root_is_an_actionable_error(
     assert "Traceback" not in err
 
 
+def test_data_only_commands_do_not_need_a_source_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv(runtime_config.SOURCE_ROOT_ENV, raising=False)
+    data_root = tmp_path / "generated"
+    (data_root / "data").mkdir(parents=True)
+
+    assert run(["validate", "--data-root", str(data_root)]) == 0
+
+    assert json.loads(capsys.readouterr().out) == {"files": 0, "rows": 0}
+
+
 def test_publish_rejects_wrong_plan_identity(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -8,6 +8,7 @@ from osm_polygon_description_tag.runtime.config import (
     MissingPathError,
     Paths,
     UnsafePathError,
+    resolve_data_root,
 )
 
 
@@ -78,3 +79,26 @@ def test_disjoint_roots_validate(tmp_path: Path) -> None:
     data.mkdir()
     paths = Paths(source_root=source, data_root=data)
     assert paths.validate() is paths
+
+
+def test_resolve_data_root_prefers_the_option(tmp_path: Path) -> None:
+    assert resolve_data_root(tmp_path, {DATA_ROOT_ENV: "/elsewhere"}) == tmp_path
+
+
+def test_resolve_data_root_needs_no_source_root(tmp_path: Path) -> None:
+    assert resolve_data_root(None, {DATA_ROOT_ENV: str(tmp_path)}) == tmp_path
+
+
+def test_resolve_data_root_reads_os_environ_by_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv(DATA_ROOT_ENV, str(tmp_path))
+    assert resolve_data_root(None) == tmp_path
+
+
+def test_resolve_data_root_names_the_flag_when_missing() -> None:
+    with pytest.raises(MissingPathError) as error:
+        resolve_data_root(None, {})
+    assert str(error.value) == (
+        "no --data-root given and OSM_POLYGON_DATA_ROOT is not set; pass one of them"
+    )

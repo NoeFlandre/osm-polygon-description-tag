@@ -2,7 +2,8 @@
 """Verify an installed wheel against the package source tree.
 
 Run with the Python of a clean venv that has only the built wheel installed.
-It imports every module (catching missing modules or runtime dependencies)
+It checks every source ``.py`` file is installed, imports every module
+(catching missing modules or runtime dependencies),
 and checks that every non-Python file in the source package is installed
 with identical bytes (catching dropped include globs).
 """
@@ -54,6 +55,19 @@ def source_modules(source_root: Path, package: str = PACKAGE) -> list[str]:
     return sorted(names)
 
 
+def python_file_problems(source_root: Path, package: str = PACKAGE) -> Iterator[str]:
+    """Yield one message per source ``.py`` file absent from the install.
+
+    Importing alone misses a dropped ``__init__.py``: the directory then
+    loads as a namespace package.
+    """
+    installed = importlib.resources.files(package)
+    for path in sorted(source_root.rglob("*.py")):
+        relative = path.relative_to(source_root).as_posix()
+        if not installed.joinpath(*relative.split("/")).is_file():
+            yield f"missing from the installed package: {relative}"
+
+
 def import_problems(source_root: Path, package: str = PACKAGE) -> Iterator[str]:
     """Yield one message per source module that fails to import when installed."""
     for name in source_modules(source_root, package):
@@ -68,7 +82,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--source-root", type=Path, default=Path("src") / PACKAGE)
     args = parser.parse_args(argv)
     source_root = args.source_root.resolve()
-    problems = [*import_problems(source_root), *data_file_problems(source_root)]
+    problems = [
+        *python_file_problems(source_root),
+        *import_problems(source_root),
+        *data_file_problems(source_root),
+    ]
     for problem in problems:
         print(problem, file=sys.stderr)
     if problems:

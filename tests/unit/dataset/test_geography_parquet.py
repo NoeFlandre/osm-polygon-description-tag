@@ -878,3 +878,18 @@ def test_a_unique_row_failure_is_reported_with_its_own_message(
         match=exactly("missing unique-row column 'osm_id' in region.parquet"),
     ):
         list(parquet_inputs.iter_centroids(tmp_path))
+
+
+def test_collect_h3_counts_names_the_missing_data_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import osm_polygon_description_tag.dataset.storage as storage
+
+    monkeypatch.setattr(storage, "validate_finalized_artifacts", lambda data_root: None)
+
+    with pytest.raises(H3AggregationError) as error:
+        collect_h3_counts(tmp_path)
+    assert str(error.value) == (
+        f"Required data directory does not exist: {tmp_path / 'data'}. "
+        "Run a complete PBF processing pass first."
+    )

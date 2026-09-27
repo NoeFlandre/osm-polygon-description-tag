@@ -77,3 +77,17 @@ def test_a_module_that_fails_to_import_is_reported(monkeypatch: pytest.MonkeyPat
         "cannot import osm_polygon_description_tag.cli: "
         "ModuleNotFoundError: No module named 'typer'"
     ]
+
+
+def test_a_dropped_initializer_is_reported(tmp_path: Path) -> None:
+    source = tmp_path / "osm_polygon_description_tag"
+    (source / "runtime").mkdir(parents=True)
+    (source / "__init__.py").write_text("")
+    (source / "runtime" / "__init__.py").write_text("")
+    (source / "runtime" / "config.py").write_text("")
+    (source / "runtime" / "never_installed" / "__init__.py").parent.mkdir()
+    (source / "runtime" / "never_installed" / "__init__.py").write_text("")
+
+    problems = list(check.python_file_problems(source))
+
+    assert problems == ["missing from the installed package: runtime/never_installed/__init__.py"]
