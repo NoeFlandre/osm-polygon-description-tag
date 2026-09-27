@@ -3,21 +3,58 @@ from pathlib import Path
 import pytest
 
 from osm_polygon_description_tag.runtime.config import (
-    DEFAULT_DATA_ROOT,
-    DEFAULT_SOURCE_ROOT,
+    DATA_ROOT_ENV,
+    SOURCE_ROOT_ENV,
+    MissingPathError,
     Paths,
     UnsafePathError,
 )
 
 
-def test_paths_use_approved_defaults() -> None:
-    paths = Paths.defaults()
-    assert paths.source_root == DEFAULT_SOURCE_ROOT
-    assert paths.data_root == DEFAULT_DATA_ROOT
-    assert paths.source_root.is_absolute()
-    assert paths.data_root.is_absolute()
-    assert paths.source_root.parts[-2:] == ("osm-polygon-wikidata-only", "raw")
-    assert paths.data_root.parts[-2:] == ("osm-polygon-description-tag", "data-root")
+def test_cli_options_beat_the_environment(tmp_path: Path) -> None:
+    env = {SOURCE_ROOT_ENV: str(tmp_path / "env-raw"), DATA_ROOT_ENV: str(tmp_path / "env-out")}
+
+    paths = Paths.resolve(tmp_path / "raw", tmp_path / "out", env)
+
+    assert paths == Paths(tmp_path / "raw", tmp_path / "out")
+
+
+def test_the_environment_fills_missing_options(tmp_path: Path) -> None:
+    env = {SOURCE_ROOT_ENV: f"  {tmp_path / 'raw'}  ", DATA_ROOT_ENV: str(tmp_path / "out")}
+
+    assert Paths.resolve(None, None, env) == Paths(tmp_path / "raw", tmp_path / "out")
+    assert Paths.resolve(tmp_path / "cli", None, env).data_root == tmp_path / "out"
+
+
+@pytest.mark.parametrize(
+    ("env", "message"),
+    [
+        ({}, "no --source-root given and OSM_POLYGON_SOURCE_ROOT is not set"),
+        (
+            {SOURCE_ROOT_ENV: "/raw", DATA_ROOT_ENV: "  "},
+            "no --data-root given and OSM_POLYGON_DATA_ROOT",
+        ),
+    ],
+)
+def test_a_missing_root_names_both_the_flag_and_the_variable(
+    env: dict[str, str], message: str
+) -> None:
+    with pytest.raises(MissingPathError, match=message):
+        Paths.resolve(None, None, env)
+
+
+def test_resolve_reads_os_environ_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(SOURCE_ROOT_ENV, str(tmp_path / "raw"))
+    monkeypatch.setenv(DATA_ROOT_ENV, str(tmp_path / "out"))
+
+    assert Paths.resolve(None, None) == Paths(tmp_path / "raw", tmp_path / "out")
+
+
+def test_resolve_still_enforces_containment(tmp_path: Path) -> None:
+    with pytest.raises(UnsafePathError, match="inside immutable source"):
+        Paths.resolve(tmp_path / "raw", tmp_path / "raw" / "out", {})
 
 
 def test_output_cannot_be_inside_source(tmp_path: Path) -> None:

@@ -11,7 +11,7 @@ The completed Seagate dataset can be logged without reading raw PBF files:
 
 ```bash
 uv run osm-polygon-description-tag trackio-snapshot \
-  --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root"
+  --data-root "$OSM_POLYGON_DATA_ROOT"
 ```
 
 The command derives two cumulative curves (`cumulative_rows` and

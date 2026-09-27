@@ -328,15 +328,15 @@ def test_captured_help_disables_rich_terminal_forcing(
     assert "--confirm-repo" in capsys.readouterr().out
 
 
-def test_inspect_uses_default_paths_when_root_options_are_omitted(
+def test_inspect_reads_roots_from_the_environment_when_options_are_omitted(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     source_root = tmp_path / "default-raw"
     source_root.mkdir()
     (source_root / "default.osm.pbf").write_bytes(b"source")
     data_root = tmp_path / "default-generated"
-    monkeypatch.setattr(runtime_config, "DEFAULT_SOURCE_ROOT", source_root)
-    monkeypatch.setattr(runtime_config, "DEFAULT_DATA_ROOT", data_root)
+    monkeypatch.setenv(runtime_config.SOURCE_ROOT_ENV, str(source_root))
+    monkeypatch.setenv(runtime_config.DATA_ROOT_ENV, str(data_root))
 
     assert run(["inspect"]) == 0
 
@@ -347,6 +347,20 @@ def test_inspect_uses_default_paths_when_root_options_are_omitted(
     assert payload["data_root"] == str(data_root)
     assert payload["osmium_executable"] == "osmium"
     assert [source["name"] for source in payload["sources"]] == ["default.osm.pbf"]
+
+
+def test_a_missing_root_is_an_actionable_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv(runtime_config.SOURCE_ROOT_ENV, raising=False)
+    monkeypatch.delenv(runtime_config.DATA_ROOT_ENV, raising=False)
+
+    assert run(["inspect"]) == 1
+
+    err = capsys.readouterr().err
+    assert "--source-root" in err
+    assert "OSM_POLYGON_SOURCE_ROOT" in err
+    assert "Traceback" not in err
 
 
 def test_publish_rejects_wrong_plan_identity(
@@ -586,8 +600,8 @@ def test_handle_run_and_publish_invokes_orchestrator(
         preflight=None,
         upload_runner=None,
         clock=None,
-        source_root=None,
-        data_root=None,
+        source_root=tmp_path / "raw",
+        data_root=tmp_path / "generated",
         osmium="osmium",
     )
 

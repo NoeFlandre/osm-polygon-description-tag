@@ -51,10 +51,13 @@ uv run osm-polygon-description-tag run-and-publish \
 
 Options:
 
-- `--source-root PATH`: immutable PBF directory; defaults to the approved
-  Seagate raw root.
-- `--data-root PATH`: generated-data directory; defaults to the approved
-  Seagate data root.
+- `--source-root PATH`: immutable PBF directory. If omitted, read from
+  `OSM_POLYGON_SOURCE_ROOT`.
+- `--data-root PATH`: generated-data directory. If omitted, read from
+  `OSM_POLYGON_DATA_ROOT`.
+
+A root given neither way is an error (exit code 1) naming both the option and
+the variable; there is no machine-specific default.
 - `--osmium NAME`: executable name or path; defaults to `osmium`.
 - `--confirm-repo REPO`: required exact target repository confirmation.
 

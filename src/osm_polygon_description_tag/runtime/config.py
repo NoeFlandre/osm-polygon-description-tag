@@ -1,10 +1,16 @@
-"""Approved path defaults and immutable raw-source containment."""
+"""Source/data root resolution and immutable raw-source containment."""
 
+import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_SOURCE_ROOT = Path("/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw")
-DEFAULT_DATA_ROOT = Path("/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root")
+SOURCE_ROOT_ENV = "OSM_POLYGON_SOURCE_ROOT"
+DATA_ROOT_ENV = "OSM_POLYGON_DATA_ROOT"
+
+
+class MissingPathError(ValueError):
+    """Raised when a root is given neither as a CLI option nor in the environment."""
 
 
 class UnsafePathError(ValueError):
@@ -25,8 +31,21 @@ class Paths:
     data_root: Path
 
     @classmethod
-    def defaults(cls) -> "Paths":
-        return cls(DEFAULT_SOURCE_ROOT, DEFAULT_DATA_ROOT)
+    def resolve(
+        cls,
+        source_root: Path | None,
+        data_root: Path | None,
+        env: Mapping[str, str] | None = None,
+    ) -> "Paths":
+        """Resolve both roots: CLI option, then environment, else a clear error.
+
+        There is no machine-specific fallback. The result is validated.
+        """
+        environment = os.environ if env is None else env
+        return cls(
+            _resolve_root(source_root, environment, SOURCE_ROOT_ENV, "--source-root"),
+            _resolve_root(data_root, environment, DATA_ROOT_ENV, "--data-root"),
+        ).validate()
 
     def validate(self) -> "Paths":
         if _is_within(self.data_root, self.source_root):
@@ -36,3 +55,12 @@ class Paths:
         if self.source_root.resolve(strict=False) == self.data_root.resolve(strict=False):
             raise UnsafePathError("source root and data root must differ")
         return self
+
+
+def _resolve_root(option: Path | None, env: Mapping[str, str], variable: str, flag: str) -> Path:
+    if option is not None:
+        return option
+    value = env.get(variable, "").strip()
+    if value:
+        return Path(value)
+    raise MissingPathError(f"no {flag} given and {variable} is not set; pass one of them")

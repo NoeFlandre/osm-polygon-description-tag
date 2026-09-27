@@ -70,11 +70,7 @@ Osmium = Annotated[str, typer.Option("--osmium")]
 
 
 def _resolve_paths(args: SimpleNamespace) -> Paths:
-    defaults = Paths.defaults()
-    return Paths(
-        source_root=args.source_root or defaults.source_root,
-        data_root=args.data_root or defaults.data_root,
-    ).validate()
+    return Paths.resolve(args.source_root, args.data_root)
 
 
 class _Interrupted(Exception):
