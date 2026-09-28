@@ -43,7 +43,12 @@ from osm_polygon_description_tag.publication import (
 )
 from osm_polygon_description_tag.publication.verification import HubVerificationError
 from osm_polygon_description_tag.runtime.click_compat import ClickException, Exit, UsageError
-from osm_polygon_description_tag.runtime.config import Paths, resolve_data_root
+from osm_polygon_description_tag.runtime.config import (
+    MissingPathError,
+    Paths,
+    UnsafePathError,
+    resolve_data_root,
+)
 from osm_polygon_description_tag.runtime.logging import RunLogger
 from osm_polygon_description_tag.runtime.presentation import TerminalPresenter, print_json
 from osm_polygon_description_tag.runtime.resources import (
@@ -108,7 +113,10 @@ def _global_options(
         ),
     ] = False,
     verbose: Annotated[
-        bool, typer.Option("-v", "--verbose", help="Also print DEBUG events, such as the resolved configuration.")
+        bool,
+        typer.Option(
+            "-v", "--verbose", help="Also print DEBUG events, such as the resolved configuration."
+        ),
     ] = False,
     quiet: Annotated[
         bool, typer.Option("-q", "--quiet", help="Print only WARNING and ERROR events.")
@@ -619,6 +627,22 @@ _ERROR_TYPES = (
     LanguageDetectionError,
 )
 
+# Documented in docs/cli.md. Usage errors exit 2 and Ctrl-C exits 130.
+EXIT_GENERIC = 1
+EXIT_ENVIRONMENT = 3
+EXIT_VALIDATION = 4
+EXIT_PUBLICATION = 5
+_EXIT_CODES: tuple[tuple[tuple[type[Exception], ...], int], ...] = (
+    ((PreflightError, MissingPathError, UnsafePathError), EXIT_ENVIRONMENT),
+    ((ManifestError, StorageError, ReportingError), EXIT_VALIDATION),
+    ((PublicationError, HubVerificationError), EXIT_PUBLICATION),
+)
+
+
+def exit_code_for(error: Exception) -> int:
+    """Map a domain error to its documented exit code."""
+    return next((code for types, code in _EXIT_CODES if isinstance(error, types)), EXIT_GENERIC)
+
 
 def _show_click_error(error: ClickException) -> None:
     if isinstance(error, UsageError) and error.ctx is not None:
@@ -647,7 +671,7 @@ def run(argv: Sequence[str] | None = None) -> int:
         presenter = TerminalPresenter(stderr=sys.stderr)
         # pragma: no mutate end
         presenter.error(str(error))
-        return 1
+        return exit_code_for(error)
 
 
 def _configure_terminal() -> None:

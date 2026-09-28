@@ -322,7 +322,7 @@ def test_publish_subprocess_failures_use_plain_cli_error_path(
     )
     captured = capsys.readouterr()
 
-    assert exit_code == 1
+    assert exit_code == 5  # publication failure
     assert captured.out == ""
     assert captured.err == f"error: {message}\n"
     assert "Traceback" not in captured.err

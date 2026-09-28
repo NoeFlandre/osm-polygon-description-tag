@@ -355,7 +355,7 @@ def test_a_missing_root_is_an_actionable_error(
     monkeypatch.delenv(runtime_config.SOURCE_ROOT_ENV, raising=False)
     monkeypatch.delenv(runtime_config.DATA_ROOT_ENV, raising=False)
 
-    assert run(["inspect"]) == 1
+    assert run(["inspect"]) == 3
 
     err = capsys.readouterr().err
     assert "--source-root" in err
@@ -662,3 +662,53 @@ def test_verbosity_is_reset_after_each_invocation(monkeypatch: pytest.MonkeyPatc
     assert run(["-q", "validate"]) == 0
     assert seen == ["WARNING"]
     assert cli_module._verbosity.stderr_level == "INFO"
+
+
+def _exit_code_cases() -> list[tuple[type[Exception], int]]:
+    import osm_polygon_description_tag.cli as cli_module
+
+    return [
+        (OSError, 1),
+        (ValueError, 1),
+        (cli_module.OsmiumExportError, 1),
+        (cli_module.OrchestratorError, 1),
+        (cli_module.MigrationError, 1),
+        (cli_module.TextMigrationError, 1),
+        (cli_module.LanguageDetectionError, 1),
+        (cli_module.PreflightError, 3),
+        (runtime_config.MissingPathError, 3),
+        (runtime_config.UnsafePathError, 3),
+        (cli_module.ManifestError, 4),
+        (cli_module.StorageError, 4),
+        (cli_module.ReportingError, 4),
+        (cli_module.PublicationError, 5),
+        (cli_module.HubVerificationError, 5),
+    ]
+
+
+@pytest.mark.parametrize(("error_type", "code"), _exit_code_cases())
+def test_each_error_class_exits_with_its_documented_code(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    error_type: type[Exception],
+    code: int,
+) -> None:
+    import osm_polygon_description_tag.cli as cli_module
+
+    def fail(_args: object) -> int:
+        raise error_type("boom")
+
+    monkeypatch.setattr(cli_module, "handle_validate", fail)
+
+    assert run(["validate"]) == code
+    err = capsys.readouterr().err
+    assert "boom" in err
+    assert "Traceback" not in err
+
+
+def test_the_exit_code_table_is_documented() -> None:
+    import osm_polygon_description_tag.cli as cli_module
+
+    cli_doc = (Path(__file__).resolve().parents[2] / "docs" / "cli.md").read_text(encoding="utf-8")
+    for code in {code for _types, code in cli_module._EXIT_CODES} | {1, 2, 130}:
+        assert f"| `{code}` |" in cli_doc

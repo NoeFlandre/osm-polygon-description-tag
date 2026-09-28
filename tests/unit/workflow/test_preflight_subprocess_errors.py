@@ -65,7 +65,7 @@ def test_cli_reports_preflight_timeout_without_traceback(
 
     monkeypatch.setattr(cli, "_invoke_app", app)
 
-    assert cli.run([]) == 1
+    assert cli.run([]) == 3  # environment failure
     stderr = capsys.readouterr().err
     assert "osmium --version failed" in stderr
     assert "Traceback" not in stderr

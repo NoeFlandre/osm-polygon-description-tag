@@ -1778,7 +1778,7 @@ def test_export_refuses_an_incomplete_run_on_stderr(
     )
     captured = capsys.readouterr()
 
-    assert code == 1
+    assert code == 5  # publication failure
     assert captured.out == ""
     assert "run is not publishable" in captured.err
 
@@ -1867,7 +1867,7 @@ def test_publish_requires_a_matching_repository_confirmation(
     )
     captured = capsys.readouterr()
 
-    assert code == 1
+    assert code == 5  # publication failure
     assert "does not match" in captured.err
     assert hub.uploads == []
 
@@ -1899,7 +1899,7 @@ def test_publish_requires_a_baseline_revision_before_applying(
     )
     captured = capsys.readouterr()
 
-    assert code == 1
+    assert code == 5  # publication failure
     assert "requires the baseline revision" in captured.err
     assert hub.uploads == []
 

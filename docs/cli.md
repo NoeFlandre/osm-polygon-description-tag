@@ -24,6 +24,20 @@ These come before the command, for example
 lines; the JSONL log under `logs/` always records every event, and stdout is
 unchanged.
 
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success. |
+| `1` | Any other failure (I/O, osmium export, orchestration, migration). |
+| `2` | Usage error: unknown command or option, bad value. |
+| `3` | Environment or configuration: preflight failed, a root is missing or unsafe. |
+| `4` | Validation failed: manifest, storage or statistics checks. |
+| `5` | Publication failed: upload plan mismatch, upload or Hub verification. |
+| `130` | Interrupted with Ctrl-C. |
+
+Errors print one line on stderr, never a traceback.
+
 ## Read-only and local commands
 
 | Command | Purpose | Main side effect |
