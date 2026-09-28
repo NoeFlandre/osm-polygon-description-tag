@@ -7,7 +7,22 @@ uv run osm-polygon-description-tag COMMAND
 ```
 
 Use `--help` on the executable or any command for the exact current option
-surface.
+surface. Every option has a description there.
+
+## Global options
+
+These come before the command, for example
+`osm-polygon-description-tag -q run-and-publish ...`:
+
+| Option | Effect |
+| --- | --- |
+| `--version` | Print the package version and exit 0. |
+| `-v`, `--verbose` | Also print DEBUG event lines on stderr, such as `resolved_config` (the roots, osmium and target repo in use). |
+| `-q`, `--quiet` | Print only WARNING and ERROR event lines on stderr. |
+
+`-v` and `-q` cannot be combined. They change only the human-readable stderr
+lines; the JSONL log under `logs/` always records every event, and stdout is
+unchanged.
 
 ## Read-only and local commands
 
@@ -57,10 +72,11 @@ Options:
 - `--data-root PATH`: generated-data directory. If omitted, read from
   `OSM_POLYGON_DATA_ROOT`.
 
-A root given neither way is an error (exit code 1) naming both the option and
-the variable; there is no machine-specific default.
 - `--osmium NAME`: executable name or path; defaults to `osmium`.
 - `--confirm-repo REPO`: required exact target repository confirmation.
+
+A root given neither way is an error (exit code 1) naming both the option and
+the variable; there is no machine-specific default.
 
 ### `release-stats`
 

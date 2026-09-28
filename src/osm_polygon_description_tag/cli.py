@@ -10,6 +10,7 @@ import os
 import sys
 import uuid
 from collections.abc import Callable, Sequence
+from importlib.metadata import version as package_version
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Annotated, Any
@@ -64,9 +65,59 @@ app = typer.Typer(
 )
 app.add_typer(language_app, name="language")
 
-SourceRoot = Annotated[Path | None, typer.Option("--source-root")]
-DataRoot = Annotated[Path | None, typer.Option("--data-root")]
-Osmium = Annotated[str, typer.Option("--osmium")]
+SourceRoot = Annotated[
+    Path | None,
+    typer.Option(
+        "--source-root",
+        help="Immutable PBF directory [default: $OSM_POLYGON_SOURCE_ROOT]. "
+        "Only commands that read PBFs use it.",
+    ),
+]
+DataRoot = Annotated[
+    Path | None,
+    typer.Option(
+        "--data-root",
+        help="Generated-data directory [default: $OSM_POLYGON_DATA_ROOT].",
+    ),
+]
+Osmium = Annotated[
+    str,
+    typer.Option("--osmium", help="osmium executable. Only commands that read PBFs use it."),
+]
+
+# stderr threshold for human-readable event lines, set by -v / -q. The JSONL
+# log always records every event.
+_verbosity = SimpleNamespace(stderr_level="INFO")
+
+
+def _show_version(value: bool) -> None:
+    if value:
+        typer.echo(package_version("osm-polygon-description-tag"))
+        raise Exit
+
+
+@app.callback()
+def _global_options(
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            callback=_show_version,
+            is_eager=True,
+            help="Print the package version and exit.",
+        ),
+    ] = False,
+    verbose: Annotated[
+        bool, typer.Option("-v", "--verbose", help="Also print DEBUG events, such as the resolved configuration.")
+    ] = False,
+    quiet: Annotated[
+        bool, typer.Option("-q", "--quiet", help="Print only WARNING and ERROR events.")
+    ] = False,
+) -> None:
+    """Build, validate and publish the OSM polygon description-tag dataset."""
+    if verbose and quiet:
+        raise UsageError("--verbose and --quiet cannot be combined")
+    _verbosity.stderr_level = "DEBUG" if verbose else "WARNING" if quiet else "INFO"
 
 
 def _resolve_paths(args: SimpleNamespace) -> Paths:
@@ -261,10 +312,20 @@ def handle_run_and_publish(args: SimpleNamespace) -> int:
             buffer_preflight=True,
             stderr=sys.stderr,
             observer=presenter.observe,
+            stderr_level=_verbosity.stderr_level,
         )
         if presenter is not None
         else None
     )
+    if logger is not None:
+        logger.event(
+            "resolved_config",
+            level="DEBUG",
+            source_root=str(paths.source_root),
+            data_root=str(paths.data_root),
+            osmium_executable=args.osmium,
+            confirm_repo=args.confirm_repo,
+        )
     try:
         report = run_and_publish(
             paths=paths,
@@ -322,7 +383,12 @@ def build_one_command(
     )
 
 
-@app.command("build-all", help="Build all discovered sources")
+@app.command(
+    "build-all",
+    help="Build all discovered sources",
+    epilog="Example: osm-polygon-description-tag build-all "
+    "--source-root /path/to/pbfs --data-root /path/to/data-root",
+)
 def build_all_command(
     source_root: SourceRoot = None,
     data_root: DataRoot = None,
@@ -399,11 +465,15 @@ def migrate_text_command(
 
 @app.command("trackio-snapshot", help="Log a completed dataset snapshot to Trackio")
 def trackio_snapshot_command(
-    project: Annotated[str, typer.Option("--project")] = "osm-polygon-description-tag",
-    space_id: Annotated[str, typer.Option("--space-id")] = (
-        "NoeFlandre/osm-polygon-description-tag-trackio"
-    ),
-    run_name: Annotated[str | None, typer.Option("--run-name")] = None,
+    project: Annotated[
+        str, typer.Option("--project", help="Trackio project name.")
+    ] = "osm-polygon-description-tag",
+    space_id: Annotated[
+        str, typer.Option("--space-id", help="Hugging Face Space hosting the dashboard.")
+    ] = "NoeFlandre/osm-polygon-description-tag-trackio",
+    run_name: Annotated[
+        str | None, typer.Option("--run-name", help="Trackio run name [default: generated].")
+    ] = None,
     source_root: SourceRoot = None,
     data_root: DataRoot = None,
     osmium: Osmium = "osmium",
@@ -421,7 +491,11 @@ def trackio_snapshot_command(
     )
 
 
-@app.command("publish-plan", help="Show the allowlisted upload plan identity")
+@app.command(
+    "publish-plan",
+    help="Show the allowlisted upload plan identity",
+    epilog="Example: osm-polygon-description-tag publish-plan --data-root /path/to/data-root",
+)
 def publish_plan_command(
     source_root: SourceRoot = None,
     data_root: DataRoot = None,
@@ -433,7 +507,12 @@ def publish_plan_command(
     )
 
 
-@app.command("publish", help="Upload after exact plan confirmation")
+@app.command(
+    "publish",
+    help="Upload after exact plan confirmation",
+    epilog="Example: osm-polygon-description-tag publish --data-root /path/to/data-root "
+    "--plan <identity_sha256 from publish-plan>",
+)
 def publish_command(
     plan: Annotated[
         str,
@@ -492,6 +571,9 @@ def release_stats_command(
 @app.command(
     "run-and-publish",
     help="Stoppable, resumable build+publish for every discovered PBF",
+    epilog="Example: osm-polygon-description-tag -q run-and-publish "
+    "--confirm-repo NoeFlandre/osm-polygon-description-tag "
+    "--source-root /path/to/pbfs --data-root /path/to/data-root",
 )
 def run_and_publish_command(
     confirm_repo: Annotated[
@@ -590,11 +672,15 @@ def _normalize_columns() -> None:
 
 
 def _invoke_app(argv: Sequence[str] | None) -> int:
-    app(
-        args=list(argv) if argv is not None else None,
-        prog_name="osm-polygon-description-tag",
-        standalone_mode=False,
-    )
+    try:
+        app(
+            args=list(argv) if argv is not None else None,
+            prog_name="osm-polygon-description-tag",
+            standalone_mode=False,
+        )
+    finally:
+        # -v / -q apply to one invocation only.
+        _verbosity.stderr_level = "INFO"
     return 0
 
 

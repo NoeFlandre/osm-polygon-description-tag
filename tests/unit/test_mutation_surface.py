@@ -217,6 +217,7 @@ def test_cli_run_and_publish_wires_tracker_logger_and_presenter(
     logger_calls: list[dict[str, object]] = []
     logger_instances: list[object] = []
     logger_closed: list[bool] = []
+    logger_events: list[dict[str, object]] = []
     workflow_calls: list[dict[str, object]] = []
 
     class FakeTracker:
@@ -228,6 +229,9 @@ def test_cli_run_and_publish_wires_tracker_logger_and_presenter(
         def __init__(self, **kwargs: object) -> None:
             logger_calls.append(kwargs)
             logger_instances.append(self)
+
+        def event(self, name: str, **fields: object) -> None:
+            logger_events.append({"event": name, **fields})
 
         def close(self) -> None:
             logger_closed.append(True)
@@ -253,7 +257,18 @@ def test_cli_run_and_publish_wires_tracker_logger_and_presenter(
         "buffer_preflight": True,
         "stderr": cli.sys.stderr,
         "observer": args.presenter.observe,
+        "stderr_level": "INFO",
     }
+    assert logger_events == [
+        {
+            "event": "resolved_config",
+            "level": "DEBUG",
+            "source_root": str(args.source_root),
+            "data_root": str(args.data_root),
+            "osmium_executable": "fake-osmium",
+            "confirm_repo": "owner/dataset",
+        }
+    ]
     assert workflow_calls == [
         {
             "paths": cli._resolve_paths(args),

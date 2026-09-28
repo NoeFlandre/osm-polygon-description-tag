@@ -82,6 +82,9 @@ _ALLOWED_FIELDS: frozenset[str] = frozenset(
         "osmium_executable",
         "osmium_version",
         "hub_repo_sha",
+        "source_root",
+        "data_root",
+        "confirm_repo",
     }
 )
 
@@ -170,6 +173,11 @@ def _fsync_directory(directory: Path) -> None:
         fsync_dir(directory)
 
 
+# Only the human stderr line is filtered by level; the JSONL keeps everything.
+_INFO_RANK = 20
+_LEVEL_RANKS = {"DEBUG": 10, "INFO": _INFO_RANK, "WARNING": 30, "ERROR": 40}
+
+
 class RunLogger:
     """Typed event sink with bounded atomic rotation.
 
@@ -190,6 +198,7 @@ class RunLogger:
         buffer_preflight: bool = False,
         stderr: Any | None = None,
         observer: Callable[[Mapping[str, object]], None] | None = None,
+        stderr_level: str = "INFO",
     ) -> None:
         self._data_root = data_root
         self._run_id = run_id
@@ -199,6 +208,7 @@ class RunLogger:
         self._buffer_preflight = buffer_preflight
         self._stderr = stderr if stderr is not None else sys.stderr
         self._observer = observer
+        self._stderr_rank = _LEVEL_RANKS[stderr_level]
         self._max_bytes = _ROTATE_MAX_BYTES
         self._backups = 5
         self._path: Path | None = None
@@ -261,18 +271,21 @@ class RunLogger:
         self._emit(scrubbed, raw)
 
     def _emit(self, record: dict[str, object], raw: str) -> None:
-        line = self._format_human(record)
-        try:
-            self._stderr.write(line + "\n")
-            self._stderr.flush()
-        except Exception:  # noqa: S110 - stderr is best-effort
-            pass
+        if _LEVEL_RANKS.get(str(record["level"]), _INFO_RANK) >= self._stderr_rank:
+            self._write_stderr(self._format_human(record))
         buffered = _BufferedEvent(record, raw)
         with self._lock:
             if self._buffer_preflight or self._handle is None:
                 self._buffered.append(buffered)
                 return
         self._append_persistent(raw)
+
+    def _write_stderr(self, line: str) -> None:
+        try:
+            self._stderr.write(line + "\n")
+            self._stderr.flush()
+        except Exception:  # noqa: S110 - stderr is best-effort
+            pass
 
     def _format_human(self, record: dict[str, object]) -> str:
         ts = record.get("ts", "")

@@ -464,3 +464,48 @@ def test_maybe_rotate_returns_when_handle_is_closed_even_if_path_remains(
     logger.close()
 
     logger.maybe_rotate()
+
+
+@pytest.mark.parametrize(
+    ("stderr_level", "shown"),
+    [
+        ("DEBUG", ["DEBUG", "INFO", "WARNING", "ERROR", "NOTICE"]),
+        ("INFO", ["INFO", "WARNING", "ERROR", "NOTICE"]),
+        ("WARNING", ["WARNING", "ERROR"]),
+        ("ERROR", ["ERROR"]),
+    ],
+)
+def test_stderr_level_filters_only_the_human_lines(
+    tmp_path: Path, stderr_level: str, shown: list[str]
+) -> None:
+    stderr = StringIO()
+    logger = logging_module.RunLogger(
+        data_root=tmp_path,
+        run_id="run",
+        clock=lambda: "ts",
+        stderr=stderr,
+        stderr_level=stderr_level,
+    )
+    # An unknown level ranks as INFO.
+    for level in ("DEBUG", "INFO", "WARNING", "ERROR", "NOTICE"):
+        logger.event("step", level=level)
+    logger.close()
+
+    assert [line.split()[1] for line in stderr.getvalue().splitlines()] == shown
+    log = (tmp_path / "logs" / "run-and-publish.jsonl").read_text(encoding="utf-8")
+    assert len(log.splitlines()) == 5
+
+
+def test_the_default_stderr_level_is_info(tmp_path: Path) -> None:
+    stderr = StringIO()
+    logger = logging_module.RunLogger(data_root=tmp_path, run_id="run", stderr=stderr)
+    logger.event("hidden", level="DEBUG")
+    logger.event("shown")
+    logger.close()
+
+    assert [line.split()[-1] for line in stderr.getvalue().splitlines()] == ["shown"]
+
+
+def test_an_unknown_stderr_level_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(KeyError):
+        logging_module.RunLogger(data_root=tmp_path, run_id="run", stderr_level="LOUD")

@@ -7,6 +7,10 @@ defined once, in `pyproject.toml`; `CITATION.cff` must match it.
 
 ## [Unreleased]
 
+### Added
+
+- `--version`, and `-v`/`-q` to show DEBUG events or only warnings and errors on stderr; every CLI option has help text, and the main commands show an example (#55).
+
 ### Fixed
 
 - Private `typer._click` import isolated; the declared `typer` floor now works (#71).

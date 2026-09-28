@@ -623,3 +623,42 @@ def test_handle_run_and_publish_invokes_orchestrator(
     assert exit_code == 0
     assert payload["final_remote_revision"] == "rev-1"
     assert captured["osmium_executable"] == "osmium"
+
+
+def test_version_prints_the_package_version(capsys: pytest.CaptureFixture[str]) -> None:
+    from importlib.metadata import version
+
+    assert run(["--version"]) == 0
+    assert capsys.readouterr().out == f"{version('osm-polygon-description-tag')}\n"
+
+
+def test_every_option_of_every_command_has_help_text() -> None:
+    import typer.main
+
+    from osm_polygon_description_tag.cli import app
+
+    missing: list[str] = []
+
+    def walk(command: object, path: str) -> None:
+        for param in getattr(command, "params", []):
+            if param.param_type_name == "option" and not getattr(param, "help", None):
+                missing.append(f"{path or '<root>'} {param.opts[0]}")
+        for name, sub in getattr(command, "commands", {}).items():
+            walk(sub, f"{path} {name}".strip())
+
+    walk(typer.main.get_command(app), "")
+
+    assert missing == []
+
+
+def test_verbosity_is_reset_after_each_invocation(monkeypatch: pytest.MonkeyPatch) -> None:
+    import osm_polygon_description_tag.cli as cli_module
+
+    seen: list[str] = []
+    monkeypatch.setattr(
+        cli_module, "handle_validate", lambda _args: seen.append(cli_module._verbosity.stderr_level)
+    )
+
+    assert run(["-q", "validate"]) == 0
+    assert seen == ["WARNING"]
+    assert cli_module._verbosity.stderr_level == "INFO"
