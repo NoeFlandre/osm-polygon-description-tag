@@ -9,6 +9,8 @@ defined once, in `pyproject.toml`; `CITATION.cff` must match it.
 
 ### Added
 
+- `language grid run`: the multi-shard Grid'5000 driver is now part of the installed CLI (was `scripts/run_language_grid.py`) (#56).
+- Distinct exit codes: 3 environment, 4 validation, 5 publication (#56).
 - `--version`, and `-v`/`-q` to show DEBUG events or only warnings and errors on stderr; every CLI option has help text, and the main commands show an example (#55).
 
 ### Fixed

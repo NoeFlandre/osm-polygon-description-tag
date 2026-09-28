@@ -90,6 +90,8 @@ Osmium = Annotated[
     typer.Option("--osmium", help="osmium executable. Only commands that read PBFs use it."),
 ]
 
+_DISTRIBUTION = "osm-polygon-description-tag"
+
 # stderr threshold for human-readable event lines, set by -v / -q. The JSONL
 # log always records every event.
 _verbosity = SimpleNamespace(stderr_level="INFO")
@@ -97,7 +99,7 @@ _verbosity = SimpleNamespace(stderr_level="INFO")
 
 def _show_version(value: bool) -> None:
     if value:
-        typer.echo(package_version("osm-polygon-description-tag"))
+        typer.echo(package_version(_DISTRIBUTION))
         raise Exit
 
 
@@ -697,7 +699,8 @@ def _normalize_columns() -> None:
 
 def _invoke_app(argv: Sequence[str] | None) -> int:
     try:
-        app(
+        # Without standalone mode, Click returns an Exit's code instead of raising.
+        code = app(
             args=list(argv) if argv is not None else None,
             prog_name="osm-polygon-description-tag",
             standalone_mode=False,
@@ -705,7 +708,7 @@ def _invoke_app(argv: Sequence[str] | None) -> int:
     finally:
         # -v / -q apply to one invocation only.
         _verbosity.stderr_level = "INFO"
-    return 0
+    return code if isinstance(code, int) else 0
 
 
 def main() -> None:

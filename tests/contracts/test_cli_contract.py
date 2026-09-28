@@ -37,7 +37,7 @@ COMMANDS = (
     "language",
 )
 LANGUAGE_COMMANDS = ("prepare", "run", "validate", "export", "publish", "grid")
-GRID_COMMANDS = ("prepare", "stage", "submit", "status", "collect")
+GRID_COMMANDS = ("prepare", "stage", "submit", "status", "collect", "run")
 COMMON_OPTIONS = ("--source-root", "--data-root", "--osmium")
 HELP_OPTION = {"--help"}
 COMMAND_OPTIONS = {
@@ -154,6 +154,30 @@ GRID_COMMAND_OPTIONS = {
         "--remote-bundle-dir",
         "--retrieved-run-dir",
         "--apply",
+    },
+    "run": {
+        *HELP_OPTION,
+        "--run-dir",
+        "--source-root",
+        "--retrieval-dir",
+        "--remote-bundle-root",
+        "--remote-glotlid-model-path",
+        "--remote-sat-model-path",
+        "--remote-operator-dir",
+        "--remote-cli",
+        "--project-root",
+        "--ssh-host",
+        "--site",
+        "--walltime-seconds",
+        "--processing-seconds",
+        "--batch-size",
+        "--poll-seconds",
+        "--job-timeout-seconds",
+        "--max-shards",
+        "--queue",
+        "--shard-stride",
+        "--shard-index",
+        "--allow-daytime",
     },
 }
 

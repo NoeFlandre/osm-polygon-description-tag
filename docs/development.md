@@ -165,7 +165,8 @@ uv run pre-commit run --all-files
 
 ## The Grid'5000 driver
 
-Two properties of `scripts/run_language_grid.py` are easy to undo by accident.
+Two properties of the driver (`workflow/grid_driver.py`, run as
+`language grid run`) are easy to undo by accident.
 
 **Never route the driver's CLI calls through `uv run`.** `uv run` holds a lock
 on the shared uv cache for the whole command, and the driver invokes the CLI

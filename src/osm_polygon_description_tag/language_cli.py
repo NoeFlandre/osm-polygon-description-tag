@@ -36,6 +36,7 @@ from osm_polygon_description_tag.language_workflow import (
     handle_validate,
 )
 from osm_polygon_description_tag.publication_workflow import handle_export, handle_publish
+from osm_polygon_description_tag.workflow import grid_driver as _grid_driver
 from osm_polygon_description_tag.workflow.grid_policy import (
     MAX_PROCESSING_SECONDS,
     MAX_WALLTIME_SECONDS,
@@ -333,6 +334,96 @@ def grid_collect_command(
         retrieved_run_dir=retrieved_run_dir,
         apply=apply,
     )
+
+
+@grid_app.command(
+    "run",
+    help="Drive stage, submit, status and collect one shard at a time over SSH, resumably",
+    epilog="Example: osm-polygon-description-tag language grid run --run-dir <run> "
+    "--source-root <src> --retrieval-dir <dir> --remote-bundle-root <dir> "
+    "--remote-glotlid-model-path <bin> --remote-sat-model-path <dir> "
+    "--remote-operator-dir <dir> --remote-cli <path> --max-shards 1",
+)
+def grid_run_command(
+    run_dir: RunDir,
+    source_root: SourceRoot,
+    retrieval_dir: Annotated[
+        Path, typer.Option("--retrieval-dir", help="Local directory receiving retrieved runs")
+    ],
+    remote_bundle_root: Annotated[
+        str, typer.Option("--remote-bundle-root", help="Remote root for per-shard bundles")
+    ],
+    remote_glotlid_model_path: Annotated[
+        str, typer.Option("--remote-glotlid-model-path", help="Pinned GlotLID v3 model on the site")
+    ],
+    remote_sat_model_path: Annotated[
+        str, typer.Option("--remote-sat-model-path", help="Pinned SaT model on the site")
+    ],
+    remote_operator_dir: Annotated[
+        str, typer.Option("--remote-operator-dir", help="Frontend directory the CLI runs from")
+    ],
+    remote_cli: Annotated[
+        str, typer.Option("--remote-cli", help="Path of this CLI on the frontend")
+    ],
+    project_root: ProjectRoot = Path(),
+    ssh_host: Annotated[
+        str, typer.Option("--ssh-host", help="SSH host of the site frontend")
+    ] = _grid_driver.DEFAULT_SITE,
+    site: Site = _grid_driver.DEFAULT_SITE,
+    walltime_seconds: Walltime = MAX_WALLTIME_SECONDS,
+    processing_seconds: ProcessingSeconds = MAX_PROCESSING_SECONDS,
+    batch_size: BatchSize = DEFAULT_BATCH_SIZE,
+    poll_seconds: Annotated[
+        int, typer.Option("--poll-seconds", help="Seconds between status checks")
+    ] = _grid_driver.DEFAULT_POLL_SECONDS,
+    job_timeout_seconds: Annotated[
+        int, typer.Option("--job-timeout-seconds", help="Give up waiting on one job after this")
+    ] = _grid_driver.DEFAULT_JOB_TIMEOUT_SECONDS,
+    max_shards: Annotated[
+        int, typer.Option("--max-shards", help="Stop after this many shards; 0 means no limit")
+    ] = 0,
+    queue: Annotated[
+        str | None,
+        typer.Option(
+            "--queue",
+            help="Scheduler queue to request; some sites reject the queue they pick themselves",
+        ),
+    ] = None,
+    shard_stride: Annotated[
+        int, typer.Option("--shard-stride", help="Split the snapshot across this many drivers")
+    ] = 1,
+    shard_index: Annotated[
+        int, typer.Option("--shard-index", help="Which share of --shard-stride this driver owns")
+    ] = 0,
+    allow_daytime: AllowDaytime = False,
+) -> None:
+    code = _grid_driver.run_driver(
+        _grid_driver.DriverOptions(
+            run_dir=run_dir,
+            source_root=source_root,
+            retrieval_dir=retrieval_dir,
+            remote_bundle_root=remote_bundle_root,
+            remote_glotlid_model_path=remote_glotlid_model_path,
+            remote_sat_model_path=remote_sat_model_path,
+            remote_operator_dir=remote_operator_dir,
+            remote_cli=remote_cli,
+            project_root=project_root,
+            ssh_host=ssh_host,
+            site=site,
+            walltime_seconds=walltime_seconds,
+            processing_seconds=processing_seconds,
+            batch_size=batch_size,
+            poll_seconds=poll_seconds,
+            job_timeout_seconds=job_timeout_seconds,
+            max_shards=max_shards,
+            queue=queue,
+            shard_stride=shard_stride,
+            shard_index=shard_index,
+            allow_daytime=allow_daytime,
+        )
+    )
+    if code:
+        raise typer.Exit(code)
 
 
 ExportDir = Annotated[
