@@ -204,10 +204,8 @@ check: lint typecheck test
     uv run pre-commit run --all-files
     uv build
 
-# Run and publish locally; override the paths with
-# `just run-and-publish source_root=... data_root=...`.
-run-and-publish source_root="/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw" data_root="/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root":
-    uv run osm-polygon-description-tag run-and-publish \
-      --source-root "{{source_root}}" \
-      --data-root "{{data_root}}" \
-      --confirm-repo {{repo_id}}
+# Run and publish locally. Roots come from OSM_POLYGON_SOURCE_ROOT and
+# OSM_POLYGON_DATA_ROOT, or pass them through:
+# `just run-and-publish --source-root /path/to/pbfs --data-root /path/to/data-root`.
+run-and-publish *args:
+    uv run osm-polygon-description-tag run-and-publish --confirm-repo {{repo_id}} {{args}}

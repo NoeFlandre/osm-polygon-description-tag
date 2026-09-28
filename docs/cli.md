@@ -44,8 +44,8 @@ The complete stoppable and resumable operation:
 
 ```bash
 uv run osm-polygon-description-tag run-and-publish \
-  --source-root "/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw" \
-  --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root" \
+  --source-root "/path/to/pbfs" \
+  --data-root "/path/to/data-root" \
   --confirm-repo NoeFlandre/osm-polygon-description-tag
 ```
 
@@ -73,12 +73,12 @@ never touched.
 ```bash
 # 1. Dry run: compute, validate, and print the exact plan. No network.
 uv run osm-polygon-description-tag release-stats \
-  --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root" \
+  --data-root "/path/to/data-root" \
   --confirm-repo NoeFlandre/osm-polygon-description-tag
 
 # 2. Publish and verify the remote revision.
 uv run osm-polygon-description-tag release-stats \
-  --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root" \
+  --data-root "/path/to/data-root" \
   --confirm-repo NoeFlandre/osm-polygon-description-tag --apply
 ```
 
@@ -122,7 +122,7 @@ dashboard:
 
 ```bash
 uv run osm-polygon-description-tag trackio-snapshot \
-  --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root" \
+  --data-root "/path/to/data-root" \
   --run-name snapshot-2026-07-31
 ```
 

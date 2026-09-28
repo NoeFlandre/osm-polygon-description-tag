@@ -116,7 +116,7 @@ pre-commit, `uv lock --check`, `uv build`, wheel contents, strict MkDocs.
 
 One skip is the Docker smoke test, which needs `RUN_DOCKER_SMOKE=1`. The other
 two are the end-to-end job-script tests, which skip whenever `TMPDIR` contains a
-shell metacharacter --- as every absolute path under `/Volumes/Seagate M3` does.
+shell metacharacter --- as any path containing a space does.
 That is the guard working, not a gap: a remote path may not contain
 metacharacters because OAR evaluates the stored command through a shell. Point
 `TMPDIR` at a plain path to run them; see the note at the end of this document.
@@ -487,7 +487,7 @@ exist for it. Nothing in the card claims an accuracy figure.
 
 Keep temporary directories **outside** the project tree: several tests walk up
 from a temp path looking for `pyproject.toml`, and a `TMPDIR` inside the repo
-makes them find the real one. `/Volumes/Seagate M3/tmp/osm-pdt` works.
+makes them find the real one. A directory such as `/tmp/osm-pdt` works.
 
 Two end-to-end job-script tests skip when the temp path contains a shell
 metacharacter, which every absolute path on a volume named `Seagate M3` does.

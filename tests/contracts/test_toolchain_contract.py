@@ -71,8 +71,9 @@ def test_pre_commit_and_just_are_configured() -> None:
         "run-and-publish ",
     ):
         assert recipe in justfile
-    assert '"/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw"' in justfile
-    assert '"/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root"' in justfile
+    # Roots come from the environment or pass-through options, never the author's machine.
+    assert "/Volumes" not in justfile
+    assert "run-and-publish *args:" in justfile
     assert "NoeFlandre/osm-polygon-description-tag" in justfile
 
 
@@ -97,3 +98,20 @@ def test_github_actions_runs_complete_quality_gate() -> None:
         'HF_HUB_OFFLINE: "1"',
     ):
         assert token in workflow
+
+
+def test_public_docs_name_no_author_machine_paths() -> None:
+    """Only the labelled maintainer example in operations.md may name /Volumes (#67)."""
+    docs = [PROJECT_ROOT / "README.md", *sorted((PROJECT_ROOT / "docs").glob("*.md"))]
+    docs += sorted((PROJECT_ROOT / "src").rglob("README.md"))
+    offenders = [
+        path.relative_to(PROJECT_ROOT).as_posix()
+        for path in docs
+        if "/Volumes" in path.read_text(encoding="utf-8")
+    ]
+
+    assert offenders == ["docs/operations.md"]
+    operations = (PROJECT_ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
+    example = operations.split("### Maintainer setup (example)", 1)
+    assert len(example) == 2
+    assert "/Volumes" not in example[0]

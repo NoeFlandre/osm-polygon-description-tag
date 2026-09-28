@@ -4,11 +4,21 @@
 
 Keep code and data separate:
 
-| Purpose | Path | Rule |
+| Purpose | Set with | Rule |
 | --- | --- | --- |
-| Code checkout | `/Volumes/Seagate M3/projects/osm-polygon-description-tag` | Git-managed source |
-| Immutable raw PBFs | `/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw` | Read-only; never an output or temp directory |
-| Generated artifacts | `/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root` | Parquet, manifests, stats, logs, and local state |
+| Code checkout | your `git clone` | Git-managed source |
+| Immutable raw PBFs | `--source-root` or `OSM_POLYGON_SOURCE_ROOT` | Read-only; never an output or temp directory |
+| Generated artifacts | `--data-root` or `OSM_POLYGON_DATA_ROOT` | Parquet, manifests, stats, logs, and local state |
+
+The two roots must be disjoint: neither may contain the other.
+
+### Maintainer setup (example)
+
+The maintainer's machine uses, for reference only:
+
+- Code: `/Volumes/Seagate M3/projects/osm-polygon-description-tag`
+- Raw PBFs: `/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw`
+- Data root: `/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root`
 
 Local state under the data root is explicitly separated:
 
@@ -97,7 +107,7 @@ repaired rows.
 Events are written to:
 
 ```text
-/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root/logs/run-and-publish.jsonl
+<data-root>/logs/run-and-publish.jsonl
 ```
 
 The active log rotates at 10 MiB with five backups using same-directory atomic

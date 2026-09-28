@@ -138,13 +138,13 @@ can be audited, interrupted, resumed, and reproduced.
 
 ```text
 code checkout
-  /Volumes/Seagate M3/projects/osm-polygon-description-tag
+  your git clone
 
 immutable raw PBFs
-  /Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw
+  /path/to/pbfs
 
 generated data + state
-  /Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root
+  /path/to/data-root
 ```
 
 <div class="source-note">Sources: docs/index.md; docs/operations.md; docs/getting-started.md</div>
@@ -393,9 +393,10 @@ pre-commit, Just, and GitHub Actions.
 # Read the contract, then run the workflow
 
 ```bash
-cd /Volumes/Seagate\ M3/projects/osm-polygon-description-tag
+git clone https://github.com/NoeFlandre/osm-polygon-description-tag
+cd osm-polygon-description-tag
 uv sync --locked
-just run-and-publish
+just run-and-publish --source-root /path/to/pbfs --data-root /path/to/data-root
 ```
 
 The codebase is intentionally conservative: validate first, write atomically,

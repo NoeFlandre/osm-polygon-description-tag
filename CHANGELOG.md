@@ -17,6 +17,8 @@ defined once, in `pyproject.toml`; `CITATION.cff` must match it.
 - The CLI imports matplotlib only when a chart is drawn (#84).
 - Each geometry is oriented once per record during transform (#85).
 - H3 density counts rank unique rows in one pass (#82).
+- Roots come from `--source-root`/`--data-root` or `OSM_POLYGON_SOURCE_ROOT`/`OSM_POLYGON_DATA_ROOT`; there are no machine-specific defaults (#69).
+- README and docs use portable paths and document install, usage, outputs and configuration (#67).
 
 ### Quality
 

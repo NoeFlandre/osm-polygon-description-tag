@@ -154,7 +154,7 @@ auditing the result, so each is independently repeatable.
 ### 1. Freeze the input snapshot
 
 ```bash
-uv run osm-polygon-description-tag language prepare --source-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root/data" --run-dir "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root/language-run-lingua-glotlid-v3-full" --project-root .
+uv run osm-polygon-description-tag language prepare --source-root "/path/to/data-root/data" --run-dir "/path/to/data-root/language-run-lingua-glotlid-v3-full" --project-root .
 ```
 
 This writes `snapshot.json`, binding every source Parquet's relative path,
