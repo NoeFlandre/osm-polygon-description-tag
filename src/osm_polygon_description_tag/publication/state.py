@@ -40,14 +40,14 @@ def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
     temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         temp.write_text(body, encoding="utf-8")
-        with open(temp, "rb") as handle:
+        with Path(temp).open("rb") as handle:
             os.fsync(handle.fileno())
         directory_fd = os.open(str(path.parent), os.O_RDONLY)
         try:
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
-        os.replace(temp, path)
+        Path(temp).replace(path)
     finally:
         if temp.exists():
             temp.unlink()
@@ -176,9 +176,7 @@ def _current_state(data_root: Path) -> dict[str, object]:
 def _add_optional_metadata_fields(
     payload: dict[str, object], fields: tuple[tuple[str, object | None], ...]
 ) -> None:
-    for key, value in fields:
-        if value is not None:
-            payload[key] = value
+    payload.update({key: value for key, value in fields if value is not None})
 
 
 def cast_dict(value: object) -> dict[str, object]:

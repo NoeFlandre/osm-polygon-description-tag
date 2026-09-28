@@ -97,7 +97,7 @@ def test_daytime_is_evaluated_in_paris_not_in_the_input_zone() -> None:
 
 def test_a_naive_time_is_rejected() -> None:
     with pytest.raises(GridPolicyError, match=exactly("policy time must be timezone aware")):
-        is_weekday_daytime(datetime(2026, 9, 7, 12, 0))
+        is_weekday_daytime(datetime(2026, 9, 7, 12, 0))  # noqa: DTZ001 - naive on purpose
 
 
 def test_the_observed_usage_policy_schema_yields_a_job_count() -> None:
@@ -223,7 +223,7 @@ def test_policy_evidence_must_be_recent_and_timezone_aware() -> None:
         moment, moment - timedelta(seconds=MAX_EVIDENCE_AGE_SECONDS + 1)
     )
     with pytest.raises(GridPolicyError, match="timezone aware"):
-        policy_evidence_is_fresh(moment, datetime(2026, 9, 5, 22, 0))
+        policy_evidence_is_fresh(moment, datetime(2026, 9, 5, 22, 0))  # noqa: DTZ001 - naive on purpose
 
 
 @pytest.mark.parametrize("age_limit", [0, -1, True, 1.0])

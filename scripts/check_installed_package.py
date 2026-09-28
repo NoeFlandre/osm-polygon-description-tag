@@ -73,7 +73,7 @@ def import_problems(source_root: Path, package: str = PACKAGE) -> Iterator[str]:
     for name in source_modules(source_root, package):
         try:
             importlib.import_module(name)
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - report every import failure, whatever its type
             yield f"cannot import {name}: {type(error).__name__}: {error}"
 
 

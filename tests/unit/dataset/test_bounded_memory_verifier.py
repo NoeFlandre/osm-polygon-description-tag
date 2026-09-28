@@ -40,8 +40,7 @@ class _FakeHubApi:
 
     def repo_info(self, *_a: object, **_kw: object) -> object:
         self.calls.append(("repo_info", (_a, _kw)))
-        info = _Info(self._repo_sha)
-        return info
+        return _Info(self._repo_sha)
 
     def get_paths_info(
         self,

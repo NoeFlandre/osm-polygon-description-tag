@@ -157,7 +157,7 @@ def _shift_backups(backup_chain: list[Path]) -> None:
         src = backup_chain[index - 1]
         dst = backup_chain[index]
         if src.exists() and src.is_file():
-            os.replace(src, dst)
+            Path(src).replace(dst)
 
 
 def _create_active_log(subdir: Path, active_name: str) -> Path:
@@ -259,8 +259,7 @@ class RunLogger:
             "event": name,
             "run_id": self._run_id,
         }
-        for key, value in fields.items():
-            record[key] = value
+        record.update(fields)
         scrubbed = _scrub(record)
         # pragma: no mutate start - ensure_ascii=None equals False; exact JSON bytes are tested
         raw = json.dumps(scrubbed, ensure_ascii=False, sort_keys=True, default=str)
@@ -284,7 +283,7 @@ class RunLogger:
         try:
             self._stderr.write(line + "\n")
             self._stderr.flush()
-        except Exception:  # noqa: S110 - stderr is best-effort
+        except Exception:  # noqa: S110, BLE001 - stderr is best-effort
             pass
 
     def _format_human(self, record: dict[str, object]) -> str:
@@ -308,7 +307,7 @@ class RunLogger:
         active = subdir / self.ACTIVE_NAME
         _validate_active_log(active)
         self._path = active
-        self._handle = open(active, "ab", buffering=0)  # noqa: SIM115
+        self._handle = Path(active).open("ab", buffering=0)  # noqa: SIM115
 
     def _append_persistent(self, raw: str) -> None:
         with self._lock:
@@ -364,11 +363,11 @@ class RunLogger:
         self._path.unlink()
         _shift_backups(backup_chain)
         if backup_chain:
-            os.replace(staging, backup_chain[0])
+            Path(staging).replace(backup_chain[0])
         else:
             staging.unlink()
         new_active = _create_active_log(subdir, self.ACTIVE_NAME)
-        self._handle = open(new_active, "ab", buffering=0)  # noqa: SIM115
+        self._handle = Path(new_active).open("ab", buffering=0)  # noqa: SIM115
         self._path = new_active
 
     def flush(self) -> None:

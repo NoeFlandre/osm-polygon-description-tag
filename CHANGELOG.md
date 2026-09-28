@@ -28,6 +28,7 @@ defined once, in `pyproject.toml`; `CITATION.cff` must match it.
 
 ### Quality
 
+- Ruff also enforces C4, PIE, RET, PERF, PLW, ARG, BLE, DTZ, PTH, T20, N, ERA and PGH (#59).
 - CI smoke-tests the built wheel in a clean venv (#74).
 - The CRAP gate scores closures and reports unmatched coverage (#76).
 - `scripts/` is measured by coverage, the CRAP gate (#77) and `ty` (#72).

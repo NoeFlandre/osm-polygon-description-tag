@@ -664,9 +664,11 @@ def test_every_option_of_every_command_has_help_text() -> None:
     missing: list[str] = []
 
     def walk(command: object, path: str) -> None:
-        for param in getattr(command, "params", []):
-            if param.param_type_name == "option" and not getattr(param, "help", None):
-                missing.append(f"{path or '<root>'} {param.opts[0]}")
+        missing.extend(
+            f"{path or '<root>'} {param.opts[0]}"
+            for param in getattr(command, "params", [])
+            if param.param_type_name == "option" and not getattr(param, "help", None)
+        )
         for name, sub in getattr(command, "commands", {}).items():
             walk(sub, f"{path} {name}".strip())
 

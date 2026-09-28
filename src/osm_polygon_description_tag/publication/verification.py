@@ -38,7 +38,7 @@ class HubVerificationError(RuntimeError):
     """Raised when the default Hub verifier cannot confirm a remote fact."""
 
 
-class _RemoteFileMismatch(HubVerificationError):
+class _RemoteFileMismatchError(HubVerificationError):
     """Expected content mismatch used by the idempotence probe."""
 
 
@@ -55,7 +55,7 @@ def _entries_by_path(requested_paths: list[str], entries: list[Any]) -> dict[str
     # the caller reports it against the exact path. ``strict=False`` is also
     # the default, so writing it either way cannot change behaviour.
     pairs = zip(requested_paths, entries, strict=False)  # pragma: no mutate
-    return {path: entry for path, entry in pairs}
+    return dict(pairs)
 
 
 def _authenticated_api() -> Any:
@@ -106,7 +106,7 @@ def _paths_info(api: Any, repo_id: str, requested_paths: list[str], revision: st
 def _check_entry_metadata(item: UploadItem, entry: Any, revision: str) -> bool:
     """Check size and LFS identity; return whether the LFS SHA settled the file."""
     if entry is None:
-        raise _RemoteFileMismatch(
+        raise _RemoteFileMismatchError(
             f"remote file missing in revision {revision}: {item.relative_path}"
         )
     _check_entry_size(item, entry)
@@ -116,7 +116,7 @@ def _check_entry_metadata(item: UploadItem, entry: Any, revision: str) -> bool:
 def _check_entry_size(item: UploadItem, entry: Any) -> None:
     size = getattr(entry, "size", None)
     if size is not None and int(size) != int(item.size_bytes):
-        raise _RemoteFileMismatch(
+        raise _RemoteFileMismatchError(
             f"remote size mismatch for {item.relative_path}: local={item.size_bytes}, remote={size}"
         )
 
@@ -127,7 +127,7 @@ def _lfs_sha_settles(item: UploadItem, entry: Any) -> bool:
     if not lfs_sha:
         return False
     if str(lfs_sha).lower() != str(item.sha256).lower():
-        raise _RemoteFileMismatch(f"remote LFS SHA mismatch for {item.relative_path}")
+        raise _RemoteFileMismatchError(f"remote LFS SHA mismatch for {item.relative_path}")
     return True
 
 
@@ -161,7 +161,7 @@ def _verify_downloaded_content(
     local_path = _download_for_hash(api, repo_id, item, revision, cache_dir)
     digest = file_sha256(Path(local_path))
     if digest.lower() != str(item.sha256).lower():
-        raise _RemoteFileMismatch(
+        raise _RemoteFileMismatchError(
             f"remote SHA mismatch for {item.relative_path}: local={item.sha256}, remote={digest}"
         )
 
@@ -207,7 +207,7 @@ def _matching_revision(
     revision = _repository_revision(api, repo_id)
     try:
         _verify_files_at_revision(api, repo_id, files, revision, cache_dir)
-    except _RemoteFileMismatch:
+    except _RemoteFileMismatchError:
         return None
     except HubVerificationError as error:
         raise HubVerificationError(
@@ -251,7 +251,7 @@ def _remote_inventory_paths(api: Any, repo_id: str, revision: str) -> set[str]:
 
 
 def _managed_paths(paths: set[str]) -> set[str]:
-    return {path for path in paths if path.startswith("data/") or path.startswith("manifests/")}
+    return {path for path in paths if path.startswith(("data/", "manifests/"))}
 
 
 def _verify_inventory(

@@ -58,7 +58,7 @@ def test_file_sha256_reads_in_bounded_chunks() -> None:
     handle.__enter__.return_value = handle
     handle.read.side_effect = [b"chunk", b""]
 
-    with patch("builtins.open", return_value=handle) as open_file:
+    with patch.object(Path, "open", autospec=True, return_value=handle) as open_file:
         assert file_sha256(Path("artifact")) == hashlib.sha256(b"chunk").hexdigest()
 
     open_file.assert_called_once_with(Path("artifact"), "rb")

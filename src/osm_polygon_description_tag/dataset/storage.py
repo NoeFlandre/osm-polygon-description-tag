@@ -100,7 +100,7 @@ def _owned_temp(target: Path) -> Path:
 
 
 def _fsync_path(path: Path) -> None:
-    with open(path, "rb") as handle:  # pragma: no mutate - mode does not affect fsync
+    with Path(path).open("rb") as handle:  # pragma: no mutate - mode does not affect fsync
         os.fsync(handle.fileno())
 
 
@@ -416,7 +416,7 @@ def _write_geoparquet_with(
         validated_rows = validator(temp_final)
         _fsync_path(temp_final)
         _fsync_dir(target.parent)
-        os.replace(temp_final, target)
+        Path(temp_final).replace(target)
         return validated_rows
     finally:
         for temp in (temp_data, temp_final):

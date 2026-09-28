@@ -506,10 +506,9 @@ def _polygon_components(
         polygons = tuple(geometry.geoms)
         return polygons, len(polygons)
     # pragma: no cover - schema validation prevents this branch
-    else:
-        raise ReportingError(
-            f"unsupported geometry in {source_name} at row {row_index}: {geometry.geom_type!r}"
-        )
+    raise ReportingError(
+        f"unsupported geometry in {source_name} at row {row_index}: {geometry.geom_type!r}"
+    )
 
 
 def _polygon_measurements(polygons: tuple[Polygon, ...]) -> tuple[int, int, int]:
@@ -1006,7 +1005,7 @@ def _build_stats_payload(
 def collect_stats(
     data_root: Path,
     *,
-    clock: Callable[[], str] = utc_now_iso,
+    clock: Callable[[], str] = utc_now_iso,  # noqa: ARG001 - kept for callers; stats carry no timestamp
 ) -> dict[str, Any]:
     """Aggregate factual statistics from validated artifacts and matching manifests."""
     artifacts = _find_validated_artifacts(data_root)

@@ -356,7 +356,7 @@ def _sync_remote_card(
         temporary.write_text(remote_readme, encoding="utf-8", newline="")  # pragma: no mutate
         with temporary.open("rb") as handle:
             os.fsync(handle.fileno())
-        os.replace(temporary, target)
+        Path(temporary).replace(target)
     finally:
         if temporary.exists():
             temporary.unlink()

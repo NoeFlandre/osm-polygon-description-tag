@@ -131,10 +131,9 @@ class _FakeHubApi:
         entry = repo.files.get(filename) if repo else None
         if entry is None:
             raise LookupError(filename)
-        import os as _os
         import tempfile
 
-        handle, path_str = tempfile.mkstemp(prefix="hf-", suffix=f"-{_os.path.basename(filename)}")
+        handle, path_str = tempfile.mkstemp(prefix="hf-", suffix=f"-{Path(filename).name}")
         _ = handle
         from pathlib import Path as _Path
 

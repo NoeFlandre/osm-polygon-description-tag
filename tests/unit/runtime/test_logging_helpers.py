@@ -329,7 +329,7 @@ def test_maybe_rotate_forwards_all_paths_and_reopens_active_file(tmp_path: Path)
         patch.object(logging_module, "_shift_backups") as shift,
         patch.object(logging_module.os, "replace") as replace,
         patch.object(logging_module, "_create_active_log", return_value=new_active) as create,
-        patch("builtins.open", return_value=new_handle) as open_active,
+        patch.object(Path, "open", autospec=True, return_value=new_handle) as open_active,
         patch.object(logging_module.os, "fsync") as fsync,
     ):
         logger.maybe_rotate()

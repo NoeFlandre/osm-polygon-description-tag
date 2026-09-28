@@ -294,7 +294,4 @@ def build_all(
 ) -> list[BuildResult]:
     """Run ``build`` for every source in deterministic order, stopping on first failure."""
     ordered = sorted(sources, key=lambda source: source.name)
-    results: list[BuildResult] = []
-    for source in ordered:
-        results.append(build(source))
-    return results
+    return [build(source) for source in ordered]

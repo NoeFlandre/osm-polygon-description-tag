@@ -7,7 +7,7 @@ import fnmatch
 import json
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -147,11 +147,11 @@ def _write_markdown(path: Path, payload: dict[str, Any]) -> None:
         "| Path | Function | Complexity | Coverage | CRAP |",
         "| --- | --- | ---: | ---: | ---: |",
     ]
-    for item in payload["functions"]:
-        lines.append(
-            f"| `{item['path']}` | `{item['name']}` | {item['complexity']} | "
-            f"{item['coverage_percent']:.2f}% | {item['crap_score']:.2f} |"
-        )
+    lines.extend(
+        f"| `{item['path']}` | `{item['name']}` | {item['complexity']} | "
+        f"{item['coverage_percent']:.2f}% | {item['crap_score']:.2f} |"
+        for item in payload["functions"]
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -258,7 +258,7 @@ def _allowlisted(
     if path is None:
         return violations, []
     allowlist = json.loads(path.read_text(encoding="utf-8"))
-    remaining, problems = apply_allowlist(violations, allowlist, today=date.today())
+    remaining, problems = apply_allowlist(violations, allowlist, today=datetime.now(UTC).date())
     excused = len(violations) - len(remaining)
     print(f"{excused} over-budget functions excused by {path} until {allowlist['expires']}")
     return remaining, problems

@@ -112,8 +112,8 @@ def _validate_data_roots(paths: Paths) -> tuple[object, ...]:
 
 def _hub_identity() -> tuple[Any, Any]:
     try:
-        HfApiCls: Any = _huggingface_hub.HfApi
-        api = HfApiCls()
+        hf_api: Any = _huggingface_hub.HfApi
+        api = hf_api()
         identity = api.whoami()
         repo_info = api.repo_info(REPO_ID, repo_type="dataset")
     except Exception as error:

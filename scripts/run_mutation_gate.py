@@ -411,9 +411,7 @@ def _recorded_path() -> Path:
     return Path("mutants") / "mutmut-recorded-tests.json"
 
 
-def coverage_selection(
-    coverage_file: Path, durations: Mapping[str, float]
-) -> dict[str, tuple[str, ...]]:
+def coverage_selection(coverage_file: Path) -> dict[str, tuple[str, ...]]:
     """Return exact per-function associations from per-test coverage contexts.
 
     Returns an empty mapping when the coverage file is absent, so the gate
@@ -584,7 +582,7 @@ def run_gate(
             }
     # Prefer the exact covering-test set; keep the recorded selection wherever
     # coverage has nothing to say, because running more tests is always sound.
-    covered = coverage_selection(coverage_file, durations)
+    covered = coverage_selection(coverage_file)
     if covered:
         full_associations = {
             name: covered.get(name) or selection for name, selection in full_associations.items()

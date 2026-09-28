@@ -97,16 +97,15 @@ def test_uniqueness_index_persists_duplicate_detection_across_batches(
 ) -> None:
     """Duplicate IDs across different batches must be rejected."""
     target = tmp_path / "dup.parquet"
-    records = []
-    for batch in range(3):
-        for offset in range(10):
-            records.append(
-                make_record_dict(
-                    Polygon([(batch, 0), (batch, 1), (batch + 0.5, 1), (batch + 0.5, 0)]),
-                    {"description": f"f{batch}-{offset}"},
-                    osm_id=batch * 100 + offset + 1,
-                )
-            )
+    records = [
+        make_record_dict(
+            Polygon([(batch, 0), (batch, 1), (batch + 0.5, 1), (batch + 0.5, 0)]),
+            {"description": f"f{batch}-{offset}"},
+            osm_id=batch * 100 + offset + 1,
+        )
+        for batch in range(3)
+        for offset in range(10)
+    ]
     # Inject a duplicate spanning batches.
     records.append(
         make_record_dict(

@@ -257,7 +257,7 @@ def test_project_code_revision_uses_discovered_git_executable(
 
 def test_resources_resolve_from_unrelated_cwd(tmp_path: Path) -> None:
     """Packaged resources resolve regardless of the caller's working directory."""
-    cwd_before = os.getcwd()
+    cwd_before = Path.cwd()
     try:
         os.chdir(tmp_path)
         # resolve all packaged resources from an unrelated cwd
@@ -273,7 +273,7 @@ def test_cli_uses_packaged_resources_from_unrelated_cwd(tmp_path: Path) -> None:
     """The CLI's run-and-publish subcommand resolves resources from any cwd."""
     from osm_polygon_description_tag.cli import run
 
-    cwd_before = os.getcwd()
+    cwd_before = Path.cwd()
     try:
         os.chdir(tmp_path)
         exit_code = run(["run-and-publish", "--help"])

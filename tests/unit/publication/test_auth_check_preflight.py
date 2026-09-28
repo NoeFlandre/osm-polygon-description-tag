@@ -57,8 +57,7 @@ class _RecordingHubApi:
 
     def repo_info(self, *_a: object, **_kw: object) -> object:
         self.calls.append(("repo_info", _a, _kw))
-        info = _Info()
-        return info
+        return _Info()
 
     def auth_check(self, repo_id: str, *, repo_type: str = "dataset", write: bool = False) -> None:
         self.calls.append(("auth_check", (repo_id, repo_type, write), {}))

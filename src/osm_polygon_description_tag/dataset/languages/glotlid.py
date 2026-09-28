@@ -72,8 +72,7 @@ def _score(value: object) -> float:
     score = float(value)
     if not math.isfinite(score) or not 0 <= score <= 1 + SCORE_ROUNDING_TOLERANCE:
         raise GlotLIDLabelError("GlotLID scores must be between 0 and 1")
-    score = min(score, 1.0)
-    return score
+    return min(score, 1.0)
 
 
 def _merge_score(values: dict[str, float], code: str, score: float) -> None:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -293,7 +292,7 @@ def _quarantine_artifact(state: ShardPaths, relative: str) -> None:
     if destination.exists() or destination.is_symlink():
         raise GridOperatorError(f"quarantine already holds an artifact: {relative}")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    os.replace(state.root / relative, destination)
+    Path(state.root / relative).replace(destination)
     fsync_directory(destination.parent)
 
 

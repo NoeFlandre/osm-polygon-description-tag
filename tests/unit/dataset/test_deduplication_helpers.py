@@ -1,6 +1,5 @@
 """Direct contracts for deduplication staging, promotion, and state."""
 
-import builtins
 import hashlib
 import os
 from collections.abc import Mapping
@@ -283,23 +282,26 @@ def test_write_state_uses_utf8_text_and_binary_fsync_reads(
     modes: list[str | None] = []
     json_options: dict[str, object] = {}
     original_write_text = Path.write_text
-    original_open = builtins.open
+    original_open = Path.open
     original_dumps = dedup_module.json.dumps
 
     def write_text(path: Path, data: str, *args: object, **kwargs: object) -> int:
         encodings.append(kwargs.get("encoding"))  # type: ignore[arg-type]
         return original_write_text(path, data, *args, **kwargs)  # type: ignore[arg-type]
 
-    def open_file(file: object, *args: object, **kwargs: object) -> object:
-        modes.append(args[0] if args else kwargs.get("mode"))  # type: ignore[arg-type]
-        return original_open(file, *args, **kwargs)  # type: ignore[arg-type]
+    def open_file(self: Path, *args: object, **kwargs: object) -> object:
+        # write_text opens through Path.open too, by keyword; record only
+        # the positional mode the fsync read passes.
+        if args:
+            modes.append(args[0])  # type: ignore[arg-type]
+        return original_open(self, *args, **kwargs)  # type: ignore[arg-type]
 
     def dumps(value: object, *args: object, **kwargs: object) -> str:
         json_options.update(kwargs)
         return original_dumps(value, *args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(Path, "write_text", write_text)
-    monkeypatch.setattr(dedup_module, "open", open_file, raising=False)
+    monkeypatch.setattr(Path, "open", open_file)
     monkeypatch.setattr(dedup_module.json, "dumps", dumps)
 
     _write_state(tmp_path / "state.json", {"value": "durable"})

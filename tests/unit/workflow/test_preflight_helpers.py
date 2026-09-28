@@ -64,7 +64,7 @@ def test_probe_osmium_version_falls_back_to_requested_executable_and_handles_emp
 ) -> None:
     def no_binary(executable: str) -> None:
         assert executable == "custom-osmium"
-        return None
+        return
 
     monkeypatch.setattr(preflight.shutil, "which", no_binary)
     calls: list[tuple[str, str]] = []

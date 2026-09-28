@@ -428,7 +428,7 @@ def _prepare_collection_directories(paths: ShardPaths) -> None:
 
 
 def _commit_staged_artifact(source: Path, destination: Path) -> None:
-    atomic_write_via(destination, lambda temporary: os.replace(source, temporary))
+    atomic_write_via(destination, lambda temporary: Path(source).replace(temporary))
 
 
 def _copy_tree_no_symlinks(source: Path, destination: Path) -> None:

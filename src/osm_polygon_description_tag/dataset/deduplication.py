@@ -107,9 +107,9 @@ def _write_state(path: Path, payload: Mapping[str, object]) -> None:
             json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        with open(temp, "rb") as handle:
+        with Path(temp).open("rb") as handle:
             os.fsync(handle.fileno())
-        os.replace(temp, path)
+        Path(temp).replace(path)
         directory_fd = os.open(str(path.parent), os.O_RDONLY)
         try:
             os.fsync(directory_fd)
@@ -214,7 +214,7 @@ def _promote_artifact(
     target = data_root / relative
     if staged.is_file() and not staged.is_symlink():
         target.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(staged, target)
+        Path(staged).replace(target)
         return True
     if target.is_file() and file_sha256(target) == expected_sha:
         return False

@@ -85,9 +85,9 @@ def _rewrite_legacy_parquet(
 
 
 def _promote_migrated_parquet(temporary: Path, target: Path) -> None:
-    with open(temporary, "rb") as handle:
+    with Path(temporary).open("rb") as handle:
         os.fsync(handle.fileno())
-    os.replace(temporary, target)
+    Path(temporary).replace(target)
     _fsync_dir(target.parent)
 
 

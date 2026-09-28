@@ -93,8 +93,20 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "S", "TID"]
+select = [
+    "E", "F", "I", "B", "UP", "SIM", "RUF", "S", "TID",
+    "C4", "PIE", "RET", "PERF", "PLW", "ARG", "BLE", "DTZ", "PTH", "T20", "N", "ERA", "PGH",
+]
 ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+# Scripts and the terminal presenter print by design.
+"scripts/**" = ["T20"]
+"src/osm_polygon_description_tag/runtime/presentation.py" = ["T20"]
+# Test fakes and lambdas mirror real signatures and names (trackio's Table,
+# HfApi classes), so unused arguments, pass-through lambdas and those names
+# are intentional there.
+"tests/**" = ["ARG", "PLW0108", "N802", "N806", "N818"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "typer._click".msg = "Private Typer module; import from osm_polygon_description_tag.runtime.click_compat."

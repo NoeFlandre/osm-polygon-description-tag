@@ -131,11 +131,8 @@ def _config_node(root: MappingNode) -> SequenceNode:
 
 
 def _config_entries(configs: list[object]) -> list[dict[str, object]]:
-    entries: list[dict[str, object]] = []
     names: set[str] = set()
-    for entry in configs:
-        entries.append(_config_entry(entry, names))
-    return entries
+    return [_config_entry(entry, names) for entry in configs]
 
 
 def _config_entry(entry: object, names: set[str]) -> dict[str, object]:

@@ -224,7 +224,7 @@ def _draw_cells_and_colorbar(
         return
     counts = _safe_counts(cells)
     minimum = min(counts)
-    maximum = max(max(counts), minimum + 1)
+    maximum = max(*counts, minimum + 1)
     # LogNorm requires vmin < vmax; the guard above guarantees this even
     # for the one-cell case.
     from matplotlib.colors import LogNorm

@@ -27,7 +27,7 @@ _OSM_TYPES = {"way", "relation"}
 
 
 @dataclass(frozen=True)
-class RejectedFeature(Exception):
+class RejectedFeature(Exception):  # noqa: N818 - a control-flow signal, not an error
     """A feature-level rejection carrying a stable reason code."""
 
     reason: str

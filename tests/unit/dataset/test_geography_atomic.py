@@ -76,7 +76,7 @@ def test_atomic_save_png_uses_nested_parent_and_exact_writer_options(tmp_path: P
     with (
         patch.object(atomic.tempfile, "mkstemp", wraps=atomic.tempfile.mkstemp) as mkstemp,
         patch.object(atomic.os, "open", wraps=atomic.os.open) as open_mock,
-        patch.object(atomic, "open", wraps=open, create=True) as open_mock_builtin,
+        patch.object(Path, "open", autospec=True, side_effect=Path.open) as open_mock_builtin,
     ):
         atomic_save_png(figure, output)
 
@@ -96,7 +96,9 @@ def test_atomic_save_png_uses_nested_parent_and_exact_writer_options(tmp_path: P
             },
         )
     ]
-    assert open_mock_builtin.call_args_list == [call(Path(figure.calls[0][0]), "rb")]
+    # The fake figure writes through Path.open("wb"); only the fsync read is "rb".
+    reads = [c for c in open_mock_builtin.call_args_list if c.args[1:] == ("rb",)]
+    assert reads == [call(Path(figure.calls[0][0]), "rb")]
     assert open_mock.call_args == call(str(output.parent), os.O_RDONLY)
 
 

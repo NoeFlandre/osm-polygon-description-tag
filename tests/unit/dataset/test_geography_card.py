@@ -545,8 +545,7 @@ def test_generated_readme_preserves_surrounding_prose_by_stripping_markers(
 
     def _strip(text: str) -> str:
         text = stats_marker_pattern.sub("", text, count=1)
-        text = _H3_MAP_BLOCK_PATTERN.sub("", text, count=1)
-        return text
+        return _H3_MAP_BLOCK_PATTERN.sub("", text, count=1)
 
     stripped_readme = _strip(readme)
     stripped_pre_h3 = _strip(pre_h3)
@@ -747,18 +746,15 @@ def test_atomic_write_template_uses_explicit_utf8_and_binary_fsync_open() -> Non
     handle = Mock()
     handle.__enter__ = Mock(return_value=handle)
     handle.__exit__ = Mock(return_value=None)
+    temporary.open.return_value = handle
 
-    with (
-        patch("builtins.open", return_value=handle) as open_file,
-        patch.object(card_module.os, "fsync") as fsync,
-        patch.object(card_module.os, "replace") as replace,
-    ):
+    with patch.object(card_module.os, "fsync") as fsync:
         _atomic_write_template(template, "new text")
 
     temporary.write_text.assert_called_once_with("new text", encoding="utf-8")
-    open_file.assert_called_once_with(temporary, "rb")
+    temporary.open.assert_called_once_with("rb")
     fsync.assert_called_once_with(handle.fileno())
-    replace.assert_called_once_with(temporary, template)
+    temporary.replace.assert_called_once_with(template)
 
 
 # ---------------------------------------------------------------------------

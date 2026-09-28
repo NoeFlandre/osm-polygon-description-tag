@@ -409,7 +409,7 @@ def test_coverage_selection_keeps_tests_added_since_the_cached_mutation_run(
     coverage_file = tmp_path / ".coverage"
     coverage_file.write_bytes(b"coverage")
 
-    assert coverage_selection(coverage_file, {}) == {"pkg.mod.x_function": ("tests/new_test",)}
+    assert coverage_selection(coverage_file) == {"pkg.mod.x_function": ("tests/new_test",)}
 
 
 def test_mutation_recording_survives_an_interrupted_narrow_pass(tmp_path: Path) -> None:
@@ -803,7 +803,7 @@ def test_mutation_gate_resets_state_before_first_escalation(monkeypatch) -> None
         "recorded_associations",
         lambda _stats, _path: {"pkg.mod.x_function": ("tests/test_one.py::test_one",)},
     )
-    monkeypatch.setattr(gate, "coverage_selection", lambda _path, _durations: {})
+    monkeypatch.setattr(gate, "coverage_selection", lambda _path: {})
     monkeypatch.setattr(gate, "escalation_stages", lambda _budget: (1,))
     monkeypatch.setattr(gate, "mutated_function_names", lambda _root: {"pkg.mod.x_function"})
     monkeypatch.setattr(gate, "_read_stats", lambda: stats)

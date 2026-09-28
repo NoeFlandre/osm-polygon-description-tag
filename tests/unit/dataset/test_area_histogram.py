@@ -206,7 +206,7 @@ def test_aggregate_area_histogram_returns_zeroed_labels_for_empty_dataset(
     """An empty (but finalized) data root returns the all-zero label set."""
     data_root = _make_finalized_area_histogram_data_root(tmp_path, {})
     counts = aggregate_area_histogram(data_root)
-    assert dict(counts) == {label: 0 for label in AREA_BUCKET_LABELS}
+    assert dict(counts) == dict.fromkeys(AREA_BUCKET_LABELS, 0)
 
 
 def test_aggregate_area_histogram_buckets_finite_areas(tmp_path: Path) -> None:
@@ -638,7 +638,7 @@ def test_render_area_histogram_orchestrates_helpers_and_closes_figure(
 
 
 def test_render_area_histogram_writes_png(tmp_path: Path) -> None:
-    counts = {label: 1 for label in AREA_BUCKET_LABELS}
+    counts = dict.fromkeys(AREA_BUCKET_LABELS, 1)
     out = tmp_path / "hist.png"
     result = render_area_histogram(counts, out)
     assert isinstance(result, AreaHistogramResult)
@@ -659,7 +659,7 @@ def test_render_area_histogram_caption_reports_totals(tmp_path: Path) -> None:
 
 
 def test_render_area_histogram_caption_for_empty_dataset(tmp_path: Path) -> None:
-    counts = {label: 0 for label in AREA_BUCKET_LABELS}
+    counts = dict.fromkeys(AREA_BUCKET_LABELS, 0)
     result = render_area_histogram(counts, tmp_path / "hist.png")
     assert "0 polygons" in result.caption
     assert "no data" in result.caption.lower()
@@ -706,7 +706,7 @@ def test_render_area_histogram_atomic_cleanup_on_failure(tmp_path: Path) -> None
 
 def test_render_area_histogram_byte_stable_for_empty_dataset(tmp_path: Path) -> None:
     """An empty dataset still produces a byte-identical no-data PNG."""
-    counts = {label: 0 for label in AREA_BUCKET_LABELS}
+    counts = dict.fromkeys(AREA_BUCKET_LABELS, 0)
     a = tmp_path / "a.png"
     b = tmp_path / "b.png"
     render_area_histogram(counts, a)
@@ -718,7 +718,7 @@ def test_render_area_histogram_does_not_draw_zero_count_bars(tmp_path: Path) -> 
     """Empty bins remain visually empty even though the x-axis is logarithmic."""
     import osm_polygon_description_tag.dataset.geography.area_rendering as rendering
 
-    counts = {label: 0 for label in AREA_BUCKET_LABELS}
+    counts = dict.fromkeys(AREA_BUCKET_LABELS, 0)
     counts[AREA_BUCKET_LABELS[2]] = 4
     captured: list[list[float]] = []
     real_barh = rendering.pyplot().Axes.barh

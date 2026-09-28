@@ -15,7 +15,7 @@ import json
 import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Protocol, cast
 from urllib.parse import quote
@@ -56,7 +56,7 @@ def dashboard_url(
 def snapshot_run_name(snapshot_date: str) -> str:
     """Return an explicit, human-readable name for a dataset snapshot."""
     try:
-        datetime.strptime(snapshot_date, "%Y-%m-%d")
+        date.fromisoformat(snapshot_date)
     except ValueError as error:
         raise ValueError("snapshot_date must use YYYY-MM-DD") from error
     return f"snapshot-{snapshot_date}"
@@ -429,7 +429,7 @@ class TrackioRecorder:
                 self.failure_reason = "trackio is not installed"
                 return False
             _initialize_backend(backend, self.project, self.run_name, config)
-        except Exception as error:  # Trackio must never take down the pipeline.
+        except Exception as error:  # noqa: BLE001 - Trackio must never take down the pipeline
             self.failure_reason = f"trackio initialization failed: {error}"
             return False
         self.backend = backend
@@ -451,7 +451,7 @@ class TrackioRecorder:
             payload = dict(metrics)
             step = payload.pop("step", None)
             self.backend.log(payload, step=int(step) if isinstance(step, int | float) else None)
-        except Exception as error:  # pragma: no cover - defensive integration boundary
+        except Exception as error:  # noqa: BLE001  # pragma: no cover - optional integration boundary
             self.failure_reason = f"trackio logging failed: {error}"
             self.enabled = False
 
@@ -467,7 +467,7 @@ class TrackioRecorder:
         try:
             snapshot_stats = stats if stats is not None else _read_stats(data_root)
             self.log(build_snapshot_payload(self.backend, data_root, snapshot_stats))
-        except Exception as error:  # pragma: no cover - defensive integration boundary
+        except Exception as error:  # noqa: BLE001  # pragma: no cover - optional integration boundary
             self.failure_reason = f"trackio snapshot failed: {error}"
             self.enabled = False
 
@@ -487,7 +487,7 @@ class TrackioRecorder:
                     sdk="static",
                     force=True,
                 )
-        except Exception as error:  # pragma: no cover - defensive integration boundary
+        except Exception as error:  # noqa: BLE001  # pragma: no cover - optional integration boundary
             self.failure_reason = f"trackio finish failed: {error}"
         finally:
             self.enabled = False

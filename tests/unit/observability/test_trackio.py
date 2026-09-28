@@ -256,7 +256,7 @@ def test_publish_snapshot_uses_utc_date_when_run_name_is_omitted(monkeypatch) ->
         @staticmethod
         def now(tz: object) -> real_datetime:
             assert tz is trackio.UTC
-            return real_datetime(2026, 8, 22)
+            return real_datetime(2026, 8, 22, tzinfo=tz)
 
     class _Recorder:
         run_names: ClassVar[list[str | None]] = []

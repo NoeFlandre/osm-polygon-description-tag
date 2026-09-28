@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import builtins
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,18 +22,18 @@ def test_atomic_write_json_creates_parents_and_stable_utf8_json(
     write_encodings: list[object] = []
     open_modes: list[str] = []
     real_write_text = Path.write_text
-    real_open = builtins.open
+    real_open = Path.open
 
     def write_text(self: Path, data: str, *args: Any, **kwargs: Any) -> int:
         write_encodings.append(kwargs.get("encoding"))
         return real_write_text(self, data, *args, **kwargs)
 
-    def open_file(file: Any, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+    def open_file(self: Path, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
         open_modes.append(mode)
-        return real_open(file, mode, *args, **kwargs)
+        return real_open(self, mode, *args, **kwargs)
 
     monkeypatch.setattr(Path, "write_text", write_text)
-    monkeypatch.setattr(builtins, "open", open_file)
+    monkeypatch.setattr(Path, "open", open_file)
 
     state._atomic_write_json(path, payload)
 

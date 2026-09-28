@@ -105,7 +105,7 @@ def _show_version(value: bool) -> None:
 
 @app.callback()
 def _global_options(
-    version: Annotated[
+    version: Annotated[  # noqa: ARG001 - consumed by its eager callback
         bool,
         typer.Option(
             "--version",
@@ -139,7 +139,7 @@ def _data_root(args: SimpleNamespace) -> Path:
     return resolve_data_root(args.data_root)
 
 
-class _Interrupted(Exception):
+class _Interrupted(Exception):  # noqa: N818 - a control-flow signal, not an error
     """Carry Ctrl-C through Typer without its default exit-code conversion."""
 
 
@@ -651,8 +651,8 @@ def _show_click_error(error: ClickException) -> None:
         usage = error.ctx.get_usage()
         if usage.startswith("Usage:"):
             usage = "usage:" + usage.removeprefix("Usage:")
-        print(usage, file=sys.stderr)
-        print(f"error: {error.format_message()}", file=sys.stderr)
+        print(usage, file=sys.stderr)  # noqa: T201 - usage errors go to stderr
+        print(f"error: {error.format_message()}", file=sys.stderr)  # noqa: T201 - as above
         return
     error.show(file=sys.stderr)
 
