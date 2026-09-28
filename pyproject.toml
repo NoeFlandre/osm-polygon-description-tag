@@ -70,17 +70,20 @@ skip-excluded-dirs = true
 [dependency-groups]
 dev = [
     "mkdocs-material>=9.6,<10",
+    # The two language pins below must equal the `language` extra's; a
+    # contract test keeps them in step.
     "lingua-language-detector==2.2.0",
     "fasttext-numpy2==0.10.2; sys_platform == 'linux'",
     "mutmut>=3,<4",
-    "pre-commit>=4.6.1",
+    "pre-commit>=4.6.1,<5",
     "hypothesis>=6.100,<7",
     "pytest>=8.4,<9",
     "pytest-cov>=6.2,<7",
     "pytest-xdist>=3.6,<4",
     "radon>=6,<7",
     "ruff>=0.12,<0.13",
-    "ty>=0.0.65",
+    # ty is pre-1.0 and CI fails on warnings: bound it to the tested series.
+    "ty>=0.0.65,<0.1",
 ]
 
 [tool.pytest.ini_options]

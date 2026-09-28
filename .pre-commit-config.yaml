@@ -7,13 +7,20 @@ repos:
       - id: check-yaml
       - id: check-toml
       - id: check-added-large-files
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.12.12
-    hooks:
-      - id: ruff-format
-      - id: ruff-check
   - repo: local
     hooks:
+      # Ruff runs from the locked environment, so pre-commit and CI use the
+      # exact version in uv.lock instead of a second pin that can drift.
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types_or: [python, pyi]
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types_or: [python, pyi]
       - id: ty
         name: ty
         entry: uv run ty check

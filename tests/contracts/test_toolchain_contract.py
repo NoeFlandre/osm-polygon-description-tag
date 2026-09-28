@@ -115,3 +115,35 @@ def test_public_docs_name_no_author_machine_paths() -> None:
     example = operations.split("### Maintainer setup (example)", 1)
     assert len(example) == 2
     assert "/Volumes" not in example[0]
+
+
+def test_dependabot_updates_every_pinned_ecosystem() -> None:
+    import yaml
+
+    config = yaml.safe_load((PROJECT_ROOT / ".github" / "dependabot.yml").read_text())
+    ecosystems = {update["package-ecosystem"] for update in config["updates"]}
+
+    assert ecosystems == {"github-actions", "docker", "uv", "pre-commit"}
+    assert all(update["schedule"]["interval"] == "weekly" for update in config["updates"])
+    assert all(update.get("groups") for update in config["updates"])
+
+
+def test_dev_language_pins_equal_the_language_extra() -> None:
+    project = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    extra = set(project["project"]["optional-dependencies"]["language"])
+    dev = project["dependency-groups"]["dev"]
+
+    shared = [pin for pin in dev if pin.startswith(("lingua-language-detector", "fasttext-numpy2"))]
+    assert len(shared) == 2
+    assert set(shared) <= extra
+
+
+def test_pre_release_tools_are_bounded_and_ruff_is_pinned_once() -> None:
+    project = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    dev = project["dependency-groups"]["dev"]
+    pre_commit = (PROJECT_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+
+    assert "ty>=0.0.65,<0.1" in dev
+    assert "pre-commit>=4.6.1,<5" in dev
+    assert "ruff-pre-commit" not in pre_commit
+    assert "entry: uv run ruff check --fix" in pre_commit
