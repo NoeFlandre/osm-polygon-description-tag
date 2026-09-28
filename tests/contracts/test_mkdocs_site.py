@@ -25,7 +25,9 @@ def test_mkdocs_site_has_public_navigation_and_tooling() -> None:
     assert config["theme"]["name"] == "material"
     assert "mkdocs-material>=9.6,<10" in dev_dependencies
     assert config["strict"] is True
-    assert "superpowers/*" in config["exclude_docs"]
+    # Agent planning notes are not kept in the public docs (#68).
+    assert "superpowers" not in config["exclude_docs"]
+    assert not (ROOT / "docs" / "superpowers").exists()
 
     nav_pages = {
         page
