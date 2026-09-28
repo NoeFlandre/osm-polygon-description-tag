@@ -1093,3 +1093,20 @@ def test_the_packaged_command_exits_1_when_the_driver_halted(
 
     assert code == 1
     assert len(seen) == 1
+
+
+@pytest.mark.parametrize(
+    "flags", [["--shard-stride", "0"], ["--shard-stride", "2", "--shard-index", "2"]]
+)
+def test_an_impossible_partition_is_a_one_line_cli_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], flags: list[str]
+) -> None:
+    from osm_polygon_description_tag.cli import run
+
+    _snapshot(tmp_path, ("a", 1))
+    argv = ["language", "grid", "run", *_REQUIRED[2:], "--run-dir", str(tmp_path), *flags]
+
+    assert run(argv) == 1
+    err = capsys.readouterr().err
+    assert "partition" in err
+    assert "Traceback" not in err

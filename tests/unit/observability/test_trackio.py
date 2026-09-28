@@ -986,3 +986,9 @@ def test_load_backend_returns_none_when_import_is_unavailable(monkeypatch) -> No
 
     monkeypatch.setattr(trackio.importlib, "import_module", unavailable)
     assert trackio._load_backend() is None
+
+
+@pytest.mark.parametrize("value", ["20260928", "2026-W40-1", "2026-9-28", "not-a-date"])
+def test_snapshot_run_name_accepts_only_yyyy_mm_dd(value: str) -> None:
+    with pytest.raises(ValueError, match="snapshot_date must use YYYY-MM-DD"):
+        snapshot_run_name(value)

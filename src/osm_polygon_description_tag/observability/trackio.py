@@ -56,9 +56,12 @@ def dashboard_url(
 def snapshot_run_name(snapshot_date: str) -> str:
     """Return an explicit, human-readable name for a dataset snapshot."""
     try:
-        date.fromisoformat(snapshot_date)
+        parsed = date.fromisoformat(snapshot_date)
     except ValueError as error:
         raise ValueError("snapshot_date must use YYYY-MM-DD") from error
+    # fromisoformat also accepts 20260928 and 2026-W40-1; only YYYY-MM-DD is allowed.
+    if parsed.isoformat() != snapshot_date:
+        raise ValueError("snapshot_date must use YYYY-MM-DD")
     return f"snapshot-{snapshot_date}"
 
 

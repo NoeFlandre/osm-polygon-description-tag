@@ -56,6 +56,7 @@ from osm_polygon_description_tag.runtime.resources import (
     osmium_export_config,
 )
 from osm_polygon_description_tag.workflow.build import BuildResult, build_all, build_one
+from osm_polygon_description_tag.workflow.grid_driver import DriverError
 from osm_polygon_description_tag.workflow.orchestrator import (
     OrchestratorError,
     run_and_publish,
@@ -627,6 +628,7 @@ _ERROR_TYPES = (
     MigrationError,
     TextMigrationError,
     LanguageDetectionError,
+    DriverError,
 )
 
 # Documented in docs/cli.md. Usage errors exit 2 and Ctrl-C exits 130.

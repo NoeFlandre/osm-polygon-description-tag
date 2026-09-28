@@ -89,7 +89,7 @@ Options:
 - `--osmium NAME`: executable name or path; defaults to `osmium`.
 - `--confirm-repo REPO`: required exact target repository confirmation.
 
-A root given neither way is an error (exit code 1) naming both the option and
+A root given neither way is an error (exit code 3) naming both the option and
 the variable; there is no machine-specific default.
 
 ### `release-stats`
