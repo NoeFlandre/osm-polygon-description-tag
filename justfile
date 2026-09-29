@@ -19,6 +19,10 @@ lint:
 typecheck:
     uv run ty check
 
+# Fail on a known-vulnerable pin in uv.lock (the ignore list is in the script).
+audit:
+    scripts/audit_locked_dependencies.sh
+
 test:
     uv run pytest {{coverage_flags}} --cov-report=term-missing
 

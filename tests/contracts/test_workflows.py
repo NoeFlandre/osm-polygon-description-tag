@@ -57,3 +57,21 @@ def test_only_the_pages_deploy_job_may_write_pages() -> None:
 
     assert jobs["build"]["permissions"].get("pages") != "write"
     assert jobs["deploy"]["permissions"]["pages"] == "write"
+
+
+def test_the_dependency_audit_runs_in_ci_and_has_a_recipe() -> None:
+    steps = _load("quality.yml")["jobs"]["quality"]["steps"]
+    justfile = (WORKFLOWS.parents[1] / "justfile").read_text(encoding="utf-8")
+
+    assert any(step.get("run") == "scripts/audit_locked_dependencies.sh" for step in steps)
+    assert "\naudit:\n    scripts/audit_locked_dependencies.sh\n" in justfile
+    assert (
+        WORKFLOWS.parents[1] / "scripts" / "audit_locked_dependencies.sh"
+    ).stat().st_mode & 0o111
+
+
+def test_secret_scanning_hooks_run_before_every_commit() -> None:
+    config = yaml.safe_load((WORKFLOWS.parents[1] / ".pre-commit-config.yaml").read_text())
+    hooks = {hook["id"] for repo in config["repos"] for hook in repo["hooks"]}
+
+    assert "detect-private-key" in hooks

@@ -59,6 +59,9 @@ jobs:
       - name: Type-check
         run: uv run ty check
 
+      - name: Audit locked dependencies
+        run: scripts/audit_locked_dependencies.sh
+
       - name: Build documentation
         run: uv run mkdocs build --strict --site-dir /tmp/osm-polygon-description-tag-site
 
