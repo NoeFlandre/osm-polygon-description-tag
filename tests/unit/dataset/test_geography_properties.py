@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from itertools import pairwise
+from pathlib import Path
 
 import h3
 import pyarrow as pa
@@ -15,6 +16,7 @@ from osm_polygon_description_tag.dataset.geography import area_histogram
 from osm_polygon_description_tag.dataset.geography.h3_policy import (
     H3PolicyError,
     assign_h3_cell,
+    coordinate_to_h3,
     split_antimeridian,
     validate_coordinate,
 )
@@ -43,7 +45,9 @@ def test_an_assigned_cell_has_the_requested_resolution_and_contains_its_centre(
     centre_lat, centre_lon = h3.cell_to_latlng(cell)
 
     assert h3.get_resolution(cell) == resolution
+    assert coordinate_to_h3(lat, lon, resolution=resolution) == cell
     assert assign_h3_cell(centre_lat, centre_lon, resolution=resolution) == cell
+    assert coordinate_to_h3(centre_lat, centre_lon, resolution=resolution) == cell
 
 
 _RING_POINTS = st.lists(
@@ -57,7 +61,8 @@ def _unwrapped_extent(points: list[tuple[float, float]]) -> float:
     """Longitude extent of a ring after each step is wrapped into (-180, 180]."""
     lon = points[0][0]
     longitudes = [lon]
-    for (previous, _), (current, _) in pairwise(points):
+    closed_points = [*points, points[0]]
+    for (previous, _), (current, _) in pairwise(closed_points):
         step = (current - previous + 180.0) % 360.0 - 180.0
         lon += step
         longitudes.append(lon)
@@ -68,18 +73,37 @@ def _unwrapped_extent(points: list[tuple[float, float]]) -> float:
 def test_clipped_rings_stay_inside_the_world_and_no_edge_spans_half_of_it(
     points: list[tuple[float, float]],
 ) -> None:
-    # A ring wider than half the world has an edge that legitimately spans more than
-    # 180 degrees once clipped, so the edge bound only holds for narrower ones. The
-    # vertex count can shrink (rings under three vertices are dropped), so it is
-    # not asserted.
-    assume(_unwrapped_extent(points) <= 180.0)
+    # A wide ring can retain a >180-degree edge after clipping; see the
+    # characterization below, so the edge bound only holds for narrower rings.
     rings = split_antimeridian(points)
 
     for ring in rings:
         longitudes = [lon for lon, _ in ring]
         assert all(-180.0 - 1e-9 <= lon <= 180.0 + 1e-9 for lon in longitudes)
+
+    assume(_unwrapped_extent(points) <= 180.0)
+    for ring in rings:
+        longitudes = [lon for lon, _ in ring]
         edges = zip(longitudes, [*longitudes[1:], longitudes[0]], strict=True)
         assert all(abs(end - start) <= 180.0 + 1e-9 for start, end in edges)
+
+
+def test_a_wide_ring_can_keep_a_world_spanning_closing_edge() -> None:
+    """Issue #79's universal edge bound conflicts with current wide-ring output."""
+    points = [(-170.0, 0.0), (0.0, 10.0), (170.0, 0.0)]
+    rings = split_antimeridian(points)
+
+    longitudes = [lon for lon, _ in rings[0]]
+    closing_edge = longitudes[0] - longitudes[-1]
+
+    assert abs(closing_edge) == 340.0
+
+
+@given(_RING_POINTS)
+def test_clipping_preserves_or_adds_ring_vertices(points: list[tuple[float, float]]) -> None:
+    rings = split_antimeridian(points)
+
+    assert sum(map(len, rings)) >= len(points)
 
 
 @given(st.lists(st.floats(min_value=0, max_value=1e12, allow_nan=False), min_size=1, max_size=40))
@@ -110,3 +134,42 @@ def test_bucket_counts_total_the_non_null_areas_whatever_their_order(
     assert first == second
     assert sum(first) == sum(area is not None for area in areas)
     assume(True)
+
+
+class _AreaBatch:
+    def __init__(self, areas: list[float]) -> None:
+        self._areas = pa.array(areas, type=pa.float64())
+
+    def column(self, name: str) -> pa.Array:
+        assert name == "area_m2"
+        return self._areas
+
+
+def _aggregate_areas(areas: list[float]) -> dict[str, int]:
+    from osm_polygon_description_tag.dataset import storage
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(storage, "validate_finalized_artifacts_strict", lambda _root: None)
+        patcher.setattr(
+            area_histogram,
+            "iter_unique_parquet_batches",
+            lambda *_args, **_kwargs: (_AreaBatch(areas),),
+        )
+        return area_histogram.aggregate_area_histogram(Path("unused"))
+
+
+@given(
+    st.lists(st.floats(min_value=0, max_value=1e12, allow_nan=False), max_size=60),
+    st.randoms(use_true_random=False),
+)
+def test_aggregate_histograms_total_input_rows_independent_of_order(
+    areas: list[float], rng: object
+) -> None:
+    shuffled = list(areas)
+    rng.shuffle(shuffled)  # type: ignore[attr-defined]
+
+    first = _aggregate_areas(areas)
+    second = _aggregate_areas(shuffled)
+
+    assert first == second
+    assert sum(first.values()) == len(areas)
