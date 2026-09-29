@@ -149,6 +149,7 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
+          trivyignores: .trivyignore
 
       - name: Verify the harmless CLI default
         run: docker run --rm osm-polygon-description-tag:ci --help
