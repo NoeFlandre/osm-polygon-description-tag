@@ -235,7 +235,7 @@ check. CI has no Hugging Face credentials and cannot publish the dataset.
 `just bench` runs the synthetic, seeded micro-benchmarks in `benchmarks/`
 (transform, H3 density-map rendering, CLI import time); set `PERF_SCALE` to
 enlarge them locally. `just bench-save` / `just bench-compare` keep a local
-baseline and fail on a >50% mean regression. CI runs the same suite in an
-advisory `perf` job (never blocking) and uploads `perf.json` as an artifact.
+baseline and fail on a >50% mean regression. CI's advisory `benchmarks` job times base and head on
+the same runner.
 Reference baseline for the renderer: 26.5k cells took 20.5 s with one patch
 per cell and about 6.7 s with a single `PolyCollection`.
