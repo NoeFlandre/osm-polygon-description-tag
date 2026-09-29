@@ -151,6 +151,20 @@ jobs:
           docker run --rm --entrypoint printenv osm-polygon-description-tag:ci \
             OSM_POLYGON_SOURCE_ROOT OSM_POLYGON_DATA_ROOT
 
+      - name: Dry-run the pipeline on a fixture inside the image
+        run: |
+          # Exercises the real entrypoint, osmium binary and packaged data
+          # offline, without publishing anything.
+          mkdir -p ci-data/raw
+          chmod -R a+rwX ci-data
+          docker run --rm --entrypoint osmium \
+            -v "$PWD/tests/fixtures:/fixtures:ro" -v "$PWD/ci-data:/data" \
+            osm-polygon-description-tag:ci \
+            cat /fixtures/descriptions.osm -o /data/raw/fixture.osm.pbf
+          docker run --rm -e HF_HUB_OFFLINE=1 \
+            -v "$PWD/ci-data:/data" \
+            osm-polygon-description-tag:ci inspect
+
       - name: Validate the compose file and run through it
         run: |
           docker compose config --quiet
