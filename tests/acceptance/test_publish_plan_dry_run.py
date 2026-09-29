@@ -14,6 +14,8 @@ import pytest
 from osm_polygon_description_tag.cli import run
 from tests.unit.publication.test_publication import _make_dataset
 
+pytestmark = pytest.mark.acceptance
+
 
 @pytest.fixture
 def finished_build(tmp_path: Path) -> Path:
