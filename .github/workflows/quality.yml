@@ -475,35 +475,3 @@ jobs:
               *) echo "a required job ended as: $result" >&2; exit 1 ;;
             esac
           done
-
-  perf:
-    # Advisory: shared runners are noisy, so this never blocks a merge. The
-    # JSON is kept as an artifact for manual comparison (docs/development.md).
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    continue-on-error: true
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-        with:
-          version: "0.11.16"
-          enable-cache: true
-
-      - name: Install Python
-        run: uv python install 3.12
-
-      - name: Sync locked environment
-        run: uv sync --frozen
-
-      - name: Run synthetic benchmarks
-        run: uv run pytest benchmarks -q --no-cov --benchmark-json=perf.json
-
-      - name: Upload benchmark JSON
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: perf-json
-          path: perf.json
-          retention-days: 14
