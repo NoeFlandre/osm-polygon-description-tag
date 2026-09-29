@@ -90,7 +90,10 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
-markers = ["integration: requires the external osmium binary"]
+markers = [
+    "integration: requires the external osmium binary",
+    "acceptance: hermetic user-journey scenario (public entry point, only network faked)",
+]
 
 [tool.ruff]
 line-length = 100
