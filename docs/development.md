@@ -143,7 +143,7 @@ just docker-check
 ```
 
 The single production command builds or reuses the runtime image, mounts the
-external generated-data root at `/data`, and mounts its `/data/raw` source
+external generated-data root at `/data`, and mounts its `/source` source
 directory read-only:
 
 ```bash
@@ -154,7 +154,7 @@ just docker-run "/path/to/data-root"
 
 | Variable | Default in the image | Purpose |
 | --- | --- | --- |
-| `OSM_POLYGON_SOURCE_ROOT` | `/data/raw` | Immutable PBF input (mount read-only) |
+| `OSM_POLYGON_SOURCE_ROOT` | `/source` | Immutable PBF input (mount read-only) |
 | `OSM_POLYGON_DATA_ROOT` | `/data` | Checkpoints, logs, manifests and artifacts |
 | `HF_TOKEN` | unset | Hub publication only; never baked into the image |
 | `HF_HUB_OFFLINE` | unset | Set to `1` to forbid any Hub access |
