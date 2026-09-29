@@ -36,7 +36,7 @@ bench-save name="base":
 
 bench-compare name="base":
     uv run pytest benchmarks -q --no-cov -p no:cacheprovider \
-        --benchmark-compare={{name}} --benchmark-compare-fail=mean:25%
+        --benchmark-compare --benchmark-compare-fail=mean:25%
 
 test-integration:
     uv run pytest tests/integration -q
