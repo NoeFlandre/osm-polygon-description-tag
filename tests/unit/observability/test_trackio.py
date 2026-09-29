@@ -11,7 +11,7 @@ from typing import ClassVar
 
 import pytest
 
-import osm_polygon_description_tag.observability.trackio as trackio
+from osm_polygon_description_tag.observability import trackio
 from osm_polygon_description_tag.observability.trackio import (
     DEFAULT_TRACKIO_PROJECT,
     DEFAULT_TRACKIO_SPACE_ID,
@@ -256,7 +256,7 @@ def test_publish_snapshot_uses_utc_date_when_run_name_is_omitted(monkeypatch) ->
         @staticmethod
         def now(tz: object) -> real_datetime:
             assert tz is trackio.UTC
-            return real_datetime(2026, 8, 22)
+            return real_datetime(2026, 8, 22, tzinfo=tz)
 
     class _Recorder:
         run_names: ClassVar[list[str | None]] = []
@@ -979,10 +979,16 @@ def test_trackio_stats_helpers_reject_non_sequence_files() -> None:
 
 
 def test_load_backend_returns_none_when_import_is_unavailable(monkeypatch) -> None:
-    import osm_polygon_description_tag.observability.trackio as trackio
+    from osm_polygon_description_tag.observability import trackio
 
     def unavailable(_name: str) -> object:
         raise ImportError("missing")
 
     monkeypatch.setattr(trackio.importlib, "import_module", unavailable)
     assert trackio._load_backend() is None
+
+
+@pytest.mark.parametrize("value", ["20260928", "2026-W40-1", "2026-9-28", "not-a-date"])
+def test_snapshot_run_name_accepts_only_yyyy_mm_dd(value: str) -> None:
+    with pytest.raises(ValueError, match="^snapshot_date must use YYYY-MM-DD$"):
+        snapshot_run_name(value)

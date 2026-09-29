@@ -1,4 +1,4 @@
-"""Safety contracts of the multi-shard Grid'5000 driver.
+"""Contracts of the multi-shard Grid'5000 driver (``language grid run``).
 
 The driver may only sequence the CLI; it must never decide to spend resources.
 These tests pin the three properties that make that true: it halts instead of
@@ -15,12 +15,13 @@ from typing import Any
 
 import pytest
 
-from scripts.run_language_grid import (
+import osm_polygon_description_tag.workflow.grid_driver as driver
+from osm_polygon_description_tag.workflow.grid_driver import (
     _UNREADABLE_CHECKPOINT,
     DriverError,
+    DriverOptions,
     Remote,
     _cli,
-    _parse_args,
     _shard_slug,
     awaiting_collection,
     checkpointed_shards,
@@ -39,30 +40,18 @@ def _remote() -> Remote:
     )
 
 
-def _args(**overrides: Any) -> Any:
-    argv = [
-        "--run-dir",
-        "/run",
-        "--source-root",
-        "/source",
-        "--retrieval-dir",
-        "/retrieve",
-        "--remote-bundle-root",
-        "/home/op/bundles",
-        "--remote-glotlid-model-path",
-        "/home/op/models/glotlid-v3/model_v3.bin",
-        "--remote-sat-model-path",
-        "/home/op/models/sat-3l-sm/model.safetensors",
-        "--remote-operator-dir",
-        "/home/op/project",
-        "--remote-cli",
-        "/home/op/.venv/bin/osm-polygon-description-tag",
-        *overrides.pop("extra", []),
-    ]
-    args = _parse_args(argv)
-    for key, value in overrides.items():
-        setattr(args, key, value)
-    return args
+def _args(**overrides: Any) -> DriverOptions:
+    fields: dict[str, Any] = {
+        "run_dir": Path("/run"),
+        "source_root": Path("/source"),
+        "retrieval_dir": Path("/retrieve"),
+        "remote_bundle_root": "/home/op/bundles",
+        "remote_glotlid_model_path": "/home/op/models/glotlid-v3/model_v3.bin",
+        "remote_sat_model_path": "/home/op/models/sat-3l-sm/model.safetensors",
+        "remote_operator_dir": "/home/op/project",
+        "remote_cli": "/home/op/.venv/bin/osm-polygon-description-tag",
+    }
+    return DriverOptions(**{**fields, **overrides})
 
 
 def _plan() -> dict[str, str]:
@@ -79,7 +68,7 @@ def test_a_submission_that_is_not_cleanly_submitted_halts_the_run(
 ) -> None:
     """An ambiguous submission means a job may exist; the driver must stop."""
     monkeypatch.setattr(
-        "scripts.run_language_grid._ssh",
+        "osm_polygon_description_tag.workflow.grid_driver._ssh_json",
         lambda *args, **kwargs: {"outcome": outcome, "job_id": None},
     )
 
@@ -94,11 +83,11 @@ def test_daytime_submission_is_off_unless_the_operator_asks_for_it(
 ) -> None:
     sent: list[str] = []
 
-    def fake_ssh(remote: Remote, command: str, *, capture_json: bool = False) -> dict[str, Any]:
+    def fake_ssh(remote: Remote, command: str) -> dict[str, Any]:
         sent.append(command)
         return _apply_payload("submitted")
 
-    monkeypatch.setattr("scripts.run_language_grid._ssh", fake_ssh)
+    monkeypatch.setattr("osm_polygon_description_tag.workflow.grid_driver._ssh_json", fake_ssh)
 
     submit(_args(), _remote(), "region.parquet", _plan())
 
@@ -111,13 +100,13 @@ def test_daytime_submission_is_forwarded_only_when_explicitly_requested(
 ) -> None:
     sent: list[str] = []
 
-    def fake_ssh(remote: Remote, command: str, *, capture_json: bool = False) -> dict[str, Any]:
+    def fake_ssh(remote: Remote, command: str) -> dict[str, Any]:
         sent.append(command)
         return _apply_payload("submitted")
 
-    monkeypatch.setattr("scripts.run_language_grid._ssh", fake_ssh)
+    monkeypatch.setattr("osm_polygon_description_tag.workflow.grid_driver._ssh_json", fake_ssh)
 
-    submit(_args(extra=["--allow-daytime"]), _remote(), "region.parquet", _plan())
+    submit(_args(allow_daytime=True), _remote(), "region.parquet", _plan())
 
     assert "--allow-daytime" in sent[0]
 
@@ -154,6 +143,7 @@ def test_shards_are_read_in_snapshot_order_with_their_row_counts(tmp_path: Path)
         ("region.parquet", "region-parquet"),
         ("a/b c.parquet", "a-b-c-parquet"),
         ("$(evil).parquet", "evil--parquet"),
+        ("X.parquetX", "X-parquetX"),
     ],
 )
 def test_a_remote_directory_name_cannot_carry_shell_metacharacters(shard: str, slug: str) -> None:
@@ -204,7 +194,8 @@ def test_a_clean_submission_in_the_cli_payload_shape_is_accepted(
 ) -> None:
     """A queued job must be recognised from the shape the CLI really emits."""
     monkeypatch.setattr(
-        "scripts.run_language_grid._ssh", lambda *args, **kwargs: _apply_payload("submitted")
+        "osm_polygon_description_tag.workflow.grid_driver._ssh_json",
+        lambda *args, **kwargs: _apply_payload("submitted"),
     )
 
     submit(_args(), _remote(), "region.parquet", _plan())
@@ -215,7 +206,8 @@ def test_the_recognised_submission_reports_the_scheduler_job_id(
 ) -> None:
     """The operator needs the job id to reconcile; it must reach the log."""
     monkeypatch.setattr(
-        "scripts.run_language_grid._ssh", lambda *args, **kwargs: _apply_payload("submitted")
+        "osm_polygon_description_tag.workflow.grid_driver._ssh_json",
+        lambda *args, **kwargs: _apply_payload("submitted"),
     )
 
     submit(_args(), _remote(), "region.parquet", _plan())
@@ -231,7 +223,8 @@ def test_an_unclean_outcome_inside_the_cli_payload_halts_the_run(
 ) -> None:
     """Reading the nested outcome must not lose the ambiguity check."""
     monkeypatch.setattr(
-        "scripts.run_language_grid._ssh", lambda *args, **kwargs: _apply_payload(outcome)
+        "osm_polygon_description_tag.workflow.grid_driver._ssh_json",
+        lambda *args, **kwargs: _apply_payload(outcome),
     )
 
     with pytest.raises(DriverError) as caught:
@@ -243,7 +236,7 @@ def test_an_unclean_outcome_inside_the_cli_payload_halts_the_run(
 def test_a_refused_apply_gate_halts_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
     """``result`` is null when the gate refused; nothing was submitted."""
     monkeypatch.setattr(
-        "scripts.run_language_grid._ssh",
+        "osm_polygon_description_tag.workflow.grid_driver._ssh_json",
         lambda *args, **kwargs: {
             "applied": False,
             "plan": {"blocked_reason": "daytime submission is refused"},
@@ -309,11 +302,11 @@ def test_no_queue_is_requested_unless_the_operator_names_one(
     """Some sites reject an explicit queue, so the bare form stays the default."""
     sent: list[str] = []
 
-    def fake_ssh(remote: Remote, command: str, *, capture_json: bool = False) -> dict[str, Any]:
+    def fake_ssh(remote: Remote, command: str) -> dict[str, Any]:
         sent.append(command)
         return _apply_payload("submitted")
 
-    monkeypatch.setattr("scripts.run_language_grid._ssh", fake_ssh)
+    monkeypatch.setattr("osm_polygon_description_tag.workflow.grid_driver._ssh_json", fake_ssh)
 
     submit(_args(), _remote(), "region.parquet", _plan())
 
@@ -324,13 +317,13 @@ def test_a_named_queue_is_forwarded_to_the_cli(monkeypatch: pytest.MonkeyPatch) 
     """Four of the eight sites cannot be used at all without this."""
     sent: list[str] = []
 
-    def fake_ssh(remote: Remote, command: str, *, capture_json: bool = False) -> dict[str, Any]:
+    def fake_ssh(remote: Remote, command: str) -> dict[str, Any]:
         sent.append(command)
         return _apply_payload("submitted")
 
-    monkeypatch.setattr("scripts.run_language_grid._ssh", fake_ssh)
+    monkeypatch.setattr("osm_polygon_description_tag.workflow.grid_driver._ssh_json", fake_ssh)
 
-    submit(_args(extra=["--queue", "default"]), _remote(), "region.parquet", _plan())
+    submit(_args(queue="default"), _remote(), "region.parquet", _plan())
 
     assert "--queue default" in sent[0]
 
@@ -415,7 +408,10 @@ def _stub_ssh(monkeypatch: pytest.MonkeyPatch, stdout: str) -> None:
             self.stdout = stdout
             self.returncode = 0
 
-    monkeypatch.setattr("scripts.run_language_grid.subprocess.run", lambda *a, **k: _Completed())
+    monkeypatch.setattr(
+        "osm_polygon_description_tag.workflow.grid_driver.subprocess.run",
+        lambda *a, **k: _Completed(),
+    )
 
 
 def test_an_unacknowledged_submission_is_resumed_not_restaged(
@@ -459,3 +455,109 @@ def test_unparseable_intent_is_not_resumed(monkeypatch: pytest.MonkeyPatch) -> N
     _stub_ssh(monkeypatch, "{not json")
 
     assert awaiting_collection(_remote(), "angola-latest.parquet") is False
+
+
+CLI = str(Path(sys.executable).parent / "osm-polygon-description-tag")
+
+
+class _Shell:
+    """Record every command the driver runs and answer from a script."""
+
+    def __init__(self, *replies: tuple[int, str, str]) -> None:
+        self.replies = list(replies)
+        self.calls: list[tuple[object, dict[str, object]]] = []
+
+    def __call__(self, argv: object, **kwargs: object) -> Any:
+        self.calls.append((argv, kwargs))
+        code, stdout, stderr = self.replies.pop(0) if self.replies else (0, "{}", "")
+        return type("Completed", (), {"returncode": code, "stdout": stdout, "stderr": stderr})()
+
+    @property
+    def argvs(self) -> list[object]:
+        return [argv for argv, _ in self.calls]
+
+
+def _shell(monkeypatch: pytest.MonkeyPatch, *replies: tuple[int, str, str]) -> _Shell:
+    shell = _Shell(*replies)
+    monkeypatch.setattr(driver.subprocess, "run", shell)
+    return shell
+
+
+@pytest.fixture(autouse=True)
+def _fixed_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(driver, "utc_now_iso", lambda: "T")
+
+
+def test_run_returns_stdout_and_passes_a_list_with_exact_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shell = _shell(monkeypatch, (0, "out", ""))
+
+    assert driver._run(("a", "b")) == "out"
+    assert shell.calls == [(["a", "b"], {"capture_output": True, "text": True, "check": False})]
+
+
+def test_run_raises_with_the_code_command_and_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
+    _shell(monkeypatch, (3, "", "  broken \n"))
+
+    with pytest.raises(DriverError) as caught:
+        driver._run(["a", "b"])
+
+    assert str(caught.value) == "command failed (3): a b\nbroken"
+
+
+def test_run_json_parses_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
+    _shell(monkeypatch, (0, '{"k": 1}', ""))
+
+    assert driver._run_json(["a"]) == {"k": 1}
+
+
+def test_run_json_refuses_non_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    _shell(monkeypatch, (0, "not json", ""))
+
+    with pytest.raises(DriverError) as caught:
+        driver._run_json(["a", "b"])
+
+    assert str(caught.value) == "command did not emit JSON: a b"
+    assert isinstance(caught.value.__cause__, json.JSONDecodeError)
+
+
+def test_ssh_helpers_target_the_remote_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    shell = _shell(monkeypatch, (0, "plain", ""), (0, '{"a": 2}', ""))
+
+    assert driver._ssh(_remote(), "ls") == "plain"
+    assert driver._ssh_json(_remote(), "cat") == {"a": 2}
+    assert shell.argvs == [["ssh", "nancy", "ls"], ["ssh", "nancy", "cat"]]
+
+
+def test_log_writes_one_sorted_json_line(capsys: pytest.CaptureFixture[str]) -> None:
+    driver._log("evt", b=1, a="x")
+
+    assert capsys.readouterr().out == '{"a": "x", "at": "T", "b": 1, "event": "evt"}\n'
+
+
+def test_bundle_dir_joins_the_root_and_the_slug_once() -> None:
+    remote = Remote("h", "/root/", "g", "s")
+
+    assert remote.bundle_dir("a b.parquet") == "/root/a-b-parquet"
+
+
+def test_options_build_the_remote_and_carry_the_documented_defaults() -> None:
+    options = _args()
+
+    assert options.remote() == _remote()
+    assert (options.project_root, options.ssh_host, options.site) == (Path(), "nancy", "nancy")
+    assert (options.poll_seconds, options.job_timeout_seconds) == (20, 2400)
+    assert (options.max_shards, options.queue) == (0, None)
+
+
+@pytest.mark.parametrize(("report", "expected"), [({"complete": True}, True), ({}, False)])
+def test_shard_is_complete_asks_the_cli(
+    monkeypatch: pytest.MonkeyPatch, report: dict[str, bool], expected: bool
+) -> None:
+    shell = _shell(monkeypatch, (0, json.dumps(report), ""))
+
+    assert driver.shard_is_complete(Path("/run"), "a.parquet") is expected
+    assert shell.argvs == [
+        [CLI, "language", "validate", "--run-dir", "/run", "--shard", "a.parquet"]
+    ]

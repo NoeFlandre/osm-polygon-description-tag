@@ -82,6 +82,9 @@ _ALLOWED_FIELDS: frozenset[str] = frozenset(
         "osmium_executable",
         "osmium_version",
         "hub_repo_sha",
+        "source_root",
+        "data_root",
+        "confirm_repo",
     }
 )
 
@@ -154,7 +157,7 @@ def _shift_backups(backup_chain: list[Path]) -> None:
         src = backup_chain[index - 1]
         dst = backup_chain[index]
         if src.exists() and src.is_file():
-            os.replace(src, dst)
+            Path(src).replace(dst)
 
 
 def _create_active_log(subdir: Path, active_name: str) -> Path:
@@ -168,6 +171,11 @@ def _create_active_log(subdir: Path, active_name: str) -> Path:
 def _fsync_directory(directory: Path) -> None:
     with contextlib.suppress(OSError):
         fsync_dir(directory)
+
+
+# Only the human stderr line is filtered by level; the JSONL keeps everything.
+_INFO_RANK = 20
+_LEVEL_RANKS = {"DEBUG": 10, "INFO": _INFO_RANK, "WARNING": 30, "ERROR": 40}
 
 
 class RunLogger:
@@ -190,6 +198,7 @@ class RunLogger:
         buffer_preflight: bool = False,
         stderr: Any | None = None,
         observer: Callable[[Mapping[str, object]], None] | None = None,
+        stderr_level: str = "INFO",
     ) -> None:
         self._data_root = data_root
         self._run_id = run_id
@@ -199,6 +208,7 @@ class RunLogger:
         self._buffer_preflight = buffer_preflight
         self._stderr = stderr if stderr is not None else sys.stderr
         self._observer = observer
+        self._stderr_rank = _LEVEL_RANKS[stderr_level]
         self._max_bytes = _ROTATE_MAX_BYTES
         self._backups = 5
         self._path: Path | None = None
@@ -249,8 +259,7 @@ class RunLogger:
             "event": name,
             "run_id": self._run_id,
         }
-        for key, value in fields.items():
-            record[key] = value
+        record.update(fields)
         scrubbed = _scrub(record)
         # pragma: no mutate start - ensure_ascii=None equals False; exact JSON bytes are tested
         raw = json.dumps(scrubbed, ensure_ascii=False, sort_keys=True, default=str)
@@ -261,18 +270,21 @@ class RunLogger:
         self._emit(scrubbed, raw)
 
     def _emit(self, record: dict[str, object], raw: str) -> None:
-        line = self._format_human(record)
-        try:
-            self._stderr.write(line + "\n")
-            self._stderr.flush()
-        except Exception:  # noqa: S110 - stderr is best-effort
-            pass
+        if _LEVEL_RANKS.get(str(record["level"]), _INFO_RANK) >= self._stderr_rank:
+            self._write_stderr(self._format_human(record))
         buffered = _BufferedEvent(record, raw)
         with self._lock:
             if self._buffer_preflight or self._handle is None:
                 self._buffered.append(buffered)
                 return
         self._append_persistent(raw)
+
+    def _write_stderr(self, line: str) -> None:
+        try:
+            self._stderr.write(line + "\n")
+            self._stderr.flush()
+        except Exception:  # noqa: S110, BLE001 - stderr is best-effort
+            pass
 
     def _format_human(self, record: dict[str, object]) -> str:
         ts = record.get("ts", "")
@@ -295,7 +307,7 @@ class RunLogger:
         active = subdir / self.ACTIVE_NAME
         _validate_active_log(active)
         self._path = active
-        self._handle = open(active, "ab", buffering=0)  # noqa: SIM115
+        self._handle = Path(active).open("ab", buffering=0)  # noqa: SIM115
 
     def _append_persistent(self, raw: str) -> None:
         with self._lock:
@@ -351,11 +363,11 @@ class RunLogger:
         self._path.unlink()
         _shift_backups(backup_chain)
         if backup_chain:
-            os.replace(staging, backup_chain[0])
+            Path(staging).replace(backup_chain[0])
         else:
             staging.unlink()
         new_active = _create_active_log(subdir, self.ACTIVE_NAME)
-        self._handle = open(new_active, "ab", buffering=0)  # noqa: SIM115
+        self._handle = Path(new_active).open("ab", buffering=0)  # noqa: SIM115
         self._path = new_active
 
     def flush(self) -> None:

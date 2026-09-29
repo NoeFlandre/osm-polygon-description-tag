@@ -360,8 +360,7 @@ def test_clip_longitude_propagates_inside_state_and_boundaries_exactly() -> None
         )
 
     assert result == [(0.0, 0.5), (1.0, 1.0), (0.0, 1.5)]
-    assert [call.args[2] for call in transition.call_args_list] == [0.0, 0.0, 0.0]
-    assert [call.args[3:5] for call in transition.call_args_list] == [
+    assert [call.args[2:4] for call in transition.call_args_list] == [
         (False, False),
         (False, True),
         (True, False),

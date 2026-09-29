@@ -339,6 +339,7 @@ def run_command(argv: Sequence[str], timeout: float) -> CommandResult:
     try:
         completed = subprocess.run(  # noqa: S603
             [executable, *argv[1:]],
+            check=False,
             capture_output=True,
             text=True,
             timeout=timeout,

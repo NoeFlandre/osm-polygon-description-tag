@@ -149,7 +149,8 @@ def _crosses_antimeridian(points: Sequence[tuple[float, float]]) -> bool:
 
 def _unwrap_points(points: Sequence[tuple[float, float]]) -> list[tuple[float, float]]:
     unwrapped = [points[0]]
-    for lon, lat in points[1:]:
+    for raw_lon, lat in points[1:]:
+        lon = raw_lon
         previous_lon = unwrapped[-1][0]
         delta = lon - previous_lon
         if delta > 180.0:  # pragma: no mutate - the boundary computes zero turns
@@ -221,7 +222,6 @@ def _clip_longitude(
             _clip_transition(
                 previous,
                 current,
-                boundary,
                 previous_inside,
                 current_inside,
                 intersection,
@@ -235,7 +235,6 @@ def _clip_longitude(
 def _clip_transition(
     previous: tuple[float, float],
     current: tuple[float, float],
-    boundary: float,
     previous_inside: bool,
     current_inside: bool,
     intersection: Callable[[tuple[float, float], tuple[float, float]], tuple[float, float]],
@@ -267,12 +266,8 @@ def cell_rings(cell: str) -> list[list[tuple[float, float]]]:
 
 
 def _boundary_points(boundary: Sequence[Sequence[float]]) -> list[tuple[float, float]]:
-    points: list[tuple[float, float]] = []
-    for pair in boundary:
-        if len(pair) >= 2:
-            # H3 v4: (lat, lon); flip to (lon, lat) for matplotlib.
-            points.append((float(pair[1]), float(pair[0])))
-    return points
+    # H3 v4: (lat, lon); flip to (lon, lat) for matplotlib.
+    return [(float(pair[1]), float(pair[0])) for pair in boundary if len(pair) >= 2]
 
 
 def _rings_from_boundary(

@@ -13,8 +13,6 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Final
 
-import matplotlib.patches as mpatches
-
 LAND_BASEMAP_FILENAME: Final[str] = "ne_110m_land.geojson"
 _LAND_COLOR: Final[str] = "#e8e0d0"
 _LAND_EDGE: Final[str] = "#b8aa90"
@@ -60,8 +58,10 @@ def _draw_ring(ax: Any, ring: Sequence[Sequence[float]]) -> None:
         coordinates = [(float(lon), float(lat)) for lon, lat in ring]
     except (TypeError, ValueError):
         return
+    from matplotlib import patches
+
     ax.add_patch(
-        mpatches.Polygon(
+        patches.Polygon(
             coordinates,
             closed=True,
             facecolor=_LAND_COLOR,

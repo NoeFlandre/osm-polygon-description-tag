@@ -14,6 +14,9 @@ from pathlib import Path
 from unittest.mock import Mock, call, patch
 
 import matplotlib
+import matplotlib.colors
+import matplotlib.patches
+import matplotlib.ticker
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -43,6 +46,7 @@ from osm_polygon_description_tag.dataset.geography.area_histogram import (
 from osm_polygon_description_tag.dataset.geography.area_rendering import (
     _format_count_tick,
 )
+from osm_polygon_description_tag.dataset.geography.mpl import pyplot
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     RunCounts,
@@ -202,7 +206,7 @@ def test_aggregate_area_histogram_returns_zeroed_labels_for_empty_dataset(
     """An empty (but finalized) data root returns the all-zero label set."""
     data_root = _make_finalized_area_histogram_data_root(tmp_path, {})
     counts = aggregate_area_histogram(data_root)
-    assert dict(counts) == {label: 0 for label in AREA_BUCKET_LABELS}
+    assert dict(counts) == dict.fromkeys(AREA_BUCKET_LABELS, 0)
 
 
 def test_aggregate_area_histogram_buckets_finite_areas(tmp_path: Path) -> None:
@@ -596,7 +600,7 @@ def test_render_area_histogram_orchestrates_helpers_and_closes_figure(
             area_rendering_module, "_build_caption", return_value=caption
         ) as build_caption,
         patch.object(
-            area_rendering_module.plt,
+            pyplot(),
             "subplots",
             return_value=(fig, axes),
         ) as subplots,
@@ -613,7 +617,7 @@ def test_render_area_histogram_orchestrates_helpers_and_closes_figure(
             area_rendering_module, "_set_area_limits", side_effect=record("limits")
         ) as set_limits,
         patch.object(area_rendering_module, "_atomic_save_png") as atomic_save,
-        patch.object(area_rendering_module.plt, "close") as close,
+        patch.object(pyplot(), "close") as close,
     ):
         result = area_rendering_module.render_area_histogram(counts, output_path)
 
@@ -634,7 +638,7 @@ def test_render_area_histogram_orchestrates_helpers_and_closes_figure(
 
 
 def test_render_area_histogram_writes_png(tmp_path: Path) -> None:
-    counts = {label: 1 for label in AREA_BUCKET_LABELS}
+    counts = dict.fromkeys(AREA_BUCKET_LABELS, 1)
     out = tmp_path / "hist.png"
     result = render_area_histogram(counts, out)
     assert isinstance(result, AreaHistogramResult)
@@ -655,7 +659,7 @@ def test_render_area_histogram_caption_reports_totals(tmp_path: Path) -> None:
 
 
 def test_render_area_histogram_caption_for_empty_dataset(tmp_path: Path) -> None:
-    counts = {label: 0 for label in AREA_BUCKET_LABELS}
+    counts = dict.fromkeys(AREA_BUCKET_LABELS, 0)
     result = render_area_histogram(counts, tmp_path / "hist.png")
     assert "0 polygons" in result.caption
     assert "no data" in result.caption.lower()
@@ -686,7 +690,7 @@ def test_render_area_histogram_atomic_cleanup_on_failure(tmp_path: Path) -> None
     """A failure inside the renderer cleans up the temporary file."""
     from matplotlib.figure import Figure
 
-    figures_before = area_rendering_module.plt.get_fignums()
+    figures_before = pyplot().get_fignums()
     out = tmp_path / "hist.png"
     out.write_bytes(b"original")
     with (
@@ -697,12 +701,12 @@ def test_render_area_histogram_atomic_cleanup_on_failure(tmp_path: Path) -> None
 
     assert out.read_bytes() == b"original"
     assert list(tmp_path.glob(".hist.png.*.tmp")) == []
-    assert area_rendering_module.plt.get_fignums() == figures_before
+    assert pyplot().get_fignums() == figures_before
 
 
 def test_render_area_histogram_byte_stable_for_empty_dataset(tmp_path: Path) -> None:
     """An empty dataset still produces a byte-identical no-data PNG."""
-    counts = {label: 0 for label in AREA_BUCKET_LABELS}
+    counts = dict.fromkeys(AREA_BUCKET_LABELS, 0)
     a = tmp_path / "a.png"
     b = tmp_path / "b.png"
     render_area_histogram(counts, a)
@@ -714,10 +718,10 @@ def test_render_area_histogram_does_not_draw_zero_count_bars(tmp_path: Path) -> 
     """Empty bins remain visually empty even though the x-axis is logarithmic."""
     import osm_polygon_description_tag.dataset.geography.area_rendering as rendering
 
-    counts = {label: 0 for label in AREA_BUCKET_LABELS}
+    counts = dict.fromkeys(AREA_BUCKET_LABELS, 0)
     counts[AREA_BUCKET_LABELS[2]] = 4
     captured: list[list[float]] = []
-    real_barh = rendering.plt.Axes.barh
+    real_barh = rendering.pyplot().Axes.barh
 
     def capture_barh(
         self: object, _positions: object, widths: object, *args: object, **kwargs: object
@@ -726,7 +730,7 @@ def test_render_area_histogram_does_not_draw_zero_count_bars(tmp_path: Path) -> 
         return real_barh(self, _positions, widths, *args, **kwargs)
 
     monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(rendering.plt.Axes, "barh", capture_barh)
+    monkeypatch.setattr(rendering.pyplot().Axes, "barh", capture_barh)
     try:
         render_area_histogram(counts, tmp_path / "hist.png")
     finally:

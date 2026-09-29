@@ -11,7 +11,7 @@ from typing import Any, ClassVar
 
 import pytest
 
-import osm_polygon_description_tag.osm.extraction as extraction
+from osm_polygon_description_tag.osm import extraction
 from osm_polygon_description_tag.osm.extraction import OsmiumExportError
 
 

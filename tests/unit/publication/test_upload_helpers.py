@@ -11,8 +11,7 @@ from typing import Any
 
 import pytest
 
-import osm_polygon_description_tag.publication.upload as upload
-import osm_polygon_description_tag.publication.verification as verification
+from osm_polygon_description_tag.publication import upload, verification
 from osm_polygon_description_tag.publication.models import (
     PublicationError,
     UploadItem,

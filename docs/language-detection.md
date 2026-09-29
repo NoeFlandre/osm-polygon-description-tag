@@ -154,7 +154,7 @@ auditing the result, so each is independently repeatable.
 ### 1. Freeze the input snapshot
 
 ```bash
-uv run osm-polygon-description-tag language prepare --source-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root/data" --run-dir "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root/language-run-lingua-glotlid-v3-full" --project-root .
+uv run osm-polygon-description-tag language prepare --source-root "/path/to/data-root/data" --run-dir "/path/to/data-root/language-run-lingua-glotlid-v3-full" --project-root .
 ```
 
 This writes `snapshot.json`, binding every source Parquet's relative path,
@@ -382,7 +382,7 @@ OAR and quota tools. Check these prerequisites before an authorised run.
 
 ### Driving all 386 shards
 
-`scripts/run_language_grid.py` sequences the per-shard protocol below; it adds
+`osm-polygon-description-tag language grid run` sequences the per-shard protocol below; it adds
 no policy of its own. It stages and transfers one shard, submits it through the
 CLI's own apply gate, polls until the scheduler reports a terminal state, then
 collects and acknowledges before touching the next shard. Anything reported as
@@ -395,7 +395,7 @@ over SSH instead, which is the separately arranged authorised transfer this
 runbook requires.
 
 ```bash
-uv run python -m scripts.run_language_grid \
+uv run osm-polygon-description-tag language grid run \
   --run-dir data-root/language-run-lingua-glotlid-v3-full \
   --source-root data-root/data --project-root . \
   --retrieval-dir data-root/language-retrieval \

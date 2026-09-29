@@ -167,7 +167,7 @@ def test_the_requested_policy_reaches_the_constructed_detector(
     assert detector.identity.policy == policy
 
 
-def test_a_model_whose_digest_is_not_the_pinned_artifact_is_refused_exactly(
+def test_a_glotlid_model_whose_digest_is_not_the_pinned_artifact_is_refused_exactly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     loader_calls: list[object] = []

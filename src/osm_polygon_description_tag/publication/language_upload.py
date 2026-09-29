@@ -299,7 +299,7 @@ def _upload(plan: UploadPlan, hub: LanguageHub, parent_revision: str) -> str | N
     """
     try:
         hub.upload(plan, parent_revision=parent_revision)
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - any upload error makes the outcome ambiguous
         return f"{type(error).__name__}: {error}"
     return None
 

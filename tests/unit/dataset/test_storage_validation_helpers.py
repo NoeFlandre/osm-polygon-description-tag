@@ -13,7 +13,7 @@ from hypothesis import strategies as st
 from shapely import to_wkb
 from shapely.geometry import Polygon
 
-import osm_polygon_description_tag.dataset.storage as storage
+from osm_polygon_description_tag.dataset import storage
 from osm_polygon_description_tag.dataset.manifest import ManifestError
 from osm_polygon_description_tag.dataset.storage import (
     StorageError,

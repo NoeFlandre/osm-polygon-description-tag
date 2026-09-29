@@ -1,8 +1,8 @@
 """Lazy, pinned Lingua adapter and conservative score classification."""
 
-import importlib.metadata as metadata
 import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from importlib import metadata
 from pathlib import Path
 from typing import Protocol, cast
 

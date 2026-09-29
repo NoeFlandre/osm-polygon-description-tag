@@ -15,10 +15,10 @@ from typing import Any
 
 import pytest
 from click import Command, Context
-from typer._click.exceptions import ClickException, UsageError
 
-import osm_polygon_description_tag.cli as cli
-import osm_polygon_description_tag.runtime.presentation as presentation
+from osm_polygon_description_tag import cli
+from osm_polygon_description_tag.runtime import presentation
+from osm_polygon_description_tag.runtime.click_compat import ClickException, UsageError
 
 
 @pytest.fixture
@@ -36,7 +36,11 @@ def paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         assert isinstance(args, SimpleNamespace), f"handler passed {args!r} instead of its args"
         return resolved
 
+    def _data_root(args: object) -> Path:
+        return _resolve(args).data_root
+
     monkeypatch.setattr(cli, "_resolve_paths", _resolve)
+    monkeypatch.setattr(cli, "_data_root", _data_root)
     return resolved
 
 
@@ -151,6 +155,15 @@ def test_cli_resolve_paths_uses_supplied_roots(tmp_path: Path) -> None:
 
     assert paths.source_root == args.source_root
     assert paths.data_root == args.data_root
+
+
+def test_cli_data_root_ignores_a_missing_source_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OSM_POLYGON_SOURCE_ROOT", raising=False)
+    args = SimpleNamespace(source_root=None, data_root=tmp_path)
+
+    assert cli._data_root(args) == tmp_path
 
 
 def test_cli_print_json_is_sorted_and_indented(capsys: pytest.CaptureFixture[str]) -> None:
@@ -303,6 +316,7 @@ def test_cli_run_and_publish_wires_tracker_logger_and_presenter(
     logger_calls: list[dict[str, object]] = []
     logger_instances: list[object] = []
     logger_closed: list[bool] = []
+    logger_events: list[dict[str, object]] = []
     workflow_calls: list[dict[str, object]] = []
 
     class FakeTracker:
@@ -314,6 +328,9 @@ def test_cli_run_and_publish_wires_tracker_logger_and_presenter(
         def __init__(self, **kwargs: object) -> None:
             logger_calls.append(kwargs)
             logger_instances.append(self)
+
+        def event(self, name: str, **fields: object) -> None:
+            logger_events.append({"event": name, **fields})
 
         def close(self) -> None:
             logger_closed.append(True)
@@ -339,7 +356,18 @@ def test_cli_run_and_publish_wires_tracker_logger_and_presenter(
         "buffer_preflight": True,
         "stderr": cli.sys.stderr,
         "observer": args.presenter.observe,
+        "stderr_level": "INFO",
     }
+    assert logger_events == [
+        {
+            "event": "resolved_config",
+            "level": "DEBUG",
+            "source_root": str(args.source_root),
+            "data_root": str(args.data_root),
+            "osmium_executable": "fake-osmium",
+            "confirm_repo": "owner/dataset",
+        }
+    ]
     assert workflow_calls == [
         {
             "paths": cli._resolve_paths(args),

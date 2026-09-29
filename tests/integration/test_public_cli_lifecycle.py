@@ -536,15 +536,10 @@ def test_uploads_only_contain_per_pbf_and_metadata_files(
         assert not any(item.startswith("logs/") for item in includes)
         assert not any(item.startswith(".cache") for item in includes)
         for item in includes:
-            assert (
-                item.endswith(".parquet")
-                or item.endswith(".manifest.json")
-                or item
-                in {
-                    "README.md",
-                    "stats.json",
-                    "assets/description_polygon_density.png",
-                    "assets/area_distribution.png",
-                    "assets/dataset-card-hero.png",
-                }
-            )
+            assert item.endswith((".parquet", ".manifest.json")) or item in {
+                "README.md",
+                "stats.json",
+                "assets/description_polygon_density.png",
+                "assets/area_distribution.png",
+                "assets/dataset-card-hero.png",
+            }

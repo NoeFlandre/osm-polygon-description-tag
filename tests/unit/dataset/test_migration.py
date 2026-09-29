@@ -403,7 +403,7 @@ def test_promote_migrated_parquet_fsyncs_a_binary_handle_before_replace(
         observed["open"] = (path, mode)
         return Handle()
 
-    monkeypatch.setattr(migration, "open", fake_open, raising=False)
+    monkeypatch.setattr(Path, "open", fake_open)
     monkeypatch.setattr(
         migration.os, "fsync", lambda descriptor: observed.setdefault("fsync", descriptor)
     )

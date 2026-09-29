@@ -13,11 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
-import matplotlib
-
-matplotlib.use("Agg")  # non-interactive backend for CI/macOS terminal runs
-
-import matplotlib.pyplot as plt
 import numpy as np
 
 from osm_polygon_description_tag.dataset.geography.area_histogram import (
@@ -26,6 +21,7 @@ from osm_polygon_description_tag.dataset.geography.area_histogram import (
 from osm_polygon_description_tag.dataset.geography.atomic import (
     atomic_save_png as _atomic_save_png,
 )
+from osm_polygon_description_tag.dataset.geography.mpl import pyplot
 
 # Shared palette with the H3 density map so the dataset card feels like
 # one document.
@@ -108,6 +104,7 @@ def render_area_histogram(
     """
     labels, values = _bar_labels(counts)
     caption = _build_caption(counts)
+    plt = pyplot()
     fig, ax = plt.subplots(figsize=_FIGSIZE, dpi=_DPI)
     try:
         positions = np.arange(len(labels))

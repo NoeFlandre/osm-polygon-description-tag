@@ -17,6 +17,7 @@ The verifier returns the real, verified commit SHA.
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -91,10 +92,9 @@ class _FakeHubApi:
         content = self._files.get(filename)
         if content is None:
             raise LookupError(filename)
-        import os as _os
         import tempfile
 
-        handle, path_str = tempfile.mkstemp(prefix="hf-", suffix=f"-{_os.path.basename(filename)}")
+        handle, path_str = tempfile.mkstemp(prefix="hf-", suffix=f"-{Path(filename).name}")
         _ = handle
         from pathlib import Path as _Path
 
@@ -173,11 +173,11 @@ def test_default_verifier_uses_lfs_sha_when_present(patched_hf) -> None:
     # Hub reports LFS metadata directly (without size verification).
     class _LfsApi(_FakeHubApi):
         def get_paths_info(self, repo_id: str, paths, *, revision: str, repo_type: str = "dataset"):  # type: ignore[override]
-            out = []
-            for path in paths:
-                if path == "data/a.parquet":
-                    out.append(_LfsPathInfo(path, len(lfs_data), lfs_sha))
-            return out
+            return [
+                _LfsPathInfo(path, len(lfs_data), lfs_sha)
+                for path in paths
+                if path == "data/a.parquet"
+            ]
 
         def get_hf_file_metadata(self, *args: Any, **kwargs: Any) -> Any:
             raise AssertionError("Should not be called when LFS sha present")

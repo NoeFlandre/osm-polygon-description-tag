@@ -910,8 +910,11 @@ def test_run_metadata_upload_uses_default_executor_with_confirmation(
         "timeout": 12.0,
         "retry_observer": seen["retry_observer"],
     }
-    assert callable(seen["retry_observer"])
     assert logger.events == []
+    seen["retry_observer"](attempt=2, reason="timeout")  # type: ignore[operator]
+    assert logger.events == [
+        ("upload_retry", {"stage": "metadata", "attempt": 2, "reason": "timeout"})
+    ]
 
 
 def test_run_metadata_upload_accepts_injected_runner_and_rejects_empty_revision(

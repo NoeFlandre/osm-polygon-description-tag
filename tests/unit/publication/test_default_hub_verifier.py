@@ -131,10 +131,9 @@ class _FakeHubApi:
         entry = repo.files.get(filename) if repo else None
         if entry is None:
             raise LookupError(filename)
-        import os as _os
         import tempfile
 
-        handle, path_str = tempfile.mkstemp(prefix="hf-", suffix=f"-{_os.path.basename(filename)}")
+        handle, path_str = tempfile.mkstemp(prefix="hf-", suffix=f"-{Path(filename).name}")
         _ = handle
         from pathlib import Path as _Path
 
@@ -235,7 +234,6 @@ def test_default_hub_verifier_factory_creates_hfapi(monkeypatch: pytest.MonkeyPa
     )
 
     factory = default_hub_verifier_factory()
-    assert callable(factory)
     # The verifier invokes the real HfApi lazily.
     items = (
         UploadItem(
@@ -764,7 +762,10 @@ def test_default_verifier_fails_closed_on_download_error(
 class _RecordingApi:
     """Fake ``HfApi`` that records exactly how it was called."""
 
-    def __init__(self, text: str = "card", sha: str = "revision-sha") -> None:
+    def __init__(
+        self, directory: Path | None = None, text: str = "card", sha: str = "revision-sha"
+    ) -> None:
+        self.directory = directory
         self.text = text
         self.sha = sha
         self.download_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
@@ -777,10 +778,8 @@ class _RecordingApi:
 
     def hf_hub_download(self, *args: object, **kwargs: object) -> str:
         self.download_calls.append((args, dict(kwargs)))
-        import tempfile
-
-        directory = tempfile.mkdtemp()
-        target = Path(directory) / "downloaded.md"
+        assert self.directory is not None, "a downloading fake needs a directory"
+        target = self.directory / "downloaded.md"
         target.write_text(self.text, encoding="utf-8")
         return str(target)
 
@@ -792,7 +791,7 @@ def _install(monkeypatch: pytest.MonkeyPatch, api: object) -> None:
 
 
 def test_read_file_requests_the_exact_path_at_the_exact_revision(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Reading the remote card must be pinned to one revision and repo type.
 
@@ -800,7 +799,7 @@ def test_read_file_requests_the_exact_path_at_the_exact_revision(
     revision the release was planned against, which is precisely the race the
     parented commit exists to prevent.
     """
-    api = _RecordingApi(text="remote card")
+    api = _RecordingApi(tmp_path, text="remote card")
     _install(monkeypatch, api)
 
     result = default_hub_verifier_factory().read_file(REPO_ID, "README.md", revision="abc123")
@@ -814,7 +813,7 @@ def test_read_file_requests_the_exact_path_at_the_exact_revision(
 def test_read_file_passes_the_cache_directory_only_when_one_was_configured(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    api = _RecordingApi()
+    api = _RecordingApi(tmp_path)
     _install(monkeypatch, api)
 
     default_hub_verifier_factory(cache_dir=tmp_path).read_file(
@@ -950,7 +949,7 @@ def test_a_failed_inventory_lookup_names_the_revision_it_used(
 
 
 def test_default_hub_verifier_factory_uses_lazy_api(monkeypatch: pytest.MonkeyPatch) -> None:
-    import osm_polygon_description_tag.publication.verification as verification
+    from osm_polygon_description_tag.publication import verification
 
     class _Api:
         def whoami(self) -> dict[str, str]:

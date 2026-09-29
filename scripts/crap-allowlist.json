@@ -1,0 +1,28 @@
+{
+  "issue": "https://github.com/NoeFlandre/osm-polygon-description-tag/issues/77",
+  "reason": "scripts/ gate logic was never measured; these functions predate the budget",
+  "expires": "2026-12-31",
+  "functions": [
+    "scripts/check_mutation_score.py::build_metadata_report",
+    "scripts/check_mutation_score.py::scoped_metadata_paths",
+    "scripts/coverage_associations.py::associations_for_file",
+    "scripts/coverage_associations.py::build_associations",
+    "scripts/coverage_associations.py::mangled_names.visit",
+    "scripts/quality_metrics.py::_coverage_for_block",
+    "scripts/quality_metrics.py::_crap_budget_violations",
+    "scripts/quality_metrics.py::_scored_blocks",
+    "scripts/quality_metrics.py::_write_markdown",
+    "scripts/quality_metrics.py::build_report",
+    "scripts/quality_metrics.py::main",
+    "scripts/run_mutation_gate.py::_MutationScratchJanitor.__exit__",
+    "scripts/run_mutation_gate.py::_MutationScratchJanitor._run",
+    "scripts/run_mutation_gate.py::_process_is_alive",
+    "scripts/run_mutation_gate.py::_remove_finished_worker_dirs",
+    "scripts/run_mutation_gate.py::main",
+    "scripts/run_mutation_gate.py::parse_changed_lines",
+    "scripts/run_mutation_gate.py::run_gate",
+    "scripts/run_mutation_gate.py::unresolved_mutants",
+    "scripts/show_mutant.py::main",
+    "scripts/show_mutant.py::mutant_diff"
+  ]
+}

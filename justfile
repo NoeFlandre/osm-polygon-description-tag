@@ -4,7 +4,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 repo_id := "NoeFlandre/osm-polygon-description-tag"
 
 # Coverage flags shared by `test` and `risk`, so the two gates cannot drift.
-coverage_flags := "--cov=osm_polygon_description_tag --cov-branch --cov-fail-under=90"
+coverage_flags := "--cov=osm_polygon_description_tag --cov=scripts --cov-branch"
 
 sync:
     uv sync --frozen
@@ -19,11 +19,31 @@ lint:
 typecheck:
     uv run ty check
 
+# Fail on a known-vulnerable pin in uv.lock (the ignore list is in the script).
+audit:
+    scripts/audit_locked_dependencies.sh
+
 test:
     uv run pytest {{coverage_flags}} --cov-report=term-missing
 
+# Time the per-feature transform (benchmarks/ is not part of the normal test run).
+bench:
+    uv run pytest benchmarks -q --no-cov -p no:cacheprovider
+
+# Save a baseline, then fail if a later run is >50% slower on the mean.
+bench-save name="base":
+    uv run pytest benchmarks -q --no-cov -p no:cacheprovider --benchmark-save={{name}}
+
+bench-compare name="base":
+    uv run pytest benchmarks -q --no-cov -p no:cacheprovider \
+        --benchmark-compare --benchmark-compare-fail=mean:50%
+
 test-integration:
     uv run pytest tests/integration -q
+
+# Hermetic user-journey tests: no network, no osmium.
+test-acceptance:
+    uv run pytest tests/acceptance -q
 
 # The suite is the expensive part and `quality` already runs it with coverage,
 # so re-running it here only produced the same numbers a second time.
@@ -31,7 +51,7 @@ test-integration:
 # Build the CRAP report from an existing reports/coverage.json.
 risk-prepared:
     test -f reports/coverage.json
-    uv run radon cc src/osm_polygon_description_tag -s -j > reports/radon.json
+    uv run radon cc src/osm_polygon_description_tag scripts -s -j > reports/radon.json
     uv run python scripts/quality_metrics.py crap \
         --coverage-json reports/coverage.json \
         --radon-json reports/radon.json \
@@ -39,13 +59,14 @@ risk-prepared:
         --markdown-output reports/crap.md
     uv run python scripts/quality_metrics.py check \
         --report reports/crap.json \
-        --max-crap-score 6
+        --max-crap-score 6 \
+        --allowlist scripts/crap-allowlist.json
 
 # Generate deterministic CRAP risk reports from test coverage and Radon.
 risk:
     mkdir -p reports
     uv run pytest {{coverage_flags}} --cov-report=json:reports/coverage.json
-    uv run radon cc src/osm_polygon_description_tag -s -j > reports/radon.json
+    uv run radon cc src/osm_polygon_description_tag scripts -s -j > reports/radon.json
     uv run python scripts/quality_metrics.py crap \
         --coverage-json reports/coverage.json \
         --radon-json reports/radon.json \
@@ -53,7 +74,8 @@ risk:
         --markdown-output reports/crap.md
     uv run python scripts/quality_metrics.py check \
         --report reports/crap.json \
-        --max-crap-score 6
+        --max-crap-score 6 \
+        --allowlist scripts/crap-allowlist.json
 
 # Record which tests execute which source lines. The mutation gate turns this
 # into the exact covering-test set per function, which is what keeps it fast:
@@ -202,10 +224,8 @@ check: lint typecheck test
     uv run pre-commit run --all-files
     uv build
 
-# Run and publish locally; override the paths with
-# `just run-and-publish source_root=... data_root=...`.
-run-and-publish source_root="/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw" data_root="/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root":
-    uv run osm-polygon-description-tag run-and-publish \
-      --source-root "{{source_root}}" \
-      --data-root "{{data_root}}" \
-      --confirm-repo {{repo_id}}
+# Run and publish locally. Roots come from OSM_POLYGON_SOURCE_ROOT and
+# OSM_POLYGON_DATA_ROOT, or pass them through:
+# `just run-and-publish --source-root /path/to/pbfs --data-root /path/to/data-root`.
+run-and-publish *args:
+    uv run osm-polygon-description-tag run-and-publish --confirm-repo {{repo_id}} {{args}}

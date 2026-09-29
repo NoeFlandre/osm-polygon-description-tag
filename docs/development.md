@@ -147,8 +147,24 @@ external generated-data root at `/data`, and mounts its `/data/raw` source
 directory read-only:
 
 ```bash
-just docker-run "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root"
+just docker-run "/path/to/data-root"
 ```
+
+### Environment the image honours
+
+| Variable | Default in the image | Purpose |
+| --- | --- | --- |
+| `OSM_POLYGON_SOURCE_ROOT` | `/data/raw` | Immutable PBF input (mount read-only) |
+| `OSM_POLYGON_DATA_ROOT` | `/data` | Checkpoints, logs, manifests and artifacts |
+| `HF_TOKEN` | unset | Hub publication only; never baked into the image |
+| `HF_HUB_OFFLINE` | unset | Set to `1` to forbid any Hub access |
+| `HOME` | `/tmp` | Writable home for caches when the root filesystem is read-only |
+
+`compose.yaml` runs the same image through a `pipeline` service (bind-mounting
+`$DATA_ROOT` and `$DATA_ROOT/raw` read-only, as the current user) and a
+`test` service (`docker compose --profile test run --rm test`) for the
+development target. The image carries OCI labels for its source, licence and
+title.
 
 The mounted data root retains Parquets, manifests, logs, caches, and
 publication state. `Ctrl-C` is safe; rerunning the command resumes completed
@@ -165,7 +181,8 @@ uv run pre-commit run --all-files
 
 ## The Grid'5000 driver
 
-Two properties of `scripts/run_language_grid.py` are easy to undo by accident.
+Two properties of the driver (`workflow/grid_driver.py`, run as
+`language grid run`) are easy to undo by accident.
 
 **Never route the driver's CLI calls through `uv run`.** `uv run` holds a lock
 on the shared uv cache for the whole command, and the driver invokes the CLI

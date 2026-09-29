@@ -56,7 +56,7 @@ def test_the_daytime_window_is_evaluated_in_paris_not_in_the_local_timezone(
 
 def test_a_naive_policy_time_is_refused_with_its_exact_reason() -> None:
     with pytest.raises(GridPolicyError) as caught:
-        is_weekday_daytime(datetime(2026, 9, 15, 22, 0))
+        is_weekday_daytime(datetime(2026, 9, 15, 22, 0))  # noqa: DTZ001 - naive on purpose
 
     assert str(caught.value) == "policy time must be timezone aware"
 
@@ -223,8 +223,8 @@ def test_stale_or_future_evidence_is_unknown_with_its_exact_reason() -> None:
 @pytest.mark.parametrize(
     ("moment", "captured_at", "label"),
     [
-        (datetime(2026, 9, 15, 22, 0), _NIGHT, "policy evaluation time"),
-        (_NIGHT, datetime(2026, 9, 15, 22, 0), "policy evidence time"),
+        (datetime(2026, 9, 15, 22, 0), _NIGHT, "policy evaluation time"),  # noqa: DTZ001 - naive on purpose
+        (_NIGHT, datetime(2026, 9, 15, 22, 0), "policy evidence time"),  # noqa: DTZ001 - naive on purpose
     ],
 )
 def test_a_naive_freshness_argument_is_refused_under_its_own_label(

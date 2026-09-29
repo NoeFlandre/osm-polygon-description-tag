@@ -44,7 +44,7 @@ class ManifestError(ValueError):
 def file_sha256(path: Path) -> str:
     """Return the hex SHA-256 of ``path`` without mutating it."""
     digest = hashlib.sha256()
-    with open(path, "rb") as handle:
+    with Path(path).open("rb") as handle:
         while True:
             chunk = handle.read(_SHA256_CHUNK)
             if not chunk:
@@ -262,9 +262,9 @@ def write_manifest(manifest: Manifest, path: Path) -> None:
         encoded = manifest.to_json().encode("utf-8")
         # pragma: no mutate end
         temp.write_bytes(encoded)
-        with open(temp, "rb") as handle:  # pragma: no mutate - only the descriptor is used
+        with Path(temp).open("rb") as handle:  # pragma: no mutate - only the descriptor is used
             os.fsync(handle.fileno())
-        os.replace(temp, path)
+        Path(temp).replace(path)
         _fsync_dir(path.parent)
     finally:
         if temp.exists():

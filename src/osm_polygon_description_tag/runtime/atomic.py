@@ -50,7 +50,7 @@ def atomic_write_via(path: Path, produce: Callable[[Path], object]) -> None:
     try:
         produce(temp)
         fsync_file(temp)
-        os.replace(temp, path)
+        Path(temp).replace(path)
         fsync_dir(path.parent)
     finally:
         temp.unlink(missing_ok=True)

@@ -15,6 +15,7 @@ from osm_polygon_description_tag.dataset.canonical_rows import (
     CANONICAL_RANK_COLUMNS,
     canonical_geometry_wkb_sql,
     canonical_rows_sql,
+    canonical_rows_with_text_flag_sql,
 )
 from osm_polygon_description_tag.dataset.constants import DEFAULT_ARROW_BATCH_SIZE
 from osm_polygon_description_tag.dataset.text import sql_literal
@@ -176,6 +177,29 @@ def _read_unique_rows(
         ) from error
 
 
+def iter_unique_parquet_batches_with_text_flag(
+    data_root: Path,
+    *,
+    columns: Sequence[str],
+    batch_size: int = _BATCH_SIZE,
+) -> Iterator[pa.RecordBatch]:
+    """Yield plain- and text-canonical rows in one pass, flagged by ``_text_canonical``.
+
+    Lets a caller validate every plain-canonical row and use only the
+    text-canonical ones without running the ranking query twice.
+    """
+    _require_batch_size(batch_size)
+    paths = _parquet_paths(data_root)
+    if not paths:
+        return
+    query = canonical_rows_with_text_flag_sql(f"({_parquet_relation(paths, columns)})", columns)
+    connection = _open_unique_rows_connection(data_root)
+    try:
+        yield from _read_unique_rows(connection, query, batch_size, data_root)
+    finally:
+        connection.close()
+
+
 def iter_unique_parquet_batches(
     data_root: Path,
     *,
@@ -210,4 +234,9 @@ def iter_unique_parquet_batches(
         connection.close()
 
 
-__all__ = ["UniqueRowsError", "iter_unique_parquet_batches", "unique_rows_sql"]
+__all__ = [
+    "UniqueRowsError",
+    "iter_unique_parquet_batches",
+    "iter_unique_parquet_batches_with_text_flag",
+    "unique_rows_sql",
+]

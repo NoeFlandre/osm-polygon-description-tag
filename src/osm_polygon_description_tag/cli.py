@@ -10,13 +10,13 @@ import os
 import sys
 import uuid
 from collections.abc import Callable, Sequence
+from importlib.metadata import version as package_version
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Annotated, Any
 
 import typer
 from typer import rich_utils
-from typer._click.exceptions import ClickException, Exit, UsageError
 
 from osm_polygon_description_tag.dataset.docs import generate_dataset_docs
 from osm_polygon_description_tag.dataset.languages.detector import LanguageDetectionError
@@ -42,7 +42,13 @@ from osm_polygon_description_tag.publication import (
     release_metadata,
 )
 from osm_polygon_description_tag.publication.verification import HubVerificationError
-from osm_polygon_description_tag.runtime.config import Paths
+from osm_polygon_description_tag.runtime.click_compat import ClickException, Exit, UsageError
+from osm_polygon_description_tag.runtime.config import (
+    MissingPathError,
+    Paths,
+    UnsafePathError,
+    resolve_data_root,
+)
 from osm_polygon_description_tag.runtime.logging import RunLogger
 from osm_polygon_description_tag.runtime.presentation import TerminalPresenter, print_json
 from osm_polygon_description_tag.runtime.resources import (
@@ -50,6 +56,7 @@ from osm_polygon_description_tag.runtime.resources import (
     osmium_export_config,
 )
 from osm_polygon_description_tag.workflow.build import BuildResult, build_all, build_one
+from osm_polygon_description_tag.workflow.grid_driver import DriverError
 from osm_polygon_description_tag.workflow.orchestrator import (
     OrchestratorError,
     run_and_publish,
@@ -64,20 +71,76 @@ app = typer.Typer(
 )
 app.add_typer(language_app, name="language")
 
-SourceRoot = Annotated[Path | None, typer.Option("--source-root")]
-DataRoot = Annotated[Path | None, typer.Option("--data-root")]
-Osmium = Annotated[str, typer.Option("--osmium")]
+SourceRoot = Annotated[
+    Path | None,
+    typer.Option(
+        "--source-root",
+        help="Immutable PBF directory [default: $OSM_POLYGON_SOURCE_ROOT]. "
+        "Only commands that read PBFs use it.",
+    ),
+]
+DataRoot = Annotated[
+    Path | None,
+    typer.Option(
+        "--data-root",
+        help="Generated-data directory [default: $OSM_POLYGON_DATA_ROOT].",
+    ),
+]
+Osmium = Annotated[
+    str,
+    typer.Option("--osmium", help="osmium executable. Only commands that read PBFs use it."),
+]
+
+_DISTRIBUTION = "osm-polygon-description-tag"
+
+# stderr threshold for human-readable event lines, set by -v / -q. The JSONL
+# log always records every event.
+_verbosity = SimpleNamespace(stderr_level="INFO")
+
+
+def _show_version(value: bool) -> None:
+    if value:
+        typer.echo(package_version(_DISTRIBUTION))
+        raise Exit
+
+
+@app.callback()
+def _global_options(
+    version: Annotated[  # noqa: ARG001 - consumed by its eager callback
+        bool,
+        typer.Option(
+            "--version",
+            callback=_show_version,
+            is_eager=True,
+            help="Print the package version and exit.",
+        ),
+    ] = False,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "-v", "--verbose", help="Also print DEBUG events, such as the resolved configuration."
+        ),
+    ] = False,
+    quiet: Annotated[
+        bool, typer.Option("-q", "--quiet", help="Print only WARNING and ERROR events.")
+    ] = False,
+) -> None:
+    """Build, validate and publish the OSM polygon description-tag dataset."""
+    if verbose and quiet:
+        raise UsageError("--verbose and --quiet cannot be combined")
+    _verbosity.stderr_level = "DEBUG" if verbose else "WARNING" if quiet else "INFO"
 
 
 def _resolve_paths(args: SimpleNamespace) -> Paths:
-    defaults = Paths.defaults()
-    return Paths(
-        source_root=args.source_root or defaults.source_root,
-        data_root=args.data_root or defaults.data_root,
-    ).validate()
+    return Paths.resolve(args.source_root, args.data_root)
 
 
-class _Interrupted(Exception):
+def _data_root(args: SimpleNamespace) -> Path:
+    """Data-only commands need no source root."""
+    return resolve_data_root(args.data_root)
+
+
+class _Interrupted(Exception):  # noqa: N818 - a control-flow signal, not an error
     """Carry Ctrl-C through Typer without its default exit-code conversion."""
 
 
@@ -171,8 +234,8 @@ def handle_build_all(args: SimpleNamespace) -> int:
 
 
 def handle_validate(args: SimpleNamespace) -> int:
-    paths = _resolve_paths(args)
-    data_dir = paths.data_root / "data"
+    data_root = _data_root(args)
+    data_dir = data_root / "data"
     if not data_dir.is_dir():
         raise ValueError(f"missing data directory: {data_dir}")
     rows_total = 0
@@ -185,8 +248,8 @@ def handle_validate(args: SimpleNamespace) -> int:
 
 
 def handle_card(args: SimpleNamespace) -> int:
-    paths = _resolve_paths(args)
-    stats = generate_dataset_docs(paths.data_root, dataset_card_template())
+    data_root = _data_root(args)
+    stats = generate_dataset_docs(data_root, dataset_card_template())
     print_json(
         {
             "output_files": stats["output_files"],
@@ -199,23 +262,23 @@ def handle_card(args: SimpleNamespace) -> int:
 
 def handle_migrate_schema(args: SimpleNamespace) -> int:
     """Upgrade existing legacy map Parquets without reading raw PBFs."""
-    paths = _resolve_paths(args)
-    migrated = migrate_dataset_schema(paths.data_root)
-    print_json({"data_root": str(paths.data_root), "migrated_files": migrated})
+    data_root = _data_root(args)
+    migrated = migrate_dataset_schema(data_root)
+    print_json({"data_root": str(data_root), "migrated_files": migrated})
     return 0
 
 
 def handle_migrate_text(args: SimpleNamespace) -> int:
     """Repair legacy untrimmed description text without reading raw PBFs."""
-    paths = _resolve_paths(args)
-    migrated = migrate_dataset_text(paths.data_root, max_workers=args.max_workers)
-    print_json({"data_root": str(paths.data_root), "migrated_files": migrated})
+    data_root = _data_root(args)
+    migrated = migrate_dataset_text(data_root, max_workers=args.max_workers)
+    print_json({"data_root": str(data_root), "migrated_files": migrated})
     return 0
 
 
 def handle_publish_plan(args: SimpleNamespace) -> int:
-    paths = _resolve_paths(args)
-    plan = create_upload_plan(paths.data_root)
+    data_root = _data_root(args)
+    plan = create_upload_plan(data_root)
     print_json(
         {
             "repo_id": plan.repo_id,
@@ -229,8 +292,8 @@ def handle_publish_plan(args: SimpleNamespace) -> int:
 
 
 def handle_publish(args: SimpleNamespace) -> int:
-    paths = _resolve_paths(args)
-    plan = create_upload_plan(paths.data_root)
+    data_root = _data_root(args)
+    plan = create_upload_plan(data_root)
     execute_upload(plan, confirmation=args.plan)
     print_json({"repo_id": plan.repo_id, "identity_sha256": plan.identity_sha256})
     return 0
@@ -238,9 +301,9 @@ def handle_publish(args: SimpleNamespace) -> int:
 
 def handle_release_stats(args: SimpleNamespace) -> int:
     """Compute, validate, and publish only the dataset card and stats report."""
-    paths = _resolve_paths(args)
+    data_root = _data_root(args)
     report = release_metadata(
-        paths.data_root,
+        data_root,
         dataset_card_template(),
         confirm_repo=args.confirm_repo,
         apply=args.apply,
@@ -260,10 +323,20 @@ def handle_run_and_publish(args: SimpleNamespace) -> int:
             buffer_preflight=True,
             stderr=sys.stderr,
             observer=presenter.observe,
+            stderr_level=_verbosity.stderr_level,
         )
         if presenter is not None
         else None
     )
+    if logger is not None:
+        logger.event(
+            "resolved_config",
+            level="DEBUG",
+            source_root=str(paths.source_root),
+            data_root=str(paths.data_root),
+            osmium_executable=args.osmium,
+            confirm_repo=args.confirm_repo,
+        )
     try:
         report = run_and_publish(
             paths=paths,
@@ -280,9 +353,9 @@ def handle_run_and_publish(args: SimpleNamespace) -> int:
 
 
 def handle_trackio_snapshot(args: SimpleNamespace) -> int:
-    paths = _resolve_paths(args)
+    data_root = _data_root(args)
     report = publish_snapshot(
-        paths.data_root,
+        data_root,
         project=args.project,
         space_id=args.space_id,
         run_name=args.run_name,
@@ -321,7 +394,12 @@ def build_one_command(
     )
 
 
-@app.command("build-all", help="Build all discovered sources")
+@app.command(
+    "build-all",
+    help="Build all discovered sources",
+    epilog="Example: osm-polygon-description-tag build-all "
+    "--source-root /path/to/pbfs --data-root /path/to/data-root",
+)
 def build_all_command(
     source_root: SourceRoot = None,
     data_root: DataRoot = None,
@@ -398,11 +476,15 @@ def migrate_text_command(
 
 @app.command("trackio-snapshot", help="Log a completed dataset snapshot to Trackio")
 def trackio_snapshot_command(
-    project: Annotated[str, typer.Option("--project")] = "osm-polygon-description-tag",
-    space_id: Annotated[str, typer.Option("--space-id")] = (
-        "NoeFlandre/osm-polygon-description-tag-trackio"
-    ),
-    run_name: Annotated[str | None, typer.Option("--run-name")] = None,
+    project: Annotated[
+        str, typer.Option("--project", help="Trackio project name.")
+    ] = "osm-polygon-description-tag",
+    space_id: Annotated[
+        str, typer.Option("--space-id", help="Hugging Face Space hosting the dashboard.")
+    ] = "NoeFlandre/osm-polygon-description-tag-trackio",
+    run_name: Annotated[
+        str | None, typer.Option("--run-name", help="Trackio run name [default: generated].")
+    ] = None,
     source_root: SourceRoot = None,
     data_root: DataRoot = None,
     osmium: Osmium = "osmium",
@@ -420,7 +502,11 @@ def trackio_snapshot_command(
     )
 
 
-@app.command("publish-plan", help="Show the allowlisted upload plan identity")
+@app.command(
+    "publish-plan",
+    help="Show the allowlisted upload plan identity",
+    epilog="Example: osm-polygon-description-tag publish-plan --data-root /path/to/data-root",
+)
 def publish_plan_command(
     source_root: SourceRoot = None,
     data_root: DataRoot = None,
@@ -432,7 +518,12 @@ def publish_plan_command(
     )
 
 
-@app.command("publish", help="Upload after exact plan confirmation")
+@app.command(
+    "publish",
+    help="Upload after exact plan confirmation",
+    epilog="Example: osm-polygon-description-tag publish --data-root /path/to/data-root "
+    "--plan <identity_sha256 from publish-plan>",
+)
 def publish_command(
     plan: Annotated[
         str,
@@ -491,6 +582,9 @@ def release_stats_command(
 @app.command(
     "run-and-publish",
     help="Stoppable, resumable build+publish for every discovered PBF",
+    epilog="Example: osm-polygon-description-tag -q run-and-publish "
+    "--confirm-repo NoeFlandre/osm-polygon-description-tag "
+    "--source-root /path/to/pbfs --data-root /path/to/data-root",
 )
 def run_and_publish_command(
     confirm_repo: Annotated[
@@ -534,7 +628,24 @@ _ERROR_TYPES = (
     MigrationError,
     TextMigrationError,
     LanguageDetectionError,
+    DriverError,
 )
+
+# Documented in docs/cli.md. Usage errors exit 2 and Ctrl-C exits 130.
+EXIT_GENERIC = 1
+EXIT_ENVIRONMENT = 3
+EXIT_VALIDATION = 4
+EXIT_PUBLICATION = 5
+_EXIT_CODES: tuple[tuple[tuple[type[Exception], ...], int], ...] = (
+    ((PreflightError, MissingPathError, UnsafePathError), EXIT_ENVIRONMENT),
+    ((ManifestError, StorageError, ReportingError), EXIT_VALIDATION),
+    ((PublicationError, HubVerificationError), EXIT_PUBLICATION),
+)
+
+
+def exit_code_for(error: Exception) -> int:
+    """Map a domain error to its documented exit code."""
+    return next((code for types, code in _EXIT_CODES if isinstance(error, types)), EXIT_GENERIC)
 
 
 def _show_click_error(error: ClickException) -> None:
@@ -542,8 +653,8 @@ def _show_click_error(error: ClickException) -> None:
         usage = error.ctx.get_usage()
         if usage.startswith("Usage:"):
             usage = "usage:" + usage.removeprefix("Usage:")
-        print(usage, file=sys.stderr)
-        print(f"error: {error.format_message()}", file=sys.stderr)
+        print(usage, file=sys.stderr)  # noqa: T201 - usage errors go to stderr
+        print(f"error: {error.format_message()}", file=sys.stderr)  # noqa: T201 - as above
         return
     error.show(file=sys.stderr)
 
@@ -564,7 +675,7 @@ def run(argv: Sequence[str] | None = None) -> int:
         presenter = TerminalPresenter(stderr=sys.stderr)
         # pragma: no mutate end
         presenter.error(str(error))
-        return 1
+        return exit_code_for(error)
 
 
 def _configure_terminal() -> None:
@@ -589,12 +700,17 @@ def _normalize_columns() -> None:
 
 
 def _invoke_app(argv: Sequence[str] | None) -> int:
-    app(
-        args=list(argv) if argv is not None else None,
-        prog_name="osm-polygon-description-tag",
-        standalone_mode=False,
-    )
-    return 0
+    try:
+        # Without standalone mode, Click returns an Exit's code instead of raising.
+        code = app(
+            args=list(argv) if argv is not None else None,
+            prog_name="osm-polygon-description-tag",
+            standalone_mode=False,
+        )
+    finally:
+        # -v / -q apply to one invocation only.
+        _verbosity.stderr_level = "INFO"
+    return code if isinstance(code, int) else 0
 
 
 def main() -> None:

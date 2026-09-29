@@ -1,15 +1,15 @@
 """Drive the bounded Grid'5000 language run one shard at a time.
 
-This script orchestrates the documented per-shard protocol; it contains no
-policy of its own. Every decision that could allocate resources, spend quota,
-or overwrite committed state stays inside the CLI:
+``language grid run`` orchestrates the documented per-shard protocol; it
+contains no policy of its own. Every decision that could allocate resources,
+spend quota, or overwrite committed state stays inside the other CLI commands:
 
 * ``language grid stage`` builds the portable payload and verifies it;
 * ``language grid submit --apply`` gathers live policy evidence and submits;
 * ``language grid status --apply`` reconciles a recorded submission;
 * ``language grid collect --apply`` validates, imports, and acknowledges.
 
-The driver adds exactly three things the CLI deliberately leaves out.
+The driver adds exactly three things those commands deliberately leave out.
 
 **The transfer.** ``grid stage`` emits a *filesystem* rsync argv, so it cannot
 reach the site from a laptop. The transfer is arranged here over SSH, which is
@@ -25,13 +25,12 @@ an operator to reconcile. Re-running the driver resumes from the on-disk
 checkpoints, so a stopped run loses no completed shard.
 
 Daytime submission is never enabled implicitly: ``--allow-daytime`` is passed
-through only when the operator sets it here, having confirmed their own
-accounting, exactly as the CLI requires.
+through only when the operator sets it, having confirmed their own
+accounting, exactly as ``grid submit`` requires.
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import subprocess
 import sys
@@ -42,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from osm_polygon_description_tag.dataset.languages.worker import DEFAULT_BATCH_SIZE
+from osm_polygon_description_tag.runtime.time import utc_now_iso
 from osm_polygon_description_tag.workflow.grid_policy import (
     MAX_PROCESSING_SECONDS,
     MAX_WALLTIME_SECONDS,
@@ -51,6 +51,8 @@ DEFAULT_SITE = "nancy"
 DEFAULT_POLL_SECONDS = 20
 DEFAULT_JOB_TIMEOUT_SECONDS = 2400
 TERMINAL_STATES = frozenset({"terminated"})
+_UNRESOLVED_STATES = frozenset({"unknown", "ambiguous"})
+_RSYNC = ("rsync", "--archive", "--checksum", "--protect-args", "-e", "ssh", "--")
 # Sentinel: a checkpoint we could not read, which forces the CLI to be asked
 # about every shard rather than assuming an unreadable one means "unstarted".
 _UNREADABLE_CHECKPOINT = "\x00unreadable"
@@ -73,6 +75,48 @@ class Remote:
         return f"{self.bundle_root.rstrip('/')}/{_shard_slug(shard)}"
 
 
+@dataclass(frozen=True)
+class DriverOptions:
+    """Everything one ``language grid run`` invocation was asked to do."""
+
+    run_dir: Path
+    source_root: Path
+    retrieval_dir: Path
+    remote_bundle_root: str
+    remote_glotlid_model_path: str
+    remote_sat_model_path: str
+    remote_operator_dir: str
+    remote_cli: str
+    project_root: Path = Path()
+    ssh_host: str = DEFAULT_SITE
+    site: str = DEFAULT_SITE
+    walltime_seconds: int = MAX_WALLTIME_SECONDS
+    processing_seconds: int = MAX_PROCESSING_SECONDS
+    batch_size: int = DEFAULT_BATCH_SIZE
+    poll_seconds: int = DEFAULT_POLL_SECONDS
+    job_timeout_seconds: int = DEFAULT_JOB_TIMEOUT_SECONDS
+    max_shards: int = 0
+    queue: str | None = None
+    shard_stride: int = 1
+    shard_index: int = 0
+    allow_daytime: bool = False
+
+    def remote(self) -> Remote:
+        return Remote(
+            self.ssh_host,
+            self.remote_bundle_root,
+            self.remote_glotlid_model_path,
+            self.remote_sat_model_path,
+        )
+
+
+@dataclass
+class _Tally:
+    done: int = 0
+    skipped: int = 0
+    halted: bool = False
+
+
 def _shard_slug(shard: str) -> str:
     """Return a remote directory name that cannot contain shell metacharacters."""
     slug = "".join(character if character.isalnum() else "-" for character in shard)
@@ -80,33 +124,42 @@ def _shard_slug(shard: str) -> str:
 
 
 def _log(event: str, **fields: Any) -> None:
-    payload = {"event": event, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), **fields}
-    print(json.dumps(payload, sort_keys=True), flush=True)
+    payload = {"event": event, "at": utc_now_iso(), **fields}
+    sys.stdout.write(json.dumps(payload, sort_keys=True) + "\n")
+    sys.stdout.flush()
 
 
-def _run(argv: Sequence[str], *, capture_json: bool = False) -> dict[str, Any] | None:
-    completed = subprocess.run(  # noqa: S603
+def _run(argv: Sequence[str]) -> str:
+    """Run one command and return its stdout; any failure stops the run."""
+    completed = subprocess.run(  # noqa: S603 - argv lists built by this module
         list(argv), capture_output=True, text=True, check=False
     )
     if completed.returncode != 0:
         raise DriverError(
             f"command failed ({completed.returncode}): {' '.join(argv)}\n{completed.stderr.strip()}"
         )
-    if not capture_json:
-        return None
+    return completed.stdout
+
+
+def _run_json(argv: Sequence[str]) -> dict[str, Any]:
+    stdout = _run(argv)
     try:
-        return json.loads(completed.stdout)
+        return json.loads(stdout)
     except json.JSONDecodeError as error:
         raise DriverError(f"command did not emit JSON: {' '.join(argv)}") from error
 
 
-def _ssh(remote: Remote, command: str, *, capture_json: bool = False) -> dict[str, Any] | None:
-    return _run(["ssh", remote.ssh_host, command], capture_json=capture_json)
+def _ssh(remote: Remote, command: str) -> str:
+    return _run(["ssh", remote.ssh_host, command])
+
+
+def _ssh_json(remote: Remote, command: str) -> dict[str, Any]:
+    return _run_json(["ssh", remote.ssh_host, command])
 
 
 def shards_of(run_dir: Path) -> tuple[tuple[str, int], ...]:
     """Return every snapshot shard with its row count, in snapshot order."""
-    snapshot = json.loads((run_dir / "snapshot.json").read_text(encoding="utf-8"))
+    snapshot = json.loads((run_dir / "snapshot.json").read_bytes())
     return tuple(
         (entry["relative_path"], int(entry["row_count"])) for entry in snapshot["source_files"]
     )
@@ -147,36 +200,26 @@ def checkpointed_shards(run_dir: Path) -> frozenset[str]:
     shards_root = run_dir / "shards"
     if not shards_root.is_dir():
         return frozenset()
-    names: set[str] = set()
-    for checkpoint in shards_root.glob("*/checkpoint.json"):
-        try:
-            payload = json.loads(checkpoint.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            # An unreadable checkpoint is not evidence of absence: let the CLI
-            # look at this shard rather than silently treating it as unstarted.
-            names.add(_UNREADABLE_CHECKPOINT)
-            continue
-        shard = payload.get("shard")
-        if isinstance(shard, str):
-            names.add(shard)
-    return frozenset(names)
+    names = (_checkpoint_shard(path) for path in shards_root.glob("*/checkpoint.json"))
+    return frozenset(name for name in names if name is not None)
+
+
+def _checkpoint_shard(checkpoint: Path) -> str | None:
+    try:
+        payload = json.loads(checkpoint.read_bytes())
+    except (OSError, ValueError):
+        # An unreadable checkpoint is not evidence of absence: let the CLI
+        # look at this shard rather than silently treating it as unstarted.
+        return _UNREADABLE_CHECKPOINT
+    shard = payload.get("shard")
+    return shard if isinstance(shard, str) else None
 
 
 def shard_is_complete(run_dir: Path, shard: str) -> bool:
     """Return whether this shard already has a committed complete checkpoint."""
-    report = _run(
-        [
-            *_cli(),
-            "language",
-            "validate",
-            "--run-dir",
-            str(run_dir),
-            "--shard",
-            shard,
-        ],
-        capture_json=True,
+    report = _run_json(
+        [*_cli(), "language", "validate", "--run-dir", str(run_dir), "--shard", shard]
     )
-    assert report is not None
     return bool(report.get("complete"))
 
 
@@ -193,83 +236,66 @@ def _cli() -> list[str]:
     return [str(Path(sys.executable).parent / "osm-polygon-description-tag")]
 
 
-def stage(args: argparse.Namespace, remote: Remote, shard: str) -> dict[str, Any]:
+def stage(options: DriverOptions, remote: Remote, shard: str) -> dict[str, Any]:
     """Build and verify the payload locally, then transfer it over SSH."""
-    plan = _run(
+    destination = remote.bundle_dir(shard)
+    plan = _run_json(
         [
             *_cli(),
             "language",
             "grid",
             "stage",
             "--run-dir",
-            str(args.run_dir),
+            str(options.run_dir),
             "--shard",
             shard,
             "--project-root",
-            str(args.project_root),
+            str(options.project_root),
             "--source-root",
-            str(args.source_root),
+            str(options.source_root),
             "--remote-bundle-dir",
-            remote.bundle_dir(shard),
+            destination,
             "--processing-seconds",
-            str(args.processing_seconds),
+            str(options.processing_seconds),
             "--batch-size",
-            str(args.batch_size),
+            str(options.batch_size),
             "--walltime-seconds",
-            str(args.walltime_seconds),
+            str(options.walltime_seconds),
             "--glotlid-model-path",
             remote.glotlid_model_path,
             "--sat-model-path",
             remote.sat_model_path,
-        ],
-        capture_json=True,
-    )
-    assert plan is not None
-    payload = plan["payload_dir"]
-    destination = remote.bundle_dir(shard)
-    _ssh(remote, f"mkdir -p {destination}")
-    _run(
-        [
-            "rsync",
-            "--archive",
-            "--checksum",
-            "--protect-args",
-            "-e",
-            "ssh",
-            "--",
-            f"{payload}/",
-            f"{remote.ssh_host}:{destination}/",
         ]
     )
+    _ssh(remote, f"mkdir -p {destination}")
+    _run([*_RSYNC, f"{plan['payload_dir']}/", f"{remote.ssh_host}:{destination}/"])
     _log("staged", shard=shard, bundle_id=plan["bundle_id"], rows=plan["input_row_count"])
     return plan
 
 
-def submit(args: argparse.Namespace, remote: Remote, shard: str, plan: dict[str, Any]) -> None:
+def submit(options: DriverOptions, remote: Remote, shard: str, plan: dict[str, Any]) -> None:
     """Submit through the CLI on the frontend, behind its own apply gate."""
-    command = " ".join(
-        [
-            f"cd {args.remote_operator_dir} &&",
-            f"{args.remote_cli}",
-            "language grid submit",
-            f"--run-dir {plan['remote_run_dir']}",
-            f"--shard {shard}",
-            f"--remote-project-dir {plan['remote_project_dir']}",
-            f"--remote-source-dir {plan['remote_source_dir']}",
-            f"--remote-run-dir {plan['remote_run_dir']}",
-            f"--site {args.site}",
-            f"--walltime-seconds {args.walltime_seconds}",
-            f"--processing-seconds {args.processing_seconds}",
-            f"--batch-size {args.batch_size}",
-            f"--glotlid-model-path {remote.glotlid_model_path}",
-            f"--sat-model-path {remote.sat_model_path}",
-            f"--queue {args.queue}" if args.queue else "",
-            "--allow-daytime" if args.allow_daytime else "",
-            "--apply",
-        ]
-    )
-    payload = _ssh(remote, command, capture_json=True)
-    assert payload is not None
+    parts = [
+        f"cd {options.remote_operator_dir} &&",
+        options.remote_cli,
+        "language grid submit",
+        f"--run-dir {plan['remote_run_dir']}",
+        f"--shard {shard}",
+        f"--remote-project-dir {plan['remote_project_dir']}",
+        f"--remote-source-dir {plan['remote_source_dir']}",
+        f"--remote-run-dir {plan['remote_run_dir']}",
+        f"--site {options.site}",
+        f"--walltime-seconds {options.walltime_seconds}",
+        f"--processing-seconds {options.processing_seconds}",
+        f"--batch-size {options.batch_size}",
+        f"--glotlid-model-path {remote.glotlid_model_path}",
+        f"--sat-model-path {remote.sat_model_path}",
+    ]
+    if options.queue:
+        parts.append(f"--queue {options.queue}")
+    if options.allow_daytime:
+        parts.append("--allow-daytime")
+    payload = _ssh_json(remote, " ".join([*parts, "--apply"]))
     submission = _submitted_job(payload)
     if submission is None:
         raise DriverError(
@@ -290,73 +316,64 @@ def _submitted_job(payload: dict[str, Any]) -> dict[str, Any] | None:
     record = payload.get("result")
     if not isinstance(record, dict):
         return None
-    if str(record.get("outcome", "")).lower() != "submitted":
+    if str(record.get("outcome")).lower() != "submitted":
         return None
     return record
 
 
-def await_terminal(args: argparse.Namespace, remote: Remote, shard: str, run_dir: str) -> None:
+def await_terminal(options: DriverOptions, remote: Remote, shard: str, run_dir: str) -> None:
     """Poll the recorded submission until the scheduler reports a terminal state."""
-    deadline = time.monotonic() + args.job_timeout_seconds
+    deadline = time.monotonic() + options.job_timeout_seconds
+    command = (
+        f"cd {options.remote_operator_dir} && {options.remote_cli} language grid status "
+        f"--run-dir {run_dir} --shard {shard} --apply"
+    )
     while True:
-        command = (
-            f"cd {args.remote_operator_dir} && {args.remote_cli} language grid status "
-            f"--run-dir {run_dir} --shard {shard} --apply"
-        )
-        status = _ssh(remote, command, capture_json=True)
-        assert status is not None
-        state = str(status.get("state", "")).lower()
+        state = _poll_state(remote, command, shard)
         if state in TERMINAL_STATES:
-            _log("terminal", shard=shard, state=state, detail=status.get("detail"))
             return
-        if state in {"unknown", "ambiguous"}:
-            raise DriverError(
-                f"shard {shard} reconciled to {state!r}; inspect it before doing anything else: "
-                f"{json.dumps(status, sort_keys=True)}"
-            )
         if time.monotonic() > deadline:
             raise DriverError(
                 f"shard {shard} did not reach a terminal state within "
-                f"{args.job_timeout_seconds}s; it is still {state!r}"
+                f"{options.job_timeout_seconds}s; it is still {state!r}"
             )
-        time.sleep(args.poll_seconds)
+        time.sleep(options.poll_seconds)
 
 
-def collect(args: argparse.Namespace, remote: Remote, shard: str, plan: dict[str, Any]) -> None:
+def _poll_state(remote: Remote, command: str, shard: str) -> str:
+    status = _ssh_json(remote, command)
+    state = str(status.get("state")).lower()
+    if state in TERMINAL_STATES:
+        _log("terminal", shard=shard, state=state, detail=status.get("detail"))
+    elif state in _UNRESOLVED_STATES:
+        raise DriverError(
+            f"shard {shard} reconciled to {state!r}; inspect it before doing anything else: "
+            f"{json.dumps(status, sort_keys=True)}"
+        )
+    return state
+
+
+def collect(options: DriverOptions, remote: Remote, shard: str, plan: dict[str, Any]) -> None:
     """Retrieve the shard's state over SSH, then import and acknowledge it."""
-    staging = args.retrieval_dir / _shard_slug(shard)
+    staging = options.retrieval_dir / _shard_slug(shard)
     staging.mkdir(parents=True, exist_ok=True)
     remote_run = plan["remote_run_dir"].rstrip("/")
-    _run(
-        [
-            "rsync",
-            "--archive",
-            "--checksum",
-            "--protect-args",
-            "-e",
-            "ssh",
-            "--",
-            f"{remote.ssh_host}:{remote_run}/",
-            f"{staging}/",
-        ]
-    )
-    report = _run(
+    _run([*_RSYNC, f"{remote.ssh_host}:{remote_run}/", f"{staging}/"])
+    report = _run_json(
         [
             *_cli(),
             "language",
             "grid",
             "collect",
             "--run-dir",
-            str(args.run_dir),
+            str(options.run_dir),
             "--shard",
             shard,
             "--retrieved-run-dir",
             str(staging),
             "--apply",
-        ],
-        capture_json=True,
+        ]
     )
-    assert report is not None
     _log("collected", shard=shard, annotations=report.get("annotation_count"))
 
 
@@ -373,125 +390,104 @@ def awaiting_collection(remote: Remote, shard: str) -> bool:
     the shard is resumed from the site instead of being staged again.
     """
     remote_run = f"{remote.bundle_dir(shard)}/run"
-    argv = [
-        "ssh",
-        remote.ssh_host,
-        f"cat {remote_run}/jobs/*/submission-intent.json 2>/dev/null",
-    ]
-    listing = subprocess.run(  # noqa: S603
+    argv = ["ssh", remote.ssh_host, f"cat {remote_run}/jobs/*/submission-intent.json 2>/dev/null"]
+    listing = subprocess.run(  # noqa: S603 - fixed argv
         argv, capture_output=True, text=True, check=False
     )
-    intents = [line for line in listing.stdout.splitlines() if line.strip()]
+    intent = _single_intent(listing.stdout)
+    return (
+        intent is not None
+        and intent.get("outcome") == "submitted"
+        and not intent.get("result_acknowledged")
+    )
+
+
+def _single_intent(stdout: str) -> dict[str, Any] | None:
+    """Return the one recorded intent, or None when there is none or several."""
+    intents = [line for line in stdout.splitlines() if line.strip()]
     if len(intents) != 1:
         # Nothing recorded, or more than one attempt: not an unambiguous resume.
-        return False
+        return None
     try:
-        intent = json.loads(intents[0])
+        return json.loads(intents[0])
     except json.JSONDecodeError:
-        return False
-    return intent.get("outcome") == "submitted" and not intent.get("result_acknowledged", False)
+        return None
 
 
-def process(args: argparse.Namespace, remote: Remote, shard: str) -> None:
+def process(options: DriverOptions, remote: Remote, shard: str) -> None:
     if awaiting_collection(remote, shard):
         remote_run = f"{remote.bundle_dir(shard)}/run"
         _log("resuming_uncollected", shard=shard)
-        await_terminal(args, remote, shard, remote_run)
-        collect(args, remote, shard, {"remote_run_dir": remote_run})
+        await_terminal(options, remote, shard, remote_run)
+        collect(options, remote, shard, {"remote_run_dir": remote_run})
         return
-    plan = stage(args, remote, shard)
-    submit(args, remote, shard, plan)
-    await_terminal(args, remote, shard, plan["remote_run_dir"])
-    collect(args, remote, shard, plan)
+    plan = stage(options, remote, shard)
+    submit(options, remote, shard, plan)
+    await_terminal(options, remote, shard, plan["remote_run_dir"])
+    collect(options, remote, shard, plan)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    args = _parse_args(argv)
-    remote = Remote(
-        args.ssh_host,
-        args.remote_bundle_root,
-        args.remote_glotlid_model_path,
-        args.remote_sat_model_path,
-    )
+def run_driver(options: DriverOptions) -> int:
+    """Process this driver's shards in order; return 1 if one halted the run."""
+    remote = options.remote()
     shards = selected_shards(
-        shards_of(args.run_dir), stride=args.shard_stride, index=args.shard_index
+        shards_of(options.run_dir), stride=options.shard_stride, index=options.shard_index
     )
     _log(
         "run_start",
         shards=len(shards),
         rows=sum(rows for _, rows in shards),
-        stride=args.shard_stride,
-        index=args.shard_index,
+        stride=options.shard_stride,
+        index=options.shard_index,
     )
+    tally = _drive(options, remote, shards)
+    _log("run_end", completed=tally.done, already_complete=tally.skipped, halted=int(tally.halted))
+    return 1 if tally.halted else 0
 
-    done = failed = skipped = 0
-    checkpointed = checkpointed_shards(args.run_dir)
-    unreadable = _UNREADABLE_CHECKPOINT in checkpointed
+
+def _drive(options: DriverOptions, remote: Remote, shards: tuple[tuple[str, int], ...]) -> _Tally:
+    tally = _Tally()
+    checkpointed = checkpointed_shards(options.run_dir)
     for shard, rows in shards:
-        if args.max_shards and done >= args.max_shards:
-            _log("budget_reached", processed=done)
+        if _budget_reached(options, tally.done):
             break
-        may_be_complete = unreadable or shard in checkpointed
-        if may_be_complete and shard_is_complete(args.run_dir, shard):
-            skipped += 1
-            continue
-        try:
-            process(args, remote, shard)
-        except DriverError as error:
-            failed += 1
-            _log("halted", shard=shard, rows=rows, reason=str(error))
+        if _already_complete(options.run_dir, shard, checkpointed):
+            tally.skipped += 1
+        elif _processed(options, remote, shard, rows):
+            tally.done += 1
+        else:
+            tally.halted = True
             break
-        done += 1
-    _log("run_end", completed=done, already_complete=skipped, halted=failed)
-    return 1 if failed else 0
+    return tally
 
 
-def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--run-dir", type=Path, required=True)
-    parser.add_argument("--project-root", type=Path, default=Path())
-    parser.add_argument("--source-root", type=Path, required=True)
-    parser.add_argument("--retrieval-dir", type=Path, required=True)
-    parser.add_argument("--ssh-host", default=DEFAULT_SITE)
-    parser.add_argument("--site", default=DEFAULT_SITE)
-    parser.add_argument("--remote-bundle-root", required=True)
-    parser.add_argument("--remote-glotlid-model-path", required=True)
-    parser.add_argument("--remote-sat-model-path", required=True)
-    parser.add_argument("--remote-operator-dir", required=True)
-    parser.add_argument("--remote-cli", required=True)
-    parser.add_argument("--walltime-seconds", type=int, default=MAX_WALLTIME_SECONDS)
-    parser.add_argument("--processing-seconds", type=int, default=MAX_PROCESSING_SECONDS)
-    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
-    parser.add_argument("--poll-seconds", type=int, default=DEFAULT_POLL_SECONDS)
-    parser.add_argument("--job-timeout-seconds", type=int, default=DEFAULT_JOB_TIMEOUT_SECONDS)
-    parser.add_argument("--max-shards", type=int, default=0)
-    parser.add_argument(
-        "--queue",
-        default=None,
-        help=(
-            "Scheduler queue to request; sites disagree on what a bare "
-            "submission means, and several reject the queue they pick themselves."
-        ),
-    )
-    parser.add_argument(
-        "--shard-stride",
-        type=int,
-        default=1,
-        help="Split the snapshot across this many cooperating drivers.",
-    )
-    parser.add_argument(
-        "--shard-index",
-        type=int,
-        default=0,
-        help="Which share of --shard-stride this driver owns.",
-    )
-    parser.add_argument(
-        "--allow-daytime",
-        action="store_true",
-        help="Only set this once you have confirmed your own daytime accounting.",
-    )
-    return parser.parse_args(argv)
+def _budget_reached(options: DriverOptions, done: int) -> bool:
+    if options.max_shards and done >= options.max_shards:
+        _log("budget_reached", processed=done)
+        return True
+    return False
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+def _already_complete(run_dir: Path, shard: str, checkpointed: frozenset[str]) -> bool:
+    may_be_complete = _UNREADABLE_CHECKPOINT in checkpointed or shard in checkpointed
+    return may_be_complete and shard_is_complete(run_dir, shard)
+
+
+def _processed(options: DriverOptions, remote: Remote, shard: str, rows: int) -> bool:
+    try:
+        process(options, remote, shard)
+    except DriverError as error:
+        _log("halted", shard=shard, rows=rows, reason=str(error))
+        return False
+    return True
+
+
+__all__ = [
+    "DEFAULT_JOB_TIMEOUT_SECONDS",
+    "DEFAULT_POLL_SECONDS",
+    "DEFAULT_SITE",
+    "DriverError",
+    "DriverOptions",
+    "Remote",
+    "run_driver",
+]

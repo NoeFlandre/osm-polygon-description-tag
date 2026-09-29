@@ -82,9 +82,7 @@ def test_run_and_publish_resume_after_interrupt(tmp_path: Path) -> None:
 
     def fail_on_b(command: list[str]) -> str:
         # Identify the source by the parquet include flag.
-        for inc in command:
-            if inc.startswith("data/"):
-                uploaded.append(inc)
+        uploaded.extend(inc for inc in command if inc.startswith("data/"))
         if "data/b.parquet" in command:
             raise subprocess.CalledProcessError(1, command)
         return "r-a"
@@ -107,9 +105,7 @@ def test_run_and_publish_resume_after_interrupt(tmp_path: Path) -> None:
 
     # Restart: succeed for both. "a" should be skipped; "b" should be uploaded.
     def succeed_all(command: list[str]) -> str:
-        for inc in command:
-            if inc.startswith("data/"):
-                uploaded.append(inc)
+        uploaded.extend(inc for inc in command if inc.startswith("data/"))
         if "data/a.parquet" in command:
             return "r-a-restart"
         return "r-b-restart"
@@ -153,9 +149,12 @@ def test_run_and_publish_safe_upload_retry_after_interrupt(
 
     real_write = orchestrator._write_publication_state
 
+    crashed = False
+
     def flaky_write(*args, **kwargs):
-        if not hasattr(flaky_write, "called"):
-            flaky_write.called = True  # type: ignore[attr-defined]
+        nonlocal crashed
+        if not crashed:
+            crashed = True
             raise RuntimeError("simulated crash after remote commit")
         return real_write(*args, **kwargs)
 

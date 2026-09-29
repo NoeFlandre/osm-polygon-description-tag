@@ -148,7 +148,7 @@ def _patch_external_boundaries(
             command[index + 1] for index, piece in enumerate(command) if piece == "--include"
         ]
         if metadata_runner is not None and not any(
-            inc.startswith("manifests/") or inc.startswith("data/") for inc in includes
+            inc.startswith(("manifests/", "data/")) for inc in includes
         ):
             metadata_runner(command)
             call_log["uploads"] += 1

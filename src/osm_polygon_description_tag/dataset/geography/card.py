@@ -193,9 +193,9 @@ def _atomic_write_template(template_path: Path, new_text: str) -> None:
     tmp = template_path.with_name(f".{template_path.name}.{uuid.uuid4().hex}.tmp")
     try:
         tmp.write_text(new_text, encoding="utf-8")
-        with open(tmp, "rb") as handle:
+        with tmp.open("rb") as handle:
             os.fsync(handle.fileno())
-        os.replace(tmp, template_path)
+        tmp.replace(template_path)
     finally:
         if tmp.exists():
             tmp.unlink()

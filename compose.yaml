@@ -1,0 +1,35 @@
+# Run the pipeline without `just`:
+#
+#   DATA_ROOT=/path/to/data-root UID=$(id -u) GID=$(id -g) \
+#     docker compose run --rm pipeline run-and-publish --confirm-repo NoeFlandre/osm-polygon-description-tag
+#
+# PBFs are read from $DATA_ROOT/raw (read-only); checkpoints, logs and artifacts
+# are written under $DATA_ROOT. HF_TOKEN comes from an optional .env file.
+services:
+  pipeline:
+    build:
+      context: .
+      target: runtime
+    image: osm-polygon-description-tag:local
+    user: "${UID:-10001}:${GID:-10001}"
+    environment:
+      OSM_POLYGON_SOURCE_ROOT: /data/raw
+      OSM_POLYGON_DATA_ROOT: /data
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - type: bind
+        source: ${DATA_ROOT:-./data-root}
+        target: /data
+      - type: bind
+        source: ${DATA_ROOT:-./data-root}/raw
+        target: /data/raw
+        read_only: true
+
+  test:
+    build:
+      context: .
+      target: development
+    image: osm-polygon-description-tag:dev
+    profiles: [test]

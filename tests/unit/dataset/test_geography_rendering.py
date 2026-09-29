@@ -20,7 +20,10 @@ from pathlib import Path
 from unittest.mock import Mock, call, patch
 
 import matplotlib
+import matplotlib.colors
 import matplotlib.colors as mcolors
+import matplotlib.patches
+import matplotlib.ticker
 import pytest
 
 matplotlib.use("Agg")
@@ -37,6 +40,7 @@ from osm_polygon_description_tag.dataset.geography.basemap import (
     draw_landmasses,
     load_land_basemap,
 )
+from osm_polygon_description_tag.dataset.geography.mpl import pyplot
 from osm_polygon_description_tag.dataset.geography.rendering import (
     _COLORMAP_NAME,
     _DPI,
@@ -125,7 +129,7 @@ def test_draw_cell_skips_short_rings_and_preserves_patch_style() -> None:
     with (
         patch.object(rendering_module, "cell_rings", return_value=rings) as cell_rings,
         patch.object(
-            rendering_module.mpatches,
+            matplotlib.patches,
             "Polygon",
             return_value=patch_artist,
         ) as polygon,
@@ -192,7 +196,7 @@ def test_draw_cells_and_colorbar_draws_cells_in_sorted_order() -> None:
     cells = {"a": 5, "b": 1}
 
     with (
-        patch.object(rendering_module.mcolors, "LogNorm", return_value=norm) as log_norm,
+        patch.object(matplotlib.colors, "LogNorm", return_value=norm) as log_norm,
         patch.object(rendering_module, "_draw_cell") as draw_cell,
         patch.object(rendering_module, "_draw_density_colorbar") as density_colorbar,
     ):
@@ -213,7 +217,7 @@ def test_draw_cells_and_colorbar_expands_one_cell_log_range() -> None:
     norm = object()
 
     with (
-        patch.object(rendering_module.mcolors, "LogNorm", return_value=norm) as log_norm,
+        patch.object(matplotlib.colors, "LogNorm", return_value=norm) as log_norm,
         patch.object(rendering_module, "_draw_cell"),
         patch.object(rendering_module, "_draw_density_colorbar"),
     ):
@@ -240,12 +244,12 @@ def test_draw_density_colorbar_configures_formatter_and_ticks() -> None:
 
     with (
         patch.object(
-            rendering_module.plt.cm,
+            pyplot().cm,
             "ScalarMappable",
             return_value=scalar_mappable,
         ) as scalar_factory,
         patch.object(
-            rendering_module.mtick,
+            matplotlib.ticker,
             "FuncFormatter",
             return_value=formatter,
         ) as formatter_factory,
@@ -280,9 +284,9 @@ def test_draw_empty_colorbar_uses_stable_placeholder_range() -> None:
     fig.colorbar.return_value = colorbar
 
     with (
-        patch.object(rendering_module.mcolors, "LogNorm", return_value=norm) as log_norm,
+        patch.object(matplotlib.colors, "LogNorm", return_value=norm) as log_norm,
         patch.object(
-            rendering_module.plt.cm,
+            pyplot().cm,
             "ScalarMappable",
             return_value=scalar_mappable,
         ) as scalar_factory,
@@ -310,14 +314,14 @@ def test_render_density_map_orchestrates_stable_figure_contract(tmp_path: Path) 
     caption = "caption"
 
     with (
-        patch.object(rendering_module.plt, "subplots", return_value=(fig, axes)) as subplots,
+        patch.object(pyplot(), "subplots", return_value=(fig, axes)) as subplots,
         patch.object(rendering_module, "_init_axes") as init_axes,
         patch.object(rendering_module, "_draw_land_overlay") as draw_land_overlay,
-        patch.object(rendering_module.plt, "get_cmap", return_value=cmap) as get_cmap,
+        patch.object(pyplot(), "get_cmap", return_value=cmap) as get_cmap,
         patch.object(rendering_module, "_draw_cells_and_colorbar") as draw_cells,
         patch.object(rendering_module, "_build_caption", return_value=caption) as build_caption,
         patch.object(rendering_module, "_atomic_save_png") as atomic_save,
-        patch.object(rendering_module.plt, "close") as close,
+        patch.object(pyplot(), "close") as close,
     ):
         result = rendering_module.render_density_map(
             cells,
@@ -366,7 +370,7 @@ def test_render_density_map_closes_figure_when_save_fails(tmp_path: Path) -> Non
     output_path = tmp_path / "map.png"
 
     with (
-        patch.object(rendering_module.plt, "subplots", return_value=(fig, axes)),
+        patch.object(pyplot(), "subplots", return_value=(fig, axes)),
         patch.object(rendering_module, "_draw_land_overlay"),
         patch.object(rendering_module, "_draw_cells_and_colorbar"),
         patch.object(
@@ -374,7 +378,7 @@ def test_render_density_map_closes_figure_when_save_fails(tmp_path: Path) -> Non
             "_atomic_save_png",
             side_effect=RuntimeError("save failed"),
         ),
-        patch.object(rendering_module.plt, "close") as close,
+        patch.object(pyplot(), "close") as close,
         pytest.raises(RuntimeError, match="save failed"),
     ):
         rendering_module.render_density_map({}, output_path, land_features=[])
@@ -493,7 +497,7 @@ def test_draw_ring_passes_the_complete_land_patch_style() -> None:
     axes = Mock()
     patch_artist = object()
 
-    with patch.object(basemap_module.mpatches, "Polygon", return_value=patch_artist) as polygon:
+    with patch.object(matplotlib.patches, "Polygon", return_value=patch_artist) as polygon:
         basemap_module._draw_ring(axes, [(0, 0), (1, 0), (0, 1)])
 
     polygon.assert_called_once_with(
@@ -622,10 +626,8 @@ def test_render_density_map_uses_lognorm(tmp_path: Path) -> None:
         captured["vmax"] = norm.vmax
         return norm
 
-    import osm_polygon_description_tag.dataset.geography.rendering as rendering_module
-
-    original = rendering_module.mcolors.LogNorm
-    rendering_module.mcolors.LogNorm = capturing_lognorm  # type: ignore[assignment]
+    original = matplotlib.colors.LogNorm
+    matplotlib.colors.LogNorm = capturing_lognorm  # type: ignore[assignment]
     try:
         cells = {
             _fake_cell(0.0, 0.0): 1,
@@ -634,7 +636,7 @@ def test_render_density_map_uses_lognorm(tmp_path: Path) -> None:
         }
         render_density_map(cells, tmp_path / "map.png")
     finally:
-        rendering_module.mcolors.LogNorm = original  # type: ignore[assignment]
+        matplotlib.colors.LogNorm = original  # type: ignore[assignment]
     assert "vmin" in captured
     assert "vmax" in captured
     assert int(captured["vmin"]) == 1  # minimum count

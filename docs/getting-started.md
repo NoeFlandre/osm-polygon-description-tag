@@ -7,17 +7,31 @@ The extraction boundary requires `osmium-tool`; publication requires the
 Hugging Face `hf` CLI and an authenticated account with write access to the
 target dataset.
 
+On macOS:
+
 ```bash
-brew install uv
-brew install osmium-tool
-brew install hf
+brew install uv osmium-tool hf
 ```
 
-Install the locked Python environment from the repository:
+On Debian or Ubuntu, install `osmium-tool` with `apt`, then uv from its
+[installer](https://docs.astral.sh/uv/getting-started/installation/).
+
+Clone the repository and install the locked Python environment:
 
 ```bash
-cd /Volumes/Seagate\ M3/projects/osm-polygon-description-tag
+git clone https://github.com/NoeFlandre/osm-polygon-description-tag
+cd osm-polygon-description-tag
 uv sync --locked
+```
+
+Get input PBFs, for example a small country extract from
+[Geofabrik](https://download.geofabrik.de/), into a directory of their own.
+Choose a separate, empty directory for generated data, then point the CLI at
+both (or pass `--source-root` / `--data-root` on each command):
+
+```bash
+export OSM_POLYGON_SOURCE_ROOT=/path/to/pbfs
+export OSM_POLYGON_DATA_ROOT=/path/to/data-root
 ```
 
 Authenticate separately when you are ready to publish:
@@ -38,11 +52,8 @@ artifacts:
 uv run osm-polygon-description-tag inspect
 ```
 
-The immutable source directory is:
-
-```text
-/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw
-```
+The source directory (`OSM_POLYGON_SOURCE_ROOT`) is treated as immutable:
+nothing is ever written there.
 
 ## Build and validate locally
 
@@ -55,11 +66,12 @@ uv run osm-polygon-description-tag validate
 uv run osm-polygon-description-tag generate-card
 ```
 
-Generated artifacts belong under:
+Generated artifacts go under the data root (`OSM_POLYGON_DATA_ROOT`):
+`data/*.parquet` with their manifests, `stats.json`, `README.md` (the dataset
+card), `logs/` and local state. See the [dataset contract](dataset-contract.md).
 
-```text
-/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root
-```
+`publish-plan` prints the exact files an upload would send, without uploading,
+so it works as a dry run.
 
 ## Run the complete workflow
 
@@ -68,6 +80,9 @@ The supported one-command operation is:
 ```bash
 just run-and-publish
 ```
+
+It publishes to the maintainer's dataset, `NoeFlandre/osm-polygon-description-tag`,
+and needs write access to it; other users stop at the local build above.
 
 It discovers PBFs deterministically, builds or reuses one artifact per source,
 validates each artifact, uploads exact allowlisted files, verifies remote

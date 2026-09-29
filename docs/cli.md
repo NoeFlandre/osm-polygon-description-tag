@@ -7,7 +7,36 @@ uv run osm-polygon-description-tag COMMAND
 ```
 
 Use `--help` on the executable or any command for the exact current option
-surface.
+surface. Every option has a description there.
+
+## Global options
+
+These come before the command, for example
+`osm-polygon-description-tag -q run-and-publish ...`:
+
+| Option | Effect |
+| --- | --- |
+| `--version` | Print the package version and exit 0. |
+| `-v`, `--verbose` | Also print DEBUG event lines on stderr, such as `resolved_config` (the roots, osmium and target repo in use). |
+| `-q`, `--quiet` | Print only WARNING and ERROR event lines on stderr. |
+
+`-v` and `-q` cannot be combined. They change only the human-readable stderr
+lines; the JSONL log under `logs/` always records every event, and stdout is
+unchanged.
+
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success. |
+| `1` | Any other failure (I/O, osmium export, orchestration, migration). |
+| `2` | Usage error: unknown command or option, bad value. |
+| `3` | Environment or configuration: preflight failed, a root is missing or unsafe. |
+| `4` | Validation failed: manifest, storage or statistics checks. |
+| `5` | Publication failed: upload plan mismatch, upload or Hub verification. |
+| `130` | Interrupted with Ctrl-C. |
+
+Errors print one line on stderr, never a traceback.
 
 ## Read-only and local commands
 
@@ -44,19 +73,24 @@ The complete stoppable and resumable operation:
 
 ```bash
 uv run osm-polygon-description-tag run-and-publish \
-  --source-root "/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw" \
-  --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root" \
+  --source-root "/path/to/pbfs" \
+  --data-root "/path/to/data-root" \
   --confirm-repo NoeFlandre/osm-polygon-description-tag
 ```
 
 Options:
 
-- `--source-root PATH`: immutable PBF directory; defaults to the approved
-  Seagate raw root.
-- `--data-root PATH`: generated-data directory; defaults to the approved
-  Seagate data root.
+- `--source-root PATH`: immutable PBF directory. If omitted, read from
+  `OSM_POLYGON_SOURCE_ROOT`. Only `inspect`, `build-one`, `build-all`, and
+  `run-and-publish` need it; data-only commands ignore it.
+- `--data-root PATH`: generated-data directory. If omitted, read from
+  `OSM_POLYGON_DATA_ROOT`.
+
 - `--osmium NAME`: executable name or path; defaults to `osmium`.
 - `--confirm-repo REPO`: required exact target repository confirmation.
+
+A root given neither way is an error (exit code 3) naming both the option and
+the variable; there is no machine-specific default.
 
 ### `release-stats`
 
@@ -69,12 +103,12 @@ never touched.
 ```bash
 # 1. Dry run: compute, validate, and print the exact plan. No network.
 uv run osm-polygon-description-tag release-stats \
-  --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root" \
+  --data-root "/path/to/data-root" \
   --confirm-repo NoeFlandre/osm-polygon-description-tag
 
 # 2. Publish and verify the remote revision.
 uv run osm-polygon-description-tag release-stats \
-  --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root" \
+  --data-root "/path/to/data-root" \
   --confirm-repo NoeFlandre/osm-polygon-description-tag --apply
 ```
 
@@ -118,7 +152,7 @@ dashboard:
 
 ```bash
 uv run osm-polygon-description-tag trackio-snapshot \
-  --data-root "/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root" \
+  --data-root "/path/to/data-root" \
   --run-name snapshot-2026-07-31
 ```
 

@@ -674,7 +674,7 @@ def test_a_naive_evaluation_instant_makes_freshness_unknown() -> None:
     reason = grid_operator._policy_freshness_block(
         _verdict(captured_at=datetime(2026, 9, 8, tzinfo=UTC)),
         # A naive evaluation instant is not comparable and must fail closed.
-        datetime(2026, 9, 8),
+        datetime(2026, 9, 8),  # noqa: DTZ001 - naive on purpose
     )
 
     assert reason == "policy evidence freshness is unknown"

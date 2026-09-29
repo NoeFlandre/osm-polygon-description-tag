@@ -167,7 +167,7 @@ def _stub_png_render(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def _install_external_boundaries(monkeypatch: pytest.MonkeyPatch) -> dict:
+def _install_external_boundaries(monkeypatch: pytest.MonkeyPatch) -> dict:  # noqa: C901 - long test; TODO(#62) split it
     import osm_polygon_description_tag.osm.extraction as extraction_module
     import osm_polygon_description_tag.publication.upload as pub
     import osm_polygon_description_tag.runtime.resources as resources_module

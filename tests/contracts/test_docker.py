@@ -128,3 +128,41 @@ def test_opt_in_docker_smoke() -> None:
     )
     assert help_run.returncode == 0, help_run.stdout + help_run.stderr
     assert "run-and-publish" in help_run.stdout
+
+
+def _last_stage(dockerfile: str) -> list[list[str]]:
+    stages: list[list[list[str]]] = []
+    for line in dockerfile.replace("\\\n", " ").splitlines():
+        words = line.split()
+        if not words or words[0].startswith("#"):
+            continue
+        if words[0].upper() == "FROM":
+            stages.append([])
+        if stages:
+            stages[-1].append(words)
+    return stages[-1]
+
+
+def test_the_runtime_image_presets_its_roots_and_carries_oci_labels() -> None:
+    stage = _last_stage(_read("Dockerfile"))
+    env = [word for words in stage if words[0].upper() == "ENV" for word in words[1:]]
+    labels = " ".join(word for words in stage if words[0].upper() == "LABEL" for word in words[1:])
+
+    assert "OSM_POLYGON_SOURCE_ROOT=/data/raw" in env
+    assert "OSM_POLYGON_DATA_ROOT=/data" in env
+    for key in ("source", "licenses", "title"):
+        assert f"org.opencontainers.image.{key}=" in labels
+
+
+def test_the_compose_pipeline_mounts_raw_input_read_only_and_runs_as_the_caller() -> None:
+    import yaml
+
+    service = yaml.safe_load(_read("compose.yaml"))["services"]["pipeline"]
+    mounts = {volume["target"]: volume for volume in service["volumes"]}
+
+    assert service["build"]["target"] == "runtime"
+    assert mounts["/data/raw"]["read_only"] is True
+    assert "read_only" not in mounts["/data"]
+    assert "UID" in service["user"]
+    assert "HF_TOKEN" not in service["environment"]
+    assert service["env_file"] == [{"path": ".env", "required": False}]

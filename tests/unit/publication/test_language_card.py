@@ -740,23 +740,23 @@ def test_markers_at_the_start_of_crlf_lines_are_accepted(export: LanguageExport)
 
 
 def _stats(**overrides: object) -> LanguageStats:
-    base: dict[str, object] = dict(
-        annotation_count=100,
-        object_count=90,
-        base_description_count=80,
-        localized_description_count=20,
-        detected_count=60,
-        uncertain_count=30,
-        non_linguistic_count=10,
-        distinct_language_count=5,
-        top_languages=(("eng", 273435), ("deu", 138912)),
-        split_count=45,
-        unsupported_language_count=15,
-        unsupported_distinct_count=3,
-        top_unsupported_languages=(("tso", 10), ("vec", 5)),
-        not_detected_count=25,
-        sentence_count=70,
-    )
+    base: dict[str, object] = {
+        "annotation_count": 100,
+        "object_count": 90,
+        "base_description_count": 80,
+        "localized_description_count": 20,
+        "detected_count": 60,
+        "uncertain_count": 30,
+        "non_linguistic_count": 10,
+        "distinct_language_count": 5,
+        "top_languages": (("eng", 273435), ("deu", 138912)),
+        "split_count": 45,
+        "unsupported_language_count": 15,
+        "unsupported_distinct_count": 3,
+        "top_unsupported_languages": (("tso", 10), ("vec", 5)),
+        "not_detected_count": 25,
+        "sentence_count": 70,
+    }
     base.update(overrides)
     return LanguageStats(**base)  # type: ignore[arg-type]
 

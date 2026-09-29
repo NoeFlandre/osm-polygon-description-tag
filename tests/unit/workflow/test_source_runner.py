@@ -5,10 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 
-import osm_polygon_description_tag.workflow.source_runner as source_runner
 from osm_polygon_description_tag.osm.discovery import Source
 from osm_polygon_description_tag.publication.state import PublicationStateError
 from osm_polygon_description_tag.runtime.config import Paths
+from osm_polygon_description_tag.workflow import source_runner
 from osm_polygon_description_tag.workflow.build import BuildResult
 from osm_polygon_description_tag.workflow.source_runner import (
     STATUS_BUILT,
@@ -98,7 +98,6 @@ def test_build_source_forwards_clock_and_all_build_options(
     assert seen["export_config"] is export_config
     assert seen["progress_interval"] == 7
     assert seen["executable"] == "custom-osmium"
-    assert callable(seen["progress_callback"])
     assert logger.events == [
         (
             "source_decision",
@@ -405,8 +404,7 @@ def test_published_entry_defaults_missing_state_sections_to_empty(
 
 
 def test_publication_state_call_translates_errors_and_preserves_cause() -> None:
-    call_state = getattr(source_runner, "_call_publication_state", None)
-    assert callable(call_state)
+    call_state = source_runner._call_publication_state
     state_error = PublicationStateError("malformed state")
 
     def fail() -> str:

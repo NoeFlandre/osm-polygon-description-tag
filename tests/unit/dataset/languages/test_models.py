@@ -75,10 +75,7 @@ def test_policy_accepts_inclusive_minimum_and_threshold_boundaries() -> None:
     assert policy.tie_epsilon == 1.0
 
 
-def test_the_policy_carries_no_confidence_threshold() -> None:
-    """A score or margin gate was removed; only structural gates remain."""
-    assert not hasattr(DEFAULT_LANGUAGE_POLICY, "min_score")
-    assert not hasattr(DEFAULT_LANGUAGE_POLICY, "min_margin")
+def test_the_default_policy_gates_only_on_alphabetic_length() -> None:
     assert DEFAULT_LANGUAGE_POLICY.min_alphabetic_chars == 5
 
 

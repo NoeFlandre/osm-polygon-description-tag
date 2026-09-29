@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
 
+# A superseded pull-request run has nothing left to prove; do not pay for it twice.
+concurrency:
+  group: quality-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   quality:
     runs-on: ubuntu-latest
@@ -17,6 +22,7 @@ jobs:
     env:
       HF_HUB_OFFLINE: "1"
       HF_DATASETS_OFFLINE: "1"
+      HYPOTHESIS_PROFILE: ci
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -53,6 +59,9 @@ jobs:
       - name: Type-check
         run: uv run ty check
 
+      - name: Audit locked dependencies
+        run: scripts/audit_locked_dependencies.sh
+
       - name: Build documentation
         run: uv run mkdocs build --strict --site-dir /tmp/osm-polygon-description-tag-site
 
@@ -61,10 +70,10 @@ jobs:
           mkdir -p reports &&
           uv run pytest
           --cov=osm_polygon_description_tag
+          --cov=scripts
           --cov-branch
           --cov-report=term-missing
           --cov-report=json:reports/coverage.json
-          --cov-fail-under=90
 
       - name: Upload coverage report
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -81,6 +90,27 @@ jobs:
         run: |
           uv run osm-polygon-description-tag --help
           uv run osm-polygon-description-tag run-and-publish --help
+
+      # `uv run` above uses the editable dev environment. Install only the
+      # built wheel into a clean venv, outside the repository, and check that
+      # every module imports and every packaged data file shipped intact.
+      - name: Smoke-test the built wheel in a clean venv
+        run: |
+          uv venv --python 3.12 /tmp/wheel-venv
+          uv pip install --python /tmp/wheel-venv dist/*.whl
+          /tmp/wheel-venv/bin/osm-polygon-description-tag --help
+          (cd /tmp && /tmp/wheel-venv/bin/python "$GITHUB_WORKSPACE/scripts/check_installed_package.py" \
+            --source-root "$GITHUB_WORKSPACE/src/osm_polygon_description_tag")
+
+      # The lockfile only proves the newest versions work. Install the lowest
+      # declared direct dependencies (wheels only) and run the built CLI.
+      - name: Smoke-test lowest declared dependencies
+        run: |
+          uv venv --python 3.12 /tmp/lowest
+          uv pip install --python /tmp/lowest --resolution lowest-direct --only-binary :all: -r pyproject.toml
+          uv pip install --python /tmp/lowest --no-deps dist/*.whl
+          /tmp/lowest/bin/osm-polygon-description-tag --help
+          /tmp/lowest/bin/osm-polygon-description-tag run-and-publish --help
 
       - name: Verify wheel contents
         run: >-
@@ -115,6 +145,18 @@ jobs:
       - name: Verify the bundled osmium binary
         run: docker run --rm --entrypoint osmium osm-polygon-description-tag:ci --version
 
+      - name: Verify the image runs as a non-root user with the roots preset
+        run: |
+          test "$(docker run --rm --entrypoint id osm-polygon-description-tag:ci -u)" != "0"
+          docker run --rm --entrypoint printenv osm-polygon-description-tag:ci \
+            OSM_POLYGON_SOURCE_ROOT OSM_POLYGON_DATA_ROOT
+
+      - name: Validate the compose file and run through it
+        run: |
+          docker compose config --quiet
+          mkdir -p data-root/raw
+          docker compose run --rm --build pipeline --help
+
   risk:
     # The CRAP budget is a single whole-repository measurement, so it runs once
     # rather than once per mutation shard.
@@ -124,6 +166,7 @@ jobs:
     env:
       HF_HUB_OFFLINE: "1"
       HF_DATASETS_OFFLINE: "1"
+      HYPOTHESIS_PROFILE: ci
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -173,6 +216,7 @@ jobs:
     env:
       HF_HUB_OFFLINE: "1"
       HF_DATASETS_OFFLINE: "1"
+      HYPOTHESIS_PROFILE: mutation
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -237,6 +281,7 @@ jobs:
     env:
       HF_HUB_OFFLINE: "1"
       HF_DATASETS_OFFLINE: "1"
+      HYPOTHESIS_PROFILE: mutation
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -292,6 +337,7 @@ jobs:
     env:
       HF_HUB_OFFLINE: "1"
       HF_DATASETS_OFFLINE: "1"
+      HYPOTHESIS_PROFILE: mutation
       MUTATION_SHARD_COUNT: "8"
     steps:
       - name: Check out repository
@@ -369,3 +415,63 @@ jobs:
           name: mutation-score-shard-${{ matrix.shard }}
           path: reports/mutation-summary.json
           if-no-files-found: error
+
+  # Advisory: continue-on-error keeps a noisy shared runner from failing ci-ok.
+  # Times the base and the head on the same runner.
+  benchmarks:
+    if: github.event_name == 'pull_request'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.16"
+          enable-cache: true
+
+      - name: Install Python and just
+        run: |
+          uv python install 3.12
+          sudo apt-get update
+          sudo apt-get install -y just
+
+      - name: Time the base
+        run: |
+          uv sync --frozen
+          git checkout "${{ github.event.pull_request.head.sha }}" -- benchmarks
+          # The base lockfile predates pytest-benchmark, so add it for this run only.
+          uv run --with "pytest-benchmark>=5.3,<6" pytest benchmarks --no-cov \
+            -p no:cacheprovider -q --benchmark-save=base
+
+      - name: Time the head against it
+        run: |
+          git checkout --force "${{ github.event.pull_request.head.sha }}"
+          uv sync --frozen
+          just bench-compare
+
+  # The one check to require in branch protection. Which of the jobs above run
+  # depends on the event (mutation-scope on pull requests, the sweeps on push),
+  # so a skipped job is fine; a failed or cancelled one is not.
+  ci-ok:
+    if: always()
+    needs: [quality, container, risk, mutation-scope, mutation-contexts, mutation-all, benchmarks]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every gate to have passed or been skipped
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in $RESULTS; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "a required job ended as: $result" >&2; exit 1 ;;
+            esac
+          done

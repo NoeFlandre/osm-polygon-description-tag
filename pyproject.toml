@@ -30,7 +30,7 @@ dependencies = [
     "shapely>=2.1,<3",
     "trackio>=0.20,<1",
     "tqdm>=4.66,<5",
-    "typer>=0.12,<1",
+    "typer>=0.26,<1",
 ]
 
 [project.optional-dependencies]
@@ -70,17 +70,21 @@ skip-excluded-dirs = true
 [dependency-groups]
 dev = [
     "mkdocs-material>=9.6,<10",
+    # The two language pins below must equal the `language` extra's; a
+    # contract test keeps them in step.
     "lingua-language-detector==2.2.0",
     "fasttext-numpy2==0.10.2; sys_platform == 'linux'",
     "mutmut>=3,<4",
-    "pre-commit>=4.6.1",
+    "pre-commit>=4.6.1,<5",
     "hypothesis>=6.100,<7",
-    "pytest>=8.4,<9",
+    "pytest>=9.0.3,<10",
+    "pytest-benchmark>=5.3,<6",
     "pytest-cov>=6.2,<7",
     "pytest-xdist>=3.6,<4",
     "radon>=6,<7",
     "ruff>=0.12,<0.13",
-    "ty>=0.0.65",
+    # ty is pre-1.0 and CI fails on warnings: bound it to the tested series.
+    "ty>=0.0.65,<0.1",
 ]
 
 [tool.pytest.ini_options]
@@ -93,8 +97,46 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "S", "TID"]
+select = [
+    "E", "F", "I", "B", "UP", "SIM", "RUF", "S", "TID",
+    "C4", "PIE", "RET", "PERF", "PLW", "ARG", "BLE", "DTZ", "PTH", "T20", "N", "ERA", "PGH",
+    "C90", "PLR0912", "PLR0913", "PLR0915", "PLR1711", "PLR0402",
+]
 ignore = ["S101"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+# Keyword-heavy builders are the norm here; the modules that already exceed the
+# bound are listed under per-file-ignores until each is reshaped (TODO(#62)).
+max-args = 8
+
+[tool.ruff.lint.per-file-ignores]
+# Scripts and the terminal presenter print by design.
+"scripts/**" = ["T20"]
+"src/osm_polygon_description_tag/runtime/presentation.py" = ["T20"]
+# Test fakes and lambdas mirror real signatures and names (trackio's Table,
+# HfApi classes), so unused arguments, pass-through lambdas and those names
+# are intentional there.
+"tests/**" = ["ARG", "PLW0108", "N802", "N806", "N818", "PLR0913"]
+# Signatures that predate the argument-count bound (TODO(#62): reshape, then delete).
+"src/osm_polygon_description_tag/dataset/languages/worker.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/grid_workflow.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/language_cli.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/publication/state.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/workflow/build.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/workflow/finalization.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/workflow/grid_operator/bundle.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/workflow/grid_operator/script.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/workflow/grid_operator/stage.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/workflow/grid_operator/submission.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/workflow/grid_policy.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/workflow/orchestrator.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/workflow/source_runner.py" = ["PLR0913"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"typer._click".msg = "Private Typer module; import from osm_polygon_description_tag.runtime.click_compat."
 
 [tool.ruff.format]
 quote-style = "double"
@@ -103,17 +145,17 @@ line-ending = "lf"
 
 [tool.ty.environment]
 python-version = "3.12"
-root = ["./src"]
+root = ["./src", "."]
 
 [tool.ty.src]
-include = ["src"]
+include = ["src", "scripts"]
 
 [tool.ty.terminal]
 error-on-warning = true
 
 [tool.coverage.run]
 branch = true
-source = ["osm_polygon_description_tag"]
+source = ["osm_polygon_description_tag", "scripts"]
 
 [tool.coverage.report]
 fail_under = 90
@@ -127,9 +169,13 @@ also_copy = [
     ".dockerignore",
     ".gitignore",
     ".pre-commit-config.yaml",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
     "CITATION.cff",
     "Dockerfile",
     "README.md",
+    "SECURITY.md",
+    "compose.yaml",
     "config/",
     "docs/",
     "justfile",

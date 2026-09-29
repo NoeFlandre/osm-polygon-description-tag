@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -176,7 +175,7 @@ def _materialize_payload(
         temporary = Path(temporary_name)
         _copy_payload_inputs(temporary, paths, bundle, project_root, source_dir, snapshot)
         _write_stage_manifest(temporary, bundle, resume_fingerprint)
-        os.replace(temporary, payload_root)
+        Path(temporary).replace(payload_root)
         fsync_directory(paths.root)
 
 

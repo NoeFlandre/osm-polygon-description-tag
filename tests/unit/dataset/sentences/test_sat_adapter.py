@@ -8,7 +8,6 @@ cannot vouch for rather than segmenting it anyway.
 
 from __future__ import annotations
 
-import builtins
 import hashlib
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -109,7 +108,7 @@ def test_the_model_and_its_tokenizer_come_from_the_verified_directory(
     assert loads == [(str(path), str(path / "tokenizer"))]
 
 
-def test_a_model_whose_digest_is_not_the_pinned_artifact_is_refused_exactly(
+def test_a_sat_model_whose_digest_is_not_the_pinned_artifact_is_refused_exactly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     model = _FakeModel()
@@ -292,14 +291,14 @@ def test_an_unhashable_model_path_is_reported_by_its_own_path(
     weights = model_dir / "model.safetensors"
     # ``chmod(0o000)`` does not stop root from reading the file, so the read
     # failure is injected at ``open`` to hold on every user account.
-    real_open = builtins.open
+    real_open = Path.open
 
-    def _refuse_weights(file: object, *args: object, **kwargs: object) -> object:
-        if file == weights:
-            raise PermissionError(13, "Permission denied", str(file))
-        return real_open(file, *args, **kwargs)  # type: ignore[call-overload]
+    def _refuse_weights(self: Path, *args: object, **kwargs: object) -> object:
+        if self == weights:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_open(self, *args, **kwargs)  # type: ignore[call-overload]
 
-    monkeypatch.setattr(builtins, "open", _refuse_weights)
+    monkeypatch.setattr(Path, "open", _refuse_weights)
 
     with pytest.raises(SentenceSplitterError) as caught:
         build_sat_splitter(model_dir=model_dir)

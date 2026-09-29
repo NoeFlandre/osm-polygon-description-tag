@@ -12,7 +12,7 @@ import pytest
 from shapely import to_wkb
 from shapely.geometry import Polygon
 
-import osm_polygon_description_tag.dataset.unique_rows as unique_rows
+from osm_polygon_description_tag.dataset import unique_rows
 from osm_polygon_description_tag.dataset.canonical_rows import (
     canonical_geometry_wkb,
     select_canonical_row,
@@ -470,6 +470,26 @@ def test_iter_unique_parquet_batches_wraps_duckdb_errors(
                 columns=("osm_type", "osm_id", "geometry"),
             )
         )
+
+
+def test_the_text_flag_reader_names_the_data_root_on_duckdb_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = tmp_path / "dataset"
+    data_dir = data_root / "data"
+    data_dir.mkdir(parents=True)
+    (data_dir / "region.parquet").write_bytes(b"placeholder")
+    monkeypatch.setattr(unique_rows, "_parquet_relation", lambda paths, columns: "relation")
+    monkeypatch.setattr(
+        unique_rows,
+        "canonical_rows_with_text_flag_sql",
+        lambda relation, columns: "SELECT * FROM missing",
+    )
+
+    with pytest.raises(unique_rows.UniqueRowsError) as error:
+        list(unique_rows.iter_unique_parquet_batches_with_text_flag(data_root, columns=("osm_id",)))
+    assert str(error.value).startswith(f"cannot read unique Parquet rows under {data_root}: ")
 
 
 def test_the_relation_requires_every_column_the_caller_asked_for(

@@ -37,7 +37,7 @@ COMMANDS = (
     "language",
 )
 LANGUAGE_COMMANDS = ("prepare", "run", "validate", "export", "publish", "grid")
-GRID_COMMANDS = ("prepare", "stage", "submit", "status", "collect")
+GRID_COMMANDS = ("prepare", "stage", "submit", "status", "collect", "run")
 COMMON_OPTIONS = ("--source-root", "--data-root", "--osmium")
 HELP_OPTION = {"--help"}
 COMMAND_OPTIONS = {
@@ -154,6 +154,30 @@ GRID_COMMAND_OPTIONS = {
         "--remote-bundle-dir",
         "--retrieved-run-dir",
         "--apply",
+    },
+    "run": {
+        *HELP_OPTION,
+        "--run-dir",
+        "--source-root",
+        "--retrieval-dir",
+        "--remote-bundle-root",
+        "--remote-glotlid-model-path",
+        "--remote-sat-model-path",
+        "--remote-operator-dir",
+        "--remote-cli",
+        "--project-root",
+        "--ssh-host",
+        "--site",
+        "--walltime-seconds",
+        "--processing-seconds",
+        "--batch-size",
+        "--poll-seconds",
+        "--job-timeout-seconds",
+        "--max-shards",
+        "--queue",
+        "--shard-stride",
+        "--shard-index",
+        "--allow-daytime",
     },
 }
 
@@ -328,15 +352,15 @@ def test_captured_help_disables_rich_terminal_forcing(
     assert "--confirm-repo" in capsys.readouterr().out
 
 
-def test_inspect_uses_default_paths_when_root_options_are_omitted(
+def test_inspect_reads_roots_from_the_environment_when_options_are_omitted(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     source_root = tmp_path / "default-raw"
     source_root.mkdir()
     (source_root / "default.osm.pbf").write_bytes(b"source")
     data_root = tmp_path / "default-generated"
-    monkeypatch.setattr(runtime_config, "DEFAULT_SOURCE_ROOT", source_root)
-    monkeypatch.setattr(runtime_config, "DEFAULT_DATA_ROOT", data_root)
+    monkeypatch.setenv(runtime_config.SOURCE_ROOT_ENV, str(source_root))
+    monkeypatch.setenv(runtime_config.DATA_ROOT_ENV, str(data_root))
 
     assert run(["inspect"]) == 0
 
@@ -347,6 +371,32 @@ def test_inspect_uses_default_paths_when_root_options_are_omitted(
     assert payload["data_root"] == str(data_root)
     assert payload["osmium_executable"] == "osmium"
     assert [source["name"] for source in payload["sources"]] == ["default.osm.pbf"]
+
+
+def test_a_missing_root_is_an_actionable_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv(runtime_config.SOURCE_ROOT_ENV, raising=False)
+    monkeypatch.delenv(runtime_config.DATA_ROOT_ENV, raising=False)
+
+    assert run(["inspect"]) == 3
+
+    err = capsys.readouterr().err
+    assert "--source-root" in err
+    assert "OSM_POLYGON_SOURCE_ROOT" in err
+    assert "Traceback" not in err
+
+
+def test_data_only_commands_do_not_need_a_source_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv(runtime_config.SOURCE_ROOT_ENV, raising=False)
+    data_root = tmp_path / "generated"
+    (data_root / "data").mkdir(parents=True)
+
+    assert run(["validate", "--data-root", str(data_root)]) == 0
+
+    assert json.loads(capsys.readouterr().out) == {"files": 0, "rows": 0}
 
 
 def test_publish_rejects_wrong_plan_identity(
@@ -492,7 +542,7 @@ def test_handle_build_one_invokes_pipeline(
         manifest_path=data / "manifests" / "region.manifest.json",
     )
 
-    import osm_polygon_description_tag.cli as cli
+    from osm_polygon_description_tag import cli
 
     monkeypatch.setattr(cli, "build_one", lambda *args, **kwargs: fake_result)
 
@@ -527,7 +577,7 @@ def test_handle_publish_invokes_execute_upload(
     (data / "assets" / "area_distribution.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"hist" * 1024)
     (data / "assets" / "dataset-card-hero.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"hero" * 1024)
 
-    import osm_polygon_description_tag.cli as cli
+    from osm_polygon_description_tag import cli
 
     captured: list[list[str]] = []
 
@@ -555,7 +605,7 @@ def test_handle_publish_invokes_execute_upload(
 def test_handle_run_and_publish_invokes_orchestrator(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    import osm_polygon_description_tag.cli as cli
+    from osm_polygon_description_tag import cli
 
     fake_report = {
         "preflight": {"source_count": 1},
@@ -586,8 +636,8 @@ def test_handle_run_and_publish_invokes_orchestrator(
         preflight=None,
         upload_runner=None,
         clock=None,
-        source_root=None,
-        data_root=None,
+        source_root=tmp_path / "raw",
+        data_root=tmp_path / "generated",
         osmium="osmium",
     )
 
@@ -597,3 +647,94 @@ def test_handle_run_and_publish_invokes_orchestrator(
     assert exit_code == 0
     assert payload["final_remote_revision"] == "rev-1"
     assert captured["osmium_executable"] == "osmium"
+
+
+def test_version_prints_the_package_version(capsys: pytest.CaptureFixture[str]) -> None:
+    from importlib.metadata import version
+
+    assert run(["--version"]) == 0
+    assert capsys.readouterr().out == f"{version('osm-polygon-description-tag')}\n"
+
+
+def test_every_option_of_every_command_has_help_text() -> None:
+    import typer.main
+
+    from osm_polygon_description_tag.cli import app
+
+    missing: list[str] = []
+
+    def walk(command: object, path: str) -> None:
+        missing.extend(
+            f"{path or '<root>'} {param.opts[0]}"
+            for param in getattr(command, "params", [])
+            if param.param_type_name == "option" and not getattr(param, "help", None)
+        )
+        for name, sub in getattr(command, "commands", {}).items():
+            walk(sub, f"{path} {name}".strip())
+
+    walk(typer.main.get_command(app), "")
+
+    assert missing == []
+
+
+def test_verbosity_is_reset_after_each_invocation(monkeypatch: pytest.MonkeyPatch) -> None:
+    import osm_polygon_description_tag.cli as cli_module
+
+    seen: list[str] = []
+    monkeypatch.setattr(
+        cli_module, "handle_validate", lambda _args: seen.append(cli_module._verbosity.stderr_level)
+    )
+
+    assert run(["-q", "validate"]) == 0
+    assert seen == ["WARNING"]
+    assert cli_module._verbosity.stderr_level == "INFO"
+
+
+def _exit_code_cases() -> list[tuple[type[Exception], int]]:
+    import osm_polygon_description_tag.cli as cli_module
+
+    return [
+        (OSError, 1),
+        (ValueError, 1),
+        (cli_module.OsmiumExportError, 1),
+        (cli_module.OrchestratorError, 1),
+        (cli_module.MigrationError, 1),
+        (cli_module.TextMigrationError, 1),
+        (cli_module.LanguageDetectionError, 1),
+        (cli_module.PreflightError, 3),
+        (runtime_config.MissingPathError, 3),
+        (runtime_config.UnsafePathError, 3),
+        (cli_module.ManifestError, 4),
+        (cli_module.StorageError, 4),
+        (cli_module.ReportingError, 4),
+        (cli_module.PublicationError, 5),
+        (cli_module.HubVerificationError, 5),
+    ]
+
+
+@pytest.mark.parametrize(("error_type", "code"), _exit_code_cases())
+def test_each_error_class_exits_with_its_documented_code(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    error_type: type[Exception],
+    code: int,
+) -> None:
+    import osm_polygon_description_tag.cli as cli_module
+
+    def fail(_args: object) -> int:
+        raise error_type("boom")
+
+    monkeypatch.setattr(cli_module, "handle_validate", fail)
+
+    assert run(["validate"]) == code
+    err = capsys.readouterr().err
+    assert "boom" in err
+    assert "Traceback" not in err
+
+
+def test_the_exit_code_table_is_documented() -> None:
+    import osm_polygon_description_tag.cli as cli_module
+
+    cli_doc = (Path(__file__).resolve().parents[2] / "docs" / "cli.md").read_text(encoding="utf-8")
+    for code in {code for _types, code in cli_module._EXIT_CODES} | {1, 2, 130}:
+        assert f"| `{code}` |" in cli_doc

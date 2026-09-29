@@ -133,7 +133,7 @@ def test_preparing_a_snapshot_forwards_the_requested_identity_unchanged(
         lambda *_args, **_kwargs: SimpleNamespace(
             snapshot_id="s" * 64,
             source_files=(),
-            to_payload=lambda: {},
+            to_payload=dict,
         ),
     )
     monkeypatch.setattr(language_cli, "print_json", lambda _payload: None)
@@ -533,7 +533,7 @@ def test_submitting_forwards_the_budget_and_the_daytime_authorisation(
     monkeypatch.setattr(
         language_cli,
         "submit_job",
-        lambda *_args, **_kwargs: (SimpleNamespace(to_payload=lambda: {}), None),
+        lambda *_args, **_kwargs: (SimpleNamespace(to_payload=dict), None),
     )
 
     language_cli.handle_grid_submit(
@@ -589,7 +589,7 @@ def test_a_first_submission_prepares_the_job_with_the_requested_budget(
     monkeypatch.setattr(
         language_cli,
         "submit_job",
-        lambda *_args, **_kwargs: (SimpleNamespace(to_payload=lambda: {}), None),
+        lambda *_args, **_kwargs: (SimpleNamespace(to_payload=dict), None),
     )
 
     language_cli.handle_grid_submit(
@@ -643,7 +643,7 @@ def _submit_with_queue(
 
     def fake_submit(*_args: object, **kwargs: object) -> object:
         queues.append(kwargs.get("queue"))
-        return SimpleNamespace(to_payload=lambda: {}), None
+        return SimpleNamespace(to_payload=dict), None
 
     monkeypatch.setattr(language_cli, "submit_job", fake_submit)
 

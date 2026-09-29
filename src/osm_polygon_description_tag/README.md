@@ -8,7 +8,11 @@ The canonical implementation is organized by operational domain:
 - `publication`: upload planning, state, execution, and Hub verification;
 - `observability`: optional Trackio snapshot and live pipeline metrics;
 - `workflow`: preflight, resumable builds, completeness, and lifecycle composition;
-- `cli.py`: the stable console entry point.
+- `cli.py`: the stable console entry point;
+- `language_cli.py`: the `language` command group, backed by
+  `language_workflow.py` (local detection), `grid_workflow.py` and
+  `grid_transport.py` (Grid'5000 runs), and `publication_workflow.py`
+  (language export and publication).
 
-The domain packages contain the implementation. The package root holds only
-the console modules; import everything else from its domain package.
+The domain packages contain the implementation. There are no compatibility
+re-exports: import each name from the module that defines it.

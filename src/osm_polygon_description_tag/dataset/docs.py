@@ -107,7 +107,7 @@ def _atomic_write_if_changed(path: Path, data: bytes) -> bool:
         temp.write_bytes(data)
         with temp.open("rb") as handle:
             os.fsync(handle.fileno())
-        os.replace(temp, path)
+        Path(temp).replace(path)
         return True
     finally:
         if temp.exists():
@@ -240,8 +240,10 @@ def _render_text_rejection_section(stats: Mapping[str, Any]) -> list[str]:
         "| Rejection category | Rows |",
         "| --- | ---: |",
     ]
-    for reason in TEXT_REJECTION_REASONS:
-        lines.append(f"| `{reason}` | {_fmt_int(int(text_rejections.get(reason, 0)))} |")
+    lines.extend(
+        f"| `{reason}` | {_fmt_int(int(text_rejections.get(reason, 0)))} |"
+        for reason in TEXT_REJECTION_REASONS
+    )
     if has_persisted_rejection_count:
         # pragma: no mutate start - key presence makes the fallback unreachable
         lines.extend(

@@ -11,9 +11,9 @@ import pytest
 from shapely import to_wkb
 from shapely.geometry import Polygon
 
-import osm_polygon_description_tag.cli as cli
 import osm_polygon_description_tag.publication.upload as publication_upload
 import osm_polygon_description_tag.workflow.orchestrator as workflow_orchestrator
+from osm_polygon_description_tag import cli
 from osm_polygon_description_tag.osm.discovery import Source
 from osm_polygon_description_tag.osm.extraction import ExportRecord
 from osm_polygon_description_tag.publication.models import UploadItem, UploadPlan
@@ -322,7 +322,7 @@ def test_publish_subprocess_failures_use_plain_cli_error_path(
     )
     captured = capsys.readouterr()
 
-    assert exit_code == 1
+    assert exit_code == 5  # publication failure
     assert captured.out == ""
     assert captured.err == f"error: {message}\n"
     assert "Traceback" not in captured.err
@@ -419,12 +419,7 @@ def test_keyboard_interrupt_returns_130_without_output(
     assert captured.err == ""
 
 
-def test_noninteractive_run_and_publish_keeps_progress_plain(
-    monkeypatch: pytest.MonkeyPatch,
-    cli_roots: tuple[Path, Path],
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    source_root, data_root = cli_roots
+def _patch_real_orchestrator(monkeypatch: pytest.MonkeyPatch, source_root: Path) -> None:
     source_path = source_root / "region.osm.pbf"
     source_path.write_bytes(b"synthetic")
 
@@ -459,14 +454,28 @@ def test_noninteractive_run_and_publish_keeps_progress_plain(
 
     monkeypatch.setattr(cli, "run_and_publish", run_real_orchestrator)
 
-    exit_code = cli.run(
+
+def _run_and_publish(flags: list[str], source_root: Path, data_root: Path) -> int:
+    return cli.run(
         [
+            *flags,
             "run-and-publish",
             *_common_args(source_root, data_root),
             "--confirm-repo",
             "NoeFlandre/osm-polygon-description-tag",
         ]
     )
+
+
+def test_noninteractive_run_and_publish_keeps_progress_plain(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_roots: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source_root, data_root = cli_roots
+    _patch_real_orchestrator(monkeypatch, source_root)
+
+    exit_code = _run_and_publish([], source_root, data_root)
     captured = capsys.readouterr()
     decoder = json.JSONDecoder()
     payload, end = decoder.raw_decode(captured.out)
@@ -485,3 +494,34 @@ def test_noninteractive_run_and_publish_keeps_progress_plain(
     assert "%|" not in captured.err
     assert "\x1b[" not in captured.out
     assert "\r" not in captured.out
+
+
+@pytest.mark.parametrize(
+    ("flags", "info", "debug"),
+    [([], True, False), (["-v"], True, True), (["-q"], False, False)],
+)
+def test_verbosity_flags_filter_the_human_event_lines(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_roots: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+    flags: list[str],
+    info: bool,
+    debug: bool,
+) -> None:
+    source_root, data_root = cli_roots
+    _patch_real_orchestrator(monkeypatch, source_root)
+
+    assert _run_and_publish(flags, source_root, data_root) == 0
+
+    err = capsys.readouterr().err
+    assert (" INFO " in err) is info
+    assert (f" resolved_config source_root={source_root} data_root={data_root}" in err) is debug
+    # The durable JSONL log keeps every event whatever the flags.
+    log = (data_root / "logs" / "run-and-publish.jsonl").read_text(encoding="utf-8")
+    events = {json.loads(line)["event"] for line in log.splitlines()}
+    assert {"resolved_config", "build_progress", "run_summary"} <= events
+
+
+def test_verbose_and_quiet_cannot_be_combined(capsys: pytest.CaptureFixture[str]) -> None:
+    assert cli.run(["-v", "-q", "inspect"]) == 2
+    assert "--verbose and --quiet cannot be combined" in capsys.readouterr().err
