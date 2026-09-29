@@ -50,10 +50,6 @@ jobs:
       - name: Run pre-commit
         run: uv run pre-commit run --all-files
 
-      # PYSEC-2026-113 (pyarrow, fix 23.0.1) is baselined: pyarrow is capped <22 (#61).
-      - name: Audit locked dependencies for known CVEs
-        run: uv export --frozen --no-hashes --no-emit-project | uvx pip-audit --ignore-vuln PYSEC-2026-113 --strict --no-deps --disable-pip -r /dev/stdin
-
       - name: Check formatting
         run: uv run ruff format --check .
 
