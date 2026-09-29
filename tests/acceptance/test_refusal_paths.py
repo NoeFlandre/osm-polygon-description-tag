@@ -14,6 +14,8 @@ import pytest
 from osm_polygon_description_tag.cli import run
 from osm_polygon_description_tag.publication import REPO_ID
 
+pytestmark = pytest.mark.acceptance
+
 EXIT_ENVIRONMENT = 3
 
 

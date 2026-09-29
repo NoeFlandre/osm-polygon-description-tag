@@ -55,6 +55,7 @@ def test_key_order_never_changes_the_bytes_or_the_digest(payload: object) -> Non
 
 @given(_JSON)
 def test_bytes_are_the_text_plus_a_newline_and_the_digest_hashes_the_text(payload: object) -> None:
+    """Keep the durable LF terminator; digests intentionally hash bare JSON text."""
     text = canonical_json_text(payload)
 
     assert canonical_json_bytes(payload) == (text + "\n").encode()

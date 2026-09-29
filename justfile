@@ -41,9 +41,9 @@ bench-compare name="base":
 test-integration:
     uv run pytest tests/integration -q
 
-# Hermetic user-journey tests: no network, no osmium.
+# Public user workflows use real local tools; network and Hub access stay hermetic.
 test-acceptance:
-    uv run pytest tests/acceptance -q
+    uv run pytest tests/acceptance -m acceptance -q
 
 # The suite is the expensive part and `quality` already runs it with coverage,
 # so re-running it here only produced the same numbers a second time.
@@ -209,11 +209,11 @@ docker-run data_root: docker-build
         --user "$(id -u):$(id -g)" \
         --env HOME=/tmp \
         --mount "type=bind,src={{data_root}},dst=/data" \
-        --mount "type=bind,src={{data_root}}/raw,dst=/data/raw,readonly" \
+        --mount "type=bind,src={{data_root}}/raw,dst=/source,readonly" \
         --env HF_TOKEN \
         osm-polygon-description-tag:local \
         run-and-publish \
-        --source-root /data/raw \
+        --source-root /source \
         --data-root /data \
         --confirm-repo {{repo_id}}
 

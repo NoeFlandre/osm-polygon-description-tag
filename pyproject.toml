@@ -90,7 +90,10 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
-markers = ["integration: requires the external osmium binary"]
+markers = [
+    "integration: requires the external osmium binary",
+    "acceptance: hermetic user-journey scenario (public entry point, only network faked)",
+]
 
 [tool.ruff]
 line-length = 100
@@ -119,21 +122,21 @@ max-args = 8
 # Test fakes and lambdas mirror real signatures and names (trackio's Table,
 # HfApi classes), so unused arguments, pass-through lambdas and those names
 # are intentional there.
-"tests/**" = ["ARG", "PLW0108", "N802", "N806", "N818", "PLR0913"]
+"tests/**" = ["ARG", "PLW0108", "N802", "N806", "N818", "PLR0913"] # TODO(#62): remove blanket suppression.
 # Signatures that predate the argument-count bound (TODO(#62): reshape, then delete).
-"src/osm_polygon_description_tag/dataset/languages/worker.py" = ["PLR0913"]
-"src/osm_polygon_description_tag/grid_workflow.py" = ["PLR0913"]
-"src/osm_polygon_description_tag/language_cli.py" = ["PLR0913"]
-"src/osm_polygon_description_tag/publication/state.py" = ["PLR0913"]
-"src/osm_polygon_description_tag/workflow/build.py" = ["PLR0913"]
-"src/osm_polygon_description_tag/workflow/finalization.py" = ["PLR0913"]
-"src/osm_polygon_description_tag/workflow/grid_operator/bundle.py" = ["PLR0913"]
-"src/osm_polygon_description_tag/workflow/grid_operator/script.py" = ["PLR0913"]
-"src/osm_polygon_description_tag/workflow/grid_operator/stage.py" = ["PLR0913"]
-"src/osm_polygon_description_tag/workflow/grid_operator/submission.py" = ["PLR0913"]
-"src/osm_polygon_description_tag/workflow/grid_policy.py" = ["PLR0913"]
-"src/osm_polygon_description_tag/workflow/orchestrator.py" = ["PLR0913"]
-"src/osm_polygon_description_tag/workflow/source_runner.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/dataset/languages/worker.py" = ["PLR0913"] # TODO(#62)
+"src/osm_polygon_description_tag/grid_workflow.py" = ["PLR0913"] # TODO(#62)
+"src/osm_polygon_description_tag/language_cli.py" = ["PLR0913"] # TODO(#62)
+"src/osm_polygon_description_tag/publication/state.py" = ["PLR0913"] # TODO(#62)
+"src/osm_polygon_description_tag/workflow/build.py" = ["PLR0913"] # TODO(#62)
+"src/osm_polygon_description_tag/workflow/finalization.py" = ["PLR0913"] # TODO(#62)
+"src/osm_polygon_description_tag/workflow/grid_operator/bundle.py" = ["PLR0913"] # TODO(#62)
+"src/osm_polygon_description_tag/workflow/grid_operator/script.py" = ["PLR0913"] # TODO(#62)
+"src/osm_polygon_description_tag/workflow/grid_operator/stage.py" = ["PLR0913"] # TODO(#62)
+"src/osm_polygon_description_tag/workflow/grid_operator/submission.py" = ["PLR0913"] # TODO(#62)
+"src/osm_polygon_description_tag/workflow/grid_policy.py" = ["PLR0913"] # TODO(#62)
+"src/osm_polygon_description_tag/workflow/orchestrator.py" = ["PLR0913"] # TODO(#62)
+"src/osm_polygon_description_tag/workflow/source_runner.py" = ["PLR0913"] # TODO(#62)
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "typer._click".msg = "Private Typer module; import from osm_polygon_description_tag.runtime.click_compat."

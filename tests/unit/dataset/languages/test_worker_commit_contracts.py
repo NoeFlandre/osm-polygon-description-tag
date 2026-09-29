@@ -24,9 +24,9 @@ from osm_polygon_description_tag.dataset.languages.checkpoint import (
 from osm_polygon_description_tag.dataset.languages.models import LanguageResult, LanguageStatus
 from osm_polygon_description_tag.dataset.languages.snapshot import (
     SnapshotManifest,
-    prepare_snapshot,
 )
 from osm_polygon_description_tag.dataset.languages.worker import MAX_BATCH_SIZE, process_shard
+from tests.helpers.language_setup import LanguageRunSetup
 from tests.helpers.messages import exactly
 from tests.helpers.parquet import write_description_shard
 from tests.helpers.sentences import fake_splitter
@@ -45,21 +45,17 @@ _write_shard = partial(write_description_shard, batch_size=_BATCH)
 
 
 def _prepare(
-    tmp_path: Path, *, shards: tuple[str, ...] = (SHARD,)
+    language_run_setup: LanguageRunSetup, tmp_path: Path
 ) -> tuple[Path, Path, SnapshotManifest]:
-    source = tmp_path / "source"
-    for index, name in enumerate(shards):
-        _write_shard(source / name, _ROWS, start=index * 100)
-    run = tmp_path / "run"
-    snapshot = prepare_snapshot(source, run, code_fingerprint="a" * 64, lock_fingerprint="b" * 64)
-    return source, run, snapshot
+    return language_run_setup.prepare_run(tmp_path, count=_ROWS, row_group_size=_BATCH)
 
 
 def test_a_finished_shard_reports_the_shard_it_processed_and_where_it_resumed(
     tmp_path: Path,
+    language_run_setup: LanguageRunSetup,
 ) -> None:
     """The outcome is the operator's record of which shard ran and from where."""
-    source, run, snapshot = _prepare(tmp_path)
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
 
     outcome = process_shard(
         run,
@@ -78,10 +74,12 @@ def test_a_finished_shard_reports_the_shard_it_processed_and_where_it_resumed(
 
 
 def test_reprocessing_a_complete_shard_reports_it_without_rewriting_anything(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    language_run_setup: LanguageRunSetup,
 ) -> None:
     """A finished shard must be recognised from its checkpoint, not redone."""
-    source, run, snapshot = _prepare(tmp_path)
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     process_shard(
         run,
         source,
@@ -113,9 +111,11 @@ def test_reprocessing_a_complete_shard_reports_it_without_rewriting_anything(
     assert outcome.annotation_count == _ROWS
 
 
-def test_the_largest_documented_batch_size_is_accepted(tmp_path: Path) -> None:
+def test_the_largest_documented_batch_size_is_accepted(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
     """``MAX_BATCH_SIZE`` is the documented maximum, so it must be usable."""
-    source, run, snapshot = _prepare(tmp_path)
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
 
     outcome = process_shard(
         run,
@@ -132,10 +132,12 @@ def test_the_largest_documented_batch_size_is_accepted(tmp_path: Path) -> None:
 
 
 def test_a_failed_commit_reserves_no_identities_for_later_batches(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    language_run_setup: LanguageRunSetup,
 ) -> None:
     """Reserving before the write would make a retried batch refuse its own rows."""
-    source, run, snapshot = _prepare(tmp_path)
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     paths = shard_paths(run, SHARD)
     paths.parts.mkdir(parents=True, exist_ok=True)
     paths.receipts.mkdir(parents=True, exist_ok=True)
@@ -175,9 +177,10 @@ def test_a_failed_commit_reserves_no_identities_for_later_batches(
 
 def test_a_part_that_fails_verification_reserves_none_of_its_identities(
     tmp_path: Path,
+    language_run_setup: LanguageRunSetup,
 ) -> None:
     """A part refused for its row count must not reserve the identities it carries."""
-    source, run, snapshot = _prepare(tmp_path)
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     process_shard(
         run,
         source,
@@ -204,9 +207,10 @@ def test_a_part_that_fails_verification_reserves_none_of_its_identities(
 
 def test_a_committed_part_is_checked_against_the_identities_already_seen(
     tmp_path: Path,
+    language_run_setup: LanguageRunSetup,
 ) -> None:
     """Resume reads every committed part, so a duplicate across parts must be refused."""
-    source, run, snapshot = _prepare(tmp_path)
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     process_shard(
         run,
         source,
@@ -228,9 +232,11 @@ def test_a_committed_part_is_checked_against_the_identities_already_seen(
     assert "duplicate" in str(caught.value)
 
 
-def test_a_missing_committed_receipt_names_the_part_it_belongs_to(tmp_path: Path) -> None:
+def test_a_missing_committed_receipt_names_the_part_it_belongs_to(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
     """The operator has to find one receipt among a shard's many parts."""
-    source, run, snapshot = _prepare(tmp_path)
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     process_shard(
         run,
         source,
@@ -271,10 +277,13 @@ def test_a_missing_committed_receipt_names_the_part_it_belongs_to(tmp_path: Path
     ],
 )
 def test_a_checkpoint_that_does_not_bind_this_run_is_refused_in_full(
-    tmp_path: Path, changes: dict[str, object], message: str
+    tmp_path: Path,
+    changes: dict[str, object],
+    message: str,
+    language_run_setup: LanguageRunSetup,
 ) -> None:
     """Each refusal names the binding that disagreed, in full."""
-    source, run, snapshot = _prepare(tmp_path)
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     process_shard(
         run,
         source,
