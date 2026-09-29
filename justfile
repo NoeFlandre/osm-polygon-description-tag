@@ -209,11 +209,11 @@ docker-run data_root: docker-build
         --user "$(id -u):$(id -g)" \
         --env HOME=/tmp \
         --mount "type=bind,src={{data_root}},dst=/data" \
-        --mount "type=bind,src={{data_root}}/raw,dst=/data/raw,readonly" \
+        --mount "type=bind,src={{data_root}}/raw,dst=/source,readonly" \
         --env HF_TOKEN \
         osm-polygon-description-tag:local \
         run-and-publish \
-        --source-root /data/raw \
+        --source-root /source \
         --data-root /data \
         --confirm-repo {{repo_id}}
 
