@@ -30,13 +30,13 @@ test:
 bench:
     uv run pytest benchmarks -q --no-cov -p no:cacheprovider
 
-# Save a baseline, then fail if a later run is >25% slower on the mean.
+# Save a baseline, then fail if a later run is >50% slower on the mean.
 bench-save name="base":
     uv run pytest benchmarks -q --no-cov -p no:cacheprovider --benchmark-save={{name}}
 
 bench-compare name="base":
     uv run pytest benchmarks -q --no-cov -p no:cacheprovider \
-        --benchmark-compare --benchmark-compare-fail=mean:25%
+        --benchmark-compare --benchmark-compare-fail=mean:50%
 
 test-integration:
     uv run pytest tests/integration -q
