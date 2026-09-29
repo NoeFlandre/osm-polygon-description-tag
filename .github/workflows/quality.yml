@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
 
+# A superseded pull-request run has nothing left to prove; do not pay for it twice.
+concurrency:
+  group: quality-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   quality:
     runs-on: ubuntu-latest
@@ -395,3 +400,23 @@ jobs:
           name: mutation-score-shard-${{ matrix.shard }}
           path: reports/mutation-summary.json
           if-no-files-found: error
+
+  # The one check to require in branch protection. Which of the jobs above run
+  # depends on the event (mutation-scope on pull requests, the sweeps on push),
+  # so a skipped job is fine; a failed or cancelled one is not.
+  ci-ok:
+    if: always()
+    needs: [quality, container, risk, mutation-scope, mutation-contexts, mutation-all]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every gate to have passed or been skipped
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in $RESULTS; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "a required job ended as: $result" >&2; exit 1 ;;
+            esac
+          done
