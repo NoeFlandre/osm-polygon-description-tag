@@ -505,7 +505,7 @@ def _plant_metadata(data_root: Path) -> None:
     (data_root / "stats.json").write_text("{}")
 
 
-def _install_subprocess_recorder(monkeypatch: pytest.MonkeyPatch, *, action: str = "ok") -> dict:
+def _install_subprocess_recorder(monkeypatch: pytest.MonkeyPatch, *, action: str = "ok") -> dict:  # noqa: C901 - long test; TODO(#62) split it
     import osm_polygon_description_tag.publication.upload as pub
     import osm_polygon_description_tag.workflow.orchestrator as orch
     import osm_polygon_description_tag.workflow.preflight as preflight_module

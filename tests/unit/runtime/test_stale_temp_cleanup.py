@@ -42,7 +42,7 @@ def test_cleanup_removes_only_owned_temp_older_than_final_target(tmp_path: Path)
 
 
 def test_cleanup_private_name_and_target_guards_are_explicit(tmp_path: Path) -> None:
-    import osm_polygon_description_tag.runtime.cleanup as cleanup
+    from osm_polygon_description_tag.runtime import cleanup
 
     data_dir = tmp_path / "data"
     manifests_dir = tmp_path / "manifests"
@@ -117,7 +117,7 @@ def test_cleanup_routes_exact_targets_and_sorts_all_removed_paths(tmp_path: Path
 
 
 def test_cleanup_root_directory_preserves_exact_target_allowlist(tmp_path: Path) -> None:
-    import osm_polygon_description_tag.runtime.cleanup as cleanup
+    from osm_polygon_description_tag.runtime import cleanup
 
     root = tmp_path / "generated"
     root.mkdir()
@@ -141,7 +141,7 @@ def test_cleanup_root_directory_preserves_exact_target_allowlist(tmp_path: Path)
 def test_cleanup_routes_manifest_and_data_directories_exactly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import osm_polygon_description_tag.runtime.cleanup as cleanup
+    from osm_polygon_description_tag.runtime import cleanup
 
     calls: list[tuple[Path, set[str] | None]] = []
 
@@ -163,7 +163,7 @@ def test_cleanup_routes_manifest_and_data_directories_exactly(
 def test_cleanup_sorts_paths_independently_of_directory_iteration(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import osm_polygon_description_tag.runtime.cleanup as cleanup
+    from osm_polygon_description_tag.runtime import cleanup
 
     data_root = tmp_path / "generated"
     returned = (
@@ -184,7 +184,7 @@ def test_cleanup_sorts_paths_independently_of_directory_iteration(
 
 
 def test_cleanup_rejects_symlink_candidates_and_missing_target_names(tmp_path: Path) -> None:
-    import osm_polygon_description_tag.runtime.cleanup as cleanup
+    from osm_polygon_description_tag.runtime import cleanup
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
@@ -204,7 +204,7 @@ def test_cleanup_rejects_symlink_candidates_and_missing_target_names(tmp_path: P
 
 
 def test_cleanup_requires_strictly_older_candidate(tmp_path: Path) -> None:
-    import osm_polygon_description_tag.runtime.cleanup as cleanup
+    from osm_polygon_description_tag.runtime import cleanup
 
     target = tmp_path / "target.parquet"
     candidate = tmp_path / ".target.parquet.0123456789abcdef0123456789abcdef.tmp"

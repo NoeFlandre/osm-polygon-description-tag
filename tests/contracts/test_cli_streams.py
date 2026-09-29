@@ -11,9 +11,9 @@ import pytest
 from shapely import to_wkb
 from shapely.geometry import Polygon
 
-import osm_polygon_description_tag.cli as cli
 import osm_polygon_description_tag.publication.upload as publication_upload
 import osm_polygon_description_tag.workflow.orchestrator as workflow_orchestrator
+from osm_polygon_description_tag import cli
 from osm_polygon_description_tag.osm.discovery import Source
 from osm_polygon_description_tag.osm.extraction import ExportRecord
 from osm_polygon_description_tag.publication.models import UploadItem, UploadPlan

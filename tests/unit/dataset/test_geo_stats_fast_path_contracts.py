@@ -5,8 +5,8 @@ import pyarrow as pa
 import pytest
 from shapely.geometry import GeometryCollection, Point, Polygon
 
-import osm_polygon_description_tag.dataset.geography.parquet_inputs as parquet_inputs
 import osm_polygon_description_tag.dataset.stats as stats_module
+from osm_polygon_description_tag.dataset.geography import parquet_inputs
 
 _SQUARE = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
 

@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-import osm_polygon_description_tag.publication.state as state
+from osm_polygon_description_tag.publication import state
 from osm_polygon_description_tag.publication.state import PublicationStateError
 
 

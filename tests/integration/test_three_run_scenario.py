@@ -69,7 +69,7 @@ def _file_sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def test_three_run_scenario(tmp_path: Path) -> None:
+def test_three_run_scenario(tmp_path: Path) -> None:  # noqa: PLR0915 - long test; TODO(#62) split it
     paths, source_root, data_root = _setup_workspace(tmp_path)
 
     # ---- Run 1: build both, fail to write state for ``b`` after upload.

@@ -9,7 +9,7 @@ import pyarrow as pa
 import pytest
 from shapely.geometry import MultiPolygon, Polygon
 
-import osm_polygon_description_tag.dataset.storage as storage
+from osm_polygon_description_tag.dataset import storage
 from osm_polygon_description_tag.dataset.constants import DEFAULT_WRITE_BATCH_SIZE
 from osm_polygon_description_tag.dataset.schema import SCHEMA
 from tests.conftest import make_record_dict

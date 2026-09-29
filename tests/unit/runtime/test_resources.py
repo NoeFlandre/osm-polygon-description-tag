@@ -95,7 +95,7 @@ def test_project_code_revision_is_deterministic(
 def test_project_root_rejects_case_variant_pyproject_in_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import osm_polygon_description_tag.runtime.resources as resources
+    from osm_polygon_description_tag.runtime import resources
 
     fake_root = tmp_path / "fake-project"
     fake_root.mkdir()
@@ -114,7 +114,7 @@ def test_project_root_rejects_case_variant_pyproject_in_environment(
 def test_project_root_rejects_case_variant_pyproject_during_upward_walk(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import osm_polygon_description_tag.runtime.resources as resources
+    from osm_polygon_description_tag.runtime import resources
 
     fake_root = tmp_path / "fake-project"
     fake_root.mkdir()
@@ -133,7 +133,7 @@ def test_project_root_rejects_case_variant_pyproject_during_upward_walk(
 def test_project_root_ignores_dangling_environment_symlink(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import osm_polygon_description_tag.runtime.resources as resources
+    from osm_polygon_description_tag.runtime import resources
 
     missing = tmp_path / "missing-project"
     fake_root = tmp_path / "project-link"
@@ -153,7 +153,7 @@ def test_project_root_ignores_dangling_environment_symlink(
 def test_project_root_resolves_environment_path_non_strictly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import osm_polygon_description_tag.runtime.resources as resources
+    from osm_polygon_description_tag.runtime import resources
 
     fake_root = tmp_path / "fake-project"
     fake_root.mkdir()
@@ -176,7 +176,7 @@ def test_project_root_resolves_environment_path_non_strictly(
 def test_project_root_resolves_package_path_non_strictly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import osm_polygon_description_tag.runtime.resources as resources
+    from osm_polygon_description_tag.runtime import resources
 
     sentinel = tmp_path / "package" / "resources.py"
     monkeypatch.setattr(resources, "__file__", str(sentinel))
@@ -225,7 +225,7 @@ def test_revision_from_process_accepts_only_successful_nonempty_revision(
 def test_project_code_revision_forwards_root_and_git_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import osm_polygon_description_tag.runtime.resources as resources
+    from osm_polygon_description_tag.runtime import resources
 
     with (
         patch.object(resources, "project_root", return_value=tmp_path) as root,
@@ -242,7 +242,7 @@ def test_project_code_revision_forwards_root_and_git_fallback(
 def test_project_code_revision_uses_discovered_git_executable(
     tmp_path: Path,
 ) -> None:
-    import osm_polygon_description_tag.runtime.resources as resources
+    from osm_polygon_description_tag.runtime import resources
 
     with (
         patch.object(resources, "project_root", return_value=tmp_path),

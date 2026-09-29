@@ -5,10 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 
-import osm_polygon_description_tag.workflow.source_runner as source_runner
 from osm_polygon_description_tag.osm.discovery import Source
 from osm_polygon_description_tag.publication.state import PublicationStateError
 from osm_polygon_description_tag.runtime.config import Paths
+from osm_polygon_description_tag.workflow import source_runner
 from osm_polygon_description_tag.workflow.build import BuildResult
 from osm_polygon_description_tag.workflow.source_runner import (
     STATUS_BUILT,

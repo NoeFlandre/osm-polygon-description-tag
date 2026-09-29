@@ -949,7 +949,7 @@ def test_a_failed_inventory_lookup_names_the_revision_it_used(
 
 
 def test_default_hub_verifier_factory_uses_lazy_api(monkeypatch: pytest.MonkeyPatch) -> None:
-    import osm_polygon_description_tag.publication.verification as verification
+    from osm_polygon_description_tag.publication import verification
 
     class _Api:
         def whoami(self) -> dict[str, str]:

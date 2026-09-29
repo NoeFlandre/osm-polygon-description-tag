@@ -9,9 +9,9 @@ from typing import Any
 
 import pytest
 
-import osm_polygon_description_tag.workflow.preflight as preflight
 from osm_polygon_description_tag.publication.models import REPO_ID
 from osm_polygon_description_tag.runtime.config import Paths
+from osm_polygon_description_tag.workflow import preflight
 from osm_polygon_description_tag.workflow.preflight import PreflightError
 
 
@@ -64,7 +64,6 @@ def test_probe_osmium_version_falls_back_to_requested_executable_and_handles_emp
 ) -> None:
     def no_binary(executable: str) -> None:
         assert executable == "custom-osmium"
-        return
 
     monkeypatch.setattr(preflight.shutil, "which", no_binary)
     calls: list[tuple[str, str]] = []

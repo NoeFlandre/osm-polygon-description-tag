@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-import osm_polygon_description_tag.publication.verification as verification
+from osm_polygon_description_tag.publication import verification
 from osm_polygon_description_tag.publication.models import REPO_ID, UploadItem
 from tests.helpers.messages import exactly
 

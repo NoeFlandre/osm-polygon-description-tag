@@ -13,9 +13,9 @@ import pytest
 from shapely import from_wkb, to_wkb
 from shapely.geometry import Polygon
 
-import osm_polygon_description_tag.dataset.canonical_rows as canonical_rows
 import osm_polygon_description_tag.dataset.deduplication as dedup_module
 import osm_polygon_description_tag.dataset.stats as stats_module
+from osm_polygon_description_tag.dataset import canonical_rows
 from osm_polygon_description_tag.dataset.deduplication import (
     _STATE_RELATIVE_PATH,
     DEDUPLICATION_POLICY_SHA256,

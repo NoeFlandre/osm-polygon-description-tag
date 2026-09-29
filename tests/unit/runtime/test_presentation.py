@@ -3,7 +3,7 @@ from __future__ import annotations
 from io import StringIO
 from unittest.mock import Mock, call, patch
 
-import osm_polygon_description_tag.runtime.presentation as presentation
+from osm_polygon_description_tag.runtime import presentation
 from osm_polygon_description_tag.runtime.presentation import TerminalPresenter
 
 

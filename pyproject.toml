@@ -99,8 +99,17 @@ target-version = "py312"
 select = [
     "E", "F", "I", "B", "UP", "SIM", "RUF", "S", "TID",
     "C4", "PIE", "RET", "PERF", "PLW", "ARG", "BLE", "DTZ", "PTH", "T20", "N", "ERA", "PGH",
+    "C90", "PLR0912", "PLR0913", "PLR0915", "PLR1711", "PLR0402",
 ]
 ignore = ["S101"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+# Keyword-heavy builders are the norm here; the modules that already exceed the
+# bound are listed under per-file-ignores until each is reshaped (TODO(#62)).
+max-args = 8
 
 [tool.ruff.lint.per-file-ignores]
 # Scripts and the terminal presenter print by design.
@@ -109,7 +118,21 @@ ignore = ["S101"]
 # Test fakes and lambdas mirror real signatures and names (trackio's Table,
 # HfApi classes), so unused arguments, pass-through lambdas and those names
 # are intentional there.
-"tests/**" = ["ARG", "PLW0108", "N802", "N806", "N818"]
+"tests/**" = ["ARG", "PLW0108", "N802", "N806", "N818", "PLR0913"]
+# Signatures that predate the argument-count bound (TODO(#62): reshape, then delete).
+"src/osm_polygon_description_tag/dataset/languages/worker.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/grid_workflow.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/language_cli.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/publication/state.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/workflow/build.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/workflow/finalization.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/workflow/grid_operator/bundle.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/workflow/grid_operator/script.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/workflow/grid_operator/stage.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/workflow/grid_operator/submission.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/workflow/grid_policy.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/workflow/orchestrator.py" = ["PLR0913"]
+"src/osm_polygon_description_tag/workflow/source_runner.py" = ["PLR0913"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "typer._click".msg = "Private Typer module; import from osm_polygon_description_tag.runtime.click_compat."

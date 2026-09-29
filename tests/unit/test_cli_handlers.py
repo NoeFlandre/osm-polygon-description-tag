@@ -16,8 +16,8 @@ from typing import Any
 import pytest
 from click import Command, Context
 
-import osm_polygon_description_tag.cli as cli
-import osm_polygon_description_tag.runtime.presentation as presentation
+from osm_polygon_description_tag import cli
+from osm_polygon_description_tag.runtime import presentation
 from osm_polygon_description_tag.runtime.click_compat import ClickException, UsageError
 
 

@@ -61,7 +61,7 @@ def _to_map(pairs: object) -> dict[str, str]:
 
 
 @pytest.mark.integration
-def test_synthetic_end_to_end(tmp_path: Path) -> None:
+def test_synthetic_end_to_end(tmp_path: Path) -> None:  # noqa: PLR0915 - long test; TODO(#62) split it
     """Real osmium-binary end-to-end against the committed synthetic fixture."""
     osmium_path = _real_osmium_path()
 

@@ -1,8 +1,8 @@
 """TDD contracts for the Lingua-primary, GlotLID-fallback detector."""
 
 import hashlib
-import importlib.metadata as metadata
 import sys
+from importlib import metadata
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 

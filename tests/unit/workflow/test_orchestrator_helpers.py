@@ -12,10 +12,9 @@ from unittest.mock import Mock
 
 import pytest
 
-import osm_polygon_description_tag.workflow.orchestrator as orchestrator
-import osm_polygon_description_tag.workflow.source_runner as source_runner
 from osm_polygon_description_tag.osm.discovery import Source
 from osm_polygon_description_tag.runtime.config import Paths
+from osm_polygon_description_tag.workflow import orchestrator, source_runner
 from osm_polygon_description_tag.workflow.source_runner import (
     STATUS_BUILT,
     STATUS_PUBLISHED,
@@ -1035,8 +1034,9 @@ def test_publish_source_retains_deduplicated_note_when_state_write_fails(
     assert outcome.note == "deduplicated artifact requires upload"
 
 
-def test_run_and_publish_executes_stages_in_order_and_finishes_tracker(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_run_and_publish_executes_stages_in_order_and_finishes_tracker(  # noqa: C901, PLR0915 - long test; TODO(#62) split it
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     paths, source = _workspace(tmp_path)
     source_root = tmp_path / "provided-source-root"
@@ -1778,7 +1778,7 @@ def test_reconcile_remote_logs_empty_revision_as_empty_string(
     ]
 
 
-def test_run_and_publish_forwards_all_options_and_closes_owned_resources(
+def test_run_and_publish_forwards_all_options_and_closes_owned_resources(  # noqa: C901 - long test; TODO(#62) split it
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:

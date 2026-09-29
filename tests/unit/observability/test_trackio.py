@@ -11,7 +11,7 @@ from typing import ClassVar
 
 import pytest
 
-import osm_polygon_description_tag.observability.trackio as trackio
+from osm_polygon_description_tag.observability import trackio
 from osm_polygon_description_tag.observability.trackio import (
     DEFAULT_TRACKIO_PROJECT,
     DEFAULT_TRACKIO_SPACE_ID,
@@ -979,7 +979,7 @@ def test_trackio_stats_helpers_reject_non_sequence_files() -> None:
 
 
 def test_load_backend_returns_none_when_import_is_unavailable(monkeypatch) -> None:
-    import osm_polygon_description_tag.observability.trackio as trackio
+    from osm_polygon_description_tag.observability import trackio
 
     def unavailable(_name: str) -> object:
         raise ImportError("missing")

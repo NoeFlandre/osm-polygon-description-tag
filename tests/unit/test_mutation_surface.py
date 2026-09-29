@@ -16,10 +16,10 @@ from types import SimpleNamespace
 import pytest
 from click import Command, Context
 
-import osm_polygon_description_tag.cli as cli
-import osm_polygon_description_tag.runtime.presentation as presentation
+from osm_polygon_description_tag import cli
 from osm_polygon_description_tag.dataset.manifest import _empty_policy_hash
 from osm_polygon_description_tag.dataset.text import trimmed_nonempty_text
+from osm_polygon_description_tag.runtime import presentation
 from osm_polygon_description_tag.runtime.click_compat import ClickException, UsageError
 
 
@@ -622,7 +622,7 @@ def test_empty_policy_hash_is_sha256_of_empty_bytes() -> None:
 
 
 def test_default_hub_verifier_factory_uses_lazy_api(monkeypatch: pytest.MonkeyPatch) -> None:
-    import osm_polygon_description_tag.publication.verification as verification
+    from osm_polygon_description_tag.publication import verification
 
     class _Api:
         def whoami(self) -> dict[str, str]:

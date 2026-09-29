@@ -883,7 +883,7 @@ def test_a_unique_row_failure_is_reported_with_its_own_message(
 def test_collect_h3_counts_names_the_missing_data_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import osm_polygon_description_tag.dataset.storage as storage
+    from osm_polygon_description_tag.dataset import storage
 
     monkeypatch.setattr(storage, "validate_finalized_artifacts", lambda data_root: None)
 

@@ -8,7 +8,7 @@ from unittest.mock import call, patch
 
 import pytest
 
-import osm_polygon_description_tag.dataset.geography.atomic as atomic
+from osm_polygon_description_tag.dataset.geography import atomic
 from osm_polygon_description_tag.dataset.geography.atomic import atomic_save_png
 
 

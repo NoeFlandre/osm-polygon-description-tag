@@ -1,6 +1,6 @@
 """Failure paths of the Lingua adapter and the pinned-version guard."""
 
-import importlib.metadata as metadata
+from importlib import metadata
 from types import SimpleNamespace
 
 import pytest

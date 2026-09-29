@@ -542,7 +542,7 @@ def test_handle_build_one_invokes_pipeline(
         manifest_path=data / "manifests" / "region.manifest.json",
     )
 
-    import osm_polygon_description_tag.cli as cli
+    from osm_polygon_description_tag import cli
 
     monkeypatch.setattr(cli, "build_one", lambda *args, **kwargs: fake_result)
 
@@ -577,7 +577,7 @@ def test_handle_publish_invokes_execute_upload(
     (data / "assets" / "area_distribution.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"hist" * 1024)
     (data / "assets" / "dataset-card-hero.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"hero" * 1024)
 
-    import osm_polygon_description_tag.cli as cli
+    from osm_polygon_description_tag import cli
 
     captured: list[list[str]] = []
 
@@ -605,7 +605,7 @@ def test_handle_publish_invokes_execute_upload(
 def test_handle_run_and_publish_invokes_orchestrator(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    import osm_polygon_description_tag.cli as cli
+    from osm_polygon_description_tag import cli
 
     fake_report = {
         "preflight": {"source_count": 1},

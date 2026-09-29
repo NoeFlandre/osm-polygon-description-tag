@@ -79,7 +79,7 @@ def _setup_two_sources(tmp_path: Path) -> tuple[Paths, Path, Path]:
     return Paths(source_root=source_root, data_root=data_root), source_root, data_root
 
 
-def _install_hf_stubs(
+def _install_hf_stubs(  # noqa: C901 - long test; TODO(#62) split it
     monkeypatch: pytest.MonkeyPatch, *, interrupted_run: int | None = None
 ) -> dict:
     """Install HermeticHF stubs and return a per-run log."""

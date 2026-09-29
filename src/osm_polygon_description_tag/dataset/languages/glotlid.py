@@ -1,10 +1,10 @@
 """Strict adapter and loader for the pinned GlotLID v3 fallback model."""
 
 import importlib
-import importlib.metadata as metadata
 import math
 import re
 from collections.abc import Iterable, Mapping
+from importlib import metadata
 from pathlib import Path
 from typing import Final, Protocol, cast
 

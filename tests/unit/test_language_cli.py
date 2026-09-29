@@ -1401,7 +1401,7 @@ def test_grid_stage_quarantines_and_reports_uncheckpointed_orphans(
     assert (shard_paths(run_dir, SHARD).root / "quarantine" / "parts" / orphan).is_file()
 
 
-def test_grid_stage_then_submit_reuses_the_exact_staged_script_contract(
+def test_grid_stage_then_submit_reuses_the_exact_staged_script_contract(  # noqa: PLR0915 - long test; TODO(#62) split it
     tmp_path: Path,
     project: Path,
     source: Path,

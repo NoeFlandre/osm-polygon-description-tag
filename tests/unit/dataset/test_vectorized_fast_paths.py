@@ -15,10 +15,9 @@ import pyarrow as pa
 import pytest
 from shapely.geometry import LineString, MultiPolygon, Polygon
 
-import osm_polygon_description_tag.dataset.geography.parquet_inputs as parquet_inputs
 import osm_polygon_description_tag.dataset.stats as stats_module
-import osm_polygon_description_tag.dataset.storage as storage
-from osm_polygon_description_tag.dataset.geography import area_histogram
+from osm_polygon_description_tag.dataset import storage
+from osm_polygon_description_tag.dataset.geography import area_histogram, parquet_inputs
 from osm_polygon_description_tag.dataset.schema import SCHEMA
 from tests.conftest import make_record_dict
 

@@ -12,7 +12,7 @@ import pytest
 from shapely import to_wkb
 from shapely.geometry import Polygon
 
-import osm_polygon_description_tag.dataset.unique_rows as unique_rows
+from osm_polygon_description_tag.dataset import unique_rows
 from osm_polygon_description_tag.dataset.canonical_rows import (
     canonical_geometry_wkb,
     select_canonical_row,
