@@ -282,7 +282,9 @@ def test_synthetic_end_to_end(tmp_path: Path) -> None:  # noqa: PLR0915 - long t
     assert not state_path.exists(), "no publication state should exist after inspect-only"
 
 
-def test_dummy_osmium_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_real_osmium_helper_skips_on_a_dummy_binary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A dummy ``osmium`` that returns no libosmium version is rejected."""
     dummy = tmp_path / "dummy-osmium"
     dummy.write_text("#!/bin/sh\necho nope\n", encoding="utf-8")

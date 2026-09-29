@@ -108,7 +108,7 @@ def test_the_model_and_its_tokenizer_come_from_the_verified_directory(
     assert loads == [(str(path), str(path / "tokenizer"))]
 
 
-def test_a_model_whose_digest_is_not_the_pinned_artifact_is_refused_exactly(
+def test_a_sat_model_whose_digest_is_not_the_pinned_artifact_is_refused_exactly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     model = _FakeModel()
