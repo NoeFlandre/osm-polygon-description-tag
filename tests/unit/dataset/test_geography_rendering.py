@@ -119,7 +119,8 @@ def test_draw_cells_builds_one_collection_and_skips_short_rings() -> None:
 
     axes = Mock()
     cmap = Mock(side_effect=lambda values: np.tile([[0.1, 0.2, 0.3, 1.0]], (len(values), 1)))
-    norm = Mock(side_effect=lambda values: values)
+    normalized_counts = np.array([0.2, 0.8])
+    norm = Mock(return_value=normalized_counts)
     rings = {
         "a": [[(0, 0), (1, 0)], [(0, 0), (1, 0), (0, 1)]],
         "b": [[(2, 0), (3, 0), (2, 1), (2, 0)]],
@@ -132,7 +133,7 @@ def test_draw_cells_builds_one_collection_and_skips_short_rings() -> None:
     assert collection.get_zorder() == 3
     assert collection.get_alpha() == rendering_module._COUNT_ALPHA
     assert list(norm.call_args.args[0]) == [1.0, 4.0]
-    assert cmap.call_args.args[0] is norm.return_value
+    assert cmap.call_args.args[0] is normalized_counts
 
 
 def test_draw_cells_adds_nothing_when_no_ring_is_drawable() -> None:
