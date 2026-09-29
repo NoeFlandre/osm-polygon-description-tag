@@ -229,3 +229,13 @@ dataset metadata.
 GitHub Actions installs the locked uv environment, runs pre-commit, Ruff, ty,
 pytest with at least 90% coverage, the strict MkDocs build, and a wheel-content
 check. CI has no Hugging Face credentials and cannot publish the dataset.
+
+## Benchmarks
+
+`just bench` runs the synthetic, seeded micro-benchmarks in `benchmarks/`
+(transform, H3 density-map rendering, CLI import time); set `PERF_SCALE` to
+enlarge them locally. `just bench-save` / `just bench-compare` keep a local
+baseline and fail on a >50% mean regression. CI runs the same suite in an
+advisory `perf` job (never blocking) and uploads `perf.json` as an artifact.
+Reference baseline for the renderer: 26.5k cells took 20.5 s with one patch
+per cell and about 6.7 s with a single `PolyCollection`.

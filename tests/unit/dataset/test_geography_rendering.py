@@ -114,58 +114,32 @@ def test_safe_counts_clamps_and_converts_every_cell_value() -> None:
     ) == [1, 1, 3, 4]
 
 
-def test_draw_cell_skips_short_rings_and_preserves_patch_style() -> None:
+def test_draw_cells_builds_one_collection_and_skips_short_rings() -> None:
+    import numpy as np
+
     axes = Mock()
-    cmap = Mock()
-    norm = Mock()
-    cmap.return_value = "face"
-    patch_artist = object()
+    cmap = Mock(side_effect=lambda values: np.tile([[0.1, 0.2, 0.3, 1.0]], (len(values), 1)))
+    norm = Mock(side_effect=lambda values: values)
+    rings = {
+        "a": [[(0, 0), (1, 0)], [(0, 0), (1, 0), (0, 1)]],
+        "b": [[(2, 0), (3, 0), (2, 1), (2, 0)]],
+    }
+    with patch.object(rendering_module, "cell_rings", side_effect=rings.__getitem__):
+        rendering_module._draw_cells(axes, (("a", 0), ("b", 4)), cmap=cmap, norm=norm)
 
-    rings = [
-        [(0, 0), (1, 0)],
-        [(0, 0), (1, 0), (0, 1)],
-        [(2, 0), (3, 0), (2, 1), (2, 0)],
-    ]
-    with (
-        patch.object(rendering_module, "cell_rings", return_value=rings) as cell_rings,
-        patch.object(
-            matplotlib.patches,
-            "Polygon",
-            return_value=patch_artist,
-        ) as polygon,
-    ):
-        rendering_module._draw_cell(
-            axes,
-            "cell",
-            count=0,
-            cmap=cmap,
-            norm=norm,
-        )
+    (collection,) = (c.args[0] for c in axes.add_collection.call_args_list)
+    assert len(collection.get_paths()) == 2
+    assert collection.get_zorder() == 3
+    assert collection.get_alpha() == rendering_module._COUNT_ALPHA
+    assert list(norm.call_args.args[0]) == [1.0, 4.0]
+    assert cmap.call_args.args[0] is norm.return_value
 
-    cell_rings.assert_called_once_with("cell")
-    norm.assert_called_once_with(1)
-    cmap.assert_called_once_with(norm.return_value)
-    assert polygon.call_args_list == [
-        call(
-            rings[1],
-            closed=True,
-            facecolor="face",
-            edgecolor=rendering_module._EDGE_COLOR,
-            linewidth=rendering_module._EDGE_WIDTH,
-            alpha=rendering_module._COUNT_ALPHA,
-            zorder=3,
-        ),
-        call(
-            rings[2],
-            closed=True,
-            facecolor="face",
-            edgecolor=rendering_module._EDGE_COLOR,
-            linewidth=rendering_module._EDGE_WIDTH,
-            alpha=rendering_module._COUNT_ALPHA,
-            zorder=3,
-        ),
-    ]
-    assert axes.add_patch.call_args_list == [call(patch_artist), call(patch_artist)]
+
+def test_draw_cells_adds_nothing_when_no_ring_is_drawable() -> None:
+    axes = Mock()
+    with patch.object(rendering_module, "cell_rings", return_value=[[(0, 0)]]):
+        rendering_module._draw_cells(axes, (("a", 1),), cmap=Mock(), norm=Mock())
+    axes.add_collection.assert_not_called()
 
 
 def test_draw_cells_and_colorbar_uses_empty_colorbar_without_cells() -> None:
@@ -176,7 +150,7 @@ def test_draw_cells_and_colorbar_uses_empty_colorbar_without_cells() -> None:
     with (
         patch.object(rendering_module, "_draw_empty_colorbar") as empty_colorbar,
         patch.object(rendering_module, "_safe_counts") as safe_counts,
-        patch.object(rendering_module, "_draw_cell") as draw_cell,
+        patch.object(rendering_module, "_draw_cells") as draw_cell,
         patch.object(rendering_module, "_draw_density_colorbar") as density_colorbar,
     ):
         rendering_module._draw_cells_and_colorbar(fig, axes, (), {}, cmap)
@@ -197,16 +171,13 @@ def test_draw_cells_and_colorbar_draws_cells_in_sorted_order() -> None:
 
     with (
         patch.object(matplotlib.colors, "LogNorm", return_value=norm) as log_norm,
-        patch.object(rendering_module, "_draw_cell") as draw_cell,
+        patch.object(rendering_module, "_draw_cells") as draw_cell,
         patch.object(rendering_module, "_draw_density_colorbar") as density_colorbar,
     ):
         rendering_module._draw_cells_and_colorbar(fig, axes, sorted_cells, cells, cmap)
 
     log_norm.assert_called_once_with(vmin=1, vmax=5)
-    assert draw_cell.call_args_list == [
-        call(axes, "b", count=1, cmap=cmap, norm=norm),
-        call(axes, "a", count=5, cmap=cmap, norm=norm),
-    ]
+    draw_cell.assert_called_once_with(axes, sorted_cells, cmap=cmap, norm=norm)
     density_colorbar.assert_called_once_with(fig, axes, cmap, norm)
 
 
@@ -218,7 +189,7 @@ def test_draw_cells_and_colorbar_expands_one_cell_log_range() -> None:
 
     with (
         patch.object(matplotlib.colors, "LogNorm", return_value=norm) as log_norm,
-        patch.object(rendering_module, "_draw_cell"),
+        patch.object(rendering_module, "_draw_cells"),
         patch.object(rendering_module, "_draw_density_colorbar"),
     ):
         rendering_module._draw_cells_and_colorbar(
