@@ -456,7 +456,7 @@ def test_validated_parquets_validates_each_discovered_parquet(
     monkeypatch.setattr(
         dedup_module,
         "validate_finalized_artifacts",
-        lambda root: (validated_calls.append(root) or {"parquets": [parquet]}),
+        lambda root: validated_calls.append(root) or {"parquets": [parquet]},
     )
     monkeypatch.setattr(
         dedup_module,

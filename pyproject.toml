@@ -23,10 +23,10 @@ dependencies = [
     "huggingface_hub>=0.24,<2",
     "matplotlib>=3.9,<4",
     "orjson>=3.10,<4",
-    "pyarrow>=20,<26",
+    "pyarrow>=20,<22",  # Preserve published Parquet bytes until a deliberate release.
     "pyproj>=3.7,<4",
     "pyyaml>=6,<7",
-    "rich>=13,<16",
+    "rich>=13,<15",
     "shapely>=2.1,<3",
     "trackio>=0.20,<1",
     "tqdm>=4.66,<5",
@@ -74,7 +74,7 @@ dev = [
     # contract test keeps them in step.
     "lingua-language-detector==2.2.0",
     "fasttext-numpy2==0.10.4; sys_platform == 'linux'",
-    "mutmut>=3,<4",
+    "mutmut>=3,<3.8",
     "pre-commit>=4.6.1,<5",
     "hypothesis>=6.100,<7",
     "pytest>=9.0.3,<10",
@@ -82,9 +82,9 @@ dev = [
     "pytest-cov>=6.2,<8",
     "pytest-xdist>=3.6,<4",
     "radon>=6,<7",
-    "ruff>=0.12,<0.17",
-    # ty is pre-1.0 and CI fails on warnings: bound it to the tested series.
-    "ty>=0.0.65,<0.1",
+    "ruff>=0.12,<0.13",
+    # ty is pre-1.0 and CI fails on warnings: keep the tested release pinned.
+    "ty>=0.0.65,<0.0.66",
 ]
 
 [tool.pytest.ini_options]

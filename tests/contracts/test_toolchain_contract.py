@@ -155,7 +155,7 @@ def test_pre_release_tools_are_bounded_and_ruff_is_pinned_once() -> None:
     dev = project["dependency-groups"]["dev"]
     pre_commit = (PROJECT_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
 
-    assert "ty>=0.0.65,<0.1" in dev
+    assert "ty>=0.0.65,<0.0.66" in dev
     assert "pre-commit>=4.6.1,<5" in dev
     assert "ruff-pre-commit" not in pre_commit
     assert "entry: uv run ruff check --fix" in pre_commit

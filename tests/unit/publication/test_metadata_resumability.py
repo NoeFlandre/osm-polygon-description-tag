@@ -202,7 +202,7 @@ def test_metadata_retried_after_interrupted_first_run(
     _patch_external_boundaries(
         monkeypatch,
         subprocess_runner=lambda command: None,
-        verifier_factory=lambda: (lambda *a, **kw: "rev"),
+        verifier_factory=lambda: lambda *a, **kw: "rev",
         metadata_runner=metadata_runner_fails,
     )
 
@@ -231,7 +231,7 @@ def test_metadata_retried_after_interrupted_first_run(
     log2 = _patch_external_boundaries(
         monkeypatch,
         subprocess_runner=lambda command: None,
-        verifier_factory=lambda: (lambda *a, **kw: "rev-meta"),
+        verifier_factory=lambda: lambda *a, **kw: "rev-meta",
         metadata_runner=None,  # metadata succeeds
     )
 
@@ -267,7 +267,7 @@ def test_metadata_retried_after_interrupted_first_run(
     log3 = _patch_external_boundaries(
         monkeypatch,
         subprocess_runner=lambda command: None,
-        verifier_factory=lambda: (lambda *a, **kw: "rev"),
+        verifier_factory=lambda: lambda *a, **kw: "rev",
     )
     snapshot_state = file_sha256(data_root / PUBLICATION_STATE_FILENAME)
     snapshot_readme = file_sha256(data_root / "README.md")
@@ -305,7 +305,7 @@ def test_metadata_state_records_required_fields(
     _patch_external_boundaries(
         monkeypatch,
         subprocess_runner=lambda command: None,
-        verifier_factory=lambda: (lambda *a, **kw: "rev-meta-1"),
+        verifier_factory=lambda: lambda *a, **kw: "rev-meta-1",
     )
 
     exit_code = cli_run(
@@ -351,7 +351,7 @@ def test_metadata_upload_failure_leaves_state_incomplete(
     _patch_external_boundaries(
         monkeypatch,
         subprocess_runner=lambda command: None,
-        verifier_factory=lambda: (lambda *a, **kw: "never"),
+        verifier_factory=lambda: lambda *a, **kw: "never",
         metadata_runner=metadata_runner_fails,
     )
 
@@ -523,7 +523,7 @@ def test_metadata_uploaded_when_no_per_pbf_uploads(
     log = _patch_external_boundaries(
         monkeypatch,
         subprocess_runner=lambda command: None,
-        verifier_factory=lambda: (lambda *a, **kw: "rev-meta"),
+        verifier_factory=lambda: lambda *a, **kw: "rev-meta",
     )
 
     exit_code = cli_run(

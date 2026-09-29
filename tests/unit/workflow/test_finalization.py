@@ -361,7 +361,7 @@ def test_upload_final_metadata_forwards_every_stage_argument(
     monkeypatch.setattr(
         finalization_module,
         "build_metadata_only_upload_plan",
-        lambda root: (calls.append(("plan", root)) or plan),
+        lambda root: calls.append(("plan", root)) or plan,
     )
 
     def skip(root: Path, actual_plan: UploadPlan, actual_logger: object) -> str | None:
