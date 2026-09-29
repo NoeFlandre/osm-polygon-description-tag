@@ -9,7 +9,6 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
-from shapely.geometry import Polygon
 
 from osm_polygon_description_tag.dataset.languages import snapshot as snapshot_module
 from osm_polygon_description_tag.dataset.languages.models import (
@@ -28,32 +27,8 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
     source_path_for,
 )
 from osm_polygon_description_tag.dataset.schema import SCHEMA
-from osm_polygon_description_tag.dataset.storage import write_geoparquet
-from tests.conftest import make_record_dict
+from tests.helpers.language_setup import LanguageRunSetup
 from tests.helpers.messages import exactly
-
-
-def _write_source(path: Path, *, text: str = "A synthetic description") -> None:
-    record = make_record_dict(Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]), {"description": text})
-    path.parent.mkdir(parents=True, exist_ok=True)
-    write_geoparquet(iter([record]), path, batch_size=1)
-
-
-def _prepare(source: Path, run: Path) -> SnapshotManifest:
-    return prepare_snapshot(
-        source,
-        run,
-        code_fingerprint="a" * 64,
-        lock_fingerprint="b" * 64,
-        model_identity=language_model_identity(LanguagePolicy()),
-    )
-
-
-def _prepared(tmp_path: Path) -> tuple[Path, Path, SnapshotManifest]:
-    source = tmp_path / "source"
-    _write_source(source / "region.parquet")
-    run = tmp_path / "run"
-    return source, run, _prepare(source, run)
 
 
 def _rewrite(run: Path, mutate: Callable[[dict[str, Any]], None]) -> None:
@@ -75,8 +50,10 @@ def test_project_source_fingerprint_rejects_symlinked_files(tmp_path: Path) -> N
         fingerprint_project_source(project)
 
 
-def test_a_path_object_is_accepted_wherever_a_relative_path_is(tmp_path: Path) -> None:
-    source, _, snapshot = _prepared(tmp_path)
+def test_a_path_object_is_accepted_wherever_a_relative_path_is(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, _, snapshot = language_run_setup.prepared_snapshot(tmp_path)
 
     assert snapshot.source_file(Path("region.parquet")).relative_path == "region.parquet"
     assert source_path_for(snapshot, source, Path("region.parquet")).is_file()
@@ -89,8 +66,10 @@ def test_a_non_canonical_relative_path_is_rejected() -> None:
         SourceFileSnapshot("a//b.parquet", 10, "a" * 64, 3, "b" * 64, 1)
 
 
-def test_a_malformed_policy_value_is_rejected(tmp_path: Path) -> None:
-    _, run, _ = _prepared(tmp_path)
+def test_a_malformed_policy_value_is_rejected(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    _, run, _ = language_run_setup.prepared_snapshot(tmp_path)
     _rewrite(
         run, lambda payload: payload["model_identity"]["policy"].__setitem__("tie_epsilon", "high")
     )
@@ -99,8 +78,10 @@ def test_a_malformed_policy_value_is_rejected(tmp_path: Path) -> None:
         read_snapshot(run)
 
 
-def test_an_unusable_language_scope_is_rejected(tmp_path: Path) -> None:
-    _, run, _ = _prepared(tmp_path)
+def test_an_unusable_language_scope_is_rejected(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    _, run, _ = language_run_setup.prepared_snapshot(tmp_path)
     _rewrite(run, lambda payload: payload["model_identity"].__setitem__("language_scope", []))
 
     with pytest.raises(SnapshotError, match="invalid snapshot model identity"):
@@ -108,10 +89,12 @@ def test_an_unusable_language_scope_is_rejected(tmp_path: Path) -> None:
 
 
 def test_an_unresolvable_source_file_is_reported(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    language_run_setup: LanguageRunSetup,
 ) -> None:
     source = tmp_path / "source"
-    _write_source(source / "region.parquet")
+    language_run_setup.write_snapshot_source(source / "region.parquet")
     original = Path.resolve
 
     def _explode(self: Path, strict: bool = False) -> Path:
@@ -124,33 +107,38 @@ def test_an_unresolvable_source_file_is_reported(
         inspect_source_file(source, source / "region.parquet")
 
 
-def test_an_existing_empty_run_directory_is_usable(tmp_path: Path) -> None:
+def test_an_existing_empty_run_directory_is_usable(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
     source = tmp_path / "source"
-    _write_source(source / "region.parquet")
+    language_run_setup.write_snapshot_source(source / "region.parquet")
     run = tmp_path / "run"
     run.mkdir()
 
-    snapshot = _prepare(source, run)
+    snapshot = language_run_setup.prepare_snapshot(source, run)
 
     assert (run / "snapshot.json").is_file()
     assert read_snapshot(run) == snapshot
 
 
-def test_non_parquet_files_in_the_source_tree_are_ignored(tmp_path: Path) -> None:
+def test_non_parquet_files_in_the_source_tree_are_ignored(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
     source = tmp_path / "source"
-    _write_source(source / "region.parquet")
+    language_run_setup.write_snapshot_source(source / "region.parquet")
     (source / "notes.txt").write_text("ignored", encoding="utf-8")
     (source / "nested").mkdir()
 
-    snapshot = _prepare(source, tmp_path / "run")
+    snapshot = language_run_setup.prepare_snapshot(source, tmp_path / "run")
 
     assert [item.relative_path for item in snapshot.source_files] == ["region.parquet"]
 
 
 def test_legacy_lingua_payload_without_cascade_fields_remains_readable(
     tmp_path: Path,
+    language_run_setup: LanguageRunSetup,
 ) -> None:
-    _, run, snapshot = _prepared(tmp_path)
+    _, run, snapshot = language_run_setup.prepared_snapshot(tmp_path)
     payload = json.loads((run / "snapshot.json").read_text(encoding="utf-8"))
     for key in (
         "detector_name",
@@ -174,9 +162,11 @@ def test_legacy_lingua_payload_without_cascade_fields_remains_readable(
     assert read_snapshot(run).model_identity == language_model_identity(LanguagePolicy())
 
 
-def test_cascade_snapshot_requires_a_verified_binary_hash(tmp_path: Path) -> None:
+def test_cascade_snapshot_requires_a_verified_binary_hash(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
     source = tmp_path / "source"
-    _write_source(source / "region.parquet")
+    language_run_setup.write_snapshot_source(source / "region.parquet")
     run = tmp_path / "run"
     identity = cascade_model_identity(LanguagePolicy())
     prepare_snapshot(
@@ -216,9 +206,10 @@ def test_cascade_snapshot_requires_a_verified_binary_hash(tmp_path: Path) -> Non
 
 def test_an_optional_model_identity_field_names_itself_when_it_is_not_text(
     tmp_path: Path,
+    language_run_setup: LanguageRunSetup,
 ) -> None:
     """The operator needs the field name: six optional fields share this refusal."""
-    _, run, _ = _prepared(tmp_path)
+    _, run, _ = language_run_setup.prepared_snapshot(tmp_path)
     _rewrite(run, lambda payload: payload["model_identity"].__setitem__("model_repository", 7))
 
     with pytest.raises(
@@ -229,6 +220,7 @@ def test_an_optional_model_identity_field_names_itself_when_it_is_not_text(
 
 def test_an_absent_optional_identity_field_does_not_stop_the_remaining_checks(
     tmp_path: Path,
+    language_run_setup: LanguageRunSetup,
 ) -> None:
     """An absent optional field must skip only itself, not every later field."""
 
@@ -236,7 +228,7 @@ def test_an_absent_optional_identity_field_does_not_stop_the_remaining_checks(
         payload["model_identity"].pop("model_repository")
         payload["model_identity"]["config_fingerprint"] = "c" * 64
 
-    _, run, _ = _prepared(tmp_path)
+    _, run, _ = language_run_setup.prepared_snapshot(tmp_path)
     _rewrite(run, drop_optional_and_corrupt_later)
 
     with pytest.raises(
@@ -249,13 +241,15 @@ def test_an_absent_optional_identity_field_does_not_stop_the_remaining_checks(
 _SPLITTER_FIELDS = ("splitter_name", "splitter_revision", "splitter_languages_fingerprint")
 
 
-def test_the_snapshot_names_the_splitter_that_produced_the_run(tmp_path: Path) -> None:
+def test_the_snapshot_names_the_splitter_that_produced_the_run(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
     """The splitter binds through config_fingerprint, but nobody can read a hash.
 
     A person opening snapshot.json has to be able to say which sentence
     splitter made these sentences, without recomputing a fingerprint.
     """
-    source, run, manifest = _prepared(tmp_path)
+    source, run, manifest = language_run_setup.prepared_snapshot(tmp_path)
 
     recorded = json.loads((run / "snapshot.json").read_text(encoding="utf-8"))["model_identity"]
 
@@ -267,9 +261,11 @@ def test_the_snapshot_names_the_splitter_that_produced_the_run(tmp_path: Path) -
     )
 
 
-def test_the_recorded_splitter_is_the_pinned_sat_artifact(tmp_path: Path) -> None:
+def test_the_recorded_splitter_is_the_pinned_sat_artifact(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
     """Naming the wrong splitter would be worse than naming none at all."""
-    _, run, _ = _prepared(tmp_path)
+    _, run, _ = language_run_setup.prepared_snapshot(tmp_path)
 
     recorded = json.loads((run / "snapshot.json").read_text(encoding="utf-8"))["model_identity"]
 
@@ -277,16 +273,20 @@ def test_the_recorded_splitter_is_the_pinned_sat_artifact(tmp_path: Path) -> Non
     assert recorded["splitter_revision"] == "137da054051ad9f1eac42025f758db4ac9f22535"
 
 
-def test_a_snapshot_carrying_the_splitter_still_round_trips(tmp_path: Path) -> None:
-    _, run, manifest = _prepared(tmp_path)
+def test_a_snapshot_carrying_the_splitter_still_round_trips(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    _, run, manifest = language_run_setup.prepared_snapshot(tmp_path)
 
     assert read_snapshot(run) == manifest
 
 
 @pytest.mark.parametrize("field", _SPLITTER_FIELDS)
-def test_a_recorded_splitter_field_that_disagrees_is_refused(tmp_path: Path, field: str) -> None:
+def test_a_recorded_splitter_field_that_disagrees_is_refused(
+    tmp_path: Path, field: str, language_run_setup: LanguageRunSetup
+) -> None:
     """A run claiming one splitter and computed with another is not publishable."""
-    _, run, _ = _prepared(tmp_path)
+    _, run, _ = language_run_setup.prepared_snapshot(tmp_path)
     _rewrite(run, lambda payload: payload["model_identity"].update({field: "tampered"}))
 
     with pytest.raises(
@@ -298,7 +298,9 @@ def test_a_recorded_splitter_field_that_disagrees_is_refused(tmp_path: Path, fie
 
 @pytest.mark.parametrize("field", _SPLITTER_FIELDS)
 def test_a_model_payload_without_the_splitter_keys_is_read_not_refused(
-    tmp_path: Path, field: str
+    tmp_path: Path,
+    field: str,
+    language_run_setup: LanguageRunSetup,
 ) -> None:
     """A missing key has nothing to disagree with, so it must not be a refusal.
 
@@ -306,7 +308,7 @@ def test_a_model_payload_without_the_splitter_keys_is_read_not_refused(
     frozen before these keys existed had its id hashed over a payload without
     them, so the id itself no longer verifies; see the test below.
     """
-    _, run, _ = _prepared(tmp_path)
+    _, run, _ = language_run_setup.prepared_snapshot(tmp_path)
     _rewrite(run, lambda payload: payload["model_identity"].pop(field))
 
     assert read_snapshot(run).model_identity.splitter_name == "sat-3l-sm"
@@ -314,6 +316,7 @@ def test_a_model_payload_without_the_splitter_keys_is_read_not_refused(
 
 def test_a_snapshot_frozen_before_the_splitter_was_recorded_must_be_re_prepared(
     tmp_path: Path,
+    language_run_setup: LanguageRunSetup,
 ) -> None:
     """Recording the splitter changes the id, and that has to be visible.
 
@@ -321,7 +324,7 @@ def test_a_snapshot_frozen_before_the_splitter_was_recorded_must_be_re_prepared(
     retires the ids that came before it. A stale run directory must be refused
     loudly and re-prepared, never silently accepted against new code.
     """
-    _, run, manifest = _prepared(tmp_path)
+    _, run, manifest = language_run_setup.prepared_snapshot(tmp_path)
 
     def to_the_old_shape(payload: dict[str, Any]) -> None:
         for name in _SPLITTER_FIELDS:

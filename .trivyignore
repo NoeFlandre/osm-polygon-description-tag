@@ -1,0 +1,5 @@
+# Baseline: findings present when the scan was introduced (#61). Remove each line when fixed.
+# pyarrow is capped <22 in pyproject.toml; the fix is 23.0.1 (needs a dependency-bound decision).
+CVE-2026-25087
+# quinn-proto is vendored inside the pinned uv binary; clears with the next uv bump.
+GHSA-4w2j-m93h-cj5j

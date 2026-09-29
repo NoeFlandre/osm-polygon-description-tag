@@ -25,10 +25,8 @@ from osm_polygon_description_tag.dataset.languages.checkpoint import (
     write_checkpoint,
 )
 from osm_polygon_description_tag.dataset.languages.models import (
-    LanguagePolicy,
     LanguageResult,
     LanguageStatus,
-    language_model_identity,
 )
 from osm_polygon_description_tag.dataset.languages.snapshot import (
     SnapshotManifest,
@@ -43,6 +41,7 @@ from osm_polygon_description_tag.dataset.languages.worker import (
 )
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from tests.conftest import make_record_dict
+from tests.helpers.language_setup import LanguageRunSetup
 from tests.helpers.messages import exactly
 from tests.helpers.parquet import write_description_shard
 from tests.helpers.sentences import fake_splitter
@@ -105,19 +104,19 @@ def _strip_description_tags(path: Path) -> None:
 
 
 def _prepare(
-    tmp_path: Path, *, count: int = 12, row_group_size: int = 4
+    language_run_setup: LanguageRunSetup,
+    tmp_path: Path,
+    *,
+    count: int = 12,
+    row_group_size: int = 4,
 ) -> tuple[Path, Path, SnapshotManifest]:
-    source = tmp_path / "source"
-    _write_shard(source / SHARD, count, row_group_size=row_group_size)
-    run = tmp_path / "run"
-    snapshot = prepare_snapshot(
-        source,
-        run,
-        code_fingerprint="a" * 64,
-        lock_fingerprint="b" * 64,
-        model_identity=language_model_identity(LanguagePolicy()),
+    return language_run_setup.prepare_run(
+        tmp_path,
+        count=count,
+        row_group_size=row_group_size,
+        tags=_tags_for,
+        normalize_row_groups=True,
     )
-    return source, run, snapshot
 
 
 def _process(
@@ -142,8 +141,10 @@ def _process(
 
 
 @pytest.mark.parametrize("kind", ["dangling_symlink", "directory"])
-def test_invalid_checkpoint_path_is_not_treated_as_a_new_run(tmp_path: Path, kind: str) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_invalid_checkpoint_path_is_not_treated_as_a_new_run(
+    tmp_path: Path, kind: str, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     path = shard_paths(run, SHARD).checkpoint
     path.parent.mkdir(parents=True)
     if kind == "directory":
@@ -180,8 +181,10 @@ class _StepBudget(ProcessingBudget):
         return False
 
 
-def test_processing_annotates_every_description_value_once(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_processing_annotates_every_description_value_once(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
 
     outcome = _process(run, source, snapshot)
     rows = _annotations(run)
@@ -196,8 +199,10 @@ def test_processing_annotates_every_description_value_once(tmp_path: Path) -> No
     assert sum(1 for row in rows if row["tag_key"] == "description:xyz") == 2
 
 
-def test_annotation_rows_carry_identity_provenance_and_run_binding(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path, count=4)
+def test_annotation_rows_carry_identity_provenance_and_run_binding(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path, count=4)
 
     _process(run, source, snapshot)
     rows = _annotations(run)
@@ -217,8 +222,10 @@ def test_annotation_rows_carry_identity_provenance_and_run_binding(tmp_path: Pat
     )
 
 
-def test_non_linguistic_and_uncertain_outcomes_are_preserved(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path, count=8)
+def test_non_linguistic_and_uncertain_outcomes_are_preserved(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path, count=8)
 
     _process(run, source, snapshot)
     rows = _annotations(run)
@@ -230,8 +237,10 @@ def test_non_linguistic_and_uncertain_outcomes_are_preserved(tmp_path: Path) -> 
         assert row["reason"] == "low_confidence"
 
 
-def test_an_empty_shard_completes_without_parts(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path, count=0)
+def test_an_empty_shard_completes_without_parts(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path, count=0)
 
     outcome = _process(run, source, snapshot)
 
@@ -258,12 +267,16 @@ def test_rows_without_descriptions_still_advance_the_cursor(tmp_path: Path) -> N
     assert len(outcome.completed_parts) == 2
 
 
-def test_paused_and_resumed_output_matches_an_uninterrupted_run(tmp_path: Path) -> None:
-    uninterrupted_source, uninterrupted_run, uninterrupted = _prepare(tmp_path / "one")
+def test_paused_and_resumed_output_matches_an_uninterrupted_run(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    uninterrupted_source, uninterrupted_run, uninterrupted = _prepare(
+        language_run_setup, tmp_path / "one"
+    )
     _process(uninterrupted_run, uninterrupted_source, uninterrupted)
     expected = _annotations(uninterrupted_run)
 
-    source, run, snapshot = _prepare(tmp_path / "two")
+    source, run, snapshot = _prepare(language_run_setup, tmp_path / "two")
     first = _process(run, source, snapshot, budget=_StepBudget(1))
     assert not first.is_complete
     assert first.input_cursor == 4
@@ -280,8 +293,10 @@ def test_paused_and_resumed_output_matches_an_uninterrupted_run(tmp_path: Path) 
     assert final.annotation_count == len(expected)
 
 
-def test_resuming_a_complete_shard_does_no_further_work(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_resuming_a_complete_shard_does_no_further_work(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     first = _process(run, source, snapshot)
 
     detector = _CountingDetector()
@@ -301,9 +316,13 @@ def test_resuming_a_complete_shard_does_no_further_work(tmp_path: Path) -> None:
     assert second.annotation_count == first.annotation_count
 
 
-def test_a_crash_before_the_checkpoint_commit_is_recovered(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
-    reference_source, reference_run, reference = _prepare(tmp_path / "reference")
+def test_a_crash_before_the_checkpoint_commit_is_recovered(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
+    reference_source, reference_run, reference = _prepare(
+        language_run_setup, tmp_path / "reference"
+    )
     _process(reference_run, reference_source, reference)
     expected = _annotations(reference_run)
 
@@ -321,8 +340,10 @@ def test_a_crash_before_the_checkpoint_commit_is_recovered(tmp_path: Path) -> No
     assert _annotations(run) == expected
 
 
-def test_a_corrupt_committed_part_is_never_adopted(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_corrupt_committed_part_is_never_adopted(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     _process(run, source, snapshot, budget=_StepBudget(1))
     paths = shard_paths(run, SHARD)
     paths.part(part_name_for_offset(0)).write_bytes(b"truncated")
@@ -331,8 +352,10 @@ def test_a_corrupt_committed_part_is_never_adopted(tmp_path: Path) -> None:
         _process(run, source, snapshot)
 
 
-def test_a_missing_committed_part_is_reported(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_missing_committed_part_is_reported(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     _process(run, source, snapshot, budget=_StepBudget(1))
     shard_paths(run, SHARD).part(part_name_for_offset(0)).unlink()
 
@@ -340,8 +363,10 @@ def test_a_missing_committed_part_is_reported(tmp_path: Path) -> None:
         _process(run, source, snapshot)
 
 
-def test_a_part_that_disagrees_with_its_receipt_row_count_is_reported(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_part_that_disagrees_with_its_receipt_row_count_is_reported(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     _process(run, source, snapshot, budget=_StepBudget(1))
     paths = shard_paths(run, SHARD)
     receipt_path = paths.receipt(part_name_for_offset(0))
@@ -354,24 +379,30 @@ def test_a_part_that_disagrees_with_its_receipt_row_count_is_reported(tmp_path: 
         _process(run, source, snapshot)
 
 
-def test_source_drift_is_rejected_before_any_processing(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_source_drift_is_rejected_before_any_processing(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     _write_shard(source / SHARD, 16)
 
     with pytest.raises(Exception, match="does not match snapshot"):
         _process(run, source, snapshot)
 
 
-def test_resuming_with_a_different_batch_size_is_rejected(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_resuming_with_a_different_batch_size_is_rejected(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     _process(run, source, snapshot, budget=_StepBudget(1))
 
     with pytest.raises(CheckpointError, match="written with batch size 4"):
         _process(run, source, snapshot, batch_size=8)
 
 
-def test_an_initialized_checkpoint_without_parts_accepts_any_batch_size(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_an_initialized_checkpoint_without_parts_accepts_any_batch_size(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     paths = shard_paths(run, SHARD)
     write_checkpoint(
         paths.checkpoint,
@@ -394,12 +425,16 @@ def test_an_initialized_checkpoint_without_parts_accepts_any_batch_size(tmp_path
     assert read_checkpoint(paths.checkpoint).batch_size == 4
 
 
-def test_a_checkpoint_from_another_run_is_rejected(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_checkpoint_from_another_run_is_rejected(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     _process(run, source, snapshot, budget=_StepBudget(1))
 
     # Same row count, different bytes, therefore a different snapshot identity.
-    other_source, other_run, other = _prepare(tmp_path / "other", count=12, row_group_size=6)
+    other_source, other_run, other = _prepare(
+        language_run_setup, tmp_path / "other", count=12, row_group_size=6
+    )
     assert other.snapshot_id != snapshot.snapshot_id
     paths = shard_paths(run, SHARD)
     other_paths = shard_paths(other_run, SHARD)
@@ -437,8 +472,10 @@ def test_only_the_selected_shard_must_be_staged(tmp_path: Path) -> None:
     assert outcome.input_row_count == 8
 
 
-def test_batches_are_bounded_and_projected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    source, run, snapshot = _prepare(tmp_path, count=12, row_group_size=12)
+def test_batches_are_bounded_and_projected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path, count=12, row_group_size=12)
     seen: list[tuple[int, list[str] | None]] = []
     original = pq.ParquetFile.iter_batches
 
@@ -453,8 +490,10 @@ def test_batches_are_bounded_and_projected(tmp_path: Path, monkeypatch: pytest.M
     assert len(outcome.completed_parts) == 3
 
 
-def test_resume_skips_row_groups_already_committed(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path, count=12, row_group_size=4)
+def test_resume_skips_row_groups_already_committed(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path, count=12, row_group_size=4)
     _process(run, source, snapshot, budget=_StepBudget(2))
 
     detector = _CountingDetector()
@@ -473,8 +512,10 @@ def test_resume_skips_row_groups_already_committed(tmp_path: Path) -> None:
     assert 0 < detector.calls <= 6
 
 
-def test_a_misaligned_resume_cursor_is_rejected(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path, count=12, row_group_size=12)
+def test_a_misaligned_resume_cursor_is_rejected(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path, count=12, row_group_size=12)
     _process(run, source, snapshot, budget=_StepBudget(1))
     paths = shard_paths(run, SHARD)
     payload = paths.checkpoint.read_text(encoding="utf-8").replace(
@@ -572,8 +613,10 @@ def test_the_budget_is_monotonic_and_validated() -> None:
         ProcessingBudget(float("inf"))
 
 
-def test_a_batch_that_finishes_after_the_budget_is_not_committed(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_batch_that_finishes_after_the_budget_is_not_committed(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     ticks = iter([0.0, 0.0, 2.0])
     budget = ProcessingBudget(1.0, clock=lambda: next(ticks))
 
@@ -584,8 +627,10 @@ def test_a_batch_that_finishes_after_the_budget_is_not_committed(tmp_path: Path)
     assert outcome.completed_parts == ()
 
 
-def test_an_exhausted_budget_pauses_before_the_first_batch(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_an_exhausted_budget_pauses_before_the_first_batch(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
 
     outcome = _process(run, source, snapshot, budget=_StepBudget(0))
 
@@ -595,8 +640,10 @@ def test_an_exhausted_budget_pauses_before_the_first_batch(tmp_path: Path) -> No
     assert read_checkpoint(shard_paths(run, SHARD).checkpoint).input_cursor == 0
 
 
-def test_detector_errors_are_not_converted_into_completed_results(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_detector_errors_are_not_converted_into_completed_results(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
 
     def _failing(text: str) -> LanguageResult:
         raise RuntimeError("detector exploded")
@@ -615,8 +662,10 @@ def test_detector_errors_are_not_converted_into_completed_results(tmp_path: Path
     assert not shard_paths(run, SHARD).checkpoint.exists()
 
 
-def test_an_invalid_batch_size_is_rejected(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_an_invalid_batch_size_is_rejected(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
 
     with pytest.raises(ValueError, match=exactly("batch_size must be a positive integer")):
         _process(run, source, snapshot, batch_size=0)
@@ -625,8 +674,8 @@ def test_an_invalid_batch_size_is_rejected(tmp_path: Path) -> None:
         _process(run, source, snapshot, batch_size=MAX_BATCH_SIZE + 1)
 
 
-def test_an_unknown_shard_is_rejected(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_an_unknown_shard_is_rejected(tmp_path: Path, language_run_setup: LanguageRunSetup) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
 
     with pytest.raises(Exception, match="not in snapshot"):
         process_shard(
@@ -654,9 +703,12 @@ def _tamper_checkpoint(run: Path, **changes: object) -> None:
     ],
 )
 def test_a_checkpoint_that_does_not_match_the_run_is_rejected(
-    tmp_path: Path, changes: dict[str, object], message: str
+    tmp_path: Path,
+    changes: dict[str, object],
+    message: str,
+    language_run_setup: LanguageRunSetup,
 ) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     _process(run, source, snapshot, budget=_StepBudget(1))
     _tamper_checkpoint(run, **changes)
 
@@ -677,8 +729,10 @@ def test_a_checkpoint_recorded_against_another_shard_is_rejected(tmp_path: Path)
         _process(run, source, snapshot)
 
 
-def test_a_receipt_from_another_run_is_rejected(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_receipt_from_another_run_is_rejected(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     _process(run, source, snapshot, budget=_StepBudget(1))
     receipt_path = shard_paths(run, SHARD).receipt(part_name_for_offset(0))
     payload = json.loads(receipt_path.read_text(encoding="utf-8"))
@@ -689,8 +743,10 @@ def test_a_receipt_from_another_run_is_rejected(tmp_path: Path) -> None:
         _process(run, source, snapshot)
 
 
-def test_a_part_that_hashes_correctly_but_is_not_parquet_is_rejected(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_part_that_hashes_correctly_but_is_not_parquet_is_rejected(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     _process(run, source, snapshot, budget=_StepBudget(1))
     paths = shard_paths(run, SHARD)
     part_name = part_name_for_offset(0)
@@ -714,9 +770,13 @@ def test_a_part_that_hashes_correctly_but_is_not_parquet_is_rejected(tmp_path: P
     ],
 )
 def test_a_receipt_with_a_foreign_binding_is_rejected(
-    tmp_path: Path, field: str, value: str, message: str
+    tmp_path: Path,
+    field: str,
+    value: str,
+    message: str,
+    language_run_setup: LanguageRunSetup,
 ) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     _process(run, source, snapshot, budget=_StepBudget(1))
     receipt_path = shard_paths(run, SHARD).receipt(part_name_for_offset(0))
     payload = json.loads(receipt_path.read_text(encoding="utf-8"))
@@ -727,8 +787,10 @@ def test_a_receipt_with_a_foreign_binding_is_rejected(
         _process(run, source, snapshot)
 
 
-def test_a_receipt_with_a_foreign_part_name_is_rejected(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_receipt_with_a_foreign_part_name_is_rejected(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     _process(run, source, snapshot, budget=_StepBudget(1))
     receipt_path = shard_paths(run, SHARD).receipt(part_name_for_offset(0))
     payload = json.loads(receipt_path.read_text(encoding="utf-8"))
@@ -745,8 +807,10 @@ def test_a_receipt_with_a_foreign_part_name_is_rejected(tmp_path: Path) -> None:
         _process(run, source, snapshot)
 
 
-def test_a_part_whose_rows_disagree_with_its_receipt_is_rejected(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_part_whose_rows_disagree_with_its_receipt_is_rejected(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     _process(run, source, snapshot, budget=_StepBudget(1))
     paths = shard_paths(run, SHARD)
     part_name = part_name_for_offset(0)
@@ -759,8 +823,10 @@ def test_a_part_whose_rows_disagree_with_its_receipt_is_rejected(tmp_path: Path)
         _process(run, source, snapshot)
 
 
-def test_a_checkpoint_whose_total_disagrees_with_its_parts_is_rejected(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_checkpoint_whose_total_disagrees_with_its_parts_is_rejected(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path)
     _process(run, source, snapshot, budget=_StepBudget(1))
     _tamper_checkpoint(run, annotation_count=999)
 
@@ -771,10 +837,14 @@ def test_a_checkpoint_whose_total_disagrees_with_its_parts_is_rejected(tmp_path:
         _process(run, source, snapshot)
 
 
-def test_resume_skips_earlier_batches_inside_one_row_group(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path, count=12, row_group_size=12)
+def test_resume_skips_earlier_batches_inside_one_row_group(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path, count=12, row_group_size=12)
     _process(run, source, snapshot, budget=_StepBudget(2))
-    reference_source, reference_run, reference = _prepare(tmp_path / "reference", row_group_size=12)
+    reference_source, reference_run, reference = _prepare(
+        language_run_setup, tmp_path / "reference", row_group_size=12
+    )
     _process(reference_run, reference_source, reference)
 
     outcome = _process(run, source, snapshot)
@@ -784,13 +854,17 @@ def test_resume_skips_earlier_batches_inside_one_row_group(tmp_path: Path) -> No
     assert _annotations(run) == _annotations(reference_run)
 
 
-def test_resume_preserves_the_global_batch_grid_across_row_groups(tmp_path: Path) -> None:
+def test_resume_preserves_the_global_batch_grid_across_row_groups(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
     reference_source, reference_run, reference = _prepare(
-        tmp_path / "reference", count=18, row_group_size=6
+        language_run_setup, tmp_path / "reference", count=18, row_group_size=6
     )
     _process(reference_run, reference_source, reference, batch_size=4)
 
-    source, run, snapshot = _prepare(tmp_path / "resumed", count=18, row_group_size=6)
+    source, run, snapshot = _prepare(
+        language_run_setup, tmp_path / "resumed", count=18, row_group_size=6
+    )
     first = _process(run, source, snapshot, batch_size=4, budget=_StepBudget(2))
     assert not first.is_complete
 
@@ -800,8 +874,10 @@ def test_resume_preserves_the_global_batch_grid_across_row_groups(tmp_path: Path
     assert _annotations(run) == _annotations(reference_run)
 
 
-def test_resume_rejects_a_gap_in_the_committed_receipt_chain(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path, count=12, row_group_size=4)
+def test_resume_rejects_a_gap_in_the_committed_receipt_chain(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = _prepare(language_run_setup, tmp_path, count=12, row_group_size=4)
     _process(run, source, snapshot, batch_size=4)
     paths = shard_paths(run, SHARD)
     first = part_name_for_offset(0)

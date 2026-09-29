@@ -13,7 +13,7 @@ services:
     image: osm-polygon-description-tag:local
     user: "${UID:-10001}:${GID:-10001}"
     environment:
-      OSM_POLYGON_SOURCE_ROOT: /data/raw
+      OSM_POLYGON_SOURCE_ROOT: /source
       OSM_POLYGON_DATA_ROOT: /data
     env_file:
       - path: .env
@@ -24,7 +24,7 @@ services:
         target: /data
       - type: bind
         source: ${DATA_ROOT:-./data-root}/raw
-        target: /data/raw
+        target: /source
         read_only: true
 
   test:

@@ -61,9 +61,9 @@ def test_justfile_exposes_one_safe_resumable_container_command() -> None:
         assert recipe in justfile
     assert "docker-run data_root: docker-build" in justfile
     assert '--user "$(id -u):$(id -g)"' in justfile
-    assert "dst=/data/raw,readonly" in justfile
+    assert "dst=/source,readonly" in justfile
     assert "run-and-publish" in justfile
-    assert "--source-root /data/raw" in justfile
+    assert "--source-root /source" in justfile
     assert "--data-root /data" in justfile
     assert 'repo_id := "NoeFlandre/osm-polygon-description-tag"' in justfile
     assert "--confirm-repo {{repo_id}}" in justfile
@@ -78,7 +78,7 @@ def test_docs_describe_the_container_boundary_and_resume_contract() -> None:
         "uv.lock",
         "osmium-tool",
         "read-only",
-        "/data/raw",
+        "/source",
         "Ctrl-C",
         "HF_TOKEN",
     ):
@@ -148,7 +148,7 @@ def test_the_runtime_image_presets_its_roots_and_carries_oci_labels() -> None:
     env = [word for words in stage if words[0].upper() == "ENV" for word in words[1:]]
     labels = " ".join(word for words in stage if words[0].upper() == "LABEL" for word in words[1:])
 
-    assert "OSM_POLYGON_SOURCE_ROOT=/data/raw" in env
+    assert "OSM_POLYGON_SOURCE_ROOT=/source" in env
     assert "OSM_POLYGON_DATA_ROOT=/data" in env
     for key in ("source", "licenses", "title"):
         assert f"org.opencontainers.image.{key}=" in labels
@@ -161,7 +161,7 @@ def test_the_compose_pipeline_mounts_raw_input_read_only_and_runs_as_the_caller(
     mounts = {volume["target"]: volume for volume in service["volumes"]}
 
     assert service["build"]["target"] == "runtime"
-    assert mounts["/data/raw"]["read_only"] is True
+    assert mounts["/source"]["read_only"] is True
     assert "read_only" not in mounts["/data"]
     assert "UID" in service["user"]
     assert "HF_TOKEN" not in service["environment"]

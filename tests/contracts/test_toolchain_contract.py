@@ -83,7 +83,7 @@ def test_github_actions_runs_complete_quality_gate() -> None:
     for token in (
         "ubuntu-latest",
         "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-        "astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b",
+        "astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7",
         'version: "0.11.16"',
         "uv python install 3.12",
         "osmium-tool",

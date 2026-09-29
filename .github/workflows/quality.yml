@@ -28,7 +28,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.11.16"
           enable-cache: true
@@ -59,6 +59,7 @@ jobs:
       - name: Type-check
         run: uv run ty check
 
+      # PYSEC-2026-113 (pyarrow, fix 23.0.1) is baselined: pyarrow is capped <22 (#61).
       - name: Audit locked dependencies
         run: scripts/audit_locked_dependencies.sh
 
@@ -76,7 +77,7 @@ jobs:
           --cov-report=json:reports/coverage.json
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-json
           path: reports/coverage.json
@@ -139,6 +140,15 @@ jobs:
       - name: Build the non-root runtime image
         run: docker build --target runtime --tag osm-polygon-description-tag:ci .
 
+      - name: Scan the image for fixable HIGH/CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: osm-polygon-description-tag:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore
+
       - name: Verify the harmless CLI default
         run: docker run --rm osm-polygon-description-tag:ci --help
 
@@ -150,6 +160,20 @@ jobs:
           test "$(docker run --rm --entrypoint id osm-polygon-description-tag:ci -u)" != "0"
           docker run --rm --entrypoint printenv osm-polygon-description-tag:ci \
             OSM_POLYGON_SOURCE_ROOT OSM_POLYGON_DATA_ROOT
+
+      - name: Dry-run the pipeline on a fixture inside the image
+        run: |
+          # Exercises the real entrypoint, osmium binary and packaged data
+          # offline, without publishing anything.
+          mkdir -p ci-data ci-source
+          chmod -R a+rwX ci-data ci-source
+          docker run --rm --entrypoint osmium \
+            -v "$PWD/tests/fixtures:/fixtures:ro" -v "$PWD/ci-source:/source" \
+            osm-polygon-description-tag:ci \
+            cat /fixtures/descriptions.osm -o /source/fixture.osm.pbf
+          docker run --rm -e HF_HUB_OFFLINE=1 \
+            -v "$PWD/ci-data:/data" -v "$PWD/ci-source:/source:ro" \
+            osm-polygon-description-tag:ci inspect
 
       - name: Validate the compose file and run through it
         run: |
@@ -172,7 +196,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.11.16"
           enable-cache: true
@@ -189,7 +213,7 @@ jobs:
         run: uv sync --frozen
 
       - name: Restore coverage from the quality job
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: coverage-json
           path: reports
@@ -199,7 +223,7 @@ jobs:
 
       - name: Upload CRAP reports
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: crap-report
           path: |
@@ -224,7 +248,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.11.16"
           enable-cache: true
@@ -264,7 +288,7 @@ jobs:
 
       - name: Upload mutation report
         if: always() && steps.scope.outputs.changed == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mutation-score-scope
           path: reports/mutation-summary.json
@@ -287,7 +311,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.11.16"
           enable-cache: true
@@ -312,7 +336,7 @@ jobs:
         run: just mutation-contexts
 
       - name: Upload coverage contexts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mutation-coverage-contexts
           path: data-root/.tmp/.coverage-ctx
@@ -344,7 +368,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.11.16"
           enable-cache: true
@@ -397,7 +421,7 @@ jobs:
           PY
 
       - name: Restore shared coverage contexts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: mutation-coverage-contexts
           path: data-root/.tmp
@@ -410,7 +434,7 @@ jobs:
 
       - name: Upload mutation report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mutation-score-shard-${{ matrix.shard }}
           path: reports/mutation-summary.json
@@ -431,7 +455,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.11.16"
           enable-cache: true

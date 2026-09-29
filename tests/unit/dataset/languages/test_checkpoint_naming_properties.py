@@ -12,12 +12,14 @@ from osm_polygon_description_tag.dataset.languages.checkpoint import (
     receipt_name_for_part,
 )
 
-_OFFSETS = st.integers(min_value=0, max_value=10**12 - 1)
+# Part filenames have a fixed 20-digit offset; overflow is rejected explicitly.
+_OFFSETS = st.integers(min_value=0, max_value=10**20 - 1)
 
 
 @given(_OFFSETS)
 @example(0)
 @example(10**12 - 1)
+@example(10**20 - 1)
 def test_a_generated_part_name_is_recognised_and_has_a_matching_receipt(offset: int) -> None:
     part = part_name_for_offset(offset)
 

@@ -18,7 +18,7 @@ installs the real `osmium-tool`; the build stage installs the locked Python
 environment; development adds the checkout and test dependencies; runtime
 copies only the non-editable installed package into a non-root image. `/data`
 is the sole mounted state boundary. The default command is `--help`, while
-`run-and-publish --source-root /data/raw --data-root /data` is required to start
+`run-and-publish --source-root /source --data-root /data` is required to start
 processing. The raw source mount is read-only, and resumable state survives
 container removal because it remains on the host.
 
