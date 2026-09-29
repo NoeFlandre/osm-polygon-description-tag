@@ -26,6 +26,18 @@ audit:
 test:
     uv run pytest {{coverage_flags}} --cov-report=term-missing
 
+# Time the per-feature transform (benchmarks/ is not part of the normal test run).
+bench:
+    uv run pytest benchmarks -q --no-cov -p no:cacheprovider
+
+# Save a baseline, then fail if a later run is >25% slower on the mean.
+bench-save name="base":
+    uv run pytest benchmarks -q --no-cov -p no:cacheprovider --benchmark-save={{name}}
+
+bench-compare name="base":
+    uv run pytest benchmarks -q --no-cov -p no:cacheprovider \
+        --benchmark-compare={{name}} --benchmark-compare-fail=mean:25%
+
 test-integration:
     uv run pytest tests/integration -q
 

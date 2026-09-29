@@ -416,12 +416,50 @@ jobs:
           path: reports/mutation-summary.json
           if-no-files-found: error
 
+  # Advisory: continue-on-error keeps a noisy shared runner from failing ci-ok.
+  # Times the base and the head on the same runner.
+  benchmarks:
+    if: github.event_name == 'pull_request'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.16"
+          enable-cache: true
+
+      - name: Install Python and just
+        run: |
+          uv python install 3.12
+          sudo apt-get update
+          sudo apt-get install -y just
+
+      - name: Time the base
+        run: |
+          uv sync --frozen
+          git checkout "${{ github.event.pull_request.head.sha }}" -- benchmarks
+          just bench-save
+
+      - name: Time the head against it
+        run: |
+          git checkout --force "${{ github.event.pull_request.head.sha }}"
+          uv sync --frozen
+          just bench-compare
+
   # The one check to require in branch protection. Which of the jobs above run
   # depends on the event (mutation-scope on pull requests, the sweeps on push),
   # so a skipped job is fine; a failed or cancelled one is not.
   ci-ok:
     if: always()
-    needs: [quality, container, risk, mutation-scope, mutation-contexts, mutation-all]
+    needs: [quality, container, risk, mutation-scope, mutation-contexts, mutation-all, benchmarks]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
