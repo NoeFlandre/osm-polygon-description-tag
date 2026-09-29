@@ -59,6 +59,7 @@ jobs:
       - name: Type-check
         run: uv run ty check
 
+      # PYSEC-2026-113 (pyarrow, fix 23.0.1) is baselined: pyarrow is capped <22 (#61).
       - name: Audit locked dependencies
         run: scripts/audit_locked_dependencies.sh
 
@@ -138,6 +139,15 @@ jobs:
 
       - name: Build the non-root runtime image
         run: docker build --target runtime --tag osm-polygon-description-tag:ci .
+
+      - name: Scan the image for fixable HIGH/CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: osm-polygon-description-tag:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore
 
       - name: Verify the harmless CLI default
         run: docker run --rm osm-polygon-description-tag:ci --help
