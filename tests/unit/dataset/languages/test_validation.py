@@ -26,6 +26,7 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
 )
 from osm_polygon_description_tag.dataset.languages.validation import validate_run
 from osm_polygon_description_tag.dataset.languages.worker import process_shard
+from tests.helpers.language_setup import LanguageRunSetup
 from tests.helpers.parquet import write_description_shard
 from tests.helpers.sentences import fake_splitter
 
@@ -40,7 +41,7 @@ def _detector(text: str) -> LanguageResult:
 _write_shard = partial(write_description_shard, batch_size=4)
 
 
-def _prepare(
+def _prepare_multi_shard(
     tmp_path: Path, *, shards: tuple[str, ...] = (SHARD,)
 ) -> tuple[Path, Path, SnapshotManifest]:
     source = tmp_path / "source"
@@ -67,8 +68,10 @@ def _listing(root: Path) -> list[str]:
     return sorted(str(path.relative_to(root)) for path in root.rglob("*"))
 
 
-def test_a_finished_run_validates_as_complete(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_finished_run_validates_as_complete(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     _process(run, source, snapshot)
 
     report = validate_run(run)
@@ -84,8 +87,10 @@ def test_a_finished_run_validates_as_complete(tmp_path: Path) -> None:
     assert report.shards[0].issues == ()
 
 
-def test_validation_never_modifies_the_run_directory(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_validation_never_modifies_the_run_directory(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     _process(run, source, snapshot)
     before = _listing(run)
 
@@ -95,7 +100,7 @@ def test_validation_never_modifies_the_run_directory(tmp_path: Path) -> None:
 
 
 def test_an_unprocessed_shard_is_reported_as_missing(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path, shards=(SHARD, OTHER))
+    source, run, snapshot = _prepare_multi_shard(tmp_path, shards=(SHARD, OTHER))
     _process(run, source, snapshot, SHARD)
 
     report = validate_run(run)
@@ -113,8 +118,10 @@ def test_an_unprocessed_shard_is_reported_as_missing(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("kind", ["dangling_symlink", "directory"])
-def test_invalid_checkpoint_path_is_reported_as_unreadable(tmp_path: Path, kind: str) -> None:
-    _, run, _ = _prepare(tmp_path)
+def test_invalid_checkpoint_path_is_reported_as_unreadable(
+    tmp_path: Path, kind: str, language_run_setup: LanguageRunSetup
+) -> None:
+    _, run, _ = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     path = shard_paths(run, SHARD).checkpoint
     path.parent.mkdir(parents=True)
     if kind == "directory":
@@ -132,7 +139,7 @@ def test_invalid_checkpoint_path_is_reported_as_unreadable(tmp_path: Path, kind:
 
 
 def test_validation_can_be_restricted_to_one_shard(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path, shards=(SHARD, OTHER))
+    source, run, snapshot = _prepare_multi_shard(tmp_path, shards=(SHARD, OTHER))
     _process(run, source, snapshot, SHARD)
 
     report = validate_run(run, shards=(SHARD,))
@@ -142,16 +149,20 @@ def test_validation_can_be_restricted_to_one_shard(tmp_path: Path) -> None:
     assert report.shards[0].shard == SHARD
 
 
-def test_validation_rejects_an_unknown_restricted_shard(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_validation_rejects_an_unknown_restricted_shard(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     _process(run, source, snapshot)
 
     with pytest.raises(SnapshotError, match="not in snapshot"):
         validate_run(run, shards=("absent.parquet",))
 
 
-def test_a_part_that_no_longer_matches_its_receipt_is_reported(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_part_that_no_longer_matches_its_receipt_is_reported(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     _process(run, source, snapshot)
     shard_paths(run, SHARD).part(part_name_for_offset(0)).write_bytes(b"corrupted")
 
@@ -161,8 +172,8 @@ def test_a_part_that_no_longer_matches_its_receipt_is_reported(tmp_path: Path) -
     assert any("does not match its receipt hash" in issue for issue in report.shards[0].issues)
 
 
-def test_a_missing_part_is_reported(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_missing_part_is_reported(tmp_path: Path, language_run_setup: LanguageRunSetup) -> None:
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     _process(run, source, snapshot)
     shard_paths(run, SHARD).part(part_name_for_offset(0)).unlink()
 
@@ -172,8 +183,10 @@ def test_a_missing_part_is_reported(tmp_path: Path) -> None:
     assert any("committed part is missing" in issue for issue in report.shards[0].issues)
 
 
-def test_a_malformed_receipt_is_reported_without_modifying_it(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_malformed_receipt_is_reported_without_modifying_it(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     _process(run, source, snapshot)
     part_name = part_name_for_offset(0)
     receipt = shard_paths(run, SHARD).receipt(part_name)
@@ -189,8 +202,10 @@ def test_a_malformed_receipt_is_reported_without_modifying_it(tmp_path: Path) ->
     assert receipt.read_text(encoding="utf-8") == "[]"
 
 
-def test_a_symlinked_committed_part_is_reported_without_following_it(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_symlinked_committed_part_is_reported_without_following_it(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     _process(run, source, snapshot)
     part_name = part_name_for_offset(0)
     part = shard_paths(run, SHARD).part(part_name)
@@ -207,8 +222,10 @@ def test_a_symlinked_committed_part_is_reported_without_following_it(tmp_path: P
     assert target.read_bytes() == original
 
 
-def test_a_missing_receipt_is_reported(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_missing_receipt_is_reported(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     _process(run, source, snapshot)
     shard_paths(run, SHARD).receipt(part_name_for_offset(0)).unlink()
 
@@ -218,8 +235,10 @@ def test_a_missing_receipt_is_reported(tmp_path: Path) -> None:
     assert any("receipt is unusable" in issue for issue in report.shards[0].issues)
 
 
-def test_unexpected_parts_and_receipts_are_reported(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_unexpected_parts_and_receipts_are_reported(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     _process(run, source, snapshot)
     paths = shard_paths(run, SHARD)
     stray = part_name_for_offset(64)
@@ -234,8 +253,10 @@ def test_unexpected_parts_and_receipts_are_reported(tmp_path: Path) -> None:
     assert any("unexpected receipt file" in issue for issue in issues)
 
 
-def test_a_noncanonical_part_artifact_is_reported(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_noncanonical_part_artifact_is_reported(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     _process(run, source, snapshot)
     paths = shard_paths(run, SHARD)
     paths.parts.joinpath("junk.parquet").write_bytes(b"stale artifact")
@@ -246,8 +267,10 @@ def test_a_noncanonical_part_artifact_is_reported(tmp_path: Path) -> None:
     assert any("unexpected part file" in issue for issue in report.shards[0].issues)
 
 
-def test_an_unexpected_shard_directory_is_reported(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_an_unexpected_shard_directory_is_reported(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     _process(run, source, snapshot)
     (run / "shards" / ("0" * 32)).mkdir(parents=True)
 
@@ -257,8 +280,10 @@ def test_an_unexpected_shard_directory_is_reported(tmp_path: Path) -> None:
     assert any("unexpected shard directory" in issue for issue in report.issues)
 
 
-def test_an_unreadable_checkpoint_is_reported(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_an_unreadable_checkpoint_is_reported(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     _process(run, source, snapshot)
     shard_paths(run, SHARD).checkpoint.write_text("{not-json", encoding="utf-8")
 
@@ -269,8 +294,10 @@ def test_an_unreadable_checkpoint_is_reported(tmp_path: Path) -> None:
     assert report.shards[0].issues
 
 
-def test_a_checkpoint_from_another_configuration_is_reported(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_checkpoint_from_another_configuration_is_reported(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     _process(run, source, snapshot)
     path = shard_paths(run, SHARD).checkpoint
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -285,8 +312,10 @@ def test_a_checkpoint_from_another_configuration_is_reported(tmp_path: Path) -> 
     )
 
 
-def test_a_tampered_annotation_count_is_reported(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_tampered_annotation_count_is_reported(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     _process(run, source, snapshot)
     path = shard_paths(run, SHARD).checkpoint
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -299,8 +328,10 @@ def test_a_tampered_annotation_count_is_reported(tmp_path: Path) -> None:
     assert any("but the checkpoint records 99" in issue for issue in report.shards[0].issues)
 
 
-def test_a_paused_run_is_reported_as_incomplete(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_paused_run_is_reported_as_incomplete(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     path = shard_paths(run, SHARD).checkpoint
     _process(run, source, snapshot)
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -317,8 +348,10 @@ def test_a_paused_run_is_reported_as_incomplete(tmp_path: Path) -> None:
     assert report.shards[0].input_cursor == 4
 
 
-def test_the_report_payload_is_json_serializable(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_the_report_payload_is_json_serializable(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     _process(run, source, snapshot)
 
     payload = validate_run(run).to_payload()
@@ -345,9 +378,12 @@ def _tamper(run: Path, **changes: object) -> None:
     ],
 )
 def test_checkpoint_identity_mismatches_are_reported(
-    tmp_path: Path, changes: dict[str, object], message: str
+    tmp_path: Path,
+    changes: dict[str, object],
+    message: str,
+    language_run_setup: LanguageRunSetup,
 ) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     _process(run, source, snapshot)
     _tamper(run, **changes)
 
@@ -358,7 +394,7 @@ def test_checkpoint_identity_mismatches_are_reported(
 
 
 def test_a_checkpoint_recorded_against_another_shard_is_reported(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path, shards=(SHARD, OTHER))
+    source, run, snapshot = _prepare_multi_shard(tmp_path, shards=(SHARD, OTHER))
     _process(run, source, snapshot, SHARD)
     _tamper(run, shard=OTHER)
 
@@ -367,8 +403,10 @@ def test_a_checkpoint_recorded_against_another_shard_is_reported(tmp_path: Path)
     assert any("records a different shard" in issue for issue in report.shards[0].issues)
 
 
-def test_a_receipt_from_another_run_is_reported(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_receipt_from_another_run_is_reported(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     _process(run, source, snapshot)
     receipt_path = shard_paths(run, SHARD).receipt(part_name_for_offset(0))
     payload = json.loads(receipt_path.read_text(encoding="utf-8"))
@@ -380,8 +418,10 @@ def test_a_receipt_from_another_run_is_reported(tmp_path: Path) -> None:
     assert any("receipt belongs to another run" in issue for issue in report.shards[0].issues)
 
 
-def test_a_part_that_hashes_correctly_but_is_not_parquet_is_reported(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_part_that_hashes_correctly_but_is_not_parquet_is_reported(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     _process(run, source, snapshot)
     paths = shard_paths(run, SHARD)
     part_name = part_name_for_offset(0)
@@ -397,8 +437,10 @@ def test_a_part_that_hashes_correctly_but_is_not_parquet_is_reported(tmp_path: P
     assert any("committed part is unreadable" in issue for issue in report.shards[0].issues)
 
 
-def test_a_part_whose_rows_disagree_with_its_receipt_is_reported(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_part_whose_rows_disagree_with_its_receipt_is_reported(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     _process(run, source, snapshot)
     receipt_path = shard_paths(run, SHARD).receipt(part_name_for_offset(0))
     payload = json.loads(receipt_path.read_text(encoding="utf-8"))
@@ -410,8 +452,10 @@ def test_a_part_whose_rows_disagree_with_its_receipt_is_reported(tmp_path: Path)
     assert any("row count does not match its receipt" in issue for issue in report.shards[0].issues)
 
 
-def test_a_semantically_tampered_annotation_row_is_reported(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_semantically_tampered_annotation_row_is_reported(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     _process(run, source, snapshot)
     paths = shard_paths(run, SHARD)
     part_name = part_name_for_offset(0)
@@ -434,8 +478,10 @@ def test_a_semantically_tampered_annotation_row_is_reported(tmp_path: Path) -> N
     assert any("invalid description_identity" in issue for issue in report.shards[0].issues)
 
 
-def test_a_receipt_with_a_foreign_source_binding_is_reported(tmp_path: Path) -> None:
-    source, run, snapshot = _prepare(tmp_path)
+def test_a_receipt_with_a_foreign_source_binding_is_reported(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = language_run_setup.prepare_run(tmp_path, count=8, row_group_size=4)
     _process(run, source, snapshot)
     receipt_path = shard_paths(run, SHARD).receipt(part_name_for_offset(0))
     payload = json.loads(receipt_path.read_text(encoding="utf-8"))

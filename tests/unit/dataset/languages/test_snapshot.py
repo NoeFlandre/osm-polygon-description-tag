@@ -10,7 +10,6 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
-from shapely.geometry import Polygon
 
 from osm_polygon_description_tag.dataset.languages import snapshot as snapshot_module
 from osm_polygon_description_tag.dataset.languages.checkpoint import WorkerBusyError
@@ -33,32 +32,8 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
     verify_project_identity,
     verify_source_file,
 )
-from osm_polygon_description_tag.dataset.storage import write_geoparquet
-from tests.conftest import make_record_dict
+from tests.helpers.language_setup import LanguageRunSetup
 from tests.helpers.messages import exactly
-
-
-def _write_source(path: Path, *, text: str = "A synthetic description") -> None:
-    record = make_record_dict(Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]), {"description": text})
-    path.parent.mkdir(parents=True, exist_ok=True)
-    write_geoparquet(iter([record]), path, batch_size=1)
-
-
-def _prepare(source: Path, run: Path) -> SnapshotManifest:
-    return prepare_snapshot(
-        source,
-        run,
-        code_fingerprint="a" * 64,
-        lock_fingerprint="b" * 64,
-        model_identity=language_model_identity(LanguagePolicy()),
-    )
-
-
-def _prepared(tmp_path: Path) -> tuple[Path, Path, SnapshotManifest]:
-    source = tmp_path / "source"
-    _write_source(source / "region.parquet")
-    run = tmp_path / "run"
-    return source, run, _prepare(source, run)
 
 
 def _rewrite(run: Path, mutate: Callable[[dict[str, Any]], None]) -> None:
@@ -68,16 +43,18 @@ def _rewrite(run: Path, mutate: Callable[[dict[str, Any]], None]) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def test_snapshot_is_immutable_and_portable_across_source_root_paths(tmp_path: Path) -> None:
+def test_snapshot_is_immutable_and_portable_across_source_root_paths(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
     first_source = tmp_path / "first" / "data"
-    _write_source(first_source / "region.parquet")
+    language_run_setup.write_snapshot_source(first_source / "region.parquet")
 
-    first = _prepare(first_source, tmp_path / "run")
-    same = _prepare(first_source, tmp_path / "run")
+    first = language_run_setup.prepare_snapshot(first_source, tmp_path / "run")
+    same = language_run_setup.prepare_snapshot(first_source, tmp_path / "run")
 
     second_source = tmp_path / "second" / "data"
-    _write_source(second_source / "region.parquet")
-    second = _prepare(second_source, tmp_path / "second-run")
+    language_run_setup.write_snapshot_source(second_source / "region.parquet")
+    second = language_run_setup.prepare_snapshot(second_source, tmp_path / "second-run")
 
     assert first == same
     assert first.snapshot_id == second.snapshot_id
@@ -89,9 +66,11 @@ def test_snapshot_is_immutable_and_portable_across_source_root_paths(tmp_path: P
     assert first.model_config_fingerprint == first.model_identity.config_fingerprint
 
 
-def test_snapshot_round_trips_the_cascade_fallback_identity(tmp_path: Path) -> None:
+def test_snapshot_round_trips_the_cascade_fallback_identity(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
     source = tmp_path / "source"
-    _write_source(source / "region.parquet")
+    language_run_setup.write_snapshot_source(source / "region.parquet")
     run = tmp_path / "run"
     identity = cascade_model_identity(LanguagePolicy(), language_scope=("eng", "fra"))
 
@@ -109,13 +88,17 @@ def test_snapshot_round_trips_the_cascade_fallback_identity(tmp_path: Path) -> N
     assert read_snapshot(run).model_identity == identity
 
 
-def test_snapshot_rejects_source_drift_instead_of_overwriting_identity(tmp_path: Path) -> None:
-    source, run, snapshot = _prepared(tmp_path)
+def test_snapshot_rejects_source_drift_instead_of_overwriting_identity(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, snapshot = language_run_setup.prepared_snapshot(tmp_path)
 
-    _write_source(source / "region.parquet", text="Changed synthetic description")
+    language_run_setup.write_snapshot_source(
+        source / "region.parquet", text="Changed synthetic description"
+    )
 
     with pytest.raises(SnapshotError, match="immutable snapshot"):
-        _prepare(source, run)
+        language_run_setup.prepare_snapshot(source, run)
     with pytest.raises(SnapshotError, match="does not match snapshot"):
         verify_source_file(snapshot, source, "region.parquet")
     with pytest.raises(
@@ -124,16 +107,22 @@ def test_snapshot_rejects_source_drift_instead_of_overwriting_identity(tmp_path:
         verify_all_source_files(snapshot, source)
 
 
-def test_verification_accepts_an_unchanged_source_tree(tmp_path: Path) -> None:
-    source, _, snapshot = _prepared(tmp_path)
+def test_verification_accepts_an_unchanged_source_tree(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, _, snapshot = language_run_setup.prepared_snapshot(tmp_path)
 
     assert verify_source_file(snapshot, source, "region.parquet") == snapshot.source_files[0]
     assert verify_all_source_files(snapshot, source) == snapshot.source_files
 
 
-def test_verify_all_source_files_rejects_an_extra_parquet(tmp_path: Path) -> None:
-    source, _, snapshot = _prepared(tmp_path)
-    _write_source(source / "extra.parquet", text="Another synthetic description")
+def test_verify_all_source_files_rejects_an_extra_parquet(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, _, snapshot = language_run_setup.prepared_snapshot(tmp_path)
+    language_run_setup.write_snapshot_source(
+        source / "extra.parquet", text="Another synthetic description"
+    )
 
     with pytest.raises(
         SnapshotError, match=exactly("source directory files do not match immutable snapshot")
@@ -141,18 +130,22 @@ def test_verify_all_source_files_rejects_an_extra_parquet(tmp_path: Path) -> Non
         verify_all_source_files(snapshot, source)
 
 
-def test_snapshot_rejects_non_schema_three_sources(tmp_path: Path) -> None:
+def test_snapshot_rejects_non_schema_three_sources(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
     source = tmp_path / "source"
     source.mkdir()
     pq.write_table(pa.table({"source_pbf": ["region.osm.pbf"]}), source / "invalid.parquet")
 
     with pytest.raises(SnapshotError, match="schema"):
-        _prepare(source, tmp_path / "run")
+        language_run_setup.prepare_snapshot(source, tmp_path / "run")
 
 
-def test_snapshot_rejects_a_field_type_change_in_a_current_schema(tmp_path: Path) -> None:
+def test_snapshot_rejects_a_field_type_change_in_a_current_schema(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
     source = tmp_path / "source"
-    _write_source(source / "region.parquet")
+    language_run_setup.write_snapshot_source(source / "region.parquet")
     table = pq.read_table(source / "region.parquet")
     altered = table.set_column(
         table.schema.get_field_index("osm_id"),
@@ -162,49 +155,57 @@ def test_snapshot_rejects_a_field_type_change_in_a_current_schema(tmp_path: Path
     pq.write_table(altered, source / "region.parquet")
 
     with pytest.raises(SnapshotError, match="field mismatch"):
-        _prepare(source, tmp_path / "run")
+        language_run_setup.prepare_snapshot(source, tmp_path / "run")
 
 
-def test_snapshot_rejects_output_inside_the_immutable_source(tmp_path: Path) -> None:
+def test_snapshot_rejects_output_inside_the_immutable_source(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
     source = tmp_path / "source"
-    _write_source(source / "region.parquet")
+    language_run_setup.write_snapshot_source(source / "region.parquet")
 
     with pytest.raises(
         SnapshotError, match=exactly("run output must be outside the immutable source directory")
     ):
-        _prepare(source, source / "run")
+        language_run_setup.prepare_snapshot(source, source / "run")
 
 
-def test_snapshot_rejects_a_run_directory_containing_the_source(tmp_path: Path) -> None:
+def test_snapshot_rejects_a_run_directory_containing_the_source(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
     parent = tmp_path / "parent"
     source = parent / "source"
-    _write_source(source / "region.parquet")
+    language_run_setup.write_snapshot_source(source / "region.parquet")
 
     with pytest.raises(
         SnapshotError, match=exactly("run output must not contain the immutable source directory")
     ):
-        _prepare(source, parent)
+        language_run_setup.prepare_snapshot(source, parent)
 
 
-def test_snapshot_rejects_symlinked_sources(tmp_path: Path) -> None:
+def test_snapshot_rejects_symlinked_sources(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
     real_source = tmp_path / "real"
-    _write_source(real_source / "region.parquet")
+    language_run_setup.write_snapshot_source(real_source / "region.parquet")
 
     linked = tmp_path / "linked"
     linked.mkdir()
     linked.joinpath("region.parquet").symlink_to(real_source / "region.parquet")
     with pytest.raises(SnapshotError, match="symlink"):
-        _prepare(linked, tmp_path / "linked-run")
+        language_run_setup.prepare_snapshot(linked, tmp_path / "linked-run")
 
     linked_root = tmp_path / "linked-root"
     linked_root.symlink_to(real_source)
     with pytest.raises(SnapshotError, match="must not be a symlink"):
-        _prepare(linked_root, tmp_path / "root-run")
+        language_run_setup.prepare_snapshot(linked_root, tmp_path / "root-run")
 
 
-def test_snapshot_rejects_an_unusable_run_directory(tmp_path: Path) -> None:
+def test_snapshot_rejects_an_unusable_run_directory(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
     source = tmp_path / "source"
-    _write_source(source / "region.parquet")
+    language_run_setup.write_snapshot_source(source / "region.parquet")
 
     occupied = tmp_path / "occupied"
     occupied.mkdir()
@@ -212,22 +213,24 @@ def test_snapshot_rejects_an_unusable_run_directory(tmp_path: Path) -> None:
     with pytest.raises(
         SnapshotError, match=exactly("cannot initialize snapshot in a non-empty run directory")
     ):
-        _prepare(source, occupied)
+        language_run_setup.prepare_snapshot(source, occupied)
 
     as_file = tmp_path / "as-file"
     as_file.write_text("not a directory", encoding="utf-8")
     with pytest.raises(SnapshotError, match="not a regular directory"):
-        _prepare(source, as_file)
+        language_run_setup.prepare_snapshot(source, as_file)
 
     linked_run = tmp_path / "linked-run"
     linked_run.symlink_to(occupied)
     with pytest.raises(SnapshotError, match="not a regular directory"):
-        _prepare(source, linked_run)
+        language_run_setup.prepare_snapshot(source, linked_run)
 
 
-def test_snapshot_rejects_invalid_fingerprint_arguments(tmp_path: Path) -> None:
+def test_snapshot_rejects_invalid_fingerprint_arguments(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
     source = tmp_path / "source"
-    _write_source(source / "region.parquet")
+    language_run_setup.write_snapshot_source(source / "region.parquet")
 
     with pytest.raises(SnapshotError, match="code fingerprint"):
         prepare_snapshot(
@@ -239,9 +242,11 @@ def test_snapshot_rejects_invalid_fingerprint_arguments(tmp_path: Path) -> None:
         )
 
 
-def test_snapshot_rejects_a_non_identity_model_argument(tmp_path: Path) -> None:
+def test_snapshot_rejects_a_non_identity_model_argument(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
     source = tmp_path / "source"
-    _write_source(source / "region.parquet")
+    language_run_setup.write_snapshot_source(source / "region.parquet")
 
     with pytest.raises(TypeError, match=exactly("model_identity must be a LanguageModelIdentity")):
         prepare_snapshot(
@@ -253,9 +258,11 @@ def test_snapshot_rejects_a_non_identity_model_argument(tmp_path: Path) -> None:
         )
 
 
-def test_snapshot_defaults_to_the_configured_policy_identity(tmp_path: Path) -> None:
+def test_snapshot_defaults_to_the_configured_policy_identity(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
     source = tmp_path / "source"
-    _write_source(source / "region.parquet")
+    language_run_setup.write_snapshot_source(source / "region.parquet")
 
     snapshot = prepare_snapshot(
         source,
@@ -283,8 +290,10 @@ def test_reading_a_snapshot_rejects_unreadable_and_non_object_documents(tmp_path
         read_snapshot(run)
 
 
-def test_read_snapshot_rejects_a_valid_symlinked_manifest(tmp_path: Path) -> None:
-    _, run, _ = _prepared(tmp_path)
+def test_read_snapshot_rejects_a_valid_symlinked_manifest(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    _, run, _ = language_run_setup.prepared_snapshot(tmp_path)
     path = run / "snapshot.json"
     target = tmp_path / "external-snapshot.json"
     target.write_bytes(path.read_bytes())
@@ -295,8 +304,10 @@ def test_read_snapshot_rejects_a_valid_symlinked_manifest(tmp_path: Path) -> Non
         read_snapshot(run)
 
 
-def test_prepare_snapshot_rejects_a_valid_symlinked_manifest(tmp_path: Path) -> None:
-    source, run, _ = _prepared(tmp_path)
+def test_prepare_snapshot_rejects_a_valid_symlinked_manifest(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, run, _ = language_run_setup.prepared_snapshot(tmp_path)
     path = run / "snapshot.json"
     target = tmp_path / "external-snapshot.json"
     target.write_bytes(path.read_bytes())
@@ -304,16 +315,18 @@ def test_prepare_snapshot_rejects_a_valid_symlinked_manifest(tmp_path: Path) -> 
     path.symlink_to(target)
 
     with pytest.raises(SnapshotError, match="snapshot must not be a symlink"):
-        _prepare(source, run)
+        language_run_setup.prepare_snapshot(source, run)
 
 
 def test_concurrent_snapshot_preparation_cannot_replace_the_manifest(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    language_run_setup: LanguageRunSetup,
 ) -> None:
     first_source = tmp_path / "first-source"
     second_source = tmp_path / "second-source"
-    _write_source(first_source / "region.parquet", text="first")
-    _write_source(second_source / "region.parquet", text="second")
+    language_run_setup.write_snapshot_source(first_source / "region.parquet", text="first")
+    language_run_setup.write_snapshot_source(second_source / "region.parquet", text="second")
     run = tmp_path / "run"
     write_started = threading.Event()
     release_write = threading.Event()
@@ -331,9 +344,9 @@ def test_concurrent_snapshot_preparation_cannot_replace_the_manifest(
 
     monkeypatch.setattr(snapshot_module, "atomic_write_bytes", delayed_write)
     with ThreadPoolExecutor(max_workers=2) as workers:
-        first = workers.submit(_prepare, first_source, run)
+        first = workers.submit(language_run_setup.prepare_snapshot, first_source, run)
         assert write_started.wait(timeout=5)
-        second = workers.submit(_prepare, second_source, run)
+        second = workers.submit(language_run_setup.prepare_snapshot, second_source, run)
         try:
             with pytest.raises(WorkerBusyError, match="already locked"):
                 second.result(timeout=5)
@@ -356,17 +369,23 @@ def test_concurrent_snapshot_preparation_cannot_replace_the_manifest(
     ],
 )
 def test_snapshot_payload_rejects_wrongly_typed_fields(
-    tmp_path: Path, key: str, value: object, message: str
+    tmp_path: Path,
+    key: str,
+    value: object,
+    message: str,
+    language_run_setup: LanguageRunSetup,
 ) -> None:
-    _, run, _ = _prepared(tmp_path)
+    _, run, _ = language_run_setup.prepared_snapshot(tmp_path)
     _rewrite(run, lambda payload: payload.__setitem__(key, value))
 
     with pytest.raises(SnapshotError, match=message):
         read_snapshot(run)
 
 
-def test_snapshot_payload_rejects_missing_fields(tmp_path: Path) -> None:
-    _, run, _ = _prepared(tmp_path)
+def test_snapshot_payload_rejects_missing_fields(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    _, run, _ = language_run_setup.prepared_snapshot(tmp_path)
     _rewrite(run, lambda payload: payload.pop("lock_fingerprint"))
 
     with pytest.raises(SnapshotError, match="missing lock_fingerprint"):
@@ -383,25 +402,33 @@ def test_snapshot_payload_rejects_missing_fields(tmp_path: Path) -> None:
     ],
 )
 def test_source_file_payload_rejects_coercible_but_wrong_types(
-    tmp_path: Path, key: str, value: object, message: str
+    tmp_path: Path,
+    key: str,
+    value: object,
+    message: str,
+    language_run_setup: LanguageRunSetup,
 ) -> None:
-    _, run, _ = _prepared(tmp_path)
+    _, run, _ = language_run_setup.prepared_snapshot(tmp_path)
     _rewrite(run, lambda payload: payload["source_files"][0].__setitem__(key, value))
 
     with pytest.raises(SnapshotError, match=message):
         read_snapshot(run)
 
 
-def test_source_file_payload_rejects_non_object_entries(tmp_path: Path) -> None:
-    _, run, _ = _prepared(tmp_path)
+def test_source_file_payload_rejects_non_object_entries(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    _, run, _ = language_run_setup.prepared_snapshot(tmp_path)
     _rewrite(run, lambda payload: payload.__setitem__("source_files", ["region.parquet"]))
 
     with pytest.raises(SnapshotError, match="source file payload must be an object"):
         read_snapshot(run)
 
 
-def test_snapshot_payload_rejects_a_tampered_identity(tmp_path: Path) -> None:
-    _, run, _ = _prepared(tmp_path)
+def test_snapshot_payload_rejects_a_tampered_identity(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    _, run, _ = language_run_setup.prepared_snapshot(tmp_path)
     _rewrite(run, lambda payload: payload["source_files"][0].__setitem__("row_count", 99))
 
     with pytest.raises(
@@ -419,24 +446,30 @@ def test_snapshot_payload_rejects_a_tampered_identity(tmp_path: Path) -> None:
     ],
 )
 def test_model_identity_payload_rejects_unverifiable_claims(
-    tmp_path: Path, key: str, value: object, message: str
+    tmp_path: Path,
+    key: str,
+    value: object,
+    message: str,
+    language_run_setup: LanguageRunSetup,
 ) -> None:
-    _, run, _ = _prepared(tmp_path)
+    _, run, _ = language_run_setup.prepared_snapshot(tmp_path)
     _rewrite(run, lambda payload: payload["model_identity"].__setitem__(key, value))
 
     with pytest.raises(SnapshotError, match=message):
         read_snapshot(run)
 
 
-def test_model_identity_payload_rejects_malformed_policies_and_scopes(tmp_path: Path) -> None:
-    _, run, _ = _prepared(tmp_path)
+def test_model_identity_payload_rejects_malformed_policies_and_scopes(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    _, run, _ = language_run_setup.prepared_snapshot(tmp_path)
     _rewrite(
         run, lambda payload: payload["model_identity"]["policy"].__setitem__("tie_epsilon", 5.0)
     )
     with pytest.raises(SnapshotError, match="invalid snapshot policy"):
         read_snapshot(run)
 
-    _, second_run, _ = _prepared(tmp_path / "second")
+    _, second_run, _ = language_run_setup.prepared_snapshot(tmp_path / "second")
     _rewrite(
         second_run,
         lambda payload: payload["model_identity"].__setitem__("language_scope", [7]),
@@ -497,8 +530,10 @@ def test_source_file_snapshot_validates_its_fields(kwargs: dict[str, object], me
         SourceFileSnapshot(**{**defaults, **kwargs})  # type: ignore[arg-type]
 
 
-def test_source_lookup_rejects_unknown_and_unsafe_paths(tmp_path: Path) -> None:
-    source, _, snapshot = _prepared(tmp_path)
+def test_source_lookup_rejects_unknown_and_unsafe_paths(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, _, snapshot = language_run_setup.prepared_snapshot(tmp_path)
 
     with pytest.raises(SnapshotError, match="not in snapshot"):
         snapshot.source_file("missing.parquet")
@@ -510,16 +545,20 @@ def test_source_lookup_rejects_unknown_and_unsafe_paths(tmp_path: Path) -> None:
         snapshot.source_file(7)  # type: ignore[arg-type]
 
 
-def test_source_path_for_reports_a_removed_file(tmp_path: Path) -> None:
-    source, _, snapshot = _prepared(tmp_path)
+def test_source_path_for_reports_a_removed_file(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, _, snapshot = language_run_setup.prepared_snapshot(tmp_path)
     (source / "region.parquet").unlink()
 
     with pytest.raises(SnapshotError, match="source file is missing"):
         source_path_for(snapshot, source, "region.parquet")
 
 
-def test_source_path_for_rejects_a_replaced_symlink(tmp_path: Path) -> None:
-    source, _, snapshot = _prepared(tmp_path)
+def test_source_path_for_rejects_a_replaced_symlink(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
+    source, _, snapshot = language_run_setup.prepared_snapshot(tmp_path)
     outside = tmp_path / "outside.parquet"
     (source / "region.parquet").rename(outside)
     (source / "region.parquet").symlink_to(outside)
@@ -541,11 +580,13 @@ def test_inspect_source_file_rejects_unreadable_parquet(tmp_path: Path) -> None:
         inspect_source_file(source, source / "missing.parquet")
 
 
-def test_inspect_source_file_rejects_a_path_outside_the_root(tmp_path: Path) -> None:
+def test_inspect_source_file_rejects_a_path_outside_the_root(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
     source = tmp_path / "source"
     source.mkdir()
     other = tmp_path / "other"
-    _write_source(other / "region.parquet")
+    language_run_setup.write_snapshot_source(other / "region.parquet")
 
     with pytest.raises(SnapshotError, match="escapes source directory"):
         inspect_source_file(source, other / "region.parquet")
@@ -638,7 +679,9 @@ def test_project_source_fingerprint_ignores_import_caches_but_includes_package_d
     assert fingerprint_project_source(project) != with_data
 
 
-def test_project_identity_verification_rejects_code_or_lock_drift(tmp_path: Path) -> None:
+def test_project_identity_verification_rejects_code_or_lock_drift(
+    tmp_path: Path, language_run_setup: LanguageRunSetup
+) -> None:
     project = tmp_path / "project"
     source_code = project / "src" / "example.py"
     source_code.parent.mkdir(parents=True)
@@ -646,7 +689,7 @@ def test_project_identity_verification_rejects_code_or_lock_drift(tmp_path: Path
     lock = project / "uv.lock"
     lock.write_text("lock = 1\n", encoding="utf-8")
     source = tmp_path / "dataset" / "source"
-    _write_source(source / "region.parquet")
+    language_run_setup.write_snapshot_source(source / "region.parquet")
     run = tmp_path / "dataset" / "run"
     snapshot = prepare_snapshot(
         source,
