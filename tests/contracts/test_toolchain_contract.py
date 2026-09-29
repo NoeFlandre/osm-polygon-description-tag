@@ -93,11 +93,23 @@ def test_github_actions_runs_complete_quality_gate() -> None:
         "ruff format --check .",
         "ruff check .",
         "ty check",
-        "--cov-fail-under=90",
         "uv build",
         'HF_HUB_OFFLINE: "1"',
     ):
         assert token in workflow
+
+
+def test_the_coverage_threshold_is_defined_once_in_pyproject() -> None:
+    import tomllib
+
+    config = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    files = [
+        PROJECT_ROOT / "justfile",
+        *sorted((PROJECT_ROOT / ".github" / "workflows").glob("*.yml")),
+    ]
+
+    assert config["tool"]["coverage"]["report"]["fail_under"] >= 90
+    assert [f.name for f in files if "--cov-fail-under" in f.read_text(encoding="utf-8")] == []
 
 
 def test_public_docs_name_no_author_machine_paths() -> None:

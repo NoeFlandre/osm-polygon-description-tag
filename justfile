@@ -4,7 +4,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 repo_id := "NoeFlandre/osm-polygon-description-tag"
 
 # Coverage flags shared by `test` and `risk`, so the two gates cannot drift.
-coverage_flags := "--cov=osm_polygon_description_tag --cov=scripts --cov-branch --cov-fail-under=90"
+coverage_flags := "--cov=osm_polygon_description_tag --cov=scripts --cov-branch"
 
 sync:
     uv sync --frozen
