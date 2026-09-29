@@ -31,3 +31,16 @@ def test_no_test_file_exceeds_the_size_limit() -> None:
     }
 
     assert {name: size for name, size in sizes.items() if size > MAX_LINES} == {}
+
+
+def test_temporary_directories_come_from_pytest_not_mkdtemp() -> None:
+    """``mkdtemp`` leaks a directory per run and ignores pytest's cleanup."""
+    calls = [
+        path.relative_to(TESTS).as_posix()
+        for path in _test_files()
+        if path != Path(__file__).resolve()
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Attribute) and node.attr == "mkdtemp"
+    ]
+
+    assert calls == []
