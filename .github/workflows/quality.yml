@@ -51,7 +51,7 @@ jobs:
         run: uv run pre-commit run --all-files
 
       - name: Audit locked dependencies for known CVEs
-        run: uv export --frozen --no-hashes --no-emit-project | uvx pip-audit --strict --disable-pip -r /dev/stdin
+        run: uv export --frozen --no-hashes --no-emit-project | uvx pip-audit --strict --no-deps --disable-pip -r /dev/stdin
 
       - name: Check formatting
         run: uv run ruff format --check .
