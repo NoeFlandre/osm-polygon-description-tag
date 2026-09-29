@@ -82,8 +82,20 @@ just docker-help
 just docker-run /path/to/data-root   # PBFs are read from /path/to/data-root/raw
 ```
 
-The data root keeps checkpoints, so rerunning resumes safely. `HF_TOKEN` is
-passed only at runtime and never copied into the image. See the
+Without `just`, use Compose (`DATA_ROOT` is the host data root, PBFs go in its
+`raw/` directory):
+
+```bash
+DATA_ROOT=/path/to/data-root UID="$(id -u)" GID="$(id -g)" \
+  docker compose run --rm pipeline run-and-publish \
+  --confirm-repo NoeFlandre/osm-polygon-description-tag
+```
+
+The image presets `OSM_POLYGON_SOURCE_ROOT=/data/raw` and
+`OSM_POLYGON_DATA_ROOT=/data`, so no root options are needed inside the
+container. The data root keeps checkpoints, so rerunning resumes safely.
+`HF_TOKEN` is passed only at runtime (from the environment or an optional
+git-ignored `.env`) and never copied into the image. See the
 [Docker guide](docs/development.md#docker-reproducibility).
 
 ## Documentation

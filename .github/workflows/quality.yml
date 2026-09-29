@@ -145,6 +145,18 @@ jobs:
       - name: Verify the bundled osmium binary
         run: docker run --rm --entrypoint osmium osm-polygon-description-tag:ci --version
 
+      - name: Verify the image runs as a non-root user with the roots preset
+        run: |
+          test "$(docker run --rm --entrypoint id osm-polygon-description-tag:ci -u)" != "0"
+          docker run --rm --entrypoint printenv osm-polygon-description-tag:ci \
+            OSM_POLYGON_SOURCE_ROOT OSM_POLYGON_DATA_ROOT
+
+      - name: Validate the compose file and run through it
+        run: |
+          docker compose config --quiet
+          mkdir -p data-root/raw
+          docker compose run --rm --build pipeline --help
+
   risk:
     # The CRAP budget is a single whole-repository measurement, so it runs once
     # rather than once per mutation shard.

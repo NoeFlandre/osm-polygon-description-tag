@@ -57,12 +57,21 @@ CMD ["uv", "run", "pytest", "-q"]
 
 FROM base AS runtime
 
+LABEL org.opencontainers.image.title="osm-polygon-description-tag" \
+      org.opencontainers.image.description="Pipeline for the OSM polygons-with-descriptions dataset" \
+      org.opencontainers.image.source="https://github.com/NoeFlandre/osm-polygon-description-tag" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
 WORKDIR /app
 RUN groupadd --system app && useradd --system --gid app --create-home app
 COPY --from=build --chown=app:app /app/.venv /app/.venv
 
+# The roots every command defaults to inside the container: PBFs are read from
+# /data/raw (mount it read-only) and everything generated goes under /data.
 ENV PATH=/app/.venv/bin:$PATH \
-    HOME=/tmp
+    HOME=/tmp \
+    OSM_POLYGON_SOURCE_ROOT=/data/raw \
+    OSM_POLYGON_DATA_ROOT=/data
 
 # The host-mounted data root contains raw PBFs, resumable state, logs, and
 # generated artifacts. Nothing from those roots is copied into the image.
