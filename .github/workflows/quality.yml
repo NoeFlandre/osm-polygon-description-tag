@@ -50,6 +50,9 @@ jobs:
       - name: Run pre-commit
         run: uv run pre-commit run --all-files
 
+      - name: Audit locked dependencies for known CVEs
+        run: uv export --frozen --no-hashes --no-emit-project | uvx pip-audit --strict --disable-pip -r /dev/stdin
+
       - name: Check formatting
         run: uv run ruff format --check .
 
@@ -138,6 +141,14 @@ jobs:
 
       - name: Build the non-root runtime image
         run: docker build --target runtime --tag osm-polygon-description-tag:ci .
+
+      - name: Scan the image for fixable HIGH/CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: osm-polygon-description-tag:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
 
       - name: Verify the harmless CLI default
         run: docker run --rm osm-polygon-description-tag:ci --help
