@@ -149,9 +149,12 @@ def test_run_and_publish_safe_upload_retry_after_interrupt(
 
     real_write = orchestrator._write_publication_state
 
+    crashed = False
+
     def flaky_write(*args, **kwargs):
-        if not hasattr(flaky_write, "called"):
-            flaky_write.called = True  # type: ignore[attr-defined]
+        nonlocal crashed
+        if not crashed:
+            crashed = True
             raise RuntimeError("simulated crash after remote commit")
         return real_write(*args, **kwargs)
 

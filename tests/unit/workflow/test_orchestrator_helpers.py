@@ -1428,7 +1428,6 @@ def test_default_upload_forwards_identity_timeout_and_retry_callback(
     assert kwargs["timeout"] == 12.5
     assert kwargs["runner"] is None
     retry_observer = kwargs["retry_observer"]
-    assert callable(retry_observer)
     retry_observer(attempt=2, reason="timeout")  # type: ignore[operator]
     assert logger.events == [("upload_retry", {"attempt": 2, "reason": "timeout"})]
     assert orchestrator._source_retry_observer(None) is None

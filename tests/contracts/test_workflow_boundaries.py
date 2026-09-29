@@ -13,6 +13,5 @@ def test_orchestrator_delegates_per_source_state_machine() -> None:
 
 def test_finalization_has_a_dedicated_workflow_module() -> None:
     """Dataset finalization lives outside the run-level orchestrator."""
-    assert callable(finalization.refresh_dataset_docs)
-    assert callable(finalization.verify_final_completeness)
-    assert callable(finalization.upload_final_metadata)
+    for name in ("refresh_dataset_docs", "verify_final_completeness", "upload_final_metadata"):
+        assert getattr(finalization, name).__module__ == finalization.__name__

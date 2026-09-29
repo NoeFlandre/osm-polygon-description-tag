@@ -20,7 +20,6 @@ from osm_polygon_description_tag.publication import (
     execute_upload,
     planning,
 )
-from osm_polygon_description_tag.publication.models import UploadItem
 from osm_polygon_description_tag.publication.planning import (
     _build_item,
     _collect_data_items,
@@ -125,17 +124,16 @@ def test_create_upload_plan_is_deterministic(tmp_path: Path) -> None:
     assert plan_a.to_json() == plan_b.to_json()
 
 
-def test_finalize_upload_plan_hashes_canonical_payload() -> None:
-    finalize = getattr(planning, "_finalize_upload_plan", None)
-    assert callable(finalize)
+def test_upload_plan_identity_hashes_the_canonical_payload(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    _make_dataset(data_root)
 
-    items = (UploadItem(relative_path="README.md", size_bytes=1, sha256="a" * 64),)
-    plan = finalize(Path("generated"), items)
+    plan = create_upload_plan(data_root)
     provisional = replace(plan, identity_sha256="")
 
     assert plan.repo_id == "NoeFlandre/osm-polygon-description-tag"
-    assert plan.data_root == str(Path("generated").resolve(strict=False))
-    assert plan.files == items
+    assert plan.data_root == str(data_root.resolve(strict=False))
+    assert plan.files
     assert plan.identity_sha256 == file_sha256_bytes(provisional.to_json().encode("utf-8"))
 
 

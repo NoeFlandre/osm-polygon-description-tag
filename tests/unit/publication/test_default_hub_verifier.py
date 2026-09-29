@@ -234,7 +234,6 @@ def test_default_hub_verifier_factory_creates_hfapi(monkeypatch: pytest.MonkeyPa
     )
 
     factory = default_hub_verifier_factory()
-    assert callable(factory)
     # The verifier invokes the real HfApi lazily.
     items = (
         UploadItem(
