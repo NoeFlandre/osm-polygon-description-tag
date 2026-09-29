@@ -41,9 +41,9 @@ bench-compare name="base":
 test-integration:
     uv run pytest tests/integration -q
 
-# Hermetic user-journey tests: no network, no osmium.
+# Public user workflows use real local tools; network and Hub access stay hermetic.
 test-acceptance:
-    uv run pytest tests/acceptance -q
+    uv run pytest tests/acceptance -m acceptance -q
 
 # The suite is the expensive part and `quality` already runs it with coverage,
 # so re-running it here only produced the same numbers a second time.
