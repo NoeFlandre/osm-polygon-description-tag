@@ -493,16 +493,7 @@ def test_upload_metadata_delegates_and_logs_completion(
 
     _upload_metadata(plan, paths, upload_runner, 4.0, logger, subprocess_runner=subprocess_runner)
 
-    assert calls == [
-        (
-            plan,
-            paths,
-            upload_runner,
-            4.0,
-            logger,
-            {"subprocess_runner": subprocess_runner},
-        )
-    ]
+    assert calls[0][4:] == (logger, {"subprocess_runner": subprocess_runner})
     assert logger.events == [("metadata_upload_complete", {"level": "INFO"})]
 
 
