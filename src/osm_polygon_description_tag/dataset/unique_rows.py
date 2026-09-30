@@ -18,6 +18,9 @@ from osm_polygon_description_tag.dataset.canonical_rows import (
     canonical_rows_with_text_flag_sql,
 )
 from osm_polygon_description_tag.dataset.constants import DEFAULT_ARROW_BATCH_SIZE
+from osm_polygon_description_tag.dataset.duckdb_runtime import (
+    open_data_connection as _open_unique_rows_connection,
+)
 from osm_polygon_description_tag.dataset.text import sql_literal
 
 _BATCH_SIZE = DEFAULT_ARROW_BATCH_SIZE
@@ -152,14 +155,6 @@ def _unique_rows_query(
     if require_successful_text:
         options["require_successful_text"] = True
     return unique_rows_sql(f"({_parquet_relation(paths, columns)})", columns, **options)
-
-
-def _open_unique_rows_connection(data_root: Path) -> duckdb.DuckDBPyConnection:
-    work_root = data_root / ".work" / "duckdb"
-    work_root.mkdir(parents=True, exist_ok=True)
-    connection = duckdb.connect(":memory:")
-    connection.execute("SET temp_directory = ?", [str(work_root)])
-    return connection
 
 
 def _read_unique_rows(

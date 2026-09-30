@@ -580,7 +580,7 @@ def test_quality_recipes_and_required_mutation_gate_are_publicly_wired() -> None
     # Gate logic in scripts/ is measured like the package (#77).
     assert "--cov=osm_polygon_description_tag --cov=scripts" in justfile
     assert justfile.count("radon cc src/osm_polygon_description_tag scripts") == 2
-    assert justfile.count("--allowlist scripts/crap-allowlist.json") == 2
+    assert "--allowlist" not in justfile
     assert "--cov=scripts" in workflow
     assert "planning.x*__mutmut_*" not in justfile
     assert "all source modules" in justfile

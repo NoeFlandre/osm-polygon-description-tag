@@ -21,6 +21,9 @@ from osm_polygon_description_tag.dataset.geography.area_histogram import (
 from osm_polygon_description_tag.dataset.geography.atomic import (
     atomic_save_png as _atomic_save_png,
 )
+from osm_polygon_description_tag.dataset.geography.labels import (
+    format_count_tick as _format_count_tick,
+)
 from osm_polygon_description_tag.dataset.geography.mpl import pyplot
 
 # Shared palette with the H3 density map so the dataset card feels like
@@ -61,18 +64,6 @@ class AreaHistogramResult:
 
     output_path: Path
     caption: str
-
-
-def _format_count_tick(value: float, _position: int | None = None) -> str:
-    """Format a histogram count tick as a human-readable integer label."""
-    count = round(value)
-    if count < 1_000:
-        return str(count)
-    if count < 1_000_000:
-        thousands = count / 1_000.0
-        return f"{thousands:.0f}k" if thousands.is_integer() else f"{thousands:.1f}k"
-    millions = count / 1_000_000.0
-    return f"{millions:.1f}M"
 
 
 def _build_caption(counts: Mapping[str, int]) -> str:

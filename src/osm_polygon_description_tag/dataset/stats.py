@@ -31,6 +31,9 @@ from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 
 from osm_polygon_description_tag.dataset.canonical_rows import canonical_geometry_wkb_sql
+from osm_polygon_description_tag.dataset.duckdb_runtime import (
+    open_data_connection as _new_connection,
+)
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     ManifestError,
@@ -39,6 +42,7 @@ from osm_polygon_description_tag.dataset.manifest import (
     output_identity_for,
     read_manifest,
 )
+from osm_polygon_description_tag.dataset.numeric import coerce_float_values as _coerce_float_values
 from osm_polygon_description_tag.dataset.schema import SCHEMA, SCHEMA_VERSION
 from osm_polygon_description_tag.dataset.storage import validate_geoparquet
 from osm_polygon_description_tag.dataset.text import successful_description_text_sql
@@ -75,14 +79,6 @@ _SPATIAL_COLUMNS = [
 
 class ReportingError(ValueError):
     """Raised when artifacts/manifests are missing, stale, or inconsistent."""
-
-
-def _new_connection(data_root: Path) -> duckdb.DuckDBPyConnection:
-    work_root = data_root / ".work" / "duckdb"
-    work_root.mkdir(parents=True, exist_ok=True)
-    connection = duckdb.connect(":memory:")
-    connection.execute("SET temp_directory = ?", [str(work_root)])
-    return connection
 
 
 def _quantile_or_none(
@@ -580,14 +576,6 @@ def _validated_bbox(
     if coordinates is None:
         raise ReportingError(f"invalid bounding box in {source_name} at row {row_index}")
     return coordinates[0], coordinates[1], coordinates[2], coordinates[3]
-
-
-def _coerce_float_values(values: tuple[object, ...]) -> tuple[float, ...] | None:
-    """Convert object values to floats, returning ``None`` on conversion errors."""
-    try:
-        return tuple(float(cast(Any, value)) for value in values)  # pragma: no mutate
-    except (TypeError, ValueError):
-        return None
 
 
 def _coerce_bbox_values(values: tuple[object, ...]) -> tuple[float, ...] | None:

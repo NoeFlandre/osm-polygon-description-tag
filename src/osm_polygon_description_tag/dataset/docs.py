@@ -8,9 +8,9 @@ import math
 import os
 import re
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from osm_polygon_description_tag.dataset.canonical_rows import (
     CANONICAL_ROW_POLICY_SHA256,
@@ -38,6 +38,7 @@ from osm_polygon_description_tag.dataset.geography.card import (
 )
 from osm_polygon_description_tag.dataset.geography.rendering import render_density_map
 from osm_polygon_description_tag.dataset.manifest import file_sha256
+from osm_polygon_description_tag.dataset.numeric import coerce_float_values as _coerce_float_values
 from osm_polygon_description_tag.dataset.stats import (
     TEXT_REJECTION_REASONS,
     ReportingError,
@@ -150,14 +151,6 @@ def _fmt_area(value: float | None) -> str:
     if abs(value) >= 1:
         return f"{value:,.1f} m²"
     return f"{value:.3g} m²"
-
-
-def _coerce_float_values(values: Sequence[object]) -> tuple[float, ...] | None:
-    """Convert object values to floats, returning ``None`` on conversion errors."""
-    try:
-        return tuple(float(cast(Any, value)) for value in values)  # pragma: no mutate
-    except (TypeError, ValueError):
-        return None
 
 
 def _coerce_bbox_coordinates(value: object) -> tuple[float, float, float, float] | None:

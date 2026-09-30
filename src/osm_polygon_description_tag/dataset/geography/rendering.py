@@ -32,6 +32,9 @@ from osm_polygon_description_tag.dataset.geography.card import (
 from osm_polygon_description_tag.dataset.geography.h3_policy import (
     cell_rings,
 )
+from osm_polygon_description_tag.dataset.geography.labels import (
+    format_count_tick as _format_count_tick,
+)
 from osm_polygon_description_tag.dataset.geography.mpl import pyplot
 
 if TYPE_CHECKING:
@@ -93,18 +96,6 @@ def _init_axes(ax: Any) -> None:
     ax.grid(True, color=_GRID_COLOR, linewidth=0.3, alpha=0.4)
     ax.tick_params(colors="#666666", labelsize=_TICK_LABELSIZE)
     ax.set_aspect("equal", adjustable="box")
-
-
-def _format_count_tick(value: float, _position: int | None = None) -> str:
-    """Format a polygon-count colorbar value as a human-readable integer label."""
-    count = round(value)
-    if count < 1_000:
-        return str(count)
-    if count < 1_000_000:
-        thousands = count / 1_000.0
-        return f"{thousands:.0f}k" if thousands.is_integer() else f"{thousands:.1f}k"
-    millions = count / 1_000_000.0
-    return f"{millions:.1f}M"
 
 
 def _build_caption(
