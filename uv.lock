@@ -1646,6 +1646,7 @@ language = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "coverage" },
     { name = "fasttext-numpy2", marker = "sys_platform == 'linux'" },
     { name = "hypothesis" },
     { name = "lingua-language-detector" },
@@ -1685,6 +1686,7 @@ provides-extras = ["language"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "coverage", specifier = ">=7.10,<8" },
     { name = "fasttext-numpy2", marker = "sys_platform == 'linux'", specifier = "==0.10.2" },
     { name = "hypothesis", specifier = ">=6.100,<7" },
     { name = "lingua-language-detector", specifier = "==2.2.0" },
