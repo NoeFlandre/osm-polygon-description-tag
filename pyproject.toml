@@ -79,6 +79,7 @@ dev = [
     "hypothesis>=6.100,<7",
     "pytest>=9.0.3,<10",
     "pytest-benchmark>=5.3,<6",
+    "coverage>=7.10,<8",
     "pytest-cov>=6.2,<8",
     "pytest-xdist>=3.6,<4",
     "radon>=6,<7",
@@ -159,6 +160,9 @@ error-on-warning = true
 [tool.coverage.run]
 branch = true
 source = ["osm_polygon_description_tag", "scripts"]
+# pytest-cov 7 no longer measures subprocesses on its own; the contract tests
+# run the gate scripts in child processes.
+patch = ["subprocess"]
 
 [tool.coverage.report]
 fail_under = 90
