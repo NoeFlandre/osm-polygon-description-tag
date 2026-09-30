@@ -219,6 +219,7 @@ def test_publish_source_uploads_stale_state_and_persists_verified_identity(
     paths, source = _workspace(tmp_path)
     logger = _Logger()
     outcome = SourceOutcome(source.name, STATUS_PUBLISHED)
+    subprocess_runner = object()
     captured: dict[str, object] = {}
     manifest = _manifest()
 
@@ -272,6 +273,7 @@ def test_publish_source_uploads_stale_state_and_persists_verified_identity(
         logger=logger,
         source_index=2,
         source_total=3,
+        subprocess_runner=subprocess_runner,
     )
 
     assert returned is outcome
@@ -296,6 +298,7 @@ def test_publish_source_uploads_stale_state_and_persists_verified_identity(
     assert execute_args[1]["timeout"] == 12.0
     assert execute_args[1]["upload_runner"] is upload_runner
     assert execute_args[1]["logger"] is logger
+    assert execute_args[1]["subprocess_runner"] is subprocess_runner
     assert captured["plan_args"] == [(paths.data_root, source.name)] * 1
     assert captured["source_path"] == source.path
     assert captured["output_path"] == paths.data_root / "data" / "region.parquet"
@@ -449,6 +452,8 @@ def test_run_and_publish_executes_stages_in_order_and_finishes_tracker(  # noqa:
     def upload_runner(_command: list[str]) -> str:
         return "unused"
 
+    subprocess_runner = object()
+
     def verifier(_repo_id: str, _files: Any) -> str:
         return "unused"
 
@@ -530,6 +535,7 @@ def test_run_and_publish_executes_stages_in_order_and_finishes_tracker(  # noqa:
         logger=logger,
         tracker=tracker,
         osmium_executable="osmium",
+        subprocess_runner=subprocess_runner,
     )
 
     assert returned is report
@@ -598,7 +604,7 @@ def test_run_and_publish_executes_stages_in_order_and_finishes_tracker(  # noqa:
             "clock": clock,
             "logger": logger,
             "tracker": tracker,
-            "subprocess_runner": None,
+            "subprocess_runner": subprocess_runner,
         },
     )
     assert captured["reconcile_remote"] == ((paths, verifier, logger), {})
@@ -610,7 +616,7 @@ def test_run_and_publish_executes_stages_in_order_and_finishes_tracker(  # noqa:
             "upload_timeout": 5.0,
             "clock": clock,
             "logger": logger,
-            "subprocess_runner": None,
+            "subprocess_runner": subprocess_runner,
         },
     )
     assert logger.events == [

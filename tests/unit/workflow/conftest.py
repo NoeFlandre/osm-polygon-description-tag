@@ -5,6 +5,7 @@ layouts used by the Grid contract tests. Keeping the shape in one place means
 schema or bundle changes fail every dependent test together.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,7 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
     prepare_snapshot,
 )
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
-from osm_polygon_description_tag.workflow.grid_operator import prepare_job
+from osm_polygon_description_tag.workflow.grid_operator import JobBundle, prepare_job
 from tests.conftest import make_record_dict
 from tests.helpers.project import write_project as _write_project
 
@@ -29,6 +30,30 @@ REMOTE = {
     "sat_model_path": "/home/user/models/sat-3l-sm/model.safetensors",
 }
 REMOTE_BUNDLE = "/scratch/lang-bundle"
+
+
+def make_job_bundle(
+    shard: str = SHARD,
+    *,
+    source_size_bytes: int = 16,
+    input_row_count: int = 8,
+) -> JobBundle:
+    """Build the canonical synthetic bundle shared by local Grid tests."""
+    return JobBundle(
+        snapshot_id="a" * 64,
+        model_config_fingerprint="b" * 64,
+        code_fingerprint="c" * 64,
+        lock_fingerprint="d" * 64,
+        shard=shard,
+        source_sha256="e" * 64,
+        source_size_bytes=source_size_bytes,
+        input_row_count=input_row_count,
+    )
+
+
+@pytest.fixture
+def job_bundle_factory() -> Callable[..., JobBundle]:
+    return make_job_bundle
 
 
 def _write_rows(source: Path, *, count: int, description: str, batch_size: int = 2) -> None:

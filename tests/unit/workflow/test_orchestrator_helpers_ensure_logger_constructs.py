@@ -320,6 +320,7 @@ def test_execute_publication_builds_validates_uploads_and_verifies_in_order(
     plan = object()
     verifier = object()
     logger = _Logger()
+    subprocess_runner = object()
     calls: list[tuple[str, object]] = []
 
     def build_plan(data_root: Path, source_name: str) -> object:
@@ -349,6 +350,7 @@ def test_execute_publication_builds_validates_uploads_and_verifies_in_order(
         timeout=9.0,
         upload_runner=None,
         logger=logger,
+        subprocess_runner=subprocess_runner,
     )
 
     assert result == "verified-revision"
@@ -363,7 +365,7 @@ def test_execute_publication_builds_validates_uploads_and_verifies_in_order(
                     "timeout": 9.0,
                     "upload_runner": None,
                     "logger": logger,
-                    "subprocess_runner": None,
+                    "subprocess_runner": subprocess_runner,
                 },
             ),
         ),
@@ -388,6 +390,7 @@ def test_orchestrator_compatibility_wrappers_forward_all_metadata_arguments(
 
     logger = _Logger()
     verifier = object()
+    subprocess_runner = object()
 
     def upload_runner(_command):
         return "revision"
@@ -425,6 +428,7 @@ def test_orchestrator_compatibility_wrappers_forward_all_metadata_arguments(
             upload_timeout=4.0,
             clock=clock,
             logger=logger,
+            subprocess_runner=subprocess_runner,
         )
         == "metadata-revision"
     )
@@ -435,7 +439,7 @@ def test_orchestrator_compatibility_wrappers_forward_all_metadata_arguments(
         upload_timeout=4.0,
         clock=clock,
         logger=logger,
-        subprocess_runner=None,
+        subprocess_runner=subprocess_runner,
     )
 
 
@@ -445,6 +449,7 @@ def test_upload_final_metadata_uses_default_clock_and_canonical_validator(
 ) -> None:
     paths, _source = _workspace(tmp_path)
     verifier = object()
+    subprocess_runner = object()
 
     def upload_runner(_command):
         return "revision"
@@ -470,6 +475,7 @@ def test_upload_final_metadata_uses_default_clock_and_canonical_validator(
             upload_timeout=3.0,
             clock=None,
             logger=logger,
+            subprocess_runner=subprocess_runner,
         )
         == "metadata-revision"
     )
@@ -482,7 +488,7 @@ def test_upload_final_metadata_uses_default_clock_and_canonical_validator(
             "clock": orchestrator._default_clock,
             "logger": logger,
             "plan_validator": orchestrator.create_upload_plan,
-            "subprocess_runner": None,
+            "subprocess_runner": subprocess_runner,
         },
     )
 
@@ -493,6 +499,7 @@ def test_upload_final_metadata_uses_default_clock_and_canonical_validator(
         upload_timeout=None,
         clock=explicit_clock,
         logger=None,
+        subprocess_runner=subprocess_runner,
     )
     assert calls[1][1]["clock"] is explicit_clock
     assert calls[1][1]["logger"] is None

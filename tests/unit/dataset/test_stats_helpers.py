@@ -183,6 +183,11 @@ def test_validated_bbox_rejects_wrong_length_non_numeric_and_nonfinite_values(
     with pytest.raises(stats_module.ReportingError, match="invalid bounding box"):
         stats_module._validated_bbox(values, source_name="region.parquet", row_index=4)
 
+    # Keep both coordinate pairs independent: duplicating y into x is invalid.
+    assert stats_module._validated_bbox(
+        (1.0, 2.0, 3.0, 4.0), source_name="region.parquet", row_index=4
+    ) == (1.0, 2.0, 3.0, 4.0)
+
 
 def test_summarize_spatial_batch_rejects_missing_geometry() -> None:
     batch = pa.record_batch(

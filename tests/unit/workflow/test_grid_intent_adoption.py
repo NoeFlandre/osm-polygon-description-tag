@@ -22,12 +22,13 @@ from osm_polygon_description_tag.workflow.grid_operator import (
     job_paths,
 )
 from tests.helpers.messages import exactly
+from tests.unit.workflow.conftest import make_job_bundle
 
 SHARD = "region.parquet"
 
 
 def _bundle(shard: str = SHARD) -> JobBundle:
-    return JobBundle("a" * 64, "b" * 64, "c" * 64, "d" * 64, shard, "e" * 64, 1024, 184)
+    return make_job_bundle(shard, source_size_bytes=1024, input_row_count=184)
 
 
 BUNDLE_ID = _bundle().bundle_id

@@ -1,19 +1,11 @@
 import subprocess
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from shapely.geometry import Polygon
 
-from osm_polygon_description_tag.dataset.manifest import (
-    Manifest,
-    RunCounts,
-    output_identity_for,
-    source_identity_for,
-    write_manifest,
-)
-from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import (
     PublicationError,
     create_upload_plan,
@@ -47,56 +39,14 @@ from osm_polygon_description_tag.publication.planning import (
     build_per_pbf_upload_plan,
     file_sha256_bytes,
 )
-from tests.conftest import make_record_dict
 from tests.helpers.messages import exactly
 
 
-def _make_dataset(data_root: Path) -> None:
-    (data_root / "data").mkdir(parents=True)
-    (data_root / "manifests").mkdir(parents=True)
-    (data_root / "README.md").write_text("# Card\n", encoding="utf-8")
-    (data_root / "stats.json").write_text("{}\n", encoding="utf-8")
-    (data_root / "assets").mkdir()
-    (data_root / "assets" / "description_polygon_density.png").write_bytes(
-        b"\x89PNG\r\n\x1a\n" + b"map" * 1024
-    )
-    (data_root / "assets" / "area_distribution.png").write_bytes(
-        b"\x89PNG\r\n\x1a\n" + b"hist" * 1024
-    )
-    source_root = data_root.parent / "raw"
-    source_root.mkdir(exist_ok=True)
-    source = source_root / "a-latest.osm.pbf"
-    source.write_bytes(b"a-latest-bytes")
-    record = make_record_dict(
-        Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-        {"description": "x"},
-        osm_id=1,
-        source_pbf="a-latest.osm.pbf",
-    )
-    output = data_root / "data" / "a-latest.parquet"
-    write_geoparquet(iter([record]), output, batch_size=10)
-    manifest = Manifest(
-        manifest_schema_version=2,
-        schema_version=3,
-        geoparquet_version="1.1.0",
-        transform_algorithm_version=3,
-        output_algorithm_revision="x" * 64,
-        area_policy_sha256="0" * 64,
-        source=source_identity_for(source),
-        output=output_identity_for(output),
-        osmium_version="osmium version 1.16.0",
-        dependency_versions={"pyarrow": "20.0.0"},
-        code_revision="abc123",
-        started_at="2026-07-27T00:00:00+00:00",
-        completed_at="2026-07-27T00:01:00+00:00",
-        counts=RunCounts(emitted_features=1, included_rows=1, rejections={}),
-    )
-    write_manifest(manifest, data_root / "manifests" / "a-latest.manifest.json")
-
-
-def test_create_upload_plan_lists_allowlisted_files(tmp_path: Path) -> None:
+def test_create_upload_plan_lists_allowlisted_files(
+    publication_dataset_factory: Callable[[Path], None], tmp_path: Path
+) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
 
     plan = create_upload_plan(data_root)
 
@@ -113,9 +63,11 @@ def test_create_upload_plan_lists_allowlisted_files(tmp_path: Path) -> None:
     assert plan.data_root == str(data_root.resolve(strict=False))
 
 
-def test_create_upload_plan_is_deterministic(tmp_path: Path) -> None:
+def test_create_upload_plan_is_deterministic(
+    publication_dataset_factory: Callable[[Path], None], tmp_path: Path
+) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
 
     plan_a = create_upload_plan(data_root)
     plan_b = create_upload_plan(data_root)
@@ -124,9 +76,11 @@ def test_create_upload_plan_is_deterministic(tmp_path: Path) -> None:
     assert plan_a.to_json() == plan_b.to_json()
 
 
-def test_upload_plan_identity_hashes_the_canonical_payload(tmp_path: Path) -> None:
+def test_upload_plan_identity_hashes_the_canonical_payload(
+    publication_dataset_factory: Callable[[Path], None], tmp_path: Path
+) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
 
     plan = create_upload_plan(data_root)
     provisional = replace(plan, identity_sha256="")
@@ -137,18 +91,22 @@ def test_upload_plan_identity_hashes_the_canonical_payload(tmp_path: Path) -> No
     assert plan.identity_sha256 == file_sha256_bytes(provisional.to_json().encode("utf-8"))
 
 
-def test_create_upload_plan_rejects_unknown_top_level(tmp_path: Path) -> None:
+def test_create_upload_plan_rejects_unknown_top_level(
+    publication_dataset_factory: Callable[[Path], None], tmp_path: Path
+) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
     (data_root / "debug.txt").write_text("debug", encoding="utf-8")
 
     with pytest.raises(PublicationError, match="top-level|unknown"):
         create_upload_plan(data_root)
 
 
-def test_create_upload_plan_rejects_symlinks(tmp_path: Path) -> None:
+def test_create_upload_plan_rejects_symlinks(
+    publication_dataset_factory: Callable[[Path], None], tmp_path: Path
+) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
     target = tmp_path / "external.bin"
     target.write_bytes(b"x")
     (data_root / "data" / "link.parquet").symlink_to(target)
@@ -157,27 +115,33 @@ def test_create_upload_plan_rejects_symlinks(tmp_path: Path) -> None:
         create_upload_plan(data_root)
 
 
-def test_create_upload_plan_rejects_temporary_files(tmp_path: Path) -> None:
+def test_create_upload_plan_rejects_temporary_files(
+    publication_dataset_factory: Callable[[Path], None], tmp_path: Path
+) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
     (data_root / "data" / "leftover.tmp").write_bytes(b"x")
 
     with pytest.raises(PublicationError, match="temporary|unknown"):
         create_upload_plan(data_root)
 
 
-def test_create_upload_plan_rejects_missing_card_or_stats(tmp_path: Path) -> None:
+def test_create_upload_plan_rejects_missing_card_or_stats(
+    publication_dataset_factory: Callable[[Path], None], tmp_path: Path
+) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
     (data_root / "README.md").unlink()
 
     with pytest.raises(PublicationError, match="missing|R|README"):
         create_upload_plan(data_root)
 
 
-def test_collection_helpers_preserve_allowlist_boundaries(tmp_path: Path) -> None:
+def test_collection_helpers_preserve_allowlist_boundaries(
+    publication_dataset_factory: Callable[[Path], None], tmp_path: Path
+) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
     (data_root / ".DS_Store").write_bytes(b"Finder metadata")
     (data_root / ".cache" / "huggingface").mkdir(parents=True)
 
@@ -192,11 +156,12 @@ def test_collection_helpers_preserve_allowlist_boundaries(tmp_path: Path) -> Non
 
 
 def test_collect_data_items_forwards_the_text_validation_mode(
+    publication_dataset_factory: Callable[[Path], None],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
     calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     def record_validation(*args: object, **kwargs: object) -> None:
@@ -435,10 +400,12 @@ def test_validate_data_entry_rejects_hidden_temporary_and_unexpected_files(
 
 
 def test_collect_data_items_rejects_case_drift_in_data_and_manifest_paths(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    publication_dataset_factory: Callable[[Path], None],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
     original_is_dir = Path.is_dir
     original_is_file = Path.is_file
     original_read_text = Path.read_text
@@ -485,10 +452,12 @@ def test_validate_manifest_entry_preserves_rejection_contract(tmp_path: Path) ->
 
 
 def test_collect_manifest_items_does_not_scan_case_variant_directory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    publication_dataset_factory: Callable[[Path], None],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
     original_is_dir = Path.is_dir
 
     def case_sensitive_is_dir(path: Path) -> bool:
@@ -503,9 +472,11 @@ def test_collect_manifest_items_does_not_scan_case_variant_directory(
     ]
 
 
-def test_per_pbf_plan_preserves_identity_and_validation_contract(tmp_path: Path) -> None:
+def test_per_pbf_plan_preserves_identity_and_validation_contract(
+    publication_dataset_factory: Callable[[Path], None], tmp_path: Path
+) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
     (data_root / "assets" / "dataset-card-hero.png").write_bytes(b"hero")
 
     plan = build_per_pbf_upload_plan(data_root, "a-latest.osm.pbf")
@@ -522,9 +493,11 @@ def test_per_pbf_plan_preserves_identity_and_validation_contract(tmp_path: Path)
         build_per_pbf_upload_plan(data_root, "a-latest.osm.pbf")
 
 
-def test_metadata_plan_preserves_identity_and_missing_file_contract(tmp_path: Path) -> None:
+def test_metadata_plan_preserves_identity_and_missing_file_contract(
+    publication_dataset_factory: Callable[[Path], None], tmp_path: Path
+) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
     (data_root / "assets" / "dataset-card-hero.png").write_bytes(b"hero")
 
     plan = build_metadata_only_upload_plan(data_root)
@@ -545,10 +518,12 @@ def _write_assets(assets_dir: Path, *names: str) -> None:
 
 
 def test_publication_validation_helpers_preserve_their_contracts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    publication_dataset_factory: Callable[[Path], None],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
     hero = data_root / "assets" / "dataset-card-hero.png"
     hero.write_bytes(b"hero")
     manifest_path = data_root / "manifests" / "a-latest.manifest.json"
@@ -600,11 +575,12 @@ def test_publication_validation_helpers_preserve_their_contracts(
 
 
 def test_publication_text_validation_mode_is_forwarded_at_each_boundary(
+    publication_dataset_factory: Callable[[Path], None],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
     manifest_path = data_root / "manifests" / "a-latest.manifest.json"
     parquet_path = data_root / "data" / "a-latest.parquet"
     publication_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
@@ -771,10 +747,12 @@ def test_assets_validation_rejects_symlinked_directory(tmp_path: Path) -> None:
 
 
 def test_manifest_validation_reports_each_publication_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    publication_dataset_factory: Callable[[Path], None],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
     manifest_path = data_root / "manifests" / "a-latest.manifest.json"
     parquet_path = data_root / "data" / "a-latest.parquet"
     manifest = planning.read_manifest(manifest_path)
@@ -802,9 +780,11 @@ def test_manifest_validation_reports_each_publication_failure(
         _validate_manifest(manifest_path, parquet_path)
 
 
-def test_execute_upload_refuses_wrong_confirmation(tmp_path: Path) -> None:
+def test_execute_upload_refuses_wrong_confirmation(
+    publication_dataset_factory: Callable[[Path], None], tmp_path: Path
+) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
     plan = create_upload_plan(data_root)
 
     def runner(command: list[str]) -> None:
@@ -814,9 +794,11 @@ def test_execute_upload_refuses_wrong_confirmation(tmp_path: Path) -> None:
         execute_upload(plan, confirmation="deadbeef", runner=runner)
 
 
-def test_execute_upload_passes_allowlisted_exact_includes(tmp_path: Path) -> None:
+def test_execute_upload_passes_allowlisted_exact_includes(
+    publication_dataset_factory: Callable[[Path], None], tmp_path: Path
+) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
     plan = create_upload_plan(data_root)
 
     captured: list[list[str]] = []
@@ -840,9 +822,11 @@ def test_execute_upload_passes_allowlisted_exact_includes(tmp_path: Path) -> Non
     assert captured[0] == expected_command
 
 
-def test_execute_upload_detects_checksum_drift(tmp_path: Path) -> None:
+def test_execute_upload_detects_checksum_drift(
+    publication_dataset_factory: Callable[[Path], None], tmp_path: Path
+) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
     plan = create_upload_plan(data_root)
 
     # Mutate an artifact after plan creation.
@@ -855,9 +839,11 @@ def test_execute_upload_detects_checksum_drift(tmp_path: Path) -> None:
         execute_upload(plan, confirmation=plan.identity_sha256, runner=runner)
 
 
-def test_execute_upload_invokes_runner_with_subprocess_run_by_default(tmp_path: Path) -> None:
+def test_execute_upload_invokes_runner_with_subprocess_run_by_default(
+    publication_dataset_factory: Callable[[Path], None], tmp_path: Path
+) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
     plan = create_upload_plan(data_root)
 
     def fake_subprocess_run(command, **kwargs):  # type: ignore[no-untyped-def]
@@ -875,9 +861,11 @@ def test_execute_upload_invokes_runner_with_subprocess_run_by_default(tmp_path: 
         publication.subprocess.run = original  # type: ignore[assignment]
 
 
-def test_execute_upload_rejects_missing_confirmation(tmp_path: Path) -> None:
+def test_execute_upload_rejects_missing_confirmation(
+    publication_dataset_factory: Callable[[Path], None], tmp_path: Path
+) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
     plan = create_upload_plan(data_root)
 
     with pytest.raises(
@@ -887,9 +875,11 @@ def test_execute_upload_rejects_missing_confirmation(tmp_path: Path) -> None:
         execute_upload(plan, confirmation=None, runner=lambda _: None)
 
 
-def test_execute_upload_rejects_empty_manifest(tmp_path: Path) -> None:
+def test_execute_upload_rejects_empty_manifest(
+    publication_dataset_factory: Callable[[Path], None], tmp_path: Path
+) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
     # Replace the manifest with a placeholder "{}" to simulate stale state.
     (data_root / "manifests" / "a-latest.manifest.json").write_text("{}\n", encoding="utf-8")
 
@@ -897,18 +887,22 @@ def test_execute_upload_rejects_empty_manifest(tmp_path: Path) -> None:
         create_upload_plan(data_root)
 
 
-def test_execute_upload_rejects_invalid_manifest_json(tmp_path: Path) -> None:
+def test_execute_upload_rejects_invalid_manifest_json(
+    publication_dataset_factory: Callable[[Path], None], tmp_path: Path
+) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
     (data_root / "manifests" / "a-latest.manifest.json").write_text("{not valid}", encoding="utf-8")
 
     with pytest.raises(PublicationError, match="invalid manifest"):
         create_upload_plan(data_root)
 
 
-def test_execute_upload_rejects_mismatched_parquet(tmp_path: Path) -> None:
+def test_execute_upload_rejects_mismatched_parquet(
+    publication_dataset_factory: Callable[[Path], None], tmp_path: Path
+) -> None:
     data_root = tmp_path / "generated"
-    _make_dataset(data_root)
+    publication_dataset_factory(data_root)
     # Mutate the parquet after writing the manifest so the output identity drifts.
     (data_root / "data" / "a-latest.parquet").write_bytes(b"different")
 

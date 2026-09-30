@@ -273,6 +273,7 @@ def test_publish_sources_forwards_each_source_and_tracks_cumulative_progress(
     tracker = _Tracker()
     verifier = object()
     upload_runner = object()
+    subprocess_runner = object()
 
     def clock() -> str:
         return "now"
@@ -298,6 +299,7 @@ def test_publish_sources_forwards_each_source_and_tracks_cumulative_progress(
         clock=clock,
         logger=logger,
         tracker=tracker,
+        subprocess_runner=subprocess_runner,
     )
 
     assert report.outcomes == [first_outcome, second_outcome]
@@ -312,7 +314,7 @@ def test_publish_sources_forwards_each_source_and_tracks_cumulative_progress(
                 "logger": logger,
                 "source_index": 1,
                 "source_total": 2,
-                "subprocess_runner": None,
+                "subprocess_runner": subprocess_runner,
             },
         ),
         (
@@ -325,7 +327,7 @@ def test_publish_sources_forwards_each_source_and_tracks_cumulative_progress(
                 "logger": logger,
                 "source_index": 2,
                 "source_total": 2,
-                "subprocess_runner": None,
+                "subprocess_runner": subprocess_runner,
             },
         ),
     ]

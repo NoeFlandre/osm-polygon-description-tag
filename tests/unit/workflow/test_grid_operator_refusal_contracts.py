@@ -9,6 +9,7 @@ when the label is lost, so every message here is asserted whole.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -24,56 +25,51 @@ from osm_polygon_description_tag.workflow.grid_operator import (
 from tests.helpers.messages import exactly
 
 
-def _bundle() -> JobBundle:
-    return JobBundle(
-        snapshot_id="a" * 64,
-        model_config_fingerprint="b" * 64,
-        code_fingerprint="c" * 64,
-        lock_fingerprint="d" * 64,
-        shard="region.parquet",
-        source_sha256="e" * 64,
-        source_size_bytes=16,
-        input_row_count=8,
-    )
-
-
-def test_an_unreadable_job_config_is_named_as_a_job_config(tmp_path: Path) -> None:
+def test_an_unreadable_job_config_is_named_as_a_job_config(
+    job_bundle_factory: Callable[..., JobBundle], tmp_path: Path
+) -> None:
     path = tmp_path / "job-config.json"
     path.write_text("{not json", encoding="utf-8")
 
     with pytest.raises(GridOperatorError) as caught:
-        grid_operator._read_job_config(path, _bundle())
+        grid_operator._read_job_config(path, job_bundle_factory())
 
     assert str(caught.value).startswith(f"cannot read job config {path}: ")
 
 
-def test_a_job_config_that_is_not_an_object_is_named_as_a_job_config(tmp_path: Path) -> None:
+def test_a_job_config_that_is_not_an_object_is_named_as_a_job_config(
+    job_bundle_factory: Callable[..., JobBundle], tmp_path: Path
+) -> None:
     path = tmp_path / "job-config.json"
     path.write_text("[]", encoding="utf-8")
 
     with pytest.raises(GridOperatorError, match=exactly("job config payload must be an object")):
-        grid_operator._read_job_config(path, _bundle())
+        grid_operator._read_job_config(path, job_bundle_factory())
 
 
-def test_an_unreadable_stage_manifest_is_named_as_a_stage_manifest(tmp_path: Path) -> None:
+def test_an_unreadable_stage_manifest_is_named_as_a_stage_manifest(
+    job_bundle_factory: Callable[..., JobBundle], tmp_path: Path
+) -> None:
     payload_root = tmp_path / "payload"
     payload_root.mkdir()
     stage_path = payload_root / STAGE_MANIFEST_FILENAME
     stage_path.write_text("{not json", encoding="utf-8")
 
     with pytest.raises(GridOperatorError) as caught:
-        grid_operator._read_stage_manifest(payload_root, _bundle())
+        grid_operator._read_stage_manifest(payload_root, job_bundle_factory())
 
     assert str(caught.value).startswith(f"cannot read stage manifest {stage_path}: ")
 
 
-def test_a_stage_manifest_that_is_not_an_object_is_named_as_a_stage(tmp_path: Path) -> None:
+def test_a_stage_manifest_that_is_not_an_object_is_named_as_a_stage(
+    job_bundle_factory: Callable[..., JobBundle], tmp_path: Path
+) -> None:
     payload_root = tmp_path / "payload"
     payload_root.mkdir()
     (payload_root / STAGE_MANIFEST_FILENAME).write_text("[]", encoding="utf-8")
 
     with pytest.raises(GridOperatorError, match=exactly("stage payload must be an object")):
-        grid_operator._read_stage_manifest(payload_root, _bundle())
+        grid_operator._read_stage_manifest(payload_root, job_bundle_factory())
 
 
 def test_a_stage_manifest_without_a_readable_fingerprint_reads_as_absent(tmp_path: Path) -> None:
@@ -224,10 +220,12 @@ def test_a_prepared_job_config_that_changed_is_refused_and_names_the_document(
     assert str(caught.value).startswith(f"cannot read job config {path}: ")
 
 
-def test_a_payload_missing_required_files_lists_every_one_of_them() -> None:
+def test_a_payload_missing_required_files_lists_every_one_of_them(
+    job_bundle_factory: Callable[..., JobBundle],
+) -> None:
     """The operator restages exactly what is listed, so the whole list is the contract."""
     with pytest.raises(GridOperatorError) as caught:
-        grid_operator._require_payload_files(_bundle(), {"bundle.json"})
+        grid_operator._require_payload_files(job_bundle_factory(), {"bundle.json"})
 
     message = str(caught.value)
     assert message.startswith("portable payload is missing required files: ")

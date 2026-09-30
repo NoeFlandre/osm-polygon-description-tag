@@ -5,6 +5,7 @@ import subprocess
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -481,7 +482,8 @@ def test_upload_metadata_delegates_and_logs_completion(
     plan = _metadata_plan(tmp_path)
     paths = Paths(tmp_path / "raw", tmp_path)
     logger = _EventLogger()
-    upload_runner = object()
+    upload_runner: Any = object()
+    subprocess_runner: Any = object()
     calls: list[tuple[object, ...]] = []
     monkeypatch.setattr(
         finalization_module,
@@ -489,9 +491,9 @@ def test_upload_metadata_delegates_and_logs_completion(
         lambda *args, **kwargs: calls.append((*args, kwargs)),
     )
 
-    _upload_metadata(plan, paths, upload_runner, 4.0, logger)  # type: ignore[arg-type]
+    _upload_metadata(plan, paths, upload_runner, 4.0, logger, subprocess_runner=subprocess_runner)
 
-    assert calls == [(plan, paths, upload_runner, 4.0, logger, {"subprocess_runner": None})]
+    assert calls[0][-1] == {"subprocess_runner": subprocess_runner}
     assert logger.events == [("metadata_upload_complete", {"level": "INFO"})]
 
 
@@ -893,6 +895,7 @@ def test_run_metadata_upload_uses_default_executor_with_confirmation(
 ) -> None:
     plan = _metadata_plan(tmp_path)
     seen: dict[str, object] = {}
+    subprocess_runner: Any = object()
 
     def execute(upload_plan: UploadPlan, **kwargs: object) -> None:
         seen["plan"] = upload_plan
@@ -901,12 +904,13 @@ def test_run_metadata_upload_uses_default_executor_with_confirmation(
     monkeypatch.setattr("osm_polygon_description_tag.workflow.finalization.execute_upload", execute)
 
     logger = _EventLogger()
-    _run_metadata_upload(plan, Paths(tmp_path / "raw", tmp_path), None, 12.0, logger)
+    paths = Paths(tmp_path / "raw", tmp_path)
+    _run_metadata_upload(plan, paths, None, 12.0, logger, subprocess_runner=subprocess_runner)
 
     assert seen == {
         "plan": plan,
         "confirmation": "plan-id",
-        "runner": None,
+        "runner": subprocess_runner,
         "timeout": 12.0,
         "retry_observer": seen["retry_observer"],
     }

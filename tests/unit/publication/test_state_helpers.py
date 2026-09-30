@@ -316,7 +316,9 @@ def test_cast_dict_validates_runtime_shape_and_preserves_mapping() -> None:
         state.cast_dict([])
 
 
-def test_atomic_write_json_fsyncs_the_files_own_directory(tmp_path: Path) -> None:
+def test_atomic_write_json_fsyncs_the_files_own_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The durability barrier is the parent directory, not some other path.
 
     Without the fsync on that directory the rename can survive in the page
@@ -324,8 +326,17 @@ def test_atomic_write_json_fsyncs_the_files_own_directory(tmp_path: Path) -> Non
     write is structured to survive.
     """
     target = tmp_path / "publication-state.json"
+    opened: list[tuple[str | bytes, int]] = []
+    real_open = state.os.open
+
+    def capture_open(path: str | bytes, flags: int, *args: object, **kwargs: object) -> int:
+        opened.append((path, flags))
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(state.os, "open", capture_open)
 
     state._atomic_write_json(target, {"schema_version": 1})
 
     assert json.loads(target.read_text(encoding="utf-8")) == {"schema_version": 1}
     assert [entry.name for entry in tmp_path.glob("*.tmp")] == []
+    assert opened == [(str(tmp_path), state.os.O_RDONLY)]
