@@ -18,18 +18,11 @@ import json
 from pathlib import Path
 
 import pytest
-from shapely.geometry import Polygon
 
 from osm_polygon_description_tag.dataset.manifest import (
-    Manifest,
-    RunCounts,
-    current_area_policy_sha256,
-    current_output_algorithm_revision,
     output_identity_for,
     source_identity_for,
-    write_manifest,
 )
-from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import (
     REPO_ID,
     build_metadata_only_upload_plan,
@@ -37,12 +30,11 @@ from osm_polygon_description_tag.publication import (
     per_pbf_command,
 )
 from osm_polygon_description_tag.runtime.config import Paths
-from osm_polygon_description_tag.runtime.resources import project_code_revision
 from osm_polygon_description_tag.workflow.orchestrator import (
     PUBLICATION_STATE_FILENAME,
     run_and_publish,
 )
-from tests.conftest import make_record_dict
+from tests.helpers.dataset import plant_resumable_artifact as _plant_resumable_artifact
 
 _CLOCK = "2026-07-27T00:00:00+00:00"
 
@@ -59,46 +51,6 @@ def _setup_two_sources(tmp_path: Path) -> tuple[Paths, Path, Path]:
     (source_root / "a.osm.pbf").write_bytes(b"a-bytes")
     (source_root / "b.osm.pbf").write_bytes(b"b-bytes")
     return Paths(source_root=source_root, data_root=data_root), source_root, data_root
-
-
-def _plant_resumable_artifact(paths: Paths, source_root: Path, source_name: str) -> None:
-    """Plant a complete, resumable artifact for ``source_name`` on disk."""
-    stem = source_name.removesuffix(".osm.pbf")
-    (paths.data_root / "data").mkdir(parents=True, exist_ok=True)
-    (paths.data_root / "manifests").mkdir(parents=True, exist_ok=True)
-    write_geoparquet(
-        iter(
-            [
-                make_record_dict(
-                    Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-                    {"description": "x"},
-                    osm_id=1,
-                    source_pbf=source_name,
-                )
-            ]
-        ),
-        paths.data_root / "data" / f"{stem}.parquet",
-        batch_size=10,
-    )
-    write_manifest(
-        Manifest(
-            manifest_schema_version=2,
-            schema_version=3,
-            geoparquet_version="1.1.0",
-            transform_algorithm_version=3,
-            area_policy_sha256=current_area_policy_sha256(),
-            output_algorithm_revision=current_output_algorithm_revision(),
-            source=source_identity_for(source_root / source_name),
-            output=output_identity_for(paths.data_root / "data" / f"{stem}.parquet"),
-            osmium_version="osmium version 1.19.1",
-            dependency_versions={"pyarrow": "20.0.0"},
-            code_revision=project_code_revision(),
-            started_at="2026-07-27T00:00:00+00:00",
-            completed_at="2026-07-27T00:01:00+00:00",
-            counts=RunCounts(emitted_features=1, included_rows=1, rejections={}),
-        ),
-        paths.data_root / "manifests" / f"{stem}.manifest.json",
-    )
 
 
 def _plant_metadata(paths: Paths) -> None:
