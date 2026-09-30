@@ -33,7 +33,6 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -42,6 +41,7 @@ from osm_polygon_description_tag.cli import run as cli_run
 from osm_polygon_description_tag.publication import REPO_ID
 from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.workflow.orchestrator import PUBLICATION_STATE_FILENAME
+from tests.helpers.huggingface import fake_hf_api as _make_hf_stub
 from tests.helpers.osmium import write_pbf as _write_pbf
 
 
@@ -51,14 +51,6 @@ def _sha256_text(text: str) -> str:
 
 def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
-
-
-@pytest.fixture
-def _real_osmium() -> Iterator[str]:
-    executable = shutil.which("osmium")
-    if executable is None:
-        pytest.skip("osmium binary not installed")
-    yield executable
 
 
 def _build_real_dataset(
@@ -74,23 +66,6 @@ def _build_real_dataset(
     for extra in extra_sources:
         shutil.copy(pbf_path, source_root / extra)
     return Paths(source_root=source_root, data_root=data_root), source_root, data_root
-
-
-def _make_hf_stub() -> object:
-    class _Stub:
-        def whoami(self) -> object:
-            return {"name": "fake"}
-
-        def repo_info(self, *_a: object, **_kw: object) -> object:
-            class _Info:
-                sha = "abc"
-
-            return _Info()
-
-        def auth_check(self, *_a: object, **_kw: object) -> None:
-            return None
-
-    return _Stub()
 
 
 def _install_external_boundaries(

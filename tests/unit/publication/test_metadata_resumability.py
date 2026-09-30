@@ -49,24 +49,14 @@ from osm_polygon_description_tag.publication import (
     REPO_ID,
     build_metadata_only_upload_plan,
 )
-from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.workflow.orchestrator import (
     PUBLICATION_STATE_FILENAME,
     read_publication_state,
 )
 from tests.conftest import make_record_dict
+from tests.helpers.orchestration import setup_two_source_workspace as _setup_workspace
 
 _CLOCK = "2026-07-27T00:00:00+00:00"
-
-
-def _setup_workspace(tmp_path: Path) -> tuple[Paths, Path, Path]:
-    source_root = tmp_path / "raw"
-    data_root = tmp_path / "generated"
-    source_root.mkdir()
-    data_root.mkdir()
-    (source_root / "a.osm.pbf").write_bytes(b"a-bytes")
-    (source_root / "b.osm.pbf").write_bytes(b"b-bytes")
-    return Paths(source_root=source_root, data_root=data_root), source_root, data_root
 
 
 def _plant_resumable_artifact(data_root: Path, source_root: Path, source_name: str) -> None:

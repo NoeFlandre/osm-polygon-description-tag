@@ -2,11 +2,9 @@
 
 import json
 from collections.abc import Sequence
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from shapely.geometry import Polygon
 
 from osm_polygon_description_tag.dataset.languages.checkpoint import (
     ShardCheckpoint,
@@ -24,7 +22,6 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
     prepare_snapshot,
 )
 from osm_polygon_description_tag.dataset.languages.worker import process_shard
-from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.workflow import grid_operator
 from osm_polygon_description_tag.workflow.grid_operator import (
     GridOperatorError,
@@ -42,15 +39,18 @@ from osm_polygon_description_tag.workflow.grid_operator import (
 )
 from osm_polygon_description_tag.workflow.grid_policy import (
     MAX_WALLTIME_SECONDS,
-    PolicyDecision,
-    PolicyEvidence,
-    PolicyVerdict,
 )
 from osm_polygon_description_tag.workflow.grid_scheduler import (
     CommandResult,
     JobState,
 )
-from tests.conftest import make_record_dict
+from tests.helpers.grid_operator import (
+    allowed_policy_verdict as _verdict,
+)
+from tests.helpers.grid_operator import prepared_two_shard_run as _two_shard_prepared
+from tests.helpers.grid_operator import (
+    queued_command_runner as _runner,
+)
 from tests.helpers.messages import exactly
 from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH, fake_splitter
 
@@ -63,46 +63,6 @@ REMOTE = {
     "remote_run_dir": "/scratch/staging/run",
     "sat_model_path": "/home/user/models/sat-3l-sm/model.safetensors",
 }
-
-
-def _verdict(
-    decision: PolicyDecision = PolicyDecision.ALLOWED, *, captured_at: datetime | None = None
-) -> PolicyVerdict:
-    return PolicyVerdict(
-        decision,
-        ("test verdict",),
-        PolicyEvidence(0, False, True, (), captured_at=captured_at or datetime.now(UTC)),
-    )
-
-
-def _two_shard_prepared(tmp_path: Path) -> tuple[Path, SnapshotManifest, dict[str, Path]]:
-    source = tmp_path / "source"
-    source.mkdir(parents=True)
-    for shard in (SHARD, "other.parquet"):
-        write_geoparquet(
-            (
-                make_record_dict(
-                    Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-                    {"description": f"A synthetic description {index}"},
-                    osm_id=index + 1,
-                )
-                for index in range(2)
-            ),
-            source / shard,
-            batch_size=1,
-        )
-    run = tmp_path / "run"
-    snapshot = prepare_snapshot(source, run, code_fingerprint="a" * 64, lock_fingerprint="b" * 64)
-    return run, snapshot, {"source": source, "run": run}
-
-
-def _runner(results: list[CommandResult], observed: list[tuple[str, ...]] | None = None) -> object:
-    def _run(argv: Sequence[str], timeout: float) -> CommandResult:
-        if observed is not None:
-            observed.append(tuple(argv))
-        return results.pop(0)
-
-    return _run
 
 
 def test_collection_rejects_a_complete_checkpoint_without_contiguous_parts(

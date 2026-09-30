@@ -27,6 +27,7 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
 from osm_polygon_description_tag.dataset.languages.validation import validate_run
 from osm_polygon_description_tag.dataset.languages.worker import process_shard
 from tests.helpers.language_setup import LanguageRunSetup
+from tests.helpers.language_setup import tamper_checkpoint as _tamper
 from tests.helpers.parquet import write_description_shard
 from tests.helpers.sentences import fake_splitter
 
@@ -358,13 +359,6 @@ def test_the_report_payload_is_json_serializable(
 
     assert json.loads(json.dumps(payload))["complete"] is True
     assert payload["shards"][0]["shard"] == SHARD
-
-
-def _tamper(run: Path, **changes: object) -> None:
-    path = shard_paths(run, SHARD).checkpoint
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    payload.update(changes)
-    path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 @pytest.mark.parametrize(

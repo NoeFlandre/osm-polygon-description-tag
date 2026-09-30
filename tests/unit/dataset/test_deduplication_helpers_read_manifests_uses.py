@@ -7,7 +7,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from shapely.geometry import Polygon
 
 import osm_polygon_description_tag.dataset.deduplication as dedup_module
 from osm_polygon_description_tag.dataset import canonical_rows
@@ -37,24 +36,7 @@ from osm_polygon_description_tag.dataset.manifest import (
     file_sha256,
 )
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
-from tests.conftest import make_record_dict
-
-
-def _two_records() -> list[dict[str, object]]:
-    return [
-        make_record_dict(
-            Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-            {"description": "one"},
-            osm_id=1,
-            source_pbf="a.osm.pbf",
-        ),
-        make_record_dict(
-            Polygon([(2, 2), (2, 3), (3, 3), (3, 2)]),
-            {"description": "two"},
-            osm_id=2,
-            source_pbf="a.osm.pbf",
-        ),
-    ]
+from tests.helpers.dataset import two_deduplication_records as _two_records
 
 
 def test_read_manifests_uses_the_lowercase_manifest_directory_name(

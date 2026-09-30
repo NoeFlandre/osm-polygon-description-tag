@@ -19,11 +19,11 @@ from pathlib import Path
 import pytest
 
 from osm_polygon_description_tag.osm.extraction import ExportRecord
-from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.workflow.orchestrator import (
     PUBLICATION_STATE_FILENAME,
     run_and_publish,
 )
+from tests.helpers.orchestration import setup_two_source_workspace as _setup_workspace
 
 _CLOCK = "2026-07-27T00:00:00+00:00"
 
@@ -53,16 +53,6 @@ def _fake_exporter() -> object:
         return iter([record])
 
     return _export
-
-
-def _setup_workspace(tmp_path: Path) -> tuple[Paths, Path, Path]:
-    source_root = tmp_path / "raw"
-    data_root = tmp_path / "generated"
-    source_root.mkdir()
-    data_root.mkdir()
-    (source_root / "a.osm.pbf").write_bytes(b"a-bytes")
-    (source_root / "b.osm.pbf").write_bytes(b"b-bytes")
-    return Paths(source_root=source_root, data_root=data_root), source_root, data_root
 
 
 def _file_sha(path: Path) -> str:

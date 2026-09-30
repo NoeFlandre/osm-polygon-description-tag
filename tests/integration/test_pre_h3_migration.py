@@ -47,6 +47,7 @@ from osm_polygon_description_tag.workflow.orchestrator import (
     run_and_publish,
 )
 from tests.conftest import make_record_dict
+from tests.helpers.processes import standard_preflight_runner as preflight_runner
 
 _CLOCK = "2026-07-30T00:00:00+00:00"
 
@@ -167,7 +168,7 @@ def _stub_png_render(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def _install_external_boundaries(monkeypatch: pytest.MonkeyPatch) -> dict:  # noqa: C901 - long test; TODO(#62) split it
+def _install_external_boundaries(monkeypatch: pytest.MonkeyPatch) -> dict:
     import osm_polygon_description_tag.osm.extraction as extraction_module
     import osm_polygon_description_tag.publication.upload as pub
     import osm_polygon_description_tag.runtime.resources as resources_module
@@ -195,35 +196,6 @@ def _install_external_boundaries(monkeypatch: pytest.MonkeyPatch) -> dict:  # no
     def verifier(repo_id: str, files: tuple[object, ...]) -> str:
         log["verifier_calls"] = int(log["verifier_calls"]) + 1
         return f"hub-rev-{log['verifier_calls']}"
-
-    def preflight_runner(command: list[str], text: bool = False, **_kwargs: object) -> object:  # type: ignore[name-defined]
-        import subprocess
-
-        def _response(stdout: str | bytes) -> object:
-            if text:
-                return subprocess.CompletedProcess(
-                    command,
-                    returncode=0,
-                    stdout=stdout if isinstance(stdout, str) else stdout.decode("utf-8"),
-                    stderr="" if text else b"",
-                )
-            return subprocess.CompletedProcess(
-                command,
-                returncode=0,
-                stdout=stdout if isinstance(stdout, bytes) else stdout.encode("utf-8"),
-                stderr="" if text else b"",
-            )
-
-        if command == ["osmium", "--version"]:
-            return _response("osmium version 1.19.1\n")
-        if command == ["hf", "auth", "whoami"]:
-            return _response("fake-user\n")
-        if command and command[0] == "fc-list":
-            # Matplotlib probes fontconfig only on a cold worker import.
-            return _response("")
-        if len(command) >= 3 and command[0] == "git" and "rev-parse" in command:
-            return _response("abc123\n")
-        raise AssertionError(f"unexpected preflight subprocess: {command!r}")
 
     class _Stub:
         def whoami(self) -> object:

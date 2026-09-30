@@ -27,12 +27,9 @@ The tests skip if the real osmium binary is unavailable.
 from __future__ import annotations
 
 import json
-import shutil
-from collections.abc import Iterator
 from pathlib import Path
 
 import pyarrow.parquet as pq
-import pytest
 from shapely import to_wkb
 from shapely.geometry import Polygon
 
@@ -59,14 +56,6 @@ from tests.helpers.osmium import write_pbf as _write_pbf
 FIXTURE = Path("tests/fixtures/amendment_coverage.osm")
 EXPECTED_INCLUDED = {1100, 1101, 1102, 1103, 1104, 1105, 1106, 1300, 1500}
 EXPECTED_EXCLUDED = {1107, 1108, 1109, 1600, 8001}
-
-
-@pytest.fixture
-def _real_osmium() -> Iterator[str]:
-    executable = shutil.which("osmium")
-    if executable is None:
-        pytest.skip("osmium binary not installed")
-    yield executable
 
 
 def _build_dataset(tmp_path: Path, executable: str) -> tuple[Paths, Path, Path]:

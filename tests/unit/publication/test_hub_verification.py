@@ -11,15 +11,17 @@ import json
 from pathlib import Path
 
 import pytest
-from shapely import to_wkb
-from shapely.geometry import Polygon
 
-from osm_polygon_description_tag.osm.extraction import ExportRecord
-from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.workflow.orchestrator import (
     PUBLICATION_STATE_FILENAME,
     read_publication_state,
     run_and_publish,
+)
+from tests.helpers.orchestration import (
+    fake_exporter as _fake_exporter,
+)
+from tests.helpers.orchestration import (
+    setup_workspace as _setup_workspace,
 )
 
 _CLOCK = "2026-07-27T00:00:00+00:00"
@@ -27,35 +29,6 @@ _CLOCK = "2026-07-27T00:00:00+00:00"
 
 def _frozen_clock() -> str:
     return _CLOCK
-
-
-def _setup_workspace(tmp_path: Path) -> tuple[Paths, Path, Path]:
-    source_root = tmp_path / "raw"
-    data_root = tmp_path / "generated"
-    source_root.mkdir()
-    data_root.mkdir()
-    (source_root / "a.osm.pbf").write_bytes(b"a-bytes")
-    return Paths(source_root=source_root, data_root=data_root), source_root, data_root
-
-
-def _fake_exporter() -> object:
-    def _export(source_path: Path, _cfg: Path) -> object:
-        stem = source_path.name.removesuffix(".osm.pbf")
-        osm_id = abs(hash(stem)) % 1000000
-        geom = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
-        ewkb = to_wkb(geom, include_srid=True, flavor="extended", byte_order=1)
-        record = ExportRecord(
-            geometry_ewkb_hex=ewkb.hex(),
-            osm_type="way",
-            osm_id=osm_id,
-            version=1,
-            changeset=1,
-            timestamp="2026-01-01T00:00:00Z",
-            tags=json.loads('{"description": "x"}'),
-        )
-        return iter([record])
-
-    return _export
 
 
 def test_remote_revision_requires_hub_verifier(tmp_path: Path) -> None:

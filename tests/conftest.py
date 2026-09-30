@@ -34,6 +34,14 @@ def _hypothesis_profile() -> str:
     return "mutation" if os.environ.get("MUTANT_UNDER_TEST") else "dev"
 
 
+@pytest.fixture
+def _real_osmium() -> str:
+    executable = shutil.which("osmium")
+    if executable is None:
+        pytest.skip("osmium binary not installed")
+    return executable
+
+
 settings.load_profile(_hypothesis_profile())
 
 

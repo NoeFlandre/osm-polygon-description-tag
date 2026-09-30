@@ -27,6 +27,24 @@ def frozen_clock() -> str:
     return "2026-07-27T00:00:00+00:00"
 
 
+def two_deduplication_records() -> list[dict[str, object]]:
+    """Return the two ordered source rows used by deduplication contracts."""
+    return [
+        make_record_dict(
+            Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+            {"description": "one"},
+            osm_id=1,
+            source_pbf="a.osm.pbf",
+        ),
+        make_record_dict(
+            Polygon([(2, 2), (2, 3), (3, 3), (3, 2)]),
+            {"description": "two"},
+            osm_id=2,
+            source_pbf="a.osm.pbf",
+        ),
+    ]
+
+
 def write_finalized_dataset(
     data_root: Path,
     source_root: Path,

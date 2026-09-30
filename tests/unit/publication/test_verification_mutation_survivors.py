@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -10,15 +9,8 @@ from typing import Any
 import pytest
 
 from osm_polygon_description_tag.publication import verification
-from osm_polygon_description_tag.publication.models import REPO_ID, UploadItem
-
-
-def _item(path: str, content: bytes) -> UploadItem:
-    return UploadItem(
-        relative_path=path,
-        size_bytes=len(content),
-        sha256=hashlib.sha256(content).hexdigest(),
-    )
+from osm_polygon_description_tag.publication.models import REPO_ID
+from tests.helpers.verification import upload_item as _item
 
 
 class _MatchingFallbackApi:

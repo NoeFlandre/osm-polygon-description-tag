@@ -18,12 +18,14 @@ from __future__ import annotations
 import hashlib
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from osm_polygon_description_tag.publication import REPO_ID, UploadItem
 from osm_polygon_description_tag.workflow.orchestrator import default_hub_verifier_factory
+from tests.helpers.huggingface import PathInfo as _PathInfo
 
 
 class _FakeHubApi:
@@ -40,7 +42,7 @@ class _FakeHubApi:
 
     def repo_info(self, *_a: object, **_kw: object) -> object:
         self.calls.append(("repo_info", (_a, _kw)))
-        return _Info(self._repo_sha)
+        return SimpleNamespace(sha=self._repo_sha)
 
     def get_paths_info(
         self,
@@ -87,19 +89,6 @@ class _FakeHubApi:
         finally:
             os.close(fd)
         return tmp_path
-
-
-class _Info:
-    def __init__(self, sha: str) -> None:
-        self.sha = sha
-
-
-class _PathInfo:
-    def __init__(self, *, path: str, size: int, sha: str) -> None:
-        self.path = path
-        self.size = size
-        self.sha = sha
-        self.lfs = None
 
 
 def _patch_hub(monkeypatch: pytest.MonkeyPatch, hub: _FakeHubApi) -> None:

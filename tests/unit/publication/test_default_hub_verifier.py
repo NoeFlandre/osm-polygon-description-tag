@@ -25,12 +25,12 @@ from typing import Any
 import pytest
 
 from osm_polygon_description_tag.publication import REPO_ID, UploadItem
-from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.workflow.orchestrator import (
     PUBLICATION_STATE_FILENAME,
     default_hub_verifier_factory,
 )
 from tests.helpers.messages import exactly
+from tests.helpers.orchestration import setup_two_source_workspace as _setup_workspace
 
 
 class _FakeRepo:
@@ -164,16 +164,6 @@ class _BlobInfoStub:
             self.lfs = _types.SimpleNamespace(sha256=lfs_sha256)
         else:
             self.lfs = None
-
-
-def _setup_workspace(tmp_path: Path) -> tuple[Paths, Path, Path]:
-    source_root = tmp_path / "raw"
-    data_root = tmp_path / "generated"
-    source_root.mkdir()
-    data_root.mkdir()
-    (source_root / "a.osm.pbf").write_bytes(b"a-bytes")
-    (source_root / "b.osm.pbf").write_bytes(b"b-bytes")
-    return Paths(source_root=source_root, data_root=data_root), source_root, data_root
 
 
 def _fake_exporter() -> object:

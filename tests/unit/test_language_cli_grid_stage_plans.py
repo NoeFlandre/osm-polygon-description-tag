@@ -1,100 +1,33 @@
 """End-to-end behaviour of the ``language`` command group on synthetic data."""
 
-import json
 import os
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from shapely.geometry import Polygon
 
 from osm_polygon_description_tag import language_cli
 from osm_polygon_description_tag.cli import run
-from osm_polygon_description_tag.dataset.storage import write_geoparquet
-from tests.conftest import make_record_dict
-from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH, fake_splitter
-
-SAT_MODEL_PATH = "/models/sat-3l-sm/model.safetensors"
-
-
-SHARD = "region.parquet"
-
-
-NIGHT_INSTANT = datetime(2026, 9, 8, 20, 0, tzinfo=UTC)
-
-
-@pytest.fixture(autouse=True)
-def _fake_sentence_splitter(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the CLI tests about wiring; the real adapter has its own tests."""
-    monkeypatch.setattr(language_cli, "build_sat_splitter", lambda *, model_dir: fake_splitter())
-
-
-@pytest.fixture
-def night_clock(monkeypatch: pytest.MonkeyPatch) -> datetime:
-    """Freeze the Grid handlers' clock so the day/night policy is deterministic."""
-    monkeypatch.setattr(language_cli, "_utc_now", lambda: NIGHT_INSTANT)
-    return NIGHT_INSTANT
-
-
-@pytest.fixture
-def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    root = tmp_path / "project"
-    (root / "src").mkdir(parents=True)
-    (root / "src" / "example.py").write_text("VALUE = 1\n", encoding="utf-8")
-    (root / "pyproject.toml").write_text(
-        "[project]\nname = 'synthetic-language-project'\nversion = '0.0.0'\n",
-        encoding="utf-8",
-    )
-    (root / "uv.lock").write_text("lock = 1\n", encoding="utf-8")
-    monkeypatch.chdir(root)
-    return root
-
-
-@pytest.fixture
-def source(tmp_path: Path) -> Path:
-    root = tmp_path / "source"
-    records = (
-        make_record_dict(
-            Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-            {
-                "description": f"A synthetic description {index}",
-                "description:fr": f"Le mur {index}",
-            },
-            osm_id=index + 1,
-        )
-        for index in range(6)
-    )
-    root.mkdir(parents=True)
-    write_geoparquet(records, root / SHARD, batch_size=3)
-    return root
-
-
-def _stdout(capsys: pytest.CaptureFixture[str]) -> dict[str, object]:
-    captured = capsys.readouterr()
-    assert captured.err == ""
-    return json.loads(captured.out)
-
-
-def _prepare_run(tmp_path: Path, project: Path, source: Path) -> Path:
-    run_dir = tmp_path / "run"
-    assert (
-        run(
-            [
-                "language",
-                "prepare",
-                "--source-root",
-                str(source),
-                "--run-dir",
-                str(run_dir),
-                "--project-root",
-                str(project),
-            ]
-        )
-        == 0
-    )
-    return run_dir
-
+from tests.helpers.language_cli import (
+    SAT_MODEL_PATH,
+    SHARD,
+    _prepare_run,
+    _stdout,
+)
+from tests.helpers.language_cli import (
+    _fake_sentence_splitter as _language_cli_splitter,  # noqa: F401
+)
+from tests.helpers.language_cli import (
+    night_clock as _language_cli_night_clock,  # noqa: F401
+)
+from tests.helpers.language_cli import (
+    project as _language_cli_project,  # noqa: F401
+)
+from tests.helpers.language_cli import (
+    source as _language_cli_source,  # noqa: F401
+)
+from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH
 
 _REMOTE = [
     "--remote-project-dir",

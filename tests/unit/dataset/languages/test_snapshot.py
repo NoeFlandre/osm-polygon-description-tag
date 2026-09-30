@@ -2,10 +2,8 @@
 
 import json
 import threading
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -33,14 +31,8 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
     verify_source_file,
 )
 from tests.helpers.language_setup import LanguageRunSetup
+from tests.helpers.language_setup import rewrite_snapshot as _rewrite
 from tests.helpers.messages import exactly
-
-
-def _rewrite(run: Path, mutate: Callable[[dict[str, Any]], None]) -> None:
-    path = run / "snapshot.json"
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    mutate(payload)
-    path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 def test_snapshot_is_immutable_and_portable_across_source_root_paths(
