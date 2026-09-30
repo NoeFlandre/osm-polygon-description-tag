@@ -63,7 +63,7 @@ def test_dummy_osmium_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(
         _shutil,
         "which",
-        lambda name: (str(dummy) if name == "osmium" else str(fake_hf) if name == "hf" else None),
+        lambda name: str(dummy) if name == "osmium" else str(fake_hf) if name == "hf" else None,
     )
 
     with pytest.raises(PreflightError, match="osmium"):

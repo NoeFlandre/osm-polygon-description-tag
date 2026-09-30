@@ -137,9 +137,9 @@ def test_cli_migration_handler_reports_migrated_files(
     monkeypatch.setattr(
         cli,
         "migrate_dataset_schema",
-        lambda root: ["data/a.parquet"]
-        if root == args.data_root
-        else pytest.fail("wrong data root"),
+        lambda root: (
+            ["data/a.parquet"] if root == args.data_root else pytest.fail("wrong data root")
+        ),
     )
 
     assert cli.handle_migrate_schema(args) == 0
@@ -453,9 +453,9 @@ def test_cli_build_all_handler_reports_each_result(
     monkeypatch.setattr(
         cli,
         "_build_paths_and_executor",
-        lambda value: (paths, lambda _source: result)
-        if value is args
-        else pytest.fail("wrong args"),
+        lambda value: (
+            (paths, lambda _source: result) if value is args else pytest.fail("wrong args")
+        ),
     )
     monkeypatch.setattr(
         cli,
