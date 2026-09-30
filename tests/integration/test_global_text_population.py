@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from shapely import to_wkb
@@ -14,19 +13,10 @@ from osm_polygon_description_tag.dataset.geography import (
     aggregate_h3_density,
     assign_h3_cell,
 )
-from osm_polygon_description_tag.dataset.manifest import (
-    Manifest,
-    RunCounts,
-    current_area_policy_sha256,
-    current_output_algorithm_revision,
-    output_identity_for,
-    source_identity_for,
-    write_manifest,
-)
 from osm_polygon_description_tag.dataset.stats import collect_stats
-from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.dataset.transform import transform_record
 from osm_polygon_description_tag.osm.extraction import ExportRecord
+from tests.helpers.dataset import write_finalized_dataset as _write_finalized_dataset
 
 
 def _make_record(
@@ -49,49 +39,6 @@ def _make_record(
         tags=tags,
     )
     return transform_record(record, source_pbf)
-
-
-def _write_finalized_dataset(
-    data_root: Path,
-    source_root: Path,
-    shards: Mapping[str, Sequence[dict[str, object]]],
-    *,
-    rejections: Mapping[str, Mapping[str, int]] | None = None,
-) -> None:
-    (data_root / "data").mkdir(parents=True, exist_ok=True)
-    (data_root / "manifests").mkdir(parents=True, exist_ok=True)
-    source_root.mkdir(parents=True, exist_ok=True)
-    rejection_map = rejections or {}
-    for name in sorted(shards):
-        source_path = source_root / f"{name}.osm.pbf"
-        source_path.write_bytes(name.encode("utf-8"))
-        output_path = data_root / "data" / f"{name}.parquet"
-        records = list(shards[name])
-        included = write_geoparquet(iter(records), output_path, batch_size=10)
-        counts = dict(rejection_map.get(name, {}))
-        write_manifest(
-            Manifest(
-                manifest_schema_version=2,
-                schema_version=3,
-                geoparquet_version="1.1.0",
-                transform_algorithm_version=3,
-                area_policy_sha256=current_area_policy_sha256(),
-                output_algorithm_revision=current_output_algorithm_revision(),
-                source=source_identity_for(source_path),
-                output=output_identity_for(output_path),
-                osmium_version=None,
-                dependency_versions={"pyarrow": "20.0.0"},
-                code_revision=None,
-                started_at="2026-01-01T00:00:00+00:00",
-                completed_at="2026-01-01T00:00:01+00:00",
-                counts=RunCounts(
-                    emitted_features=included + sum(counts.values()),
-                    included_rows=included,
-                    rejections=counts,
-                ),
-            ),
-            data_root / "manifests" / f"{name}.manifest.json",
-        )
 
 
 def _frozen_clock() -> str:
