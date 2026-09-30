@@ -143,7 +143,7 @@ def test_draw_cells_builds_one_collection_and_skips_short_rings() -> None:
     assert cmap.call_args.args[0] is normalized_counts
     assert collection.get_facecolor()[:, :3].tolist() == [[0.2] * 3, [0.8] * 3]
     expected_edge = to_rgba(rendering_module._EDGE_COLOR, rendering_module._COUNT_ALPHA)
-    assert all(tuple(edge) == expected_edge for edge in collection.get_edgecolor())
+    assert [tuple(edge) for edge in collection.get_edgecolor()] == [expected_edge]
     assert list(collection.get_linewidth()) == [rendering_module._EDGE_WIDTH]
 
 

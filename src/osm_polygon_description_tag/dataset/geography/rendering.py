@@ -163,7 +163,6 @@ def _draw_cells(
     ax.add_collection(
         PolyCollection(
             polys,
-            closed=True,
             facecolors=facecolors,
             edgecolors=_EDGE_COLOR,
             linewidths=_EDGE_WIDTH,
