@@ -37,6 +37,13 @@ def _hypothesis_profile() -> str:
 settings.load_profile(_hypothesis_profile())
 
 
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    """Make mutmut's forced-fail probe fail before it checks the test runner."""
+    del item
+    if os.environ.get("MUTANT_UNDER_TEST") == "fail":
+        pytest.fail("intentional failure requested by the mutation-gate probe", pytrace=False)
+
+
 class NetworkAccessInTestError(RuntimeError):
     """Raised when a test tries to open a connection off this machine."""
 

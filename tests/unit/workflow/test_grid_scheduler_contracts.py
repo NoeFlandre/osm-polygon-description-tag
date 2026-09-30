@@ -8,9 +8,11 @@ These assert whole values rather than fragments.
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from osm_polygon_description_tag.workflow import grid_scheduler
 from osm_polygon_description_tag.workflow.grid_scheduler import (
     CommandResult,
     JobState,
@@ -338,6 +340,20 @@ def test_every_argument_after_the_command_reaches_the_executable(
     assert result.returncode == 0
     assert result.stderr == ""
     assert result.timed_out is False
+
+    calls: list[dict[str, object]] = []
+
+    def nonzero_result(*_args: object, **kwargs: object) -> SimpleNamespace:
+        calls.append(kwargs)
+        return SimpleNamespace(returncode=7, stdout="partial", stderr="failed")
+
+    monkeypatch.setattr(grid_scheduler.subprocess, "run", nonzero_result)
+    rejected = run_command(["oarstat", "-j", "7"], 10.0)
+
+    assert calls[0]["check"] is False
+    assert rejected.returncode == 7
+    assert rejected.stdout == "partial"
+    assert rejected.stderr == "failed"
 
 
 def test_a_timed_out_command_reports_the_argv_and_no_captured_output(

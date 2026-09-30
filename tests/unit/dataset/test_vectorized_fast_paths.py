@@ -232,6 +232,19 @@ def test_vectorized_spatial_summary_equals_the_row_pass() -> None:
     assert fast.geometry_holes_total == 1
     assert fast.multipolygon_components_total == 2
 
+    asymmetric = _spatial_batch(
+        [
+            Polygon([(2, 7), (2, 10), (5, 10), (5, 7)]),
+            Polygon([(4, -1), (4, 1), (8, 1), (8, -1)]),
+        ]
+    )
+    asymmetric_fast = stats_module._vectorized_spatial_summary(asymmetric)
+    asymmetric_rows = stats_module._summarize_spatial_batch_rows(
+        asymmetric, source_name="a", row_offset=0
+    )
+    assert asymmetric_fast == asymmetric_rows
+    assert asymmetric_rows.dataset_bbox == (2.0, -1.0, 8.0, 10.0)
+
 
 def test_vectorized_spatial_summary_keeps_the_first_signed_zero() -> None:
     batch = _spatial_batch([_SQUARE, _SQUARE], bbox_min_x=[0.0, -0.0], bbox_max_x=[-0.0, 0.0])

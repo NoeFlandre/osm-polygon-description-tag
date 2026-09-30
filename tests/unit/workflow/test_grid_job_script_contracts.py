@@ -9,6 +9,8 @@ node, hours after submission.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pytest
 
 from osm_polygon_description_tag.workflow.grid_operator import (
@@ -24,22 +26,11 @@ _REMOTE = {
 }
 
 
-def _bundle() -> JobBundle:
-    return JobBundle(
-        snapshot_id="a" * 64,
-        model_config_fingerprint="b" * 64,
-        code_fingerprint="c" * 64,
-        lock_fingerprint="d" * 64,
-        shard="region.parquet",
-        source_sha256="e" * 64,
-        source_size_bytes=16,
-        input_row_count=8,
-    )
-
-
-def test_the_scratch_directory_template_names_this_bundle(tmp_path: object) -> None:
+def test_the_scratch_directory_template_names_this_bundle(
+    job_bundle_factory: Callable[..., JobBundle], tmp_path: object
+) -> None:
     """The template is passed to ``mktemp -d``; the six X's are what it replaces."""
-    bundle = _bundle()
+    bundle = job_bundle_factory()
 
     script = render_job_script(bundle, **_REMOTE)
 
@@ -49,16 +40,20 @@ def test_the_scratch_directory_template_names_this_bundle(tmp_path: object) -> N
     ) in script
 
 
-def test_the_default_batch_size_is_the_documented_five_hundred_and_twelve() -> None:
+def test_the_default_batch_size_is_the_documented_five_hundred_and_twelve(
+    job_bundle_factory: Callable[..., JobBundle],
+) -> None:
     """This default decides how many rows one commit covers on the node."""
-    script = render_job_script(_bundle(), **_REMOTE)
+    script = render_job_script(job_bundle_factory(), **_REMOTE)
 
     assert "  --batch-size 512 \\\n" in script
 
 
-def test_a_lingua_job_appends_no_glotlid_option_at_all() -> None:
+def test_a_lingua_job_appends_no_glotlid_option_at_all(
+    job_bundle_factory: Callable[..., JobBundle],
+) -> None:
     """An empty option must contribute nothing, not the word ``None``."""
-    script = render_job_script(_bundle(), processing_seconds=900, **_REMOTE)
+    script = render_job_script(job_bundle_factory(), processing_seconds=900, **_REMOTE)
 
     assert script.endswith(
         "  --shard region.parquet \\\n"
@@ -73,10 +68,12 @@ def test_a_lingua_job_appends_no_glotlid_option_at_all() -> None:
     assert "glotlid" not in script
 
 
-def test_a_cascade_job_appends_the_model_path_on_its_own_continued_line() -> None:
+def test_a_cascade_job_appends_the_model_path_on_its_own_continued_line(
+    job_bundle_factory: Callable[..., JobBundle],
+) -> None:
     """The option is appended to a line that must be continued with a backslash."""
     script = render_job_script(
-        _bundle(),
+        job_bundle_factory(),
         processing_seconds=900,
         glotlid_model_path="/home/user/models/model_v3.bin",
         **_REMOTE,
@@ -96,16 +93,20 @@ def test_a_cascade_job_appends_the_model_path_on_its_own_continued_line() -> Non
 
 
 @pytest.mark.parametrize("batch_size", [1, 512, 4096])
-def test_the_requested_batch_size_reaches_the_script_verbatim(batch_size: int) -> None:
-    script = render_job_script(_bundle(), batch_size=batch_size, **_REMOTE)
+def test_the_requested_batch_size_reaches_the_script_verbatim(
+    job_bundle_factory: Callable[..., JobBundle], batch_size: int
+) -> None:
+    script = render_job_script(job_bundle_factory(), batch_size=batch_size, **_REMOTE)
 
     assert f"  --batch-size {batch_size} \\\n" in script
 
 
-def test_the_job_script_names_the_pinned_sentence_splitter_weights() -> None:
+def test_the_job_script_names_the_pinned_sentence_splitter_weights(
+    job_bundle_factory: Callable[..., JobBundle],
+) -> None:
     """Splitting runs in the same job, so the node needs the staged SaT artifact."""
     script = render_job_script(
-        _bundle(),
+        job_bundle_factory(),
         processing_seconds=900,
         **_REMOTE,
     )
@@ -122,13 +123,15 @@ def test_the_job_script_names_the_pinned_sentence_splitter_weights() -> None:
     )
 
 
-def test_a_sat_model_path_that_is_not_a_safe_remote_path_is_refused() -> None:
+def test_a_sat_model_path_that_is_not_a_safe_remote_path_is_refused(
+    job_bundle_factory: Callable[..., JobBundle],
+) -> None:
     """OAR evaluates the stored command through a shell, so the path is validated."""
     from osm_polygon_description_tag.workflow.grid_operator import GridOperatorError
 
     with pytest.raises(GridOperatorError) as caught:
         render_job_script(
-            _bundle(),
+            job_bundle_factory(),
             **{**_REMOTE, "sat_model_path": "/models/../escape/model.safetensors"},
         )
 

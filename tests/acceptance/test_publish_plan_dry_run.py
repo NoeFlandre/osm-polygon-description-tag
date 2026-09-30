@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from osm_polygon_description_tag.cli import run
-from tests.unit.publication.test_publication import _make_dataset
+from tests.helpers.publication import build_publication_dataset as _make_dataset
 
 pytestmark = pytest.mark.acceptance
 

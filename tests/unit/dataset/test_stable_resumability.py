@@ -20,6 +20,7 @@ The behavioral contract uses:
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -27,16 +28,15 @@ from shapely.geometry import Polygon
 
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
-    RunCounts,
-    current_area_policy_sha256,
-    current_output_algorithm_revision,
     is_resumable,
     output_identity_for,
     source_identity_for,
 )
 
 
-def test_is_resumable_with_mismatched_code_revision(tmp_path: Path) -> None:
+def test_is_resumable_with_mismatched_code_revision(
+    tmp_path: Path, manifest_factory: Callable[..., Manifest]
+) -> None:
     """A documentation-only commit (changed code_revision) must NOT invalidate resume."""
     source = tmp_path / "a.osm.pbf"
     output = tmp_path / "a.parquet"
@@ -46,80 +46,58 @@ def test_is_resumable_with_mismatched_code_revision(tmp_path: Path) -> None:
     src_identity = source_identity_for(source)
     out_identity = output_identity_for(output)
 
-    manifest = Manifest(
-        manifest_schema_version=2,
-        schema_version=3,
-        geoparquet_version="1.1.0",
-        transform_algorithm_version=3,
-        area_policy_sha256=current_area_policy_sha256(),
-        output_algorithm_revision=current_output_algorithm_revision(),
+    manifest = manifest_factory(
         source=src_identity,
         output=out_identity,
-        osmium_version="osmium version 1.19.1",
-        dependency_versions={"pyarrow": "20.0.0"},
         code_revision="STALE-DOC-ONLY-COMMIT",
-        started_at="2026-07-27T00:00:00+00:00",
-        completed_at="2026-07-27T00:01:00+00:00",
-        counts=RunCounts(emitted_features=1, included_rows=1, rejections={}),
     )
     assert is_resumable(manifest, src_identity, out_identity) is True, (
         "doc-only commit must not invalidate valid artifacts"
     )
 
 
-def test_is_resumable_with_missing_code_revision(tmp_path: Path) -> None:
+def test_is_resumable_with_missing_code_revision(
+    tmp_path: Path, manifest_factory: Callable[..., Manifest]
+) -> None:
     """A manifest whose code_revision is None (env didn't capture it) must still be resumable."""
     source = tmp_path / "a.osm.pbf"
     output = tmp_path / "a.parquet"
     source.write_bytes(b"a")
     output.write_bytes(b"out")
 
-    manifest = Manifest(
-        manifest_schema_version=2,
-        schema_version=3,
-        geoparquet_version="1.1.0",
-        transform_algorithm_version=3,
-        area_policy_sha256=current_area_policy_sha256(),
-        output_algorithm_revision=current_output_algorithm_revision(),
-        source=source_identity_for(source),
-        output=output_identity_for(output),
-        osmium_version="osmium version 1.19.1",
-        dependency_versions={"pyarrow": "20.0.0"},
+    source_identity = source_identity_for(source)
+    output_identity = output_identity_for(output)
+    manifest = manifest_factory(
+        source=source_identity,
+        output=output_identity,
         code_revision=None,
-        started_at="2026-07-27T00:00:00+00:00",
-        completed_at="2026-07-27T00:01:00+00:00",
-        counts=RunCounts(emitted_features=1, included_rows=1, rejections={}),
     )
-    assert is_resumable(manifest, source_identity_for(source), output_identity_for(output)) is True
+    assert is_resumable(manifest, source_identity, output_identity) is True
 
 
-def test_behavioral_change_invalidates_resume(tmp_path: Path) -> None:
+def test_behavioral_change_invalidates_resume(
+    tmp_path: Path, manifest_factory: Callable[..., Manifest]
+) -> None:
     """A change to ``output_algorithm_revision`` must invalidate resume."""
     source = tmp_path / "a.osm.pbf"
     output = tmp_path / "a.parquet"
     source.write_bytes(b"a")
     output.write_bytes(b"out")
-    manifest = Manifest(
-        manifest_schema_version=2,
-        schema_version=3,
-        geoparquet_version="1.1.0",
-        transform_algorithm_version=3,
-        area_policy_sha256=current_area_policy_sha256(),
-        output_algorithm_revision="old:0000",
-        source=source_identity_for(source),
-        output=output_identity_for(output),
-        osmium_version="osmium version 1.19.1",
-        dependency_versions={"pyarrow": "20.0.0"},
+    source_identity = source_identity_for(source)
+    output_identity = output_identity_for(output)
+    manifest = manifest_factory(
+        source=source_identity,
+        output=output_identity,
         code_revision=None,
-        started_at="2026-07-27T00:00:00+00:00",
-        completed_at="2026-07-27T00:01:00+00:00",
-        counts=RunCounts(emitted_features=1, included_rows=1, rejections={}),
+        output_algorithm_revision="old:0000",
     )
-    assert is_resumable(manifest, source_identity_for(source), output_identity_for(output)) is False
+    assert is_resumable(manifest, source_identity, output_identity) is False
 
 
 def test_full_run_no_rebuild_on_doc_only_commit(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    manifest_factory: Callable[..., Manifest],
 ) -> None:
     """When the orchestrator runs against a previously published PBF, no upload must occur."""
     from osm_polygon_description_tag.runtime.config import Paths
@@ -158,21 +136,10 @@ def test_full_run_no_rebuild_on_doc_only_commit(
     from osm_polygon_description_tag.dataset.manifest import write_manifest
 
     write_manifest(
-        Manifest(
-            manifest_schema_version=2,
-            schema_version=3,
-            geoparquet_version="1.1.0",
-            transform_algorithm_version=3,
-            area_policy_sha256=current_area_policy_sha256(),
-            output_algorithm_revision=current_output_algorithm_revision(),
+        manifest_factory(
             source=source_identity_for(source_root / "a.osm.pbf"),
             output=output_identity_for(paths.data_root / "data" / "a.parquet"),
-            osmium_version="osmium version 1.19.1",
-            dependency_versions={"pyarrow": "20.0.0"},
             code_revision="DOC-ONLY-COMMIT",
-            started_at="2026-07-27T00:00:00+00:00",
-            completed_at="2026-07-27T00:01:00+00:00",
-            counts=RunCounts(emitted_features=1, included_rows=1, rejections={}),
         ),
         paths.data_root / "manifests" / "a.manifest.json",
     )

@@ -218,6 +218,9 @@ def _install_external_boundaries(monkeypatch: pytest.MonkeyPatch) -> dict:  # no
             return _response("osmium version 1.19.1\n")
         if command == ["hf", "auth", "whoami"]:
             return _response("fake-user\n")
+        if command and command[0] == "fc-list":
+            # Matplotlib probes fontconfig only on a cold worker import.
+            return _response("")
         if len(command) >= 3 and command[0] == "git" and "rev-parse" in command:
             return _response("abc123\n")
         raise AssertionError(f"unexpected preflight subprocess: {command!r}")
