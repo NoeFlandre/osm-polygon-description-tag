@@ -116,9 +116,13 @@ def test_safe_counts_clamps_and_converts_every_cell_value() -> None:
 
 def test_draw_cells_builds_one_collection_and_skips_short_rings() -> None:
     import numpy as np
+    from matplotlib.colors import to_rgba
+    from matplotlib.path import Path
 
     axes = Mock()
-    cmap = Mock(side_effect=lambda values: np.tile([[0.1, 0.2, 0.3, 1.0]], (len(values), 1)))
+    cmap = Mock(
+        side_effect=lambda values: np.column_stack([values, values, values, np.ones_like(values)])
+    )
     normalized_counts = np.array([0.2, 0.8])
     norm = Mock(return_value=normalized_counts)
     rings = {
@@ -130,10 +134,17 @@ def test_draw_cells_builds_one_collection_and_skips_short_rings() -> None:
 
     (collection,) = (c.args[0] for c in axes.add_collection.call_args_list)
     assert len(collection.get_paths()) == 2
+    assert all(path.codes[-1] == Path.CLOSEPOLY for path in collection.get_paths())
     assert collection.get_zorder() == 3
     assert collection.get_alpha() == rendering_module._COUNT_ALPHA
-    assert list(norm.call_args.args[0]) == [1.0, 4.0]
+    counts = norm.call_args.args[0]
+    assert counts.dtype == float
+    assert list(counts) == [1.0, 4.0]
     assert cmap.call_args.args[0] is normalized_counts
+    assert collection.get_facecolor()[:, :3].tolist() == [[0.2] * 3, [0.8] * 3]
+    expected_edge = to_rgba(rendering_module._EDGE_COLOR, rendering_module._COUNT_ALPHA)
+    assert all(tuple(edge) == expected_edge for edge in collection.get_edgecolor())
+    assert list(collection.get_linewidth()) == [rendering_module._EDGE_WIDTH]
 
 
 def test_draw_cells_adds_nothing_when_no_ring_is_drawable() -> None:
