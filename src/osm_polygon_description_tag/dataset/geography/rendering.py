@@ -127,6 +127,18 @@ def _safe_counts(cells: Mapping[str, int]) -> list[int]:
     return [max(int(value), 1) for value in cells.values()]
 
 
+def _drawable_rings(sorted_cells: Sequence[tuple[str, int]]) -> tuple[list[Any], list[int]]:
+    """Return every ring with at least three points and the index of its cell."""
+    polys: list[Any] = []
+    owners: list[int] = []
+    for index, (cell, _count) in enumerate(sorted_cells):
+        for ring in cell_rings(cell):
+            if len(ring) >= 3:
+                polys.append(ring)
+                owners.append(index)
+    return polys, owners
+
+
 def _draw_cells(
     ax: Any,
     sorted_cells: Sequence[tuple[str, int]],
@@ -143,14 +155,7 @@ def _draw_cells(
     import numpy as np
     from matplotlib.collections import PolyCollection
 
-    polys: list[Any] = []
-    owners: list[int] = []
-    for index, (cell, _count) in enumerate(sorted_cells):
-        for ring in cell_rings(cell):
-            if len(ring) < 3:
-                continue
-            polys.append(ring)
-            owners.append(index)
+    polys, owners = _drawable_rings(sorted_cells)
     if not polys:
         return
     counts = np.array([max(int(count), 1) for _cell, count in sorted_cells], dtype=float)
