@@ -159,6 +159,9 @@ error-on-warning = true
 [tool.coverage.run]
 branch = true
 source = ["osm_polygon_description_tag", "scripts"]
+# pytest-cov 7 no longer measures subprocesses on its own; the contract tests
+# run the gate scripts in child processes.
+patch = ["subprocess"]
 
 [tool.coverage.report]
 fail_under = 90
