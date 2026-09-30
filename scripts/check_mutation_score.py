@@ -6,8 +6,14 @@ import argparse
 import fnmatch
 import json
 from collections.abc import Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+if __package__:
+    from scripts.report_io import write_json_report
+else:
+    from report_io import write_json_report
 
 REPORT_SCHEMA_VERSION = 2
 STATUS_KEYS = (
@@ -48,10 +54,16 @@ def scoped_metadata_paths(mutants_root: Path, scope_file: Path | None) -> list[P
     """
     if scope_file is None:
         return sorted(mutants_root.glob("src/**/*.py.meta"))
-    sources = [
-        line.strip() for line in scope_file.read_text(encoding="utf-8").splitlines() if line.strip()
-    ]
-    paths = [mutants_root / f"{source}.meta" for source in sources]
+    return _existing_metadata_paths(mutants_root, _scope_sources(scope_file))
+
+
+def _scope_sources(scope_file: Path) -> tuple[str, ...]:
+    lines = scope_file.read_text(encoding="utf-8").splitlines()
+    return tuple(line.strip() for line in lines if line.strip())
+
+
+def _existing_metadata_paths(mutants_root: Path, sources: tuple[str, ...]) -> list[Path]:
+    paths = (mutants_root / f"{source}.meta" for source in sources)
     return sorted(path for path in paths if path.is_file())
 
 
@@ -62,15 +74,6 @@ def iter_mutant_exit_codes(
     for metadata_path in scoped_metadata_paths(mutants_root, scope_file):
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         yield from sorted(metadata.get("exit_code_by_key", {}).items())
-
-
-def write_json_report(path: Path, payload: dict[str, Any]) -> None:
-    """Write ``payload`` as stable, pretty, UTF-8 JSON, creating parent dirs."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
 
 
 def build_report(stats: dict[str, Any], minimum_score: float) -> dict[str, Any]:
@@ -97,23 +100,40 @@ def build_metadata_report(
     minimum_score: float,
     scope_file: Path | None = None,
 ) -> dict[str, Any]:
-    stats = {"killed": 0, "total": 0}
-    unresolved: dict[str, list[str]] = {}
+    summary = _MutationSummary(patterns)
     for mutant_name, exit_code in iter_mutant_exit_codes(mutants_root, scope_file):
-        if patterns and not any(fnmatch.fnmatch(mutant_name, pattern) for pattern in patterns):
-            continue
+        summary.record(mutant_name, exit_code)
+    return summary.as_report(minimum_score)
+
+
+@dataclass
+class _MutationSummary:
+    patterns: list[str]
+    stats: dict[str, int] = field(default_factory=lambda: {"killed": 0, "total": 0})
+    unresolved: dict[str, list[str]] = field(default_factory=dict)
+
+    def record(self, mutant_name: str, exit_code: int | None) -> None:
+        if not self._matches_scope(mutant_name):
+            return
         status = STATUS_BY_EXIT_CODE.get(exit_code, "suspicious")
-        stats[status] = int(stats.get(status, 0)) + 1
-        stats["total"] += 1
+        self.stats[status] = self.stats.get(status, 0) + 1
+        self.stats["total"] += 1
         if status in STATUS_KEYS:
-            unresolved.setdefault(status, []).append(mutant_name)
-    report = build_report(stats, minimum_score)
-    report["patterns"] = patterns
-    # Name what survived. The score alone says a gate failed but not which
-    # mutant to go and kill, which left the only actionable list buried in
-    # per-shard CI state that is discarded when the runner is torn down.
-    report["unresolved_mutants"] = {status: sorted(names) for status, names in unresolved.items()}
-    return report
+            self.unresolved.setdefault(status, []).append(mutant_name)
+
+    def _matches_scope(self, mutant_name: str) -> bool:
+        return not self.patterns or any(
+            fnmatch.fnmatch(mutant_name, pattern) for pattern in self.patterns
+        )
+
+    def as_report(self, minimum_score: float) -> dict[str, Any]:
+        report = build_report(self.stats, minimum_score)
+        report["patterns"] = self.patterns
+        # Keep survivor names with the score so a failed shard is actionable.
+        report["unresolved_mutants"] = {
+            status: sorted(names) for status, names in self.unresolved.items()
+        }
+        return report
 
 
 def _parse_args() -> argparse.Namespace:

@@ -1,12 +1,10 @@
 """End-to-end behaviour of the ``language`` command group on synthetic data."""
 
-import json
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from shapely.geometry import Polygon
 
 from osm_polygon_description_tag import language_cli
 from osm_polygon_description_tag.cli import run
@@ -14,140 +12,30 @@ from osm_polygon_description_tag.dataset.languages.checkpoint import (
     part_name_for_offset,
     shard_paths,
 )
-from osm_polygon_description_tag.dataset.languages.detector import LanguageDetector
 from osm_polygon_description_tag.dataset.languages.models import (
-    DEFAULT_LANGUAGE_SCOPE,
     LanguagePolicy,
-    cascade_model_identity,
-    language_model_identity,
 )
-from osm_polygon_description_tag.dataset.storage import write_geoparquet
-from tests.conftest import make_record_dict
-from tests.helpers.sentences import fake_splitter
-
-SAT_MODEL_PATH = "/models/sat-3l-sm/model.safetensors"
-
-
-SHARD = "region.parquet"
-
-
-NIGHT_INSTANT = datetime(2026, 9, 8, 20, 0, tzinfo=UTC)
-
-
-@pytest.fixture(autouse=True)
-def _fake_sentence_splitter(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the CLI tests about wiring; the real adapter has its own tests."""
-    monkeypatch.setattr(language_cli, "build_sat_splitter", lambda *, model_dir: fake_splitter())
-
-
-@pytest.fixture
-def night_clock(monkeypatch: pytest.MonkeyPatch) -> datetime:
-    """Freeze the Grid handlers' clock so the day/night policy is deterministic."""
-    monkeypatch.setattr(language_cli, "_utc_now", lambda: NIGHT_INSTANT)
-    return NIGHT_INSTANT
-
-
-def _confidence_values(text: str) -> dict[str, float]:
-    if text.startswith("Le "):
-        return {"fra": 0.95, "eng": 0.05}
-    return {"eng": 0.9, "fra": 0.1}
-
-
-@pytest.fixture
-def stub_detector(monkeypatch: pytest.MonkeyPatch) -> list[LanguagePolicy]:
-    """Replace the real Lingua construction so the CLI loads no language model."""
-    policies: list[LanguagePolicy] = []
-
-    def _build(
-        policy: LanguagePolicy,
-        *,
-        language_codes: tuple[str, ...] | None = None,
-        glotlid_model_path: Path | None = None,
-    ) -> object:
-        policies.append(policy)
-        identity = language_model_identity(
-            policy, language_scope=language_codes or DEFAULT_LANGUAGE_SCOPE
-        )
-        return LanguageDetector(_confidence_values, policy=policy, identity=identity)
-
-    def _build_cascade(
-        policy: LanguagePolicy,
-        *,
-        language_codes: tuple[str, ...] | None = None,
-        glotlid_model_path: Path | None = None,
-    ) -> object:
-        _build(policy, language_codes=language_codes, glotlid_model_path=glotlid_model_path)
-        return LanguageDetector(
-            _confidence_values,
-            policy=policy,
-            identity=cascade_model_identity(
-                policy, language_scope=language_codes or DEFAULT_LANGUAGE_SCOPE
-            ),
-        )
-
-    monkeypatch.setattr(language_cli, "build_lingua_detector", _build)
-    monkeypatch.setattr(language_cli, "build_language_detector", _build_cascade)
-    return policies
-
-
-@pytest.fixture
-def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    root = tmp_path / "project"
-    (root / "src").mkdir(parents=True)
-    (root / "src" / "example.py").write_text("VALUE = 1\n", encoding="utf-8")
-    (root / "pyproject.toml").write_text(
-        "[project]\nname = 'synthetic-language-project'\nversion = '0.0.0'\n",
-        encoding="utf-8",
-    )
-    (root / "uv.lock").write_text("lock = 1\n", encoding="utf-8")
-    monkeypatch.chdir(root)
-    return root
-
-
-@pytest.fixture
-def source(tmp_path: Path) -> Path:
-    root = tmp_path / "source"
-    records = (
-        make_record_dict(
-            Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-            {
-                "description": f"A synthetic description {index}",
-                "description:fr": f"Le mur {index}",
-            },
-            osm_id=index + 1,
-        )
-        for index in range(6)
-    )
-    root.mkdir(parents=True)
-    write_geoparquet(records, root / SHARD, batch_size=3)
-    return root
-
-
-def _stdout(capsys: pytest.CaptureFixture[str]) -> dict[str, object]:
-    captured = capsys.readouterr()
-    assert captured.err == ""
-    return json.loads(captured.out)
-
-
-def _prepare_run(tmp_path: Path, project: Path, source: Path) -> Path:
-    run_dir = tmp_path / "run"
-    assert (
-        run(
-            [
-                "language",
-                "prepare",
-                "--source-root",
-                str(source),
-                "--run-dir",
-                str(run_dir),
-                "--project-root",
-                str(project),
-            ]
-        )
-        == 0
-    )
-    return run_dir
-
+from tests.helpers.language_cli import (
+    SAT_MODEL_PATH,
+    SHARD,
+    _prepare_run,
+    _stdout,
+)
+from tests.helpers.language_cli import (
+    _fake_sentence_splitter as _language_cli_splitter,  # noqa: F401
+)
+from tests.helpers.language_cli import (
+    night_clock as _language_cli_night_clock,  # noqa: F401
+)
+from tests.helpers.language_cli import (
+    project as _language_cli_project,  # noqa: F401
+)
+from tests.helpers.language_cli import (
+    source as _language_cli_source,  # noqa: F401
+)
+from tests.helpers.language_cli import (
+    stub_detector as _language_cli_stub_detector,  # noqa: F401
+)
 
 _REMOTE = [
     "--remote-project-dir",

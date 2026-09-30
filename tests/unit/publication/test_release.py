@@ -16,59 +16,19 @@ from osm_polygon_description_tag.publication import (
     PublicationError,
     UploadItem,
     UploadPlan,
-    release_metadata,
 )
 from osm_polygon_description_tag.publication import release as release_module
 from osm_polygon_description_tag.runtime.resources import dataset_card_template
-from tests.helpers.dataset import write_reporting_fixture
 from tests.helpers.messages import exactly
-
-
-class _RecordingVerifier:
-    """Stand-in Hub verifier returning a fixed revision."""
-
-    def __init__(self, revision: str = "deadbeef") -> None:
-        self.revision = revision
-        self.calls: list[tuple[str, tuple[UploadItem, ...]]] = []
-        self.inventory_calls: list[tuple[str, tuple[UploadItem, ...], str | None]] = []
-        self.matching_calls: list[tuple[str, tuple[UploadItem, ...]]] = []
-        self.remote_metadata_revision: str | None = None
-
-    def __call__(self, repo_id: str, files: tuple[UploadItem, ...]) -> str:
-        self.calls.append((repo_id, files))
-        return self.revision
-
-    def verify_inventory(
-        self,
-        repo_id: str,
-        files: tuple[UploadItem, ...],
-        *,
-        revision: str | None = None,
-    ) -> str:
-        self.inventory_calls.append((repo_id, files, revision))
-        return revision or "data-revision"
-
-    def matching_revision(self, repo_id: str, files: tuple[UploadItem, ...]) -> str | None:
-        self.matching_calls.append((repo_id, files))
-        return self.remote_metadata_revision
-
-
-@pytest.fixture
-def workspace(tmp_path: Path) -> Path:
-    data_root = tmp_path / "generated"
-    data_root.mkdir()
-    write_reporting_fixture(data_root, tmp_path / "raw")
-    return data_root
-
-
-def _release(data_root: Path, **kwargs: object) -> object:
-    return release_metadata(
-        data_root,
-        dataset_card_template(),
-        confirm_repo=kwargs.pop("confirm_repo", REPO_ID),  # type: ignore[arg-type]
-        apply=bool(kwargs.pop("apply", False)),
-        **kwargs,  # type: ignore[arg-type]
-    )
+from tests.helpers.release import (
+    RecordingVerifier as _RecordingVerifier,
+)
+from tests.helpers.release import (
+    release as _release,
+)
+from tests.helpers.release import (
+    release_workspace as _release_workspace_fixture,  # noqa: F401
+)
 
 
 def test_dry_run_computes_plan_without_uploading(workspace: Path) -> None:

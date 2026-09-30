@@ -19,23 +19,14 @@ from osm_polygon_description_tag.publication import (
     default_runner_with_retry,
     execute_upload,
 )
-from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.workflow.orchestrator import run_and_publish
+from tests.helpers.orchestration import setup_workspace as _setup_workspace
 
 _CLOCK = "2026-07-27T00:00:00+00:00"
 
 
 def _frozen_clock() -> str:
     return _CLOCK
-
-
-def _setup_workspace(tmp_path: Path) -> tuple[Paths, Path, Path]:
-    source_root = tmp_path / "raw"
-    data_root = tmp_path / "generated"
-    source_root.mkdir()
-    data_root.mkdir()
-    (source_root / "a.osm.pbf").write_bytes(b"a-bytes")
-    return Paths(source_root=source_root, data_root=data_root), source_root, data_root
 
 
 def _fake_exporter_records() -> object:

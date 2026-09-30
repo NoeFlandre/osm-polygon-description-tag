@@ -9,7 +9,6 @@ own, and it processes the snapshot's shards in the snapshot's own order.
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -23,120 +22,35 @@ from osm_polygon_description_tag.workflow.grid_driver import (
     awaiting_collection,
     submit,
 )
-
-
-def _remote() -> Remote:
-    return Remote(
-        "nancy",
-        "/home/op/bundles",
-        "/home/op/models/glotlid-v3/model_v3.bin",
-        "/home/op/models/sat-3l-sm/model.safetensors",
-    )
-
-
-def _args(**overrides: Any) -> DriverOptions:
-    fields: dict[str, Any] = {
-        "run_dir": Path("/run"),
-        "source_root": Path("/source"),
-        "retrieval_dir": Path("/retrieve"),
-        "remote_bundle_root": "/home/op/bundles",
-        "remote_glotlid_model_path": "/home/op/models/glotlid-v3/model_v3.bin",
-        "remote_sat_model_path": "/home/op/models/sat-3l-sm/model.safetensors",
-        "remote_operator_dir": "/home/op/project",
-        "remote_cli": "/home/op/.venv/bin/osm-polygon-description-tag",
-    }
-    return DriverOptions(**{**fields, **overrides})
-
-
-def _plan() -> dict[str, str]:
-    return {
-        "remote_project_dir": "/home/op/bundles/x/project",
-        "remote_source_dir": "/home/op/bundles/x/source",
-        "remote_run_dir": "/home/op/bundles/x/run",
-    }
-
-
-def _apply_payload(outcome: str, *, job_id: int | None = 6923144) -> dict[str, Any]:
-    """Return the payload ``language grid submit --apply`` actually prints.
-
-    The CLI wraps the submission under ``result``; it does not put ``outcome``
-    at the top level. A driver that reads the top level sees no outcome at all
-    and halts a run whose job is genuinely queued, which is the worst possible
-    reading: the job exists and the operator is told it does not.
-    """
-    return {
-        "applied": True,
-        "plan": {"shard": "region.parquet", "may_apply": True},
-        "result": {
-            "outcome": outcome,
-            "job_id": job_id,
-            "detail": "job submitted",
-            "attempt": 1,
-        },
-    }
-
-
-def _write_checkpoint(run_dir: Path, slug: str, payload: object) -> Path:
-    shard_dir = run_dir / "shards" / slug
-    shard_dir.mkdir(parents=True)
-    checkpoint = shard_dir / "checkpoint.json"
-    if isinstance(payload, str):
-        checkpoint.write_text(payload, encoding="utf-8")
-    else:
-        checkpoint.write_text(json.dumps(payload), encoding="utf-8")
-    return checkpoint
-
-
-def _intent(**overrides: object) -> str:
-    payload = {
-        "outcome": "submitted",
-        "result_acknowledged": False,
-        "job_id": 1234,
-        "shard": "angola-latest.parquet",
-    }
-    payload.update(overrides)
-    return json.dumps(payload)
-
-
-def _stub_ssh(monkeypatch: pytest.MonkeyPatch, stdout: str) -> None:
-    class _Completed:
-        def __init__(self) -> None:
-            self.stdout = stdout
-            self.returncode = 0
-
-    monkeypatch.setattr(
-        "osm_polygon_description_tag.workflow.grid_driver.subprocess.run",
-        lambda *a, **k: _Completed(),
-    )
-
-
-CLI = str(Path(sys.executable).parent / "osm-polygon-description-tag")
-
+from tests.helpers.grid_driver import (
+    CLI,
+)
+from tests.helpers.grid_driver import (
+    apply_payload as _apply_payload,
+)
+from tests.helpers.grid_driver import (
+    intent as _intent,
+)
+from tests.helpers.grid_driver import (
+    options as _args,
+)
+from tests.helpers.grid_driver import (
+    plan as _plan,
+)
+from tests.helpers.grid_driver import (
+    remote as _remote,
+)
+from tests.helpers.grid_driver import (
+    shell as _shell,
+)
+from tests.helpers.grid_driver import (
+    stub_ssh as _stub_ssh,
+)
+from tests.helpers.grid_driver import (
+    write_checkpoint as _write_checkpoint,
+)
 
 RSYNC = ["rsync", "--archive", "--checksum", "--protect-args", "-e", "ssh", "--"]
-
-
-class _Shell:
-    """Record every command the driver runs and answer from a script."""
-
-    def __init__(self, *replies: tuple[int, str, str]) -> None:
-        self.replies = list(replies)
-        self.calls: list[tuple[object, dict[str, object]]] = []
-
-    def __call__(self, argv: object, **kwargs: object) -> Any:
-        self.calls.append((argv, kwargs))
-        code, stdout, stderr = self.replies.pop(0) if self.replies else (0, "{}", "")
-        return type("Completed", (), {"returncode": code, "stdout": stdout, "stderr": stderr})()
-
-    @property
-    def argvs(self) -> list[object]:
-        return [argv for argv, _ in self.calls]
-
-
-def _shell(monkeypatch: pytest.MonkeyPatch, *replies: tuple[int, str, str]) -> _Shell:
-    shell = _Shell(*replies)
-    monkeypatch.setattr(driver.subprocess, "run", shell)
-    return shell
 
 
 def _logged(capsys: pytest.CaptureFixture[str]) -> list[dict[str, Any]]:

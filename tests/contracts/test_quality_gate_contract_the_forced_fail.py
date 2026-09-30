@@ -10,8 +10,8 @@ from typing import ClassVar
 import pytest
 
 from scripts import check_mutation_score, run_mutation_gate
+from scripts.mutation_scratch import bounded_pytest_runner
 from scripts.run_mutation_gate import (
-    bounded_pytest_runner,
     clean_test_selection,
     escalation_stages,
     mutated_function_names,
@@ -127,6 +127,50 @@ def test_mutated_function_names_are_read_from_generated_metadata(tmp_path: Path)
         "pkg.example.x_function",
         "pkg.example.x_other",
     }
+
+
+def test_unresolved_mutants_lists_every_non_killed_result(monkeypatch, tmp_path: Path) -> None:
+    import scripts.run_mutation_gate as gate
+
+    monkeypatch.setattr(
+        gate,
+        "iter_mutant_exit_codes",
+        lambda _root: [
+            ("pkg.mod.x_killed__mutmut_1", 1),
+            ("pkg.mod.x_survived__mutmut_1", 0),
+            ("pkg.mod.x_unchecked__mutmut_1", None),
+            ("pkg.mod.x_unknown__mutmut_1", 999),
+        ],
+    )
+
+    assert gate.unresolved_mutants(tmp_path) == [
+        "pkg.mod.x_survived__mutmut_1",
+        "pkg.mod.x_unchecked__mutmut_1",
+        "pkg.mod.x_unknown__mutmut_1",
+    ]
+
+
+def test_mutation_scope_keeps_recorded_map_without_a_scope_or_generated_names(
+    monkeypatch,
+) -> None:
+    import scripts.run_mutation_gate as gate
+
+    associations = {"pkg.mod.x_function": ("tests/test_mod.py::test_function",)}
+    assert gate._scope_associations(associations, None) == associations
+
+    monkeypatch.setattr(gate, "mutated_function_names", lambda _root: set())
+    assert gate._scope_associations(associations, {"src/example.py": (2,)}) == associations
+
+
+def test_runner_options_reject_non_positive_limits() -> None:
+    import argparse
+
+    import scripts.run_mutation_gate as gate
+
+    with pytest.raises(SystemExit, match="--max-children must be positive"):
+        gate._validate_runner_options(argparse.Namespace(max_children=0, mutation_batch_size=1))
+    with pytest.raises(SystemExit, match="--mutation-batch-size must be positive"):
+        gate._validate_runner_options(argparse.Namespace(max_children=1, mutation_batch_size=0))
 
 
 def test_mutation_gate_resets_state_before_first_escalation(monkeypatch) -> None:

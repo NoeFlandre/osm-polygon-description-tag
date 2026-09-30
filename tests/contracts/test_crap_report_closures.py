@@ -7,6 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from scripts import quality_metrics
 from scripts.quality_metrics import build_report
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -130,3 +131,66 @@ def test_check_output_names_closures_and_unmatched_blocks(tmp_path: Path) -> Non
     assert "5 functions scored, including closures" in result.stdout
     assert "1 without a coverage.py match" in result.stdout
     assert "  src/example.py::outer.inner.deepest" in result.stdout
+
+
+def test_crap_command_writes_markdown_when_requested(tmp_path: Path, monkeypatch) -> None:
+    coverage_path = tmp_path / "coverage.json"
+    radon_path = tmp_path / "radon.json"
+    output_path = tmp_path / "crap.json"
+    markdown_path = tmp_path / "crap.md"
+    coverage_path.write_text(
+        json.dumps(
+            {
+                "files": {
+                    "src/example.py": {
+                        "functions": {
+                            "sample": {
+                                "start_line": 10,
+                                "summary": {"percent_covered": 100.0},
+                            }
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    radon_path.write_text(
+        json.dumps(
+            {
+                "src/example.py": [
+                    {
+                        "type": "function",
+                        "name": "sample",
+                        "lineno": 10,
+                        "endline": 12,
+                        "complexity": 3,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "quality_metrics",
+            "crap",
+            "--coverage-json",
+            str(coverage_path),
+            "--radon-json",
+            str(radon_path),
+            "--output",
+            str(output_path),
+            "--markdown-output",
+            str(markdown_path),
+        ],
+    )
+
+    quality_metrics.main()
+
+    assert markdown_path.read_text(encoding="utf-8").count("sample") == 1
+    assert "| src/example.py |" not in markdown_path.read_text(encoding="utf-8")
+    assert output_path.is_file()
+    assert json.loads(output_path.read_text(encoding="utf-8"))["functions"][0]["name"] == "sample"

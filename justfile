@@ -59,8 +59,7 @@ risk-prepared:
         --markdown-output reports/crap.md
     uv run python scripts/quality_metrics.py check \
         --report reports/crap.json \
-        --max-crap-score 6 \
-        --allowlist scripts/crap-allowlist.json
+        --max-crap-score 6
 
 # Generate deterministic CRAP risk reports from test coverage and Radon.
 risk:
@@ -74,8 +73,7 @@ risk:
         --markdown-output reports/crap.md
     uv run python scripts/quality_metrics.py check \
         --report reports/crap.json \
-        --max-crap-score 6 \
-        --allowlist scripts/crap-allowlist.json
+        --max-crap-score 6
 
 # Record which tests execute which source lines. The mutation gate turns this
 # into the exact covering-test set per function, which is what keeps it fast:

@@ -10,51 +10,13 @@ from unittest.mock import Mock
 
 import pytest
 
-from osm_polygon_description_tag.osm.discovery import Source
 from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.workflow import orchestrator
 from osm_polygon_description_tag.workflow.source_runner import (
     OrchestratorError,
 )
-
-
-class _Logger:
-    def __init__(self) -> None:
-        self.events: list[tuple[str, dict[str, object]]] = []
-        self.flushed = False
-        self.preflight_approved = False
-        self.preflight_denied = False
-
-    def event(self, name: str, **fields: object) -> None:
-        self.events.append((name, fields))
-
-    def flush(self) -> None:
-        self.flushed = True
-
-    def approve_preflight(self) -> None:
-        self.preflight_approved = True
-
-    def deny_preflight(self) -> None:
-        self.preflight_denied = True
-
-
-def _workspace(tmp_path: Path) -> tuple[Paths, Source]:
-    source_root = tmp_path / "raw"
-    data_root = tmp_path / "generated"
-    source_root.mkdir()
-    (data_root / "data").mkdir(parents=True)
-    (data_root / "manifests").mkdir()
-    source_path = source_root / "region.osm.pbf"
-    source_path.write_bytes(b"source")
-    output_path = data_root / "data" / "region.parquet"
-    output_path.write_bytes(b"parquet")
-    return Paths(source_root=source_root, data_root=data_root), Source(
-        path=source_path,
-        name=source_path.name,
-        output_name=output_path.name,
-        size_bytes=source_path.stat().st_size,
-        mtime_ns=source_path.stat().st_mtime_ns,
-    )
+from tests.helpers.orchestration import RecordingLogger as _Logger
+from tests.helpers.orchestration import source_runner_workspace as _workspace
 
 
 def test_ensure_logger_constructs_owned_logger_from_explicit_paths(

@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -28,14 +27,8 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
 )
 from osm_polygon_description_tag.dataset.schema import SCHEMA
 from tests.helpers.language_setup import LanguageRunSetup
+from tests.helpers.language_setup import rewrite_snapshot as _rewrite
 from tests.helpers.messages import exactly
-
-
-def _rewrite(run: Path, mutate: Callable[[dict[str, Any]], None]) -> None:
-    path = run / "snapshot.json"
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    mutate(payload)
-    path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 def test_project_source_fingerprint_rejects_symlinked_files(tmp_path: Path) -> None:

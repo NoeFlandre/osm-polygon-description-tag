@@ -19,61 +19,9 @@ from osm_polygon_description_tag.workflow.source_runner import (
     OrchestratorError,
     SourceOutcome,
 )
-
-
-class _Logger:
-    def __init__(self) -> None:
-        self.events: list[tuple[str, dict[str, object]]] = []
-        self.flushed = False
-        self.preflight_approved = False
-        self.preflight_denied = False
-
-    def event(self, name: str, **fields: object) -> None:
-        self.events.append((name, fields))
-
-    def flush(self) -> None:
-        self.flushed = True
-
-    def approve_preflight(self) -> None:
-        self.preflight_approved = True
-
-    def deny_preflight(self) -> None:
-        self.preflight_denied = True
-
-
-class _Tracker:
-    def __init__(self) -> None:
-        self.snapshots: list[Path] = []
-        self.starts: list[dict[str, object]] = []
-        self.logs: list[dict[str, object]] = []
-
-    def log_snapshot(self, data_root: Path) -> None:
-        self.snapshots.append(data_root)
-
-    def start(self, *, config: dict[str, object]) -> None:
-        self.starts.append(config)
-
-    def log(self, data: dict[str, object]) -> None:
-        self.logs.append(data)
-
-
-def _workspace(tmp_path: Path) -> tuple[Paths, Source]:
-    source_root = tmp_path / "raw"
-    data_root = tmp_path / "generated"
-    source_root.mkdir()
-    (data_root / "data").mkdir(parents=True)
-    (data_root / "manifests").mkdir()
-    source_path = source_root / "region.osm.pbf"
-    source_path.write_bytes(b"source")
-    output_path = data_root / "data" / "region.parquet"
-    output_path.write_bytes(b"parquet")
-    return Paths(source_root=source_root, data_root=data_root), Source(
-        path=source_path,
-        name=source_path.name,
-        output_name=output_path.name,
-        size_bytes=source_path.stat().st_size,
-        mtime_ns=source_path.stat().st_mtime_ns,
-    )
+from tests.helpers.orchestration import RecordingLogger as _Logger
+from tests.helpers.orchestration import RecordingTracker as _Tracker
+from tests.helpers.orchestration import source_runner_workspace as _workspace
 
 
 def _manifest() -> SimpleNamespace:

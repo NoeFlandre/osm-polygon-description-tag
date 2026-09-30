@@ -27,16 +27,16 @@ import json
 from pathlib import Path
 
 import pytest
-from shapely import to_wkb
-from shapely.geometry import Polygon
 
-from osm_polygon_description_tag.osm.extraction import ExportRecord
 from osm_polygon_description_tag.publication import REPO_ID
 from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.workflow.orchestrator import (
     PUBLICATION_STATE_FILENAME,
     run_and_publish,
 )
+from tests.helpers.huggingface import fake_hf_api as hfapi_factory
+from tests.helpers.orchestration import fake_exporter as _fake_exporter_factory
+from tests.helpers.processes import standard_preflight_runner as preflight_runner
 
 _CLOCK = "2026-07-30T00:00:00+00:00"
 
@@ -49,26 +49,6 @@ def _file_sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _fake_exporter_factory() -> object:
-    def _export(source_path: Path, _cfg: Path) -> object:
-        stem = source_path.name.removesuffix(".osm.pbf")
-        osm_id = abs(hash(stem)) % 1000000
-        geom = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
-        ewkb = to_wkb(geom, include_srid=True, flavor="extended", byte_order=1)
-        record = ExportRecord(
-            geometry_ewkb_hex=ewkb.hex(),
-            osm_type="way",
-            osm_id=osm_id,
-            version=1,
-            changeset=1,
-            timestamp="2026-01-01T00:00:00Z",
-            tags=json.loads('{"description": "x"}'),
-        )
-        return iter([record])
-
-    return _export
-
-
 def _setup_two_sources(tmp_path: Path) -> tuple[Paths, Path, Path]:
     source_root = tmp_path / "raw"
     data_root = tmp_path / "generated"
@@ -79,7 +59,7 @@ def _setup_two_sources(tmp_path: Path) -> tuple[Paths, Path, Path]:
     return Paths(source_root=source_root, data_root=data_root), source_root, data_root
 
 
-def _install_hf_stubs(  # noqa: C901 - long test; TODO(#62) split it
+def _install_hf_stubs(
     monkeypatch: pytest.MonkeyPatch, *, interrupted_run: int | None = None
 ) -> dict:
     """Install HermeticHF stubs and return a per-run log."""
@@ -110,51 +90,9 @@ def _install_hf_stubs(  # noqa: C901 - long test; TODO(#62) split it
         else:
             log["metadata_calls"] = int(log["metadata_calls"]) + 1
 
-    def hfapi_factory() -> object:
-        class _Stub:
-            def whoami(self) -> object:
-                return {"name": "fake"}
-
-            def repo_info(self, *_a: object, **_kw: object) -> object:
-                class _Info:
-                    sha = "abc"
-
-                return _Info()
-
-            def auth_check(self, *_a: object, **_kw: object) -> None:
-                return None
-
-        return _Stub()
-
     def verifier(repo_id: str, files: tuple[object, ...]) -> str:
         log["verifier_calls"] = int(log["verifier_calls"]) + 1
         return f"hub-rev-{log['verifier_calls']}"
-
-    def preflight_runner(command: list[str], text: bool = False, **_kwargs: object) -> object:  # type: ignore[name-defined]
-        import subprocess
-
-        def _response(stdout: str | bytes) -> object:
-            if text:
-                return subprocess.CompletedProcess(
-                    command,
-                    returncode=0,
-                    stdout=stdout if isinstance(stdout, str) else stdout.decode("utf-8"),
-                    stderr="" if text else b"",
-                )
-            return subprocess.CompletedProcess(
-                command,
-                returncode=0,
-                stdout=stdout if isinstance(stdout, bytes) else stdout.encode("utf-8"),
-                stderr="" if text else b"",
-            )
-
-        if command == ["osmium", "--version"]:
-            return _response("osmium version 1.19.1\n")
-        if command == ["hf", "auth", "whoami"]:
-            return _response("fake-user\n")
-        if len(command) >= 3 and command[0] == "git" and "rev-parse" in command:
-            return _response("abc123\n")
-        raise AssertionError(f"unexpected preflight subprocess: {command!r}")
 
     monkeypatch.setattr(extraction_module.subprocess, "run", preflight_runner)
     monkeypatch.setattr(resources_module.subprocess, "run", preflight_runner)

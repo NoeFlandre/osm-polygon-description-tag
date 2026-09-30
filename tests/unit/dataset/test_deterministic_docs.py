@@ -39,10 +39,11 @@ from osm_polygon_description_tag.dataset.manifest import (
 )
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import REPO_ID
-from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.runtime.resources import dataset_card_template
 from tests.conftest import make_record_dict
 from tests.helpers.dataset import write_finalized_dataset
+from tests.helpers.huggingface import fake_hf_api as hfapi_factory
+from tests.helpers.orchestration import setup_two_source_workspace as _setup_workspace
 
 
 def _sha256_text(text: str) -> str:
@@ -457,16 +458,6 @@ def test_identical_regeneration_does_not_invalidate_metadata_state(
     assert file_sha256(data_root / "stats.json") == snapshot_stats
 
 
-def _setup_workspace(tmp_path: Path) -> tuple[Paths, Path, Path]:
-    source_root = tmp_path / "raw"
-    data_root = tmp_path / "generated"
-    source_root.mkdir()
-    data_root.mkdir()
-    (source_root / "a.osm.pbf").write_bytes(b"a-bytes")
-    (source_root / "b.osm.pbf").write_bytes(b"b-bytes")
-    return Paths(source_root=source_root, data_root=data_root), source_root, data_root
-
-
 def _plant_resumable(data_root: Path, source_root: Path, source_name: str) -> None:
     stem = source_name.removesuffix(".osm.pbf")
     (data_root / "data").mkdir(parents=True, exist_ok=True)
@@ -505,7 +496,7 @@ def _plant_metadata(data_root: Path) -> None:
     (data_root / "stats.json").write_text("{}")
 
 
-def _install_subprocess_recorder(monkeypatch: pytest.MonkeyPatch, *, action: str = "ok") -> dict:  # noqa: C901 - long test; TODO(#62) split it
+def _install_subprocess_recorder(monkeypatch: pytest.MonkeyPatch, *, action: str = "ok") -> dict:
     import osm_polygon_description_tag.publication.upload as pub
     import osm_polygon_description_tag.workflow.orchestrator as orch
     import osm_polygon_description_tag.workflow.preflight as preflight_module
@@ -535,22 +526,6 @@ def _install_subprocess_recorder(monkeypatch: pytest.MonkeyPatch, *, action: str
 
     def runner(command: list[str], timeout: float | None = None) -> None:
         log["uploads"] += 1
-
-    def hfapi_factory() -> object:
-        class _Stub:
-            def whoami(self) -> object:
-                return {"name": "fake"}
-
-            def repo_info(self, *_a: object, **_kw: object) -> object:
-                class _Info:
-                    sha = "abc"
-
-                return _Info()
-
-            def auth_check(self, *_a: object, **_kw: object) -> None:
-                return None
-
-        return _Stub()
 
     def verifier_factory():
         def f(_repo_id: str, _files: object) -> str:

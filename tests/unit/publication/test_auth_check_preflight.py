@@ -28,20 +28,11 @@ from typing import Any
 
 import pytest
 
-from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.workflow.orchestrator import (
     PreflightError,
     default_preflight,
 )
-
-
-def _paths(tmp_path: Path) -> Paths:
-    source_root = tmp_path / "raw"
-    data_root = tmp_path / "generated"
-    source_root.mkdir()
-    data_root.mkdir()
-    (source_root / "a.osm.pbf").write_bytes(b"a-bytes")
-    return Paths(source_root=source_root, data_root=data_root)
+from tests.helpers.orchestration import preflight_paths as _paths
 
 
 class _RecordingHubApi:

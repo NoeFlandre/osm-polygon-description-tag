@@ -20,15 +20,20 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
-import tempfile
-import threading
 from collections.abc import Iterable, Mapping, Sequence
-from contextlib import contextmanager, nullcontext
+from contextlib import nullcontext
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
 from scripts.check_mutation_score import STATUS_BY_EXIT_CODE, iter_mutant_exit_codes
+from scripts.mutation_scratch import (
+    MutationScratchJanitor as _MutationScratchJanitor,
+)
+from scripts.mutation_scratch import (
+    bounded_runner_patch as _bounded_runner_patch,
+)
+from scripts.report_io import write_json_report
 
 DEFAULT_MAX_CHILDREN = 8
 DEFAULT_FAST_TESTS_PER_FUNCTION = 1
@@ -44,6 +49,22 @@ _ESCALATION_FACTOR = 8
 PROBE_CANARY = "src/osm_polygon_description_tag/dataset/text.py"
 
 
+@dataclass(frozen=True)
+class GateScope:
+    only_mutate: tuple[str, ...]
+    test_selection: tuple[str, ...]
+    changed_lines: Mapping[str, tuple[int, ...]] | None
+
+
+@dataclass(frozen=True)
+class MutationRun:
+    runner: Any
+    mutmut: Any
+    mutmut_main: Any
+    durations: Mapping[str, float]
+    associations: Mapping[str, Sequence[str]]
+
+
 def with_probe_canary(
     changed_lines: Mapping[str, tuple[int, ...]], root: Path = Path()
 ) -> dict[str, tuple[int, ...]]:
@@ -56,36 +77,59 @@ def with_probe_canary(
     return scoped
 
 
+class _DiffScopeParser:
+    """Track file and new-line positions while consuming a unified diff."""
+
+    def __init__(self) -> None:
+        self.changed: dict[str, set[int]] = {}
+        self.current_path: str | None = None
+        self.new_line: int | None = None
+
+    def consume(self, line: str) -> None:
+        if line.startswith("diff --git "):
+            self._start_file(line)
+        elif line.startswith("@@") and self.current_path is not None:
+            self._start_hunk(line)
+        else:
+            self._consume_content(line)
+
+    def _start_file(self, line: str) -> None:
+        parts = line.split()
+        self.current_path = parts[-1][2:] if parts and parts[-1].startswith("b/") else None
+        if self.current_path is not None:
+            self.changed.setdefault(self.current_path, set())
+        self.new_line = None
+
+    def _start_hunk(self, line: str) -> None:
+        hunk = line.split("@@", 2)[1].strip().split()
+        new_range = next((part[1:] for part in hunk if part.startswith("+")), "")
+        start_text, _, _ = new_range.partition(",")
+        self.new_line = int(start_text)
+
+    def _consume_content(self, line: str) -> None:
+        if self.current_path is None or self.new_line is None or line.startswith("\\"):
+            return
+        self._advance_new_line(line, self.current_path, self.new_line)
+
+    def _advance_new_line(self, line: str, current_path: str, new_line: int) -> None:
+        if line.startswith("+") and not line.startswith("+++"):
+            self.changed[current_path].add(new_line)
+            self.new_line = new_line + 1
+        elif line.startswith("-") and not line.startswith("---"):
+            return
+        else:
+            self.new_line = new_line + 1
+
+    def result(self) -> dict[str, tuple[int, ...]]:
+        return {path: tuple(sorted(lines)) for path, lines in sorted(self.changed.items()) if lines}
+
+
 def parse_changed_lines(diff: str) -> dict[str, tuple[int, ...]]:
     """Parse added/modified new-file lines from a zero-context git diff."""
-
-    changed: dict[str, set[int]] = {}
-    current_path: str | None = None
-    new_line: int | None = None
+    parser = _DiffScopeParser()
     for line in diff.splitlines():
-        if line.startswith("diff --git "):
-            parts = line.split()
-            current_path = parts[-1][2:] if parts and parts[-1].startswith("b/") else None
-            if current_path is not None:
-                changed.setdefault(current_path, set())
-            new_line = None
-            continue
-        if line.startswith("@@") and current_path is not None:
-            hunk = line.split("@@", 2)[1].strip().split()
-            new_range = next((part[1:] for part in hunk if part.startswith("+")), "")
-            start_text, _, _ = new_range.partition(",")
-            new_line = int(start_text)
-            continue
-        if current_path is None or new_line is None or line.startswith("\\"):
-            continue
-        if line.startswith("+") and not line.startswith("+++"):
-            changed[current_path].add(new_line)
-            new_line += 1
-        elif line.startswith("-") and not line.startswith("---"):
-            continue
-        else:
-            new_line += 1
-    return {path: tuple(sorted(lines)) for path, lines in sorted(changed.items()) if lines}
+        parser.consume(line)
+    return parser.result()
 
 
 def _configure_mutmut(
@@ -109,124 +153,6 @@ def _configure_mutmut(
             str((Path("mutants") / path).absolute()): set(lines)
             for path, lines in changed_lines.items()
         }
-
-
-def bounded_pytest_runner(
-    runner_class: type[Any],
-    scratch_root: Path | None,
-    *,
-    skip_clean_tests: bool = False,
-) -> type[Any]:
-    """Wrap a pytest runner with one disposable directory per worker process."""
-
-    class BoundedPytestRunner(runner_class):
-        def run_tests(self, *, mutant_name: str | None, tests: Iterable[str]) -> int:
-            if mutant_name is None:
-                if skip_clean_tests:
-                    return 0
-                return super().run_tests(mutant_name=mutant_name, tests=tests)
-            if scratch_root is None:
-                return super().run_tests(mutant_name=mutant_name, tests=tests)
-
-            worker_root = scratch_root / str(os.getpid())
-            worker_root.mkdir(parents=True, exist_ok=True)
-            previous_args = self._pytest_add_cli_args
-            previous_environment = {
-                name: os.environ.get(name) for name in ("TMPDIR", "TMP", "TEMP")
-            }
-            previous_tempfile_dir = tempfile.tempdir
-            self._pytest_add_cli_args = [*previous_args, f"--basetemp={worker_root}"]
-            for name in previous_environment:
-                os.environ[name] = str(worker_root)
-            tempfile.tempdir = None
-            try:
-                return super().run_tests(mutant_name=mutant_name, tests=tests)
-            finally:
-                self._pytest_add_cli_args = previous_args
-                tempfile.tempdir = previous_tempfile_dir
-                for name, value in previous_environment.items():
-                    if value is None:
-                        os.environ.pop(name, None)
-                    else:
-                        os.environ[name] = value
-                shutil.rmtree(worker_root, ignore_errors=True)
-
-    BoundedPytestRunner.__name__ = f"Bounded{runner_class.__name__}"
-    return BoundedPytestRunner
-
-
-def _process_is_alive(pid: int) -> bool:
-    """Return whether a process exists without inspecting unrelated processes."""
-
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
-def _remove_finished_worker_dirs(scratch_root: Path) -> None:
-    """Remove only numeric worker directories whose exact PID has exited."""
-
-    if not scratch_root.is_dir():
-        return
-    for worker_root in scratch_root.iterdir():
-        if worker_root.is_symlink() or not worker_root.is_dir():
-            continue
-        try:
-            pid = int(worker_root.name)
-        except ValueError:
-            continue
-        if not _process_is_alive(pid):
-            shutil.rmtree(worker_root, ignore_errors=True)
-
-
-class _MutationScratchJanitor:
-    """Keep abandoned hard-timeout directories from accumulating on the SSD."""
-
-    def __init__(self, scratch_root: Path, *, interval_s: float = 1.0) -> None:
-        self.scratch_root = scratch_root
-        self.interval_s = interval_s
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
-
-    def __enter__(self) -> _MutationScratchJanitor:
-        self.scratch_root.mkdir(parents=True, exist_ok=True)
-        _remove_finished_worker_dirs(self.scratch_root)
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join()
-        _remove_finished_worker_dirs(self.scratch_root)
-
-    def _run(self) -> None:
-        while not self._stop.wait(self.interval_s):
-            _remove_finished_worker_dirs(self.scratch_root)
-
-
-@contextmanager
-def _bounded_runner_patch(
-    mutmut_main: Any, scratch_root: Path | None, *, skip_clean_tests: bool = False
-):
-    """Install the bounded runner only while mutmut executes mutant workers."""
-
-    if scratch_root is None and not skip_clean_tests:
-        yield
-        return
-    original_runner = mutmut_main.PytestRunner
-    mutmut_main.PytestRunner = bounded_pytest_runner(
-        original_runner, scratch_root, skip_clean_tests=skip_clean_tests
-    )
-    try:
-        yield
-    finally:
-        mutmut_main.PytestRunner = original_runner
 
 
 def test_priority(
@@ -448,15 +374,11 @@ def recorded_associations(stats: Mapping[str, Any], path: Path) -> dict[str, tup
         function_name: tuple(sorted(stats["tests_by_mangled_function_name"].get(function_name, ())))
         for function_name in stats["function_hashes"]
     }
-    path.write_text(
-        json.dumps(
-            {name: list(tests) for name, tests in recorded.items()},
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
+    write_json_report(
+        path,
+        {name: list(tests) for name, tests in recorded.items()},
+        indent=None,
+        separators=(",", ":"),
     )
     return recorded
 
@@ -466,9 +388,11 @@ def _read_stats() -> dict[str, Any]:
 
 
 def _write_stats(stats: Mapping[str, Any]) -> None:
-    _stats_path().write_text(
-        json.dumps(dict(stats), ensure_ascii=False, indent=4) + "\n",
-        encoding="utf-8",
+    write_json_report(
+        _stats_path(),
+        dict(stats),
+        indent=4,
+        sort_keys=False,
     )
 
 
@@ -555,7 +479,32 @@ def run_gate(
     changed_lines: Mapping[str, Sequence[int]] | None = None,
 ) -> None:
     """Escalate mutation triage, then confirm every selected survivor exactly."""
+    run = _prepare_mutation_run(
+        max_children,
+        coverage_file=coverage_file,
+        only_mutate=only_mutate,
+        test_selection=test_selection,
+        changed_lines=changed_lines,
+    )
+    _execute_mutation_run(
+        run,
+        max_children=max_children,
+        fast_tests_per_function=fast_tests_per_function,
+        mutation_batch_size=mutation_batch_size,
+        only_mutate=only_mutate,
+        test_selection=test_selection,
+        changed_lines=changed_lines,
+    )
 
+
+def _prepare_mutation_run(
+    max_children: int,
+    *,
+    coverage_file: Path,
+    only_mutate: Sequence[str],
+    test_selection: Sequence[str],
+    changed_lines: Mapping[str, Sequence[int]] | None,
+) -> MutationRun:
     import mutmut
     import mutmut.__main__ as mutmut_main
 
@@ -566,82 +515,194 @@ def run_gate(
         changed_lines=changed_lines,
     )
     _verify_mutmut_can_fail(runner, test_selection)
-
     stats = _read_stats()
     durations = stats["duration_by_test"]
-    full_associations = complete_associations(
-        recorded_associations(stats, _recorded_path()), durations
-    )
-    if changed_lines is not None:
-        selected_functions = mutated_function_names(Path("mutants"))
-        if selected_functions:
-            full_associations = {
-                name: selection
-                for name, selection in full_associations.items()
-                if name in selected_functions
-            }
-    # Prefer the exact covering-test set; keep the recorded selection wherever
-    # coverage has nothing to say, because running more tests is always sound.
+    associations = complete_associations(recorded_associations(stats, _recorded_path()), durations)
+    associations = _scope_associations(associations, changed_lines)
+    associations = _prefer_coverage_associations(associations, coverage_file)
+    return MutationRun(runner, mutmut, mutmut_main, durations, associations)
+
+
+def _scope_associations(
+    associations: Mapping[str, Sequence[str]],
+    changed_lines: Mapping[str, Sequence[int]] | None,
+) -> Mapping[str, Sequence[str]]:
+    if changed_lines is None:
+        return associations
+    selected_functions = mutated_function_names(Path("mutants"))
+    if not selected_functions:
+        return associations
+    return {
+        name: selection for name, selection in associations.items() if name in selected_functions
+    }
+
+
+def _prefer_coverage_associations(
+    associations: Mapping[str, Sequence[str]], coverage_file: Path
+) -> Mapping[str, Sequence[str]]:
+    # If coverage has no answer for a function, its recorded selection stays authoritative.
     covered = coverage_selection(coverage_file)
-    if covered:
-        full_associations = {
-            name: covered.get(name) or selection for name, selection in full_associations.items()
-        }
+    if not covered:
+        return associations
+    return {name: covered.get(name) or selection for name, selection in associations.items()}
 
-    original_forced_fail = mutmut_main.run_forced_fail_test
 
-    def skip_forced_fail_test(_runner: Any) -> None:
-        return None
+def _skip_forced_fail_test(_runner: Any) -> None:
+    return None
 
-    mutmut_main.run_forced_fail_test = cast(Any, skip_forced_fail_test)
-    scratch_base = os.environ.get("MUTATION_TMP_ROOT")
-    scratch_root = Path(scratch_base) / str(os.getpid()) if scratch_base is not None else None
+
+def _execute_mutation_run(
+    run: MutationRun,
+    *,
+    max_children: int,
+    fast_tests_per_function: int,
+    mutation_batch_size: int | None,
+    only_mutate: Sequence[str],
+    test_selection: Sequence[str],
+    changed_lines: Mapping[str, Sequence[int]] | None,
+) -> None:
+    main = run.mutmut_main
+    original_forced_fail = main.run_forced_fail_test
+    main.run_forced_fail_test = cast(Any, _skip_forced_fail_test)
     try:
-        os.environ["MUTANT_UNDER_TEST"] = ""
-        clean_tests = clean_test_selection(full_associations)
-        if runner.run_tests(mutant_name=None, tests=clean_tests) != 0:
-            raise SystemExit("clean mutation preflight failed")
-        with (
-            _MutationScratchJanitor(scratch_root) if scratch_root is not None else nullcontext(),
-            _bounded_runner_patch(mutmut_main, scratch_root, skip_clean_tests=True),
-        ):
-            # ``_prepare_mutmut`` already collected the current associations.
-            # Mutmut's private ``_run`` recollects them for every escalation;
-            # keep the explicit maps below authoritative and avoid paying for
-            # another full pytest invocation at each stage.
-            original_collect_or_load_stats = mutmut_main.collect_or_load_stats
-            mutmut_main.collect_or_load_stats = cast(Any, lambda *_args, **_kwargs: None)
-            try:
-                for max_tests in escalation_stages(fast_tests_per_function):
-                    selection = (
-                        full_associations
-                        if max_tests is None
-                        else trim_associations(full_associations, durations, max_tests=max_tests)
-                    )
-                    _write_stats(_replace_associations(_read_stats(), selection))
-                    remaining = unresolved_mutants(Path("mutants"))
-                    if not remaining:
-                        break
-                    for mutant_batch in mutation_batches(remaining, batch_size=mutation_batch_size):
-                        # Load the just-written selection instead of reusing the prior pass's map.
-                        mutmut._reset_globals()
-                        _configure_mutmut(
-                            mutmut,
-                            only_mutate=only_mutate,
-                            test_selection=test_selection,
-                            changed_lines=changed_lines,
-                        )
-                        mutmut.tests_by_mangled_function_name.clear()
-                        mutmut.tests_by_mangled_function_name.update(
-                            {name: set(tests) for name, tests in selection.items()}
-                        )
-                        mutmut.duration_by_test.clear()
-                        mutmut.duration_by_test.update(durations)
-                        mutmut_main._run(mutant_batch, max_children)
-            finally:
-                mutmut_main.collect_or_load_stats = original_collect_or_load_stats
+        _run_clean_preflight(run)
+        _run_mutation_passes(
+            run,
+            max_children=max_children,
+            fast_tests_per_function=fast_tests_per_function,
+            mutation_batch_size=mutation_batch_size,
+            only_mutate=only_mutate,
+            test_selection=test_selection,
+            changed_lines=changed_lines,
+        )
     finally:
-        mutmut_main.run_forced_fail_test = cast(Any, original_forced_fail)
+        main.run_forced_fail_test = original_forced_fail
+
+
+def _run_clean_preflight(run: MutationRun) -> None:
+    os.environ["MUTANT_UNDER_TEST"] = ""
+    clean_tests = clean_test_selection(run.associations)
+    if run.runner.run_tests(mutant_name=None, tests=clean_tests) != 0:
+        raise SystemExit("clean mutation preflight failed")
+
+
+def _run_mutation_passes(
+    run: MutationRun,
+    *,
+    max_children: int,
+    fast_tests_per_function: int,
+    mutation_batch_size: int | None,
+    only_mutate: Sequence[str],
+    test_selection: Sequence[str],
+    changed_lines: Mapping[str, Sequence[int]] | None,
+) -> None:
+    scratch_root = _mutation_scratch_root()
+    janitor = _MutationScratchJanitor(scratch_root) if scratch_root is not None else nullcontext()
+    with janitor, _bounded_runner_patch(run.mutmut_main, scratch_root, skip_clean_tests=True):
+        _run_escalation_stages(
+            run,
+            max_children=max_children,
+            fast_tests_per_function=fast_tests_per_function,
+            mutation_batch_size=mutation_batch_size,
+            only_mutate=only_mutate,
+            test_selection=test_selection,
+            changed_lines=changed_lines,
+        )
+
+
+def _mutation_scratch_root() -> Path | None:
+    scratch_base = os.environ.get("MUTATION_TMP_ROOT")
+    return Path(scratch_base) / str(os.getpid()) if scratch_base is not None else None
+
+
+def _run_escalation_stages(
+    run: MutationRun,
+    *,
+    max_children: int,
+    fast_tests_per_function: int,
+    mutation_batch_size: int | None,
+    only_mutate: Sequence[str],
+    test_selection: Sequence[str],
+    changed_lines: Mapping[str, Sequence[int]] | None,
+) -> None:
+    main = run.mutmut_main
+    original_collect = main.collect_or_load_stats
+    main.collect_or_load_stats = cast(Any, lambda *_args, **_kwargs: None)
+    try:
+        for max_tests in escalation_stages(fast_tests_per_function):
+            selection = _association_stage(run, max_tests)
+            _write_stats(_replace_associations(_read_stats(), selection))
+            remaining = unresolved_mutants(Path("mutants"))
+            if not remaining:
+                break
+            _run_mutant_batches(
+                run,
+                remaining,
+                selection,
+                max_children=max_children,
+                mutation_batch_size=mutation_batch_size,
+                only_mutate=only_mutate,
+                test_selection=test_selection,
+                changed_lines=changed_lines,
+            )
+    finally:
+        main.collect_or_load_stats = original_collect
+
+
+def _association_stage(run: MutationRun, max_tests: int | None) -> Mapping[str, Sequence[str]]:
+    if max_tests is None:
+        return run.associations
+    return trim_associations(run.associations, run.durations, max_tests=max_tests)
+
+
+def _run_mutant_batches(
+    run: MutationRun,
+    remaining: Sequence[str],
+    selection: Mapping[str, Sequence[str]],
+    *,
+    max_children: int,
+    mutation_batch_size: int | None,
+    only_mutate: Sequence[str],
+    test_selection: Sequence[str],
+    changed_lines: Mapping[str, Sequence[int]] | None,
+) -> None:
+    for mutant_batch in mutation_batches(remaining, batch_size=mutation_batch_size):
+        _run_mutant_batch(
+            run,
+            mutant_batch,
+            selection,
+            max_children=max_children,
+            only_mutate=only_mutate,
+            test_selection=test_selection,
+            changed_lines=changed_lines,
+        )
+
+
+def _run_mutant_batch(
+    run: MutationRun,
+    mutant_batch: Sequence[str],
+    selection: Mapping[str, Sequence[str]],
+    *,
+    max_children: int,
+    only_mutate: Sequence[str],
+    test_selection: Sequence[str],
+    changed_lines: Mapping[str, Sequence[int]] | None,
+) -> None:
+    # Mutmut resets its process state per batch; restore the gate's exact map after each reset.
+    run.mutmut._reset_globals()
+    _configure_mutmut(
+        run.mutmut,
+        only_mutate=only_mutate,
+        test_selection=test_selection,
+        changed_lines=changed_lines,
+    )
+    run.mutmut.tests_by_mangled_function_name.clear()
+    run.mutmut.tests_by_mangled_function_name.update(
+        {name: set(tests) for name, tests in selection.items()}
+    )
+    run.mutmut.duration_by_test.clear()
+    run.mutmut.duration_by_test.update(run.durations)
+    run.mutmut_main._run(mutant_batch, max_children)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -708,54 +769,58 @@ def _parse_args_from(argv: Sequence[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main() -> None:
-    args = _parse_args()
+def _validate_runner_options(args: argparse.Namespace) -> None:
     if args.max_children < 1:
         raise SystemExit("--max-children must be positive")
     if args.mutation_batch_size is not None and args.mutation_batch_size < 1:
         raise SystemExit("--mutation-batch-size must be positive")
+
+
+def _read_scope_lines(path: Path, description: str) -> tuple[str, ...]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        raise SystemExit(f"cannot read {description}: {error}") from error
+    return tuple(dict.fromkeys(line.strip() for line in lines if line.strip()))
+
+
+def _read_changed_scope(path: Path) -> dict[str, tuple[int, ...]]:
+    try:
+        diff = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise SystemExit(f"cannot read changed lines file: {error}") from error
+    changed_lines = parse_changed_lines(diff)
+    if not changed_lines:
+        raise SystemExit("changed lines file contains no Python source changes")
+    return with_probe_canary(changed_lines)
+
+
+def _scope_from_args(args: argparse.Namespace) -> GateScope:
     only_mutate = tuple(args.only_mutate)
     if args.only_mutate_file is not None:
-        try:
-            only_mutate = tuple(
-                dict.fromkeys(
-                    line.strip()
-                    for line in args.only_mutate_file.read_text(encoding="utf-8").splitlines()
-                    if line.strip()
-                )
-            )
-        except OSError as error:
-            raise SystemExit(f"cannot read mutation scope file: {error}") from error
+        only_mutate = _read_scope_lines(args.only_mutate_file, "mutation scope file")
     test_selection = tuple(args.test_selection)
     if args.test_selection_file is not None:
-        try:
-            test_selection = tuple(
-                dict.fromkeys(
-                    line.strip()
-                    for line in args.test_selection_file.read_text(encoding="utf-8").splitlines()
-                    if line.strip()
-                )
-            )
-        except OSError as error:
-            raise SystemExit(f"cannot read mutation test selection file: {error}") from error
-    changed_lines: dict[str, tuple[int, ...]] | None = None
+        test_selection = _read_scope_lines(args.test_selection_file, "mutation test selection file")
+    changed_lines = None
     if args.changed_lines_file is not None:
-        try:
-            changed_lines = parse_changed_lines(args.changed_lines_file.read_text(encoding="utf-8"))
-        except OSError as error:
-            raise SystemExit(f"cannot read changed lines file: {error}") from error
-        if not changed_lines:
-            raise SystemExit("changed lines file contains no Python source changes")
-        changed_lines = with_probe_canary(changed_lines)
+        changed_lines = _read_changed_scope(args.changed_lines_file)
         only_mutate = tuple(changed_lines)
+    return GateScope(only_mutate, test_selection, changed_lines)
+
+
+def main() -> None:
+    args = _parse_args()
+    _validate_runner_options(args)
+    scope = _scope_from_args(args)
     run_gate(
         max_children=args.max_children,
         fast_tests_per_function=args.fast_tests_per_function,
         coverage_file=args.coverage_file,
         mutation_batch_size=args.mutation_batch_size,
-        only_mutate=only_mutate,
-        test_selection=test_selection,
-        changed_lines=changed_lines,
+        only_mutate=scope.only_mutate,
+        test_selection=scope.test_selection,
+        changed_lines=scope.changed_lines,
     )
 
 

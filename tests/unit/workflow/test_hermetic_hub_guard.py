@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+
+from tests.helpers.huggingface import PathInfo as _PathInfo
 
 
 class _RecordingHubApi:
@@ -28,9 +31,9 @@ class _RecordingHubApi:
         self.calls.append(("whoami", (), {}))
         return self._whoami_value
 
-    def repo_info(self, *_a: Any, **_kw: Any) -> _RepoInfo:
+    def repo_info(self, *_a: Any, **_kw: Any) -> SimpleNamespace:
         self.calls.append(("repo_info", _a, _kw))
-        return _RepoInfo(self._repo_sha)
+        return SimpleNamespace(sha=self._repo_sha)
 
     def auth_check(self, repo_id: str, *, repo_type: str = "dataset", write: bool = False) -> None:
         self.calls.append(("auth_check", (repo_id, repo_type, write), {}))
@@ -64,19 +67,6 @@ class _RecordingHubApi:
     ) -> str:
         self.calls.append(("hf_hub_download", (repo_id, filename), {"revision": revision}))
         return str(Path(os.devnull))
-
-
-class _RepoInfo:
-    def __init__(self, sha: str) -> None:
-        self.sha = sha
-
-
-class _PathInfo:
-    def __init__(self, *, path: str, size: int = 0, sha: str = "0" * 64) -> None:
-        self.path = path
-        self.size = size
-        self.sha = sha
-        self.lfs = None
 
 
 def _install_hermetic_hub(monkeypatch: pytest.MonkeyPatch) -> _RecordingHubApi:

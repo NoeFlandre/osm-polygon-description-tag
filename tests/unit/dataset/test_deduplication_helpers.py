@@ -42,6 +42,7 @@ from osm_polygon_description_tag.dataset.manifest import (
 from osm_polygon_description_tag.dataset.schema import SCHEMA
 from osm_polygon_description_tag.dataset.storage import validate_geoparquet, write_geoparquet
 from tests.conftest import make_record_dict
+from tests.helpers.dataset import two_deduplication_records as _two_records
 
 
 def _manifest_for(
@@ -77,23 +78,6 @@ def _manifest_for(
     )
     write_manifest(manifest, data_root / "manifests" / f"{stem}.manifest.json")
     return manifest
-
-
-def _two_records() -> list[dict[str, object]]:
-    return [
-        make_record_dict(
-            Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-            {"description": "one"},
-            osm_id=1,
-            source_pbf="a.osm.pbf",
-        ),
-        make_record_dict(
-            Polygon([(2, 2), (2, 3), (3, 3), (3, 2)]),
-            {"description": "two"},
-            osm_id=2,
-            source_pbf="a.osm.pbf",
-        ),
-    ]
 
 
 @pytest.mark.parametrize(

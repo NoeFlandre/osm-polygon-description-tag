@@ -55,5 +55,6 @@ nav:
   - Language detection: language-detection.md
   - Language rollout status: language-rollout-status.md
   - CLI reference: cli.md
+  - Code quality and duplication: quality-and-duplication.md
   - Development: development.md
   - Architecture: architecture.md

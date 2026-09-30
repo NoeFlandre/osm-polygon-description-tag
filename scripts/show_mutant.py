@@ -27,6 +27,7 @@ import difflib
 import sys
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 MUTANT_MARKER = "__mutmut_"
 SOURCE_ROOT = Path("src")
@@ -78,23 +79,80 @@ def _functions_in(source: str) -> dict[str, str]:
 def mutant_diff(mutated_source: str, function_part: str, mutant_id: str) -> str:
     """Return the unified diff between a function's original and mutated body."""
     functions = _functions_in(mutated_source)
+    original, mutated = _mutant_functions(functions, function_part, mutant_id)
+    changed = _changed_function_lines(original, mutated)
+    return "\n".join(changed) if changed else "(no textual difference: equivalent mutant)"
+
+
+def _mutant_functions(
+    functions: dict[str, str], function_part: str, mutant_id: str
+) -> tuple[str, str]:
     original = functions.get(f"{function_part}{MUTANT_MARKER}orig")
     mutated = functions.get(f"{function_part}{MUTANT_MARKER}{mutant_id}")
     if original is None:
         raise KeyError(f"no mutants generated for {function_part}")
     if mutated is None:
         raise KeyError(f"no mutant {mutant_id} for {function_part}")
-    changed = [
-        line
-        for line in difflib.unified_diff(
-            original.splitlines(), mutated.splitlines(), lineterm="", n=0
+    return original, mutated
+
+
+def _changed_function_lines(original: str, mutated: str) -> list[str]:
+    diff = difflib.unified_diff(original.splitlines(), mutated.splitlines(), lineterm="", n=0)
+    # The renamed def line differs for every mutant and says nothing.
+    return [line for line in diff if _is_mutant_change(line)]
+
+
+def _is_mutant_change(line: str) -> bool:
+    if not line.startswith(("+", "-")) or line.startswith(("+++", "---")):
+        return False
+    return MUTANT_MARKER not in line
+
+
+def _mutants_by_module(names: list[str]) -> dict[str, list[tuple[str, str, str]]]:
+    by_module: dict[str, list[tuple[str, str, str]]] = defaultdict(list)
+    for name in names:
+        module_name, function_part, mutant_id = split_mutant_name(name)
+        by_module[module_name].append((name, function_part, mutant_id))
+    return by_module
+
+
+def _print_module_mutants(
+    module_name: str,
+    entries: list[tuple[str, str, str]],
+    *,
+    source_root: Path,
+    mutate_file_contents: Any,
+) -> bool:
+    path = module_path(module_name, source_root=source_root)
+    source = path.read_text(encoding="utf-8")
+    mutated_source = mutate_file_contents(str(path), source).code
+    failed = False
+    for name, function_part, mutant_id in entries:
+        print(f"=== {name}\n--- {path}")
+        try:
+            print(mutant_diff(mutated_source, function_part, mutant_id))
+        except KeyError as error:
+            failed = True
+            print(f"!!! {error}", file=sys.stderr)
+    return failed
+
+
+def _print_mutants(names: list[str], source_root: Path) -> bool:
+    # Imported here so --help works without mutmut installed.
+    from mutmut.__main__ import mutate_file_contents
+
+    failed = False
+    for module_name, entries in _mutants_by_module(names).items():
+        failed = (
+            _print_module_mutants(
+                module_name,
+                entries,
+                source_root=source_root,
+                mutate_file_contents=mutate_file_contents,
+            )
+            or failed
         )
-        if line.startswith(("+", "-"))
-        and not line.startswith(("+++", "---"))
-        # The renamed def line differs for every mutant and says nothing.
-        and MUTANT_MARKER not in line
-    ]
-    return "\n".join(changed) if changed else "(no textual difference: equivalent mutant)"
+    return failed
 
 
 def main() -> None:
@@ -107,27 +165,7 @@ def main() -> None:
         help="directory holding the package sources (default: src)",
     )
     args = parser.parse_args()
-
-    # Imported here so --help works without mutmut installed.
-    from mutmut.__main__ import mutate_file_contents
-
-    by_module: dict[str, list[tuple[str, str, str]]] = defaultdict(list)
-    for name in args.mutants:
-        module_name, function_part, mutant_id = split_mutant_name(name)
-        by_module[module_name].append((name, function_part, mutant_id))
-
-    failed = False
-    for module_name, entries in by_module.items():
-        path = module_path(module_name, source_root=args.source_root)
-        mutated_source = mutate_file_contents(str(path), path.read_text(encoding="utf-8")).code
-        for name, function_part, mutant_id in entries:
-            print(f"=== {name}\n--- {path}")
-            try:
-                print(mutant_diff(mutated_source, function_part, mutant_id))
-            except KeyError as error:
-                failed = True
-                print(f"!!! {error}", file=sys.stderr)
-    if failed:
+    if _print_mutants(args.mutants, args.source_root):
         raise SystemExit(1)
 
 

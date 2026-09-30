@@ -5,13 +5,10 @@ import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Sequence
-from datetime import UTC, datetime
 from pathlib import Path
 
 import matplotlib
 import pytest
-from shapely.geometry import Polygon
 
 from osm_polygon_description_tag.dataset.languages.checkpoint import (
     WorkerBusyError,
@@ -30,13 +27,10 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
     prepare_snapshot,
 )
 from osm_polygon_description_tag.dataset.languages.worker import ProcessingBudget, process_shard
-from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.workflow import grid_operator
 from osm_polygon_description_tag.workflow.grid_operator import (
     GridOperatorError,
     JobBundle,
-    JobPaths,
-    SubmissionIntent,
     build_bundle_transfer_argv,
     build_result_retrieval_argv,
     bundle_for_shard,
@@ -52,14 +46,16 @@ from osm_polygon_description_tag.workflow.grid_operator import (
 from osm_polygon_description_tag.workflow.grid_policy import (
     MAX_PROCESSING_SECONDS,
     MAX_WALLTIME_SECONDS,
-    PolicyDecision,
-    PolicyEvidence,
-    PolicyVerdict,
 )
 from osm_polygon_description_tag.workflow.grid_scheduler import (
     CommandResult,
 )
-from tests.conftest import make_record_dict
+from tests.helpers.grid_operator import (
+    allowed_policy_verdict as _verdict,
+)
+from tests.helpers.grid_operator import (
+    queued_command_runner as _runner,
+)
 from tests.helpers.messages import exactly
 from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH, fake_splitter
 
@@ -72,46 +68,6 @@ REMOTE = {
     "remote_run_dir": "/scratch/staging/run",
     "sat_model_path": "/home/user/models/sat-3l-sm/model.safetensors",
 }
-
-
-def _verdict(
-    decision: PolicyDecision = PolicyDecision.ALLOWED, *, captured_at: datetime | None = None
-) -> PolicyVerdict:
-    return PolicyVerdict(
-        decision,
-        ("test verdict",),
-        PolicyEvidence(0, False, True, (), captured_at=captured_at or datetime.now(UTC)),
-    )
-
-
-def _two_shard_prepared(tmp_path: Path) -> tuple[Path, SnapshotManifest, dict[str, Path]]:
-    source = tmp_path / "source"
-    source.mkdir(parents=True)
-    for shard in (SHARD, "other.parquet"):
-        write_geoparquet(
-            (
-                make_record_dict(
-                    Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
-                    {"description": f"A synthetic description {index}"},
-                    osm_id=index + 1,
-                )
-                for index in range(2)
-            ),
-            source / shard,
-            batch_size=1,
-        )
-    run = tmp_path / "run"
-    snapshot = prepare_snapshot(source, run, code_fingerprint="a" * 64, lock_fingerprint="b" * 64)
-    return run, snapshot, {"source": source, "run": run}
-
-
-def _runner(results: list[CommandResult], observed: list[tuple[str, ...]] | None = None) -> object:
-    def _run(argv: Sequence[str], timeout: float) -> CommandResult:
-        if observed is not None:
-            observed.append(tuple(argv))
-        return results.pop(0)
-
-    return _run
 
 
 def test_a_bundle_binds_code_lock_and_one_shard(
@@ -834,21 +790,3 @@ def test_result_retrieval_binds_labels_and_the_exact_remote_source(tmp_path: Pat
         f"/scratch/runX/shards/{key}/"
     )
     assert build_result_retrieval_argv("/", staging, SHARD)[-2] == f"//shards/{key}/"
-
-
-def _write_submitted_intent(paths: JobPaths, bundle: JobBundle) -> None:
-    """Record a terminal, acknowledged first attempt so a retry may be planned."""
-    intent = SubmissionIntent(
-        bundle_id=bundle.bundle_id,
-        shard=bundle.shard,
-        job_name=f"lang-{bundle.bundle_id[:16]}",
-        walltime_seconds=MAX_WALLTIME_SECONDS,
-        cores=1,
-        recorded_at="2026-09-09T21:00:00+00:00",
-        job_id=6917617,
-        outcome="submitted",
-        terminal_state="terminated",
-        reconciled_at="2026-09-09T21:05:00+00:00",
-        result_acknowledged=True,
-    )
-    paths.intent.write_text(json.dumps(intent.to_payload()), encoding="utf-8")

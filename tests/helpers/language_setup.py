@@ -1,11 +1,14 @@
 """Canonical synthetic source and run builders for language dataset tests."""
 
+import json
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pyarrow.parquet as pq
 from shapely.geometry import Polygon
 
+from osm_polygon_description_tag.dataset.languages.checkpoint import shard_paths
 from osm_polygon_description_tag.dataset.languages.detector import LanguageDetectionCallable
 from osm_polygon_description_tag.dataset.languages.models import LanguageModelIdentity
 from osm_polygon_description_tag.dataset.languages.snapshot import (
@@ -20,6 +23,22 @@ from tests.helpers.parquet import write_description_shard
 
 LanguageTags = Callable[[int], dict[str, str]]
 DEFAULT_SHARD = "region.parquet"
+
+
+def rewrite_snapshot(run: Path, mutate: Callable[[dict[str, Any]], None]) -> None:
+    """Apply one targeted mutation to the immutable snapshot JSON fixture."""
+    path = run / "snapshot.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    mutate(payload)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def tamper_checkpoint(run: Path, **changes: object) -> None:
+    """Change selected fields in the standard language checkpoint fixture."""
+    path = shard_paths(run, DEFAULT_SHARD).checkpoint
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload.update(changes)
+    path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 class LanguageRunSetup:
