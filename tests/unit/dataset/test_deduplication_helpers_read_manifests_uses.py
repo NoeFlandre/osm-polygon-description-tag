@@ -114,7 +114,7 @@ def test_resume_staged_promotes_state_and_returns_deduplicated_result(
     monkeypatch.setattr(
         dedup_module,
         "_input_hashes",
-        lambda paths: (hashed_paths.extend(paths) or {"a.parquet": "output-sha"}),
+        lambda paths: hashed_paths.extend(paths) or {"a.parquet": "output-sha"},
     )
     hook = object()
 
