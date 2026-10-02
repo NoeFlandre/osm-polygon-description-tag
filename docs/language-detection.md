@@ -1,146 +1,153 @@
 # Language detection runbook
 
-This page covers the additive `language-v1` annotation pipeline: what it
-produces, how to run it locally, how to run one bounded Grid'5000 job, and how
-to publish the result. The default dataset, its GeoParquet files, and schema 3
-are never modified by anything described here.
+This page describes the additive `language-v1` annotation pipeline. It explains
+what the pipeline produces. It explains how to run it locally, how to run one
+bounded Grid'5000 job, and how to publish the result. Nothing on this page
+changes the default dataset, its GeoParquet files, or schema 3.
 
 ## What is annotated
 
 The counting unit is **one description value, not one polygon**.
 
-For every row of the source GeoParquet, the exact `description` tag and every
-`description:<suffix>` tag is read from the authoritative raw `tags` column. An
-object carrying a base `description` and two localized values contributes three
-annotation rows.
+For each row of the source GeoParquet, the tool reads the exact `description`
+tag and each `description:<suffix>` tag. It reads them from the authoritative
+raw `tags` column. An object with a base `description` and two localized values
+adds three annotation rows.
 
-- Localized suffixes are treated as **opaque**. `description:fr` is not assumed
-  to be French; the annotation describes the text, not the key.
-- Null tag values are skipped. Empty and whitespace-only values are kept and
-  classified as `non_linguistic`.
-- The original text is preserved byte-for-byte in the output.
+- The tool treats localized suffixes as **opaque**. It does not assume that
+  `description:fr` is French. The annotation describes the text, not the key.
+- The tool skips null tag values. It keeps empty values and whitespace-only
+  values. It classifies them as `non_linguistic`.
+- The output keeps the original text byte-for-byte.
 
-Because a single object can carry several description values, the number of
-annotations is expected to exceed the number of polygons. Derive the actual
-figure from `language-v1/stats.json` after a run; do not assume it.
+One object can have several description values. Thus the number of annotations
+is expected to be larger than the number of polygons. After a run, get the
+actual number from `language-v1/stats.json`. Do not assume it.
 
 ## Output schema
 
-One row per description value, in `language-v1/data/*.parquet`:
+The output has one row for each description value, in `language-v1/data/*.parquet`:
 
 | Column | Type | Meaning |
 | --- | --- | --- |
 | `description_identity` | string | SHA-256 over `osm_type`, `osm_id`, exact tag key, and text hash |
-| `source_pbf` | string | Provenance only; not part of the identity |
+| `source_pbf` | string | Provenance only. It is not part of the identity |
 | `osm_type` | string | `way` or `relation` |
 | `osm_id` | int64 | OSM object identifier |
 | `tag_key` | string | `description` or `description:<suffix>` |
 | `original_text` | string | The exact original value |
 | `text_sha256` | string | SHA-256 of the original text |
-| `language_code` | string (nullable) | ISO 639-3, only when `status` is `detected` |
-| `top_score` | float64 (nullable) | **Raw** detector score, clamped to 1.0 only where float32 rounding exceeded it |
+| `language_code` | string (nullable) | ISO 639-3. Set only when `status` is `detected` |
+| `top_score` | float64 (nullable) | **Raw** detector score. The tool clamps it to 1.0 only where float32 rounding exceeded 1.0 |
 | `runner_up_score` | float64 (nullable) | **Raw** runner-up score |
 | `margin` | float64 (nullable) | `top_score - runner_up_score` |
 | `status` | string | `detected`, `uncertain`, or `non_linguistic` |
-| `reason` | string | Why that status was assigned |
-| `snapshot_id` | string | The immutable input snapshot this row came from |
+| `reason` | string | The reason for that status |
+| `snapshot_id` | string | The immutable input snapshot of this row |
 | `model_config_fingerprint` | string | Detector, policy, splitter, and the splittable language set |
 | `split_status` | string | `split`, `unsupported_language`, or `not_detected` |
-| `split_reason` | string | Why that split status was assigned |
-| `sentence_count` | int32 | Number of sentences; `0` whenever nothing was split |
-| `sentences` | list\<string\> | The sentences, verbatim; empty unless `split_status` is `split` |
+| `split_reason` | string | The reason for that split status |
+| `sentence_count` | int32 | Number of sentences. It is `0` when the tool did not split the text |
+| `sentences` | list\<string\> | The sentences, verbatim. It is empty unless `split_status` is `split` |
 
 ## Detector pipeline
 
 The production detector is a deterministic cascade:
 
-- Lingua 2.2.0 is the primary detector and applies only structural checks (length, ties, mixed text); confidence is not gated.
-- The pinned GlotLID v3 model is called only when Lingua returns `uncertain`.
-- If GlotLID also returns `uncertain`, the original Lingua result is retained.
-- A fallback-resolved row has `reason=fallback_glotlid_v3`; all other reasons
-  retain their normal meaning.
+- Lingua 2.2.0 is the primary detector. It applies only structural checks
+  (length, ties, mixed text). The cascade does not gate the confidence.
+- The tool calls the pinned GlotLID v3 model only when Lingua returns
+  `uncertain`.
+- If GlotLID also returns `uncertain`, the tool keeps the original Lingua
+  result.
+- A row that the fallback resolves has `reason=fallback_glotlid_v3`. All other
+  reasons keep their normal meaning.
 
-One detail of the fallback's arithmetic is visible in the data. fastText
-accumulates its softmax in float32, so a confident prediction comes back
-marginally over 1.0 --- 1.0000100135803223 was observed on 12 of 194 Afghan
-descriptions. A probability above one is rounding, not a score, so values
-within 1e-4 of 1.0 are clamped to exactly 1.0 and anything beyond that is still
-refused. Scores inside the interval are never altered.
+You can see one detail of the fallback arithmetic in the data. fastText
+accumulates its softmax in float32. Thus a confident prediction can be slightly
+over 1.0. The value 1.0000100135803223 occurred in 12 of 194 Afghan
+descriptions. A probability above one is a rounding effect. It is not a score.
+The tool clamps the values within 1e-4 of 1.0 to exactly 1.0. It still refuses
+any value beyond that. The tool never changes a score inside the interval.
 
 The fallback artifact is `cis-lmu/glotlid`, file `model_v3.bin`, revision
 `85cd6716494360367b75f642b5bc78667605d0b4`, with SHA-256
-`a818b6bd42a628ab47d3dfc1578c7ea615c45381f3494c42535e31e8c4cafc9e`. Its
-Linux runtime is pinned to `fasttext-numpy2==0.10.2`. The snapshot records this
-identity, so a run cannot silently switch models.
+`a818b6bd42a628ab47d3dfc1578c7ea615c45381f3494c42535e31e8c4cafc9e`. Its Linux
+runtime is pinned to `fasttext-numpy2==0.10.2`. The snapshot records this
+identity. Thus a run cannot change the model without a message.
 
 ## Sentence splitting
 
-Splitting runs in the same pass as detection, not as a second sweep. Cold start
-dominates a Grid'5000 run --- 386 one-shard jobs pay about 6.4 hours of repeated
-model loading against roughly 49 minutes of warm inference --- so a separate
-stage would nearly double the cost to recompute something that is already in
-memory: splitting is a pure function of the text and the detection result.
+The splitting runs in the same pass as the detection. It is not a second sweep.
+The cold start is the main cost of a Grid'5000 run. 386 one-shard jobs pay about
+6.4 hours of repeated model loading. The warm inference takes about 49 minutes.
+A separate stage would almost double the cost. It would compute again something
+that is already in memory. The splitting is a pure function of the text and the
+detection result.
 
 The splitter is SaT-3l-sm (`segment-any-text/sat-3l-sm`, revision
 `137da054051ad9f1eac42025f758db4ac9f22535`, `model.safetensors` with SHA-256
-`3e19cb0e5dbe9790d37d918d7e87880cb6577d497833f0f0627d80ae6ca1fe90`), run
+`3e19cb0e5dbe9790d37d918d7e87880cb6577d497833f0f0627d80ae6ca1fe90`). It runs
 through `wtpsplit==2.2.1`.
 
-**A description is split only when its language was detected *and* the splitter
-was trained on that language.** SaT is language-agnostic at inference --- it
-takes no language argument, and `lang_code` in the library's API selects a style
-adapter this configuration does not use --- so the 85 languages of its
-supervised mixture are where it is *known competent*, and that list is the gate.
-It is pinned in source rather than read from the installed library, and its
-digest is part of `model_config_fingerprint`, so widening or narrowing it
-changes the run identity instead of quietly changing the dataset.
+**The tool splits a description only when it detected the language *and* the
+team trained the splitter on that language.** SaT is language-agnostic at
+inference. It takes no language argument. In the API of the library,
+`lang_code` selects a style adapter that this configuration does not use. The
+85 languages of its supervised mixture are the languages where it is *known to
+be competent*. That list is the gate. The source pins the list. The tool does
+not read it from the installed library. The digest of the list is part of
+`model_config_fingerprint`. Thus, if you make the list wider or narrower, the
+run identity changes. The dataset does not change without a message.
 
-Detection reports ISO 639-3 and SaT names its languages in ISO 639-1 (except
-Cebuano, which has no 639-1 code), so the two are joined by an explicit table
-that also maps the macrolanguage members a pinned detector actually emits ---
-`nob` and `nno` to `no`, `arb` to `ar`, `cmn` to `zh`. A code the table does not
-cover is unsupported. There is no fallback and no guessing.
+The detection reports ISO 639-3. SaT names its languages in ISO 639-1 (except
+Cebuano, which has no 639-1 code). An explicit table joins the two. The table
+also maps the macrolanguage members that a pinned detector emits: `nob` and
+`nno` to `no`, `arb` to `ar`, `cmn` to `zh`. The tool treats a code that the
+table does not cover as unsupported. There is no fallback and no guessing.
 
-Every row therefore carries one of three outcomes:
+Each row has one of three outcomes:
 
 | `split_status` | When | `sentences` |
 | --- | --- | --- |
-| `split` | Detected, and SaT was trained on that language | The sentences, possibly none |
-| `unsupported_language` | Detected, but outside SaT's 85 | Empty |
+| `split` | Detected, and SaT was trained on that language | The sentences. There can be none |
+| `unsupported_language` | Detected, but outside the 85 languages of SaT | Empty |
 | `not_detected` | `uncertain` or `non_linguistic` | Empty |
 
 `split_reason` names the specific case: `split_sat_3l_sm`,
 `unsupported_language_<iso 639-3>`, or `not_detected_<detection status>`. A
-skipped description is still a complete row and never makes a run incomplete.
+skipped description is still a complete row. It never makes a run incomplete.
 
-Croatian is the clearest example of the gate doing real work: Lingua detects it
-confidently, and SaT was never trained on it, so those descriptions are
-published unsplit with `unsupported_language_hrv`.
+Croatian is the clearest example of the gate at work. Lingua detects it with
+confidence, and the team never trained SaT on it. Thus the tool publishes these
+descriptions unsplit with `unsupported_language_hrv`.
 
 ## Limitations
 
-- `top_score`, `runner_up_score`, and `margin` are **raw detector scores, not
-  calibrated probabilities**. Do not read them as confidence percentages.
-- **No accuracy has been measured on this dataset.** The detector was chosen
-  for its documented suitability on short text and has not been benchmarked
-  here. Treat every label as an unvalidated annotation.
-- **Confidence is not gated.** A minimum score and a minimum margin were
-  removed, so a value is labelled whenever it is long enough, is not an
-  outright tie between the top two candidates, and shows no mixed-language
-  evidence. Low-confidence labels are therefore expected, and `top_score`,
-  `runner_up_score` and `margin` are recorded on every row so consumers can
-  apply their own threshold.
-- Short values are still `uncertain` by design: a minimum letter count is
-  applied before detection is attempted at all.
-- When mixed-language evidence is identified, the result is `uncertain` with
-  reason `mixed_text`. The detector may miss mixed-language text, especially
-  short values.
-- Languages outside the detector's supported set cannot be identified reliably.
-  They may be marked `uncertain` or incorrectly assigned a supported language.
+- `top_score`, `runner_up_score`, and `margin` are **raw detector scores. They
+  are not calibrated probabilities**. Do not read them as confidence
+  percentages.
+- **Nobody measured the accuracy on this dataset.** The team chose the detector
+  for its documented suitability on short text. The team did not benchmark it
+  here. Treat each label as an unvalidated annotation.
+- **The cascade does not gate the confidence.** The team removed the minimum
+  score and the minimum margin. The tool labels a value when it is long enough,
+  when the top two candidates are not an outright tie, and when there is no
+  evidence of mixed language. Thus low-confidence labels are expected. The tool
+  records `top_score`, `runner_up_score`, and `margin` on each row. Consumers
+  can apply their own threshold.
+- Short values are still `uncertain` by design. The tool applies a minimum
+  letter count before it tries the detection at all.
+- When the tool identifies evidence of mixed language, the result is
+  `uncertain` with the reason `mixed_text`. The detector can miss mixed-language
+  text, especially in short values.
+- The detector cannot identify the languages outside its supported set
+  reliably. The tool can mark them `uncertain`. It can also assign a supported
+  language incorrectly.
 
 ## Local setup
 
-The detector is an optional extra so the core dataset build stays free of it:
+The detector is an optional extra. Thus the core dataset build does not need it:
 
 ```bash
 uv sync --frozen --extra language
@@ -148,8 +155,8 @@ uv sync --frozen --extra language
 
 ## Preparation versus execution
 
-The pipeline separates freezing inputs, spending a processing budget, and
-auditing the result, so each is independently repeatable.
+The pipeline separates three tasks: freeze the inputs, use a processing budget,
+and audit the result. You can repeat each task independently.
 
 ### 1. Freeze the input snapshot
 
@@ -157,14 +164,15 @@ auditing the result, so each is independently repeatable.
 uv run osm-polygon-description-tag language prepare --source-root "/path/to/data-root/data" --run-dir "/path/to/data-root/language-run-lingua-glotlid-v3-full" --project-root .
 ```
 
-This writes `snapshot.json`, binding every source Parquet's relative path,
-size, SHA-256, schema identity, and row count, together with the detector
-configuration and the code and `uv.lock` fingerprints.
+This command writes `snapshot.json`. The snapshot binds the relative path, the
+size, the SHA-256, the schema identity, and the row count of each source
+Parquet file. It also binds the detector configuration and the fingerprints of
+the code and of `uv.lock`.
 
-The snapshot identity deliberately **excludes the absolute source root**, so
-staging a shard on another machine does not change it. Re-running `prepare`
-with unchanged inputs is idempotent; if any source file changed, it fails
-rather than silently rewriting the identity.
+The snapshot identity **excludes the absolute source root** on purpose. Thus,
+if you stage a shard on another machine, the identity does not change. If you
+run `prepare` again with unchanged inputs, nothing changes. If a source file
+changed, the command fails. It does not rewrite the identity without a message.
 
 ### 2. Process one shard
 
@@ -176,223 +184,241 @@ uv run osm-polygon-description-tag language run \
   --sat-model-path <sat-3l-sm-dir>
 ```
 
-`run` requires only the selected shard's file to be present, not the whole
-dataset. It streams projected Arrow batches (`source_pbf`, `osm_type`,
-`osm_id`, `tags`) and never loads a whole file or the whole dataset.
-Batch processing and the repeated-text cache are bounded. Exact duplicate
-detection still retains description identities: memory grows with the number
-of annotations in the shard (or selected run during full validation), rather
-than remaining constant for arbitrarily large inputs. Choose small shards;
-the batch-size setting alone does not bound this identity bookkeeping.
-Before inference, the current project source and lockfile must match the frozen
-fingerprints. The detector is built with the snapshot's language scope and its
-configuration fingerprint is checked as well. `--project-root` defaults to the
-current working directory.
+`run` needs only the file of the selected shard. It does not need the whole
+dataset. It streams the projected Arrow batches (`source_pbf`, `osm_type`,
+`osm_id`, `tags`). It never loads a whole file or the whole dataset. The batch
+processing and the cache for repeated text are bounded. The exact duplicate
+detection still keeps the description identities. The memory grows with the
+number of annotations in the shard (or in the selected run during a full
+validation). It does not stay constant for very large inputs. Choose small
+shards. The batch-size setting alone does not bound this identity bookkeeping.
+Before the inference, the current project source and the lockfile must match the
+frozen fingerprints. The tool builds the detector with the language scope of the
+snapshot. It also checks the configuration fingerprint. `--project-root` is the
+current working directory by default.
 
-The run directory is locked for the attempt, so a second local worker is
-refused rather than interleaving commits.
+The tool locks the run directory for the attempt. It refuses a second local
+worker. Thus the commits cannot interleave.
 
-### 3. Audit what was produced
+### 3. Audit what the run produced
 
 ```bash
 uv run osm-polygon-description-tag language validate --run-dir <run-dir>
 ```
 
 `validate` is strictly read-only. It never repairs, deletes, or rewrites
-anything; it reports what is on disk and leaves the decision to you.
+anything. It reports what is on disk. You make the decision.
 
 ## Exact resume and corruption behaviour
 
-Each batch is committed in a fixed order: the annotation part, then its
-receipt, then the checkpoint. Every write fsyncs its contents, renames
-atomically, and then fsyncs the directory.
+The tool commits each batch in a fixed order: the annotation part, then its
+receipt, then the checkpoint. Each write does an fsync of its contents, renames
+the file atomically, and then does an fsync of the directory.
 
 **The checkpoint is the single source of truth.**
 
 | Interruption point | Behaviour on the next run |
 | --- | --- |
-| Before the part is committed | The batch is reprocessed from the last checkpoint |
-| After the part, before the receipt | The part is deterministically rewritten; nothing is adopted |
-| After the receipt, before the checkpoint | Same; the checkpoint does not list it, so it is redone |
-| After the checkpoint | Resumes from exactly that cursor |
+| Before the tool commits the part | The tool processes the batch again from the last checkpoint |
+| After the part, before the receipt | The tool rewrites the part deterministically. It adopts nothing |
+| After the receipt, before the checkpoint | The same. The checkpoint does not list the part, so the tool does it again |
+| After the checkpoint | The run resumes from exactly that cursor |
 
-Part names are derived from the input row offset, so a redone batch overwrites
-its own file rather than creating a duplicate. Uninterrupted output and
-paused-then-resumed output are byte-identical.
+The part names come from the input row offset. Thus a batch that the tool does
+again overwrites its own file. It does not create a duplicate. The output of an
+uninterrupted run and the output of a paused and resumed run are
+byte-identical.
 
-On resume the worker verifies every part the checkpoint lists: the file must
-exist, hash to its receipt, parse as the frozen annotation schema, and hold the
-recorded number of rows. Anything else is refused. A checkpoint from a
-different snapshot, detector configuration, shard, row count, or batch size is
-rejected rather than adopted.
+On resume, the worker verifies each part that the checkpoint lists. The file
+must exist. Its hash must match its receipt. It must parse as the frozen
+annotation schema. It must have the recorded number of rows. The worker refuses
+anything else. The tool rejects a checkpoint from a different snapshot,
+detector configuration, shard, row count, or batch size. It does not adopt it.
 
-Exhausting the processing budget returns a **paused** state, never a completed
-one. Real errors propagate; they are never converted into a completed result.
+When the processing budget is exhausted, the tool returns a **paused** state.
+It never returns a completed state. Real errors propagate. The tool never
+converts them into a completed result.
 
 ## Grid'5000
 
 !!! warning "Preflight is mandatory before every run"
-    Account entitlement, current quota, site capacity, and live scheduler
-    state are never assumed. They remain mandatory checks before each
-    authorised run, and the preflight fails closed on anything it cannot
-    positively interpret.
+    The tool never assumes the account entitlement, the current quota, the site
+    capacity, or the live scheduler state. You must check them before each
+    authorised run. The preflight fails closed on anything that it cannot
+    interpret positively.
 
 !!! success "Execution status"
-    **The full dataset has been processed and published.** Snapshot
+    **The team processed and published the full dataset.** Snapshot
     `9a03d00020191df375c25d3e4fa9b79e28ac9f8d83868d274a508ab954a84e98` ran to
-    completion across all 386 shards: 906 631 source rows into 919 126
-    annotations, validating `complete` with no issues. It is published at
+    completion across all 386 shards. It made 919 126 annotations from 906 631
+    source rows. It validates as `complete` with no issues. It is published at
     revision `fec858b679f5ee7e87f0ecfaaa6b7223b2a7f5e2` of
-    `NoeFlandre/osm-polygon-description-tag`, 388 files under `language-v1/`,
-    all verified against the Hub by size and SHA-256.
+    `NoeFlandre/osm-polygon-description-tag`. It has 388 files under
+    `language-v1/`. The team verified all of them against the Hub by size and
+    SHA-256.
 
-    Eight sites carried the run --- `nancy`, `grenoble`, `lille`, `lyon`,
-    `nantes`, `sophia`, `toulouse`, `luxembourg` --- one core and at most a
-    30-minute walltime per job, one active job per site throughout. `rennes`
-    was excluded on home quota. Full counts, per-language totals and the
-    publication record are in
+    Eight sites carried the run: `nancy`, `grenoble`, `lille`, `lyon`,
+    `nantes`, `sophia`, `toulouse`, and `luxembourg`. Each job used one core and
+    a walltime of 30 minutes at most. Each site had one active job throughout.
+    The team excluded `rennes` because of the home quota. The full counts, the
+    per-language totals, and the publication record are in
     [the rollout status](language-rollout-status.md#executed).
 
-    Five things were found only by running it, and all are fixed:
+    The team found five problems only when it ran the pipeline. The team fixed
+    all of them:
 
-    - the multi-shard driver read `outcome` at the top level of the submit
-      payload, where the CLI nests it under `result`, so a genuinely queued job
-      was reported as an unclean submission;
-    - `AutoTokenizer` cannot resolve a tokenizer class from SaT's `xlm-token`
-      model type, so the tokenizer needs its own directory carrying XLM-R's
-      config, or `pad_token_id` is `None` and inference dies mid-batch;
-    - the submission intent is written on the *site's* copy of the run, so it
-      has to be adopted back before a shard can be acknowledged at all;
-    - fastText accumulates its softmax in float32 and returns probabilities
-      marginally over 1.0, which the score guard refused outright;
-    - sites disagree on what a bare `oarsub` means: several auto-select a queue
-      that does not exist and reject the job, while `sophia` refuses an explicit
-      queue, so the queue is a per-site input.
+    - The multi-shard driver read `outcome` at the top level of the submit
+      payload. The CLI nests it under `result`. Thus the driver reported a job
+      that was really queued as an unclean submission.
+    - `AutoTokenizer` cannot resolve a tokenizer class from the `xlm-token` model
+      type of SaT. The tokenizer needs its own directory with the XLM-R config.
+      Without it, `pad_token_id` is `None`, and the inference stops in the middle
+      of a batch.
+    - The tool writes the submission intent on the copy of the run on the
+      *site*. The tool must adopt it back before it can acknowledge a shard.
+    - fastText accumulates its softmax in float32. It returns probabilities
+      slightly over 1.0. The score guard refused them.
+    - The sites do not agree on the meaning of a bare `oarsub`. Several sites
+      select a queue automatically. The queue does not exist, and they reject the
+      job. `sophia` refuses an explicit queue. Thus the queue is an input for
+      each site.
 
-    Two operational traps are worth carrying forward. A driver interrupted
-    between a job terminating and its results being fetched leaves a terminal,
-    unacknowledged intent on the site; `submit` then refuses to retry, correctly,
-    and the shard must be reconciled with `grid status --apply` and collected
-    rather than resubmitted. And the master run holds a placeholder checkpoint
-    (`paused`, cursor 0) for every staged shard, so a merge using
-    `rsync --ignore-existing` keeps the placeholder and silently drops the real
-    result.
+    Two operational traps are important. First, a driver can stop between the
+    end of a job and the retrieval of its results. Then a terminal,
+    unacknowledged intent stays on the site. `submit` then correctly refuses to
+    retry. You must reconcile the shard with `grid status --apply` and collect
+    it. Do not submit it again. Second, the master run has a placeholder
+    checkpoint (`paused`, cursor 0) for each staged shard. A merge with
+    `rsync --ignore-existing` keeps the placeholder. It drops the real result
+    without a message.
 
-    The NumPy baseline blocker described below is resolved: every frontend
-    reports zero x86-64-v2 flags, and pinning the *operator* environment to
-    `numpy==1.26.4` is enough, because inference uses the locked environment
-    built inside the job.
+    The NumPy baseline blocker that this page describes below is resolved. Each
+    frontend reports zero x86-64-v2 flags. It is enough to pin the *operator*
+    environment to `numpy==1.26.4`. The inference uses the locked environment
+    that the tool builds inside the job.
 
-    Production data stays under the requested Seagate project root; it only
-    gets there when the workflow is run with those paths.
+    The production data stays under the requested Seagate project root. The data
+    gets there only when you run the workflow with those paths.
 
 ### Job shape
 
 | Constraint | Value |
 | --- | --- |
 | Cores | exactly 1 (not an exclusive node) |
-| Walltime | at most 30 minutes |
-| Useful processing | at most 20 minutes, leaving setup and termination margin |
+| Walltime | 30 minutes at most |
+| Useful processing | 20 minutes at most. This leaves a margin for setup and termination |
 | Concurrency | 1 |
 | Staging | one shard |
 | GPU, job arrays, speculative submission, automatic resubmission | none |
 
-Dependency installation and inference both happen **inside the job**, on
-allocated compute resources. Frontends are used only for lightweight file
+The dependency installation and the inference both happen **inside the job**,
+on allocated compute resources. Use the frontends only for light file
 management and scheduler operations.
 
 ### Policy safeguards
 
-The preflight fails closed. Public Grid'5000 documentation does not define a
-stable `usagepolicycheck` JSON schema, nor an exit-code contract meaning "your
-quota permits this submission", so:
+The preflight fails closed. The public Grid'5000 documentation does not define a
+stable `usagepolicycheck` JSON schema. It does not define an exit-code contract
+that means "your quota permits this submission". Thus:
 
-- **Exit status zero is not treated as approval.** Only the fields actually
-  observed in a real capture (`start_time`, `stop_time`, `jobs`, `total_jobs`,
-  `limits`) are read. No "remaining quota" or "approved" field is invented.
-- Anything that cannot be positively interpreted becomes `unknown`, and
-  submission under `unknown` is refused.
-- Active jobs are counted from the selected site's `oarstat -u -J` JSON job
-  map, separately from historical usage totals. This is not a cross-site
-  inventory; check any reservations at other sites during the operator
-  preflight as well. Unknown job states do not count as an empty account.
-  The command adapter accepts the successful zero-byte no-jobs response used
-  by OAR 2.5.9, 2.5.10, and 2.6.1, as well as the `{}` response used by OAR3.
-  It does not interpret blank output from failed commands as evidence, and
-  rejects the older OAR 2.5.8 `null` response. Unnamed jobs remain in the active
-  count but are ignored when resolving a particular job name. These contracts
-  follow the upstream
+- **The tool does not treat exit status zero as approval.** It reads only the
+  fields that a real capture showed (`start_time`, `stop_time`, `jobs`,
+  `total_jobs`, `limits`). The tool does not invent a "remaining quota" field or
+  an "approved" field.
+- The tool changes anything that it cannot interpret positively to `unknown`.
+  It refuses a submission under `unknown`.
+- The tool counts the active jobs from the `oarstat -u -J` JSON job map of the
+  selected site. It counts them separately from the historical usage totals.
+  This is not a cross-site inventory. During the operator preflight, also check
+  the reservations at other sites. Unknown job states do not count as an empty
+  account. The command adapter accepts the successful zero-byte no-jobs response
+  of OAR 2.5.9, 2.5.10, and 2.6.1. It also accepts the `{}` response of OAR3. It
+  does not interpret blank output from failed commands as evidence. It rejects
+  the `null` response of the older OAR 2.5.8. Unnamed jobs stay in the active
+  count. The tool ignores them when it resolves a particular job name. These
+  contracts follow the upstream
   [OAR command implementation](https://github.com/oar-team/oar/blob/debian-upstream/2.5.10/sources/core/qfunctions/oarstat)
   and [OAR3 implementation](https://github.com/oar-team/oar3/blob/master/oar/cli/oarstat.py).
-- Home quota is read from `quota -p -w`. `quota -l` is deliberately not used
-  because it excludes NFS home storage. Both block and file-count limits are
-  checked, including raw grace fields and NFS device paths; truncated home
-  rows make the evidence unknown. The parser follows the upstream
+- The tool reads the home quota from `quota -p -w`. It does not use `quota -l`
+  on purpose, because `quota -l` excludes NFS home storage. The tool checks the
+  block limits and the file-count limits. This includes the raw grace fields and
+  the NFS device paths. Truncated home rows make the evidence unknown. The
+  parser follows the upstream
   [quota-tools output format](https://kernel.googlesource.com/pub/scm/utils/quota/quota-tools/+/refs/tags/v4.07/quota.c).
-- Weekday daytime in Europe/Paris (09:00–19:00) is **blocked by default**,
-  because daytime accounting is not verifiable from public documentation. This
-  is a conservative default, not a permanent restriction: pass
-  `--allow-daytime` once you have confirmed your own accounting. Note that the
-  daytime quota is not a universal "two core-hours" allowance, short jobs are
-  not automatically exempt, and besteffort privileges are not assumed.
-- `night=noretry` is requested so a postponed night job is not silently retried.
-- The entire requested walltime must fit within one day/night window. A job
-  ending exactly at the boundary is allowed; one crossing it is refused.
+- The tool **blocks by default** the weekday daytime in Europe/Paris
+  (09:00–19:00). The public documentation does not let you verify the daytime
+  accounting. This is a conservative default. It is not a permanent restriction.
+  After you confirm your own accounting, give `--allow-daytime`. The daytime
+  quota is not a universal "two core-hours" allowance. Short jobs are not
+  automatically exempt. Do not assume besteffort privileges.
+- The tool requests `night=noretry`. Thus the scheduler does not retry a
+  postponed night job without a message.
+- The entire requested walltime must fit in one day/night window. A job that
+  ends exactly at the boundary is allowed. The tool refuses a job that crosses
+  it.
 
 ### Workflow
 
-Run scheduler and transfer commands from the chosen site's frontend, with
-absolute paths in storage visible to the allocated compute job. The transfer
-plans use filesystem paths, not an SSH hostname: they do not establish a
-Mac-to-Grid connection. Arrange the authorised transfer to that site separately.
-Do not SSH directly to a shared compute node; follow the site's OAR access
-rules for a one-core reservation.
+Run the scheduler commands and the transfer commands from the frontend of the
+chosen site. Use absolute paths in storage that the allocated compute job can
+see. The transfer plans use filesystem paths. They do not use an SSH hostname.
+Thus they do not establish a Mac-to-Grid connection. Arrange the authorised
+transfer to that site separately. Do not use SSH to connect directly to a shared
+compute node. Follow the OAR access rules of the site for a one-core
+reservation.
 
-The operator's Python environment must already be installed; prepare it on
-allocated compute resources, not by compiling dependencies on a frontend.
-The examples use `uv run --no-sync` to prevent an implicit installation during
-frontend operations. The generated job requires `bash` and `uv` on the compute
-node; transfers require `rsync`, and scheduler operations require the site's
-OAR and quota tools. Check these prerequisites before an authorised run.
+The Python environment of the operator must be already installed. Prepare it on
+allocated compute resources. Do not compile dependencies on a frontend. The
+examples use `uv run --no-sync` to prevent an implicit installation during
+frontend operations. The generated job needs `bash` and `uv` on the compute
+node. The transfers need `rsync`. The scheduler operations need the OAR tools
+and the quota tools of the site. Check these prerequisites before an authorised
+run.
 
-!!! warning "Build the operator environment for the frontend's own CPU"
-    An environment built on an allocated compute node can be unusable on the
-    frontend that must run `oarsub`. A `nancy` operator environment built this
-    way failed on the frontend with `NumPy was built with baseline
-    optimizations: (X86_V2) but your machine doesn't support: (X86_V2)`, which
-    breaks every `grid` subcommand before it reaches the scheduler. Build the
-    operator environment on a machine whose CPU baseline the frontend also
-    satisfies, and check it with a harmless
-    `osm-polygon-description-tag --help` before staging anything.
+!!! warning "Build the operator environment for the CPU of the frontend"
+    An environment that you build on an allocated compute node can be unusable
+    on the frontend that must run `oarsub`. A `nancy` operator environment that
+    was built this way failed on the frontend with `NumPy was built with
+    baseline optimizations: (X86_V2) but your machine doesn't support:
+    (X86_V2)`. This breaks each `grid` subcommand before it reaches the
+    scheduler. Build the operator environment on a machine with a CPU baseline
+    that the frontend also satisfies. Before you stage anything, check it with a
+    harmless `osm-polygon-description-tag --help`.
 
-    The cause is measurable rather than mysterious: `fnancy` reports a
-    `Common KVM processor` whose `/proc/cpuinfo` flags contain `pni` and
-    `cx16` but neither `sse4_2` nor `popcnt`, so it is an x86-64 baseline
-    machine with SSE3. NumPy 2 wheels require x86-64-v2 and abort on import;
-    NumPy 1.26 wheels have an SSE3 baseline and run. Pinning the *operator*
-    environment to `numpy==1.26.4` is therefore enough, and it does not touch
-    model semantics: the job script runs `uv sync --frozen --no-dev --extra
-    language` on the allocated compute node, so inference always uses the
-    locked environment. Verify the split holds before relying on it:
+    You can measure the cause. `fnancy` reports a `Common KVM processor`. The
+    `/proc/cpuinfo` flags contain `pni` and `cx16`. They do not contain `sse4_2`
+    or `popcnt`. Thus it is an x86-64 baseline machine with SSE3. The NumPy 2
+    wheels need x86-64-v2 and stop on import. The NumPy 1.26 wheels have an SSE3
+    baseline and run. It is enough to pin the *operator* environment to
+    `numpy==1.26.4`. This does not change the model semantics. The job script
+    runs `uv sync --frozen --no-dev --extra language` on the allocated compute
+    node. Thus the inference always uses the locked environment. Before you
+    depend on this, verify that the split holds:
 
     ```bash
     ssh nancy 'grep -m1 flags /proc/cpuinfo | tr " " "\n" | grep -cE "^(sse4_2|popcnt)$"'
     # must print 0, which is why NumPy 2 cannot be used on the frontend
     ```
 
-### Driving all 386 shards
+### Drive all 386 shards
 
-`osm-polygon-description-tag language grid run` sequences the per-shard protocol below; it adds
-no policy of its own. It stages and transfers one shard, submits it through the
-CLI's own apply gate, polls until the scheduler reports a terminal state, then
-collects and acknowledges before touching the next shard. Anything reported as
-ambiguous, active, or unresolved stops the run for an operator to reconcile,
-and `--allow-daytime` is forwarded only when it is passed explicitly.
+`osm-polygon-description-tag language grid run` sequences the per-shard protocol
+below. It adds no policy of its own. For each shard, it does these steps:
 
-The driver exists because `grid stage --apply` emits a *filesystem* rsync argv:
-it cannot reach the site from a workstation. The driver performs that transfer
-over SSH instead, which is the separately arranged authorised transfer this
-runbook requires.
+1. It stages and transfers one shard.
+2. It submits the shard through the apply gate of the CLI.
+3. It polls until the scheduler reports a terminal state.
+4. It collects and acknowledges the shard.
+5. Then it goes to the next shard.
+
+If a result is ambiguous, active, or unresolved, the run stops. An operator must
+reconcile it. The driver forwards `--allow-daytime` only when you give it
+explicitly.
+
+The driver exists because `grid stage --apply` emits a *filesystem* rsync argv.
+It cannot reach the site from a workstation. The driver does that transfer over
+SSH. This is the separately arranged authorised transfer that this runbook
+requires.
 
 ```bash
 uv run osm-polygon-description-tag language grid run \
@@ -408,16 +434,16 @@ uv run osm-polygon-description-tag language grid run \
   --max-shards 1
 ```
 
-Start with `--max-shards 1` and read the emitted JSON before widening it. The
-driver is resumable: a shard whose checkpoint already validates as complete is
-skipped, so re-running continues rather than repeating work.
+Start with `--max-shards 1`. Read the emitted JSON before you make it larger.
+You can resume the driver. It skips a shard when its checkpoint already
+validates as complete. Thus a new run continues. It does not repeat work.
 
-### Stage the pinned models once
+### Stage the pinned models one time
 
-The cascade needs the pinned fallback model on storage the compute node can
-read; `--glotlid-model-path` is an absolute path, and the job verifies its
-SHA-256 before loading it. Fetch it once into the shared home and check the
-digest against the pinned constant:
+The cascade needs the pinned fallback model on storage that the compute node can
+read. `--glotlid-model-path` is an absolute path. The job verifies its SHA-256
+before it loads the model. Fetch the model one time into the shared home. Check
+the digest against the pinned constant:
 
 ```bash
 mkdir -p ~/models/glotlid-v3
@@ -427,26 +453,30 @@ sha256sum ~/models/glotlid-v3/model_v3.bin
 # must print a818b6bd42a628ab47d3dfc1578c7ea615c45381f3494c42535e31e8c4cafc9e
 ```
 
-The artifact is about 1.6 GiB, so confirm `quota -p -w` has room before
-fetching it. A digest that does not match the pinned constant must never be
-used: the loader refuses it, and so should you.
+The artifact is about 1.6 GiB. Before you fetch it, confirm that `quota -p -w`
+shows enough space.
 
-The sentence splitter needs the same treatment, with one difference:
-`--sat-model-path` is a **directory**, not a file. `wtpsplit` loads a model the
-way `transformers` does, from a directory holding `config.json` beside the
-weights, and it needs a tokenizer staged too --- the library's default would
-fetch `xlm-roberta-base` from the Hub, and a compute node has no reason to have
-network access. The job verifies the weights' SHA-256 before loading anything.
+WARNING: Never use a digest that is not the same as the pinned constant. The
+loader refuses it. You must also refuse it.
 
-The tokenizer goes in its own `tokenizer/` subdirectory, with XLM-R's *own*
-`config.json` beside it. This is not tidiness. SaT's `config.json` declares the
-custom model type `xlm-token`, which no tokenizer class is registered for, so a
-tokenizer loaded from the model directory resolves to a generic fast tokenizer
-carrying no special tokens at all: `pad_token_id` is `None`, padding writes
-`None` into the input ids, and inference dies part-way through the first batch
-with a `TypeError` from deep inside `wtpsplit`. XLM-R's config names the real
-tokenizer class, which is what makes `<pad>` resolve to id 1 --- exactly the
-`pad_token_id` SaT's own config expects.
+The sentence splitter needs the same procedure, with one difference.
+`--sat-model-path` is a **directory**. It is not a file. `wtpsplit` loads a
+model in the same way as `transformers`. It loads it from a directory that has
+`config.json` next to the weights. It also needs a tokenizer in the staging.
+The default of the library fetches `xlm-roberta-base` from the Hub. A compute
+node has no reason to have network access. The job verifies the SHA-256 of the
+weights before it loads anything.
+
+Put the tokenizer in its own `tokenizer/` subdirectory. Put the *own*
+`config.json` of XLM-R next to it. This is not only for order. The `config.json`
+of SaT declares the custom model type `xlm-token`. No tokenizer class is
+registered for it. Thus a tokenizer that the tool loads from the model
+directory becomes a generic fast tokenizer with no special tokens. Then
+`pad_token_id` is `None`. The padding writes `None` into the input ids. The
+inference stops in the first batch with a `TypeError` from deep inside
+`wtpsplit`. The config of XLM-R names the real tokenizer class. This makes
+`<pad>` resolve to id 1. This is exactly the `pad_token_id` that the own config
+of SaT expects.
 
 ```bash
 mkdir -p ~/models/sat-3l-sm
@@ -466,17 +496,18 @@ sha256sum model.safetensors
 # must print 3e19cb0e5dbe9790d37d918d7e87880cb6577d497833f0f0627d80ae6ca1fe90
 ```
 
-The weights are about 815 MiB and the tokenizer adds roughly 17 MiB, so budget
-about 2.5 GiB of home quota for the two models together. Confirm the directory
-loads before submitting 386 jobs:
+The weights are about 815 MiB. The tokenizer adds about 17 MiB. Plan for about
+2.5 GiB of home quota for the two models together. Before you submit 386 jobs,
+confirm that the directory loads:
 
 ```bash
 python -c "from wtpsplit import SaT; d='$HOME/models/sat-3l-sm'; \
   print(SaT(d, tokenizer_name_or_path=d + '/tokenizer').split('A park. It has benches.'))"
 ```
 
-Prepare a portable payload containing the project, lockfile, immutable
-snapshot, exactly one source shard, and validated resume artifacts:
+Prepare a portable payload. It contains the project, the lockfile, the
+immutable snapshot, exactly one source shard, and the validated resume
+artifacts:
 
 ```bash
 uv run --no-sync osm-polygon-description-tag language grid stage --run-dir <run-dir> --project-root <project> --source-root <source> --shard region.parquet --remote-bundle-dir /home/user/language-bundle \
@@ -484,11 +515,11 @@ uv run --no-sync osm-polygon-description-tag language grid stage --run-dir <run-
   --sat-model-path /home/user/models/sat-3l-sm
 ```
 
-This creates local staging files and prints the exact transfer argument vector.
-It neither transfers nor submits anything. Add `--apply` only when the printed
-source and destination are correct and visible in the current filesystem.
-After collection, stage again to include the newly committed checkpoint before
-an explicitly requested continuation.
+This command creates local staging files. It prints the exact transfer argument
+vector. It does not transfer or submit anything. Add `--apply` only when the
+printed source and destination are correct and visible in the current
+filesystem. After the collection, stage again to include the newly committed
+checkpoint. Do this before an explicitly requested continuation.
 
 ```bash
 uv run --no-sync osm-polygon-description-tag language grid prepare --run-dir <run-dir> --shard region.parquet --remote-project-dir /home/user/project --remote-source-dir /tmp/staging/source --remote-run-dir /tmp/staging/run \
@@ -496,34 +527,35 @@ uv run --no-sync osm-polygon-description-tag language grid prepare --run-dir <ru
   --sat-model-path /home/user/models/sat-3l-sm
 ```
 
-`prepare` is the lower-level script/metadata operation for already staged inputs;
-unlike `stage`, it does not copy the project or source data. It binds the code
-fingerprint, lock fingerprint, snapshot, and selected shard to the job script.
-Prepared settings cannot be silently rewritten after staging.
-The scheduler is invoked with an argument vector, and its final script argument
-is shell-quoted separately: OAR later evaluates that stored command through the
-user's shell. Spaces and metacharacters in a local script path therefore remain
-part of the filename, not executable syntax.
+`prepare` is the lower-level script and metadata operation for inputs that are
+already staged. Unlike `stage`, it does not copy the project or the source data.
+It binds the code fingerprint, the lock fingerprint, the snapshot, and the
+selected shard to the job script. After the staging, nobody can rewrite the
+prepared settings without a message. The tool invokes the scheduler with an
+argument vector. The tool shell-quotes the final script argument separately,
+because OAR later evaluates that stored command through the shell of the user.
+Thus spaces and metacharacters in a local script path stay part of the
+filename. They are not executable syntax.
 
 ```bash
 uv run --no-sync osm-polygon-description-tag language grid submit --run-dir <run-dir> --shard region.parquet --site nancy --remote-project-dir ... --remote-source-dir ... --remote-run-dir ... --glotlid-model-path /home/user/models/glotlid-v3/model_v3.bin --sat-model-path /home/user/models/sat-3l-sm
 ```
 
-Without `--apply` this only plans: it contacts no scheduler and prints the
-exact `oarsub` argument vector along with the policy verdict. Adding `--apply`
-gathers live policy evidence and submits.
+Without `--apply`, this command only makes a plan. It does not contact a
+scheduler. It prints the exact `oarsub` argument vector and the policy verdict.
+With `--apply`, it gathers live policy evidence and submits.
 
-**The submission intent is written durably before `oarsub` runs.** If the call
-then times out or answers without a job identifier, the outcome is reported as
-`ambiguous` and the intent on disk proves a job may already exist. Ambiguity is
-never resolved by submitting again.
+**The tool writes the submission intent durably before `oarsub` runs.** The call
+can time out, or it can answer without a job identifier. Then the outcome is
+`ambiguous`, and the intent on disk proves that a job can already exist. Never
+resolve an ambiguity by submitting again.
 
 ```bash
 uv run --no-sync osm-polygon-description-tag language grid status --run-dir <run-dir> --shard region.parquet --apply
 uv run --no-sync osm-polygon-description-tag language grid collect --run-dir <run-dir> --shard region.parquet
 ```
 
-`status` reconciles a recorded submission before anything else is attempted;
+`status` reconciles a recorded submission before it does anything else.
 `collect` validates the returned checkpoints and parts.
 
 To retrieve a completed attempt into a separate local staging directory, first
@@ -533,152 +565,163 @@ inspect the plan without `--apply`:
 uv run --no-sync osm-polygon-description-tag language grid collect --run-dir <run-dir> --shard region.parquet --remote-bundle-dir /home/user/language-bundle --retrieved-run-dir <retrieval-dir>
 ```
 
-With `--apply`, the command retrieves only the selected shard's state, validates
-it against the immutable snapshot, imports committed artifacts, and records
-collection acknowledgment. A paused checkpoint is not completion. A later
-attempt requires terminal scheduler reconciliation and validated collection;
-an active or ambiguous attempt must never be bypassed by submitting again.
-Import holds both submission and worker locks. It validates a private copy,
-refuses backward progress or changes to already committed history, then commits
-new parts and receipts before the checkpoint. An interruption leaves the old
-checkpoint authoritative; retry collection with the same retrieved state.
+With `--apply`, the command retrieves only the state of the selected shard. It
+validates the state against the immutable snapshot. It imports the committed
+artifacts and records the collection acknowledgment. A paused checkpoint is not
+a completion. A later attempt needs a terminal scheduler reconciliation and a
+validated collection. Never bypass an active or ambiguous attempt by submitting
+again. The import holds the submission lock and the worker lock. It validates a
+private copy. It refuses backward progress. It refuses changes to the history
+that is already committed. Then it commits the new parts and receipts before the
+checkpoint. An interruption leaves the old checkpoint authoritative. Retry the
+collection with the same retrieved state.
 
-Durable validated results belong on the external project storage. Never fall
-back to internal storage if that mount is unavailable.
+Put the durable validated results on the external project storage. Never fall
+back to internal storage if that mount is not available.
 
 ### Crash recovery
 
 `prepare` and `stage` write a validated zero-cursor checkpoint for the shard
-before a job can be submitted: `paused` for a shard with input rows, `complete`
-for a zero-row shard. They take the run-wide submission lock first and the
-exclusive worker lock second, always in that order. An existing valid
-checkpoint is preserved, never rewritten; a corrupted, symlinked, conflicting,
-or otherwise unexpected state fails closed, and a shard whose checkpoint cannot
-be initialised cannot be submitted. A job that dies during setup, before it
-processes a single row, therefore still leaves a checkpoint that `collect` can
-validate and acknowledge, which is what makes one bounded retry safe. An
-active or ambiguous submission is still never resubmitted; it must be
-reconciled.
+before a job can be submitted. The checkpoint is `paused` for a shard with input
+rows. It is `complete` for a zero-row shard. They take the run-wide submission
+lock first and the exclusive worker lock second. They always use this order. The
+commands preserve an existing valid checkpoint. They never rewrite it. They fail
+closed on a corrupted, symlinked, or conflicting state, or on any other
+unexpected state. A shard whose checkpoint cannot be initialised cannot be
+submitted. A job can die during setup, before it processes one row. It still
+leaves a checkpoint that `collect` can validate and acknowledge. This makes one
+bounded retry safe. The tool never resubmits an active or ambiguous submission.
+You must reconcile it.
 
-A worker that dies after writing a part or a receipt but before committing its
-checkpoint leaves artifacts the authoritative checkpoint does not list. They
-are never adopted and never deleted. `stage` moves recognised generated
-orphans into `shards/<key>/quarantine/`, reports them in its JSON output as
-`quarantined`, and then restages the checkpoint-listed state so the shard can
-be collected and resumed. Anything that is not a recognised generated artifact
---- an unknown filename, a symlink, a FIFO --- is refused instead of moved,
-and committed parts and receipts are never touched. The public `validate_run`
-contract is unchanged: it still reports every artifact a checkpoint does not
-account for as an issue rather than ignoring it. Commit ordering stays parts,
-then receipts, then the checkpoint last.
+A worker can die after it writes a part or a receipt but before it commits its
+checkpoint. Then it leaves artifacts that the authoritative checkpoint does not
+list. The tool never adopts them and never deletes them. `stage` moves the
+recognised generated orphans into `shards/<key>/quarantine/`. It reports them in
+its JSON output as `quarantined`. Then it stages the state that the checkpoint
+lists again, so that the shard can be collected and resumed. `stage` refuses
+anything that is not a recognised generated artifact. Examples are an unknown
+filename, a symlink, and a FIFO. It does not move them. It never touches the
+committed parts and receipts. The public `validate_run` contract does not
+change. It still reports each artifact that a checkpoint does not account for as
+an issue. It does not ignore it. The commit order stays: parts, then receipts,
+then the checkpoint last.
 
 ## Publication
 
-No Hugging Face upload has been performed for this implementation; the commands
-below have only been exercised against local fakes.
+This implementation did not do a Hugging Face upload. The team tested the
+commands below only against local fakes.
 
-Publication is additive. Data uploads are allowlisted under `language-v1/`.
-The same atomic Hub commit adds the corresponding configuration and generated
-section to the root `README.md`, preserving existing configurations, default
-selection, and unrelated prose. Nothing deletes remote files.
-The installed training configuration lists exactly the planned Parquet paths,
-not a wildcard that could accidentally include stale or unrelated files.
-An existing conflicting language configuration is refused rather than changed.
+The publication is additive. The data uploads are allowlisted under
+`language-v1/`. The same atomic Hub commit adds the corresponding configuration
+and the generated section to the root `README.md`. It preserves the existing
+configurations, the default selection, and the unrelated prose. Nothing deletes
+remote files. The installed training configuration lists exactly the planned
+Parquet paths. It does not use a wildcard that can include stale or unrelated
+files by accident. The tool refuses an existing conflicting language
+configuration. It does not change it.
 
 ```bash
 uv run osm-polygon-description-tag language export --run-dir <run-dir> --export-dir <export-dir> --card-section <path>.md
 ```
 
-`export` refuses to run unless **every** snapshot shard validates as complete,
-so a partial run cannot be published as though it covered the dataset. It
-writes `language-v1/data/*.parquet`, `language-v1/stats.json`, and optionally
-the generated dataset-card section. All counts come from the exported rows.
-The final `language-v1/export-manifest.json` binds the data and statistics by
-size and SHA-256. Missing manifests and changed files are refused, including
-an interrupted re-export that leaves files from different attempts. Re-export
-marks this manifest as in-progress before touching data; only a successful
-retry restores a completed seal. Export and publication share a local lock;
-publication rechecks the sealed files
-after acquiring it and before contacting the Hub.
+`export` refuses to run unless **each** snapshot shard validates as complete.
+Thus a partial run cannot be published as if it covered the dataset. It writes
+`language-v1/data/*.parquet`, `language-v1/stats.json`, and optionally the
+generated dataset-card section. All counts come from the exported rows. The
+final `language-v1/export-manifest.json` binds the data and the statistics by
+size and SHA-256. The tool refuses missing manifests and changed files. This
+includes an interrupted re-export that leaves files from different attempts. A
+re-export marks this manifest as in-progress before it touches data. Only a
+successful retry restores a completed seal. The export and the publication share
+a local lock. The publication checks the sealed files again after it acquires
+the lock and before it contacts the Hub.
 
 ```bash
 uv run osm-polygon-description-tag language publish --export-dir <export-dir> --repo NoeFlandre/osm-polygon-description-tag --confirm-repo NoeFlandre/osm-polygon-description-tag
 ```
 
-Publication is gated three times: the repository identifier must be repeated,
-`--apply` must be passed, and `--baseline-revision` must match the repository's
-current revision. A repository that moved is reported as `drifted` and refused
-rather than overwritten.
-Planning, including a drift refusal, never writes publication state.
+Three gates control the publication. You must repeat the repository identifier.
+You must give `--apply`. `--baseline-revision` must match the current revision
+of the repository. If the repository moved, the tool reports `drifted` and
+refuses to continue. It does not overwrite. A plan, including a drift refusal,
+never writes publication state.
 
-After uploading, every planned file is verified against the Hub by size and
-SHA-256 at the exact resulting revision, and the Dataset Viewer is checked for
-the `language-v1` configuration. An upload whose success cannot be established
-is recorded as `ambiguous`; the next invocation **verifies** rather than
-re-uploading. The intent is persisted **before** the upload starts, including
-for library calls that omit an explicit state path. Previously verified
-publications are checked again; cached state cannot conceal later remote file
-loss. An unresolved state belonging to a different plan is refused.
+After the upload, the tool verifies each planned file against the Hub by size
+and SHA-256 at the exact resulting revision. It also checks the Dataset Viewer
+for the `language-v1` configuration. If the tool cannot establish the success of
+an upload, it records the upload as `ambiguous`. The next invocation **verifies**
+the upload. It does not upload again. The tool persists the intent **before** the
+upload starts. This includes library calls that omit an explicit state path. The
+tool checks the publications that it verified before again. Cached state cannot
+hide a later remote file loss. The tool refuses an unresolved state that belongs
+to a different plan.
 
-The adapter reads the existing card at the baseline revision and creates the
-data-and-card commit with that revision as its optimistic concurrency guard.
-Malformed or conflicting card configurations are refused. Do not replace the
-existing `configs` list with a language-only list: that would hide the default
-dataset. The optional `--card-section` file is a local preview, not a separate
+The adapter reads the existing card at the baseline revision. It creates the
+data-and-card commit with that revision as its optimistic concurrency guard. The
+adapter refuses malformed or conflicting card configurations.
+
+WARNING: Do not replace the existing `configs` list with a list that has only
+the language configuration. This hides the default dataset.
+
+The optional `--card-section` file is a local preview. It is not a separate
 manual publication step.
 
-The Dataset Viewer is asynchronous and its `/splits` endpoint is unversioned.
-Card metadata alone does not prove that `language-v1/train` is queryable.
-Pending or failed indexing leaves publication unverified; rerun verification
-later without repeating the upload. A matching repository head plus a ready
-Viewer response is useful readiness evidence, not proof that the Viewer indexed
-an exact commit.
+The Dataset Viewer is asynchronous. Its `/splits` endpoint has no version. The
+card metadata alone does not prove that `language-v1/train` is queryable. If the
+indexing is pending or failed, the publication stays unverified. Run the
+verification again later. Do not repeat the upload. A matching repository head
+and a ready Viewer response are useful readiness evidence. They are not proof
+that the Viewer indexed an exact commit.
 
 ## Reproducibility and provenance
 
 ### Quality-gate interpretation
 
-Mutation reports count generated mutants, not mathematically equivalent program
-variants. As elsewhere in this repository, narrowly marked serialization and
-static-typing statements are excluded where mutmut cannot distinguish an
-equivalent argument change: `ensure_ascii=False` versus `None`, the unused JSON
-object-key separator in a flat identity array, and the type argument of
-`typing.cast`. The LRU eviction call is also narrowly marked because
-`OrderedDict.popitem(last=None)` has the same behavior as `last=False`;
-recency and bounded eviction are tested explicitly. These exclusions are visible in source; exact Unicode bytes,
-identity hashes, and decoded values remain covered by behavioral tests. A
-survivor, timeout, or unchecked generated mutant is never counted as killed.
+The mutation reports count generated mutants. They do not count mathematically
+equivalent program variants. As in the rest of this repository, the team marks
+some serialization statements and static-typing statements narrowly and
+excludes them. Mutmut cannot distinguish an equivalent argument change there.
+The cases are: `ensure_ascii=False` versus `None`, the unused JSON object-key
+separator in a flat identity array, and the type argument of `typing.cast`. The
+LRU eviction call is also marked narrowly. `OrderedDict.popitem(last=None)` has
+the same behavior as `last=False`. The tests check the recency and the bounded
+eviction explicitly. These exclusions are visible in the source. Behavioral
+tests still cover the exact Unicode bytes, the identity hashes, and the decoded
+values. The team never counts a survivor, a timeout, or an unchecked generated
+mutant as killed.
 
 ### Run identity
 
-Every annotation row records the `snapshot_id` and `model_config_fingerprint`
-that produced it. The snapshot in turn records the source file hashes, the
-schema identity, the detector policy, and the code and lockfile fingerprints.
+Each annotation row records the `snapshot_id` and the `model_config_fingerprint`
+that produced it. The snapshot records the source file hashes, the schema
+identity, the detector policy, and the fingerprints of the code and the
+lockfile.
 
-Lingua and its version are pinned and verified at construction time. For the
-cascade, the configuration fingerprint also records the exact GlotLID repository,
-revision, runtime, and model SHA-256; `binary_artifact_hash` is populated only
-with that independently verified pinned artifact. Legacy pure-Lingua snapshots
-may keep it unset.
+The tool pins Lingua and its version. It verifies them at construction time. For
+the cascade, the configuration fingerprint also records the exact GlotLID
+repository, revision, runtime, and model SHA-256. The tool populates
+`binary_artifact_hash` only with that independently verified pinned artifact.
+Legacy pure-Lingua snapshots can leave it unset.
 
 The snapshot also records the splitter by name: `splitter_name`,
-`splitter_revision`, and `splitter_languages_fingerprint`. These are bound into
-`snapshot_id` anyway, through `config_fingerprint`, but a fingerprint cannot be
-read --- someone opening `snapshot.json` has to be able to say which splitter
-produced the sentences without recomputing a hash. They are verified whenever
-they are present; a snapshot written before the fields existed has nothing there
-to disagree with, so parsing it still works. Its `snapshot_id`, however, was
-hashed over a payload without them and no longer verifies, so a run directory
-frozen before this change must be re-prepared rather than resumed.
+`splitter_revision`, and `splitter_languages_fingerprint`. The tool binds these
+fields into `snapshot_id` through `config_fingerprint` in any case. But nobody
+can read a fingerprint. A person who opens `snapshot.json` must be able to say
+which splitter produced the sentences without a new hash computation. The tool
+verifies the fields whenever they are present. A snapshot that the tool wrote
+before the fields existed has nothing there to disagree with. Thus parsing it
+still works. But its `snapshot_id` was hashed over a payload without the fields.
+It no longer verifies. You must prepare again a run directory that the tool
+froze before this change. Do not resume it.
 
-Detection is deterministic: scores within the fixed tie epsilon produce an
-uncertain result without a language label, so the provider's ordering of tied
-languages cannot change the annotation.
+The detection is deterministic. Scores within the fixed tie epsilon produce an
+uncertain result without a language label. Thus the order that the provider
+gives for tied languages cannot change the annotation.
 
 ## Licensing and attribution
 
-The annotated text is OpenStreetMap data, © OpenStreetMap contributors,
-available under the Open Database License (ODbL). Language labels are derived
-annotations produced with the pinned `lingua-language-detector` primary and the
-documented GlotLID v3 fallback. The dataset card records both upstream
-attributions and exact model provenance.
+The annotated text is OpenStreetMap data, © OpenStreetMap contributors. The
+Open Database License (ODbL) applies to it. The language labels are derived
+annotations. The tool produces them with the pinned `lingua-language-detector`
+primary and the documented GlotLID v3 fallback. The dataset card records both
+upstream attributions and the exact model provenance.
