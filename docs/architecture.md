@@ -1,6 +1,6 @@
 # Architecture
 
-The pipeline is organized into canonical domain packages with one-way dependencies:
+The pipeline has canonical domain packages. The dependencies go in one direction:
 
 ```text
 runtime → osm → dataset → publication
@@ -8,19 +8,21 @@ runtime → osm → dataset → publication
    └────────┴────────┴─────────────┴→ workflow → cli
 ```
 
-`A → B` means B may import A. It does not mean A imports B. Lower-level packages must not import
-higher-level packages, and circular imports are forbidden.
+`A → B` means that B can import A. It does not mean that A imports B. A
+lower-level package must not import a higher-level package. Circular imports
+are not permitted.
 
 ## Container boundary
 
-The `Dockerfile` separates application code from operator data. Its base stage
-installs the real `osmium-tool`; the build stage installs the locked Python
-environment; development adds the checkout and test dependencies; runtime
-copies only the non-editable installed package into a non-root image. `/data`
-is the sole mounted state boundary. The default command is `--help`, while
-`run-and-publish --source-root /source --data-root /data` is required to start
-processing. The raw source mount is read-only, and resumable state survives
-container removal because it remains on the host.
+The `Dockerfile` separates the application code from the operator data. The
+base stage installs the real `osmium-tool`. The build stage installs the locked
+Python environment. The development stage adds the checkout and the test
+dependencies. The runtime stage copies only the non-editable installed package
+into a non-root image. The directory `/data` is the only mounted state
+boundary. The default command is `--help`. To start processing, you must use
+`run-and-publish --source-root /source --data-root /data`. The raw source mount
+is read-only. The resumable state stays on the host. Thus it remains when you
+remove the container.
 
 ## Package boundaries
 
@@ -30,12 +32,12 @@ container removal because it remains on the host.
 - `publication` owns allowlisted upload plans, publication state, retry execution, and Hub
   verification.
 - `observability` owns optional Trackio metrics for dataset snapshots and live resumable
-  runs; Trackio failures never affect dataset artifacts.
+  runs. A Trackio failure does not affect the dataset artifacts.
 - `workflow` composes preflight, builds, resumability, completeness, and publication.
-- `cli` exposes the Typer command surface, invokes canonical APIs, and reports results.
+- `cli` exposes the Typer command surface, calls the canonical APIs, and reports the results.
 
-The package root holds only the console modules (`cli`, `language_cli`); everything else is
-imported from its domain package.
+The package root holds only the console modules (`cli`, `language_cli`). Each
+other item is imported from its domain package.
 
 ## End-to-end flow
 
@@ -51,26 +53,28 @@ source PBFs
   → remote verification
 ```
 
-The workflow may stop after local artifact generation. Hub publication is an explicit operation,
-not an implicit consequence of importing a package or building GeoParquet.
+The workflow can stop after the local artifact generation. The Hub publication
+is an explicit operation. Importing a package or building GeoParquet does not
+start it.
 
 ## Invariants
 
-The reorganization preserves CLI behavior, filesystem boundaries, artifact names and bytes,
-resumability, publication allowlists, bounded processing, and deterministic reporting. No domain
-move changes the dataset contract.
+The reorganization keeps these items unchanged: CLI behavior, filesystem
+boundaries, artifact names and bytes, resumability, publication allowlists,
+bounded processing, and deterministic reporting. No domain move changes the
+dataset contract.
 
 ## Tooling boundary
 
 uv owns dependency resolution and command execution. Ruff is the formatter and
-linter, ty is the type checker, and pytest is the test runner. pre-commit and
-Just expose the same local gates that GitHub Actions runs in CI. These tools do
+the linter. ty is the type checker. pytest is the test runner. pre-commit and
+Just give the same local gates that GitHub Actions runs in CI. These tools do
 not cross the operational boundary into real-data processing or publication.
 
 ## Documentation boundary
 
-MkDocs pages describe stable public contracts and operator workflows. Package
-READMEs document canonical module responsibilities. The generated dataset-card
-template describes the published artifact and is intentionally kept separate
-from the site. Internal planning material is not part of the public
-documentation site.
+The MkDocs pages describe the stable public contracts and the operator
+workflows. The package READMEs describe the responsibilities of the canonical
+modules. The generated dataset-card template describes the published artifact.
+It is separate from the site on purpose. Internal planning material is not part
+of the public documentation site.

@@ -2,21 +2,22 @@
 
 # OSM Polygon Description Tag
 
-Reproducible OpenStreetMap polygon extraction with complete tags, full
-GeoParquet geometry, geodesic area, and resumable Hugging Face publication.
+This tool extracts OpenStreetMap polygons with complete tags, full GeoParquet
+geometry, and geodesic area. It can publish the result to Hugging Face. You
+can resume the publication.
 
-It reads OpenStreetMap `.osm.pbf` extracts, keeps every polygon that carries a
-`description` tag, and writes one validated GeoParquet file per extract with
-all tags, the full geometry and its geodesic area. The maintainer publishes
-the result as the Hugging Face dataset
+The tool reads OpenStreetMap `.osm.pbf` extracts. It keeps each polygon that has a
+`description` tag. It writes one validated GeoParquet file for each extract. The file
+contains all tags, the full geometry, and the geodesic area. The maintainer
+publishes the result as the Hugging Face dataset
 [`NoeFlandre/osm-polygon-description-tag`](https://huggingface.co/datasets/NoeFlandre/osm-polygon-description-tag).
 
 ## Prerequisites
 
-- Python 3.12 via [uv](https://docs.astral.sh/uv/)
+- Python 3.12 through [uv](https://docs.astral.sh/uv/)
 - [`osmium-tool`](https://osmcode.org/osmium-tool/) (`brew install osmium-tool`, or `apt install osmium-tool`)
 - [`just`](https://just.systems/) for the recipes (optional)
-- For publishing only: the Hugging Face `hf` CLI, logged in with write access
+- To publish only: the Hugging Face `hf` CLI, logged in with write access
 
 ## Install
 
@@ -28,9 +29,9 @@ uv sync --locked
 
 ## Usage
 
-Put one or more PBFs, for example a small country from
-[Geofabrik](https://download.geofabrik.de/), in a directory of their own, and
-pick a separate, empty directory for the output:
+Put one or more PBF files in a directory. For example, use a small country
+from [Geofabrik](https://download.geofabrik.de/). Use a different, empty
+directory for the output.
 
 ```bash
 export OSM_POLYGON_SOURCE_ROOT=/path/to/pbfs
@@ -43,14 +44,14 @@ uv run osm-polygon-description-tag generate-card  # write stats.json and README.
 uv run osm-polygon-description-tag publish-plan   # dry run: print the upload plan
 ```
 
-None of these upload anything. `just run-and-publish` builds and publishes in
-one resumable command, but only to the maintainer's dataset: it needs write
-access to it. The workflow is stoppable with Ctrl-C and resumable by rerunning
-the same command.
+None of these commands uploads data. The command `just run-and-publish` builds
+and publishes in one command. You can resume it. It publishes only to the
+maintainer's dataset, and it needs write access to that dataset. To stop the
+workflow, press Ctrl-C. To resume it, run the same command again.
 
 ## Outputs
 
-Under the data root:
+The tool writes these files under the data root:
 
 ```text
 data/<extract>.parquet            GeoParquet, one row per polygon
@@ -59,7 +60,8 @@ stats.json, README.md             dataset statistics and card
 logs/                             redacted JSONL event log
 ```
 
-The column schema and guarantees are in the [dataset contract](docs/dataset-contract.md).
+The [dataset contract](docs/dataset-contract.md) describes the column schema and
+the guarantees.
 
 ## Configuration
 
@@ -69,12 +71,13 @@ The column schema and guarantees are in the [dataset contract](docs/dataset-cont
 | Generated-data directory | `--data-root` | `OSM_POLYGON_DATA_ROOT` |
 | osmium binary | `--osmium` | none |
 
-The source root is never written to, and the two roots must not contain each
-other. Commands that only read generated data need only the data root.
+The tool never writes to the source root. The two roots must not contain each
+other. A command that only reads generated data needs only the data root.
 
 ## Docker
 
-A non-root image ships the locked environment and `osmium-tool`:
+The Docker image runs as a non-root user. It contains the locked environment
+and `osmium-tool`.
 
 ```bash
 just docker-build
@@ -82,8 +85,8 @@ just docker-help
 just docker-run /path/to/data-root   # PBFs are read from /path/to/data-root/raw
 ```
 
-Without `just`, use Compose (`DATA_ROOT` is the host data root, PBFs go in its
-`raw/` directory):
+If you do not use `just`, use Compose. `DATA_ROOT` is the data root on the
+host. Put the PBF files in its `raw/` directory.
 
 ```bash
 DATA_ROOT=/path/to/data-root UID="$(id -u)" GID="$(id -g)" \
@@ -91,19 +94,21 @@ DATA_ROOT=/path/to/data-root UID="$(id -u)" GID="$(id -g)" \
   --confirm-repo NoeFlandre/osm-polygon-description-tag
 ```
 
-The image presets `OSM_POLYGON_SOURCE_ROOT=/data/raw` and
-`OSM_POLYGON_DATA_ROOT=/data`, so no root options are needed inside the
-container. The data root keeps checkpoints, so rerunning resumes safely.
-`HF_TOKEN` is passed only at runtime (from the environment or an optional
-git-ignored `.env`) and never copied into the image. See the
+The image sets `OSM_POLYGON_SOURCE_ROOT=/data/raw` and
+`OSM_POLYGON_DATA_ROOT=/data`. Do not give root options inside the container.
+The data root keeps the checkpoints. When you run the command again, it resumes
+safely. The tool gets `HF_TOKEN` only at runtime, from the environment or from
+an optional `.env` file that git ignores. The tool never copies the token into
+the image. Refer to the
 [Docker guide](docs/development.md#docker-reproducibility).
 
 ## Documentation
 
-The documentation site is built with MkDocs Material (`uv run mkdocs serve`)
-and published from `main` at
+MkDocs Material builds the documentation site (`uv run mkdocs serve`). The
+site is published from `main` at
 [noeflandre.github.io/osm-polygon-description-tag](https://noeflandre.github.io/osm-polygon-description-tag/).
-There is also a [codebase presentation](https://noeflandre.github.io/osm-polygon-description-tag/slides/codebase/codebase.html).
+A [codebase presentation](https://noeflandre.github.io/osm-polygon-description-tag/slides/codebase/codebase.html)
+is also available.
 
 - [Getting started](docs/getting-started.md)
 - [Dataset contract](docs/dataset-contract.md)
@@ -111,18 +116,19 @@ There is also a [codebase presentation](https://noeflandre.github.io/osm-polygon
 - [CLI reference](docs/cli.md)
 - [Development](docs/development.md)
 - [Architecture](docs/architecture.md)
+- [Glossary](docs/glossary.md)
 - [Contributing](CONTRIBUTING.md) and [security policy](SECURITY.md)
 
-Tests, documentation builds, and CI never read a real PBF corpus or publish to
-Hugging Face.
+The tests, the documentation builds, and the CI never read a real PBF corpus.
+They never publish to Hugging Face.
 
 ## License
 
-Project code is Apache-2.0. Derived OpenStreetMap data is © OpenStreetMap
-contributors and subject to the Open Database License (ODbL).
+The project code uses the Apache-2.0 license. The derived OpenStreetMap data is
+© OpenStreetMap contributors. The Open Database License (ODbL) applies to it.
 
 ## Citation
 
-If you use this software or its dataset, please cite the repository using the
-metadata in [`CITATION.cff`](CITATION.cff). GitHub uses this file to provide
-formatted citation downloads through **Cite this repository**.
+If you use this software or its dataset, cite the repository. Use the metadata
+in [`CITATION.cff`](CITATION.cff). GitHub uses this file to give formatted
+citation downloads through **Cite this repository**.

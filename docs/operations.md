@@ -2,136 +2,144 @@
 
 ## Storage boundaries
 
-Keep code and data separate:
+Keep the code and the data separate:
 
 | Purpose | Set with | Rule |
 | --- | --- | --- |
 | Code checkout | your `git clone` | Git-managed source |
-| Immutable raw PBFs | `--source-root` or `OSM_POLYGON_SOURCE_ROOT` | Read-only; never an output or temp directory |
+| Immutable raw PBFs | `--source-root` or `OSM_POLYGON_SOURCE_ROOT` | Read-only. Never use it as an output or temp directory |
 | Generated artifacts | `--data-root` or `OSM_POLYGON_DATA_ROOT` | Parquet, manifests, stats, logs, and local state |
 
-The two roots must be disjoint: neither may contain the other.
+The two roots must be disjoint. Neither root can contain the other.
 
 ### Maintainer setup (example)
 
-The maintainer's machine uses, for reference only:
+The maintainer's machine uses these paths. They are for reference only:
 
 - Code: `/Volumes/Seagate M3/projects/osm-polygon-description-tag`
 - Raw PBFs: `/Volumes/Seagate M3/projects/osm-polygon-wikidata-only/raw`
 - Data root: `/Volumes/Seagate M3/projects/osm-polygon-description-tag/data-root`
 
-Local state under the data root is explicitly separated:
+The local state under the data root is separated explicitly:
 
-- `.cache/huggingface/` contains resumable uploader state and verification
-  downloads.
-- `.work/` contains validation SQLite and DuckDB spill files.
+- `.cache/huggingface/` contains the resumable uploader state and the
+  verification downloads.
+- `.work/` contains the validation SQLite files and the DuckDB spill files.
 - `logs/` contains the rotated redacted JSONL event stream.
-- `logs/trackio/` contains the local Trackio SQLite database; it is synced to
-  the public static dashboard and never enters an upload plan.
-- `publication-state.json` records only verified publication transitions.
+- `logs/trackio/` contains the local Trackio SQLite database. The tool syncs it
+  to the public static dashboard. It never enters an upload plan.
+- `publication-state.json` records only the verified publication transitions.
 
 None of these local-state paths enters an upload plan.
 
 ## Lifecycle
 
-`run-and-publish` performs:
+`run-and-publish` does these steps:
 
-1. deterministic PBF discovery;
-2. read-only preflight, including real `osmium`, `hf`, authentication, and Hub
-   write-permission checks;
-3. build or validated local reuse for each source;
-4. global `(osm_type, osm_id)` deduplication with atomic resumable promotion;
-5. deterministic README, stats, and visual-asset refresh;
-6. an exact seven-file per-PBF upload plan (Parquet, manifest, README, stats,
-   H3 map, area histogram, and dataset-card hero) and remote verification;
-7. atomic publication-state update, including the H3 map identity;
-8. deterministic final `README.md` and `stats.json` generation and independent
-   metadata publication, including all three visual assets;
-9. atomic record of publication state with map SHA-256, size, and verified
-   revision.
+1. It discovers the PBF files in a deterministic order.
+2. It does a read-only preflight. The preflight includes checks of the real
+   `osmium`, `hf`, the authentication, and the Hub write permission.
+3. It builds each source, or it reuses the validated local artifact.
+4. It does the global `(osm_type, osm_id)` deduplication with an atomic
+   promotion that you can resume.
+5. It refreshes the deterministic README, the stats, and the visual assets.
+6. It uploads an exact seven-file plan for each PBF and verifies it remotely.
+   The files are the Parquet file, the manifest, the README, the stats, the H3
+   map, the area histogram, and the dataset-card hero.
+7. It updates the publication state atomically. The update includes the H3 map
+   identity.
+8. It generates the deterministic final `README.md` and `stats.json`. It
+   publishes the metadata independently, with all three visual assets.
+9. It records the publication state atomically with the map SHA-256, the size,
+   and the verified revision.
 
-Preflight fails before opening a PBF or creating generated artifacts. Once it
-passes, every state transition is persisted only after the relevant artifact
-or remote identity is verified.
+The preflight fails before the tool opens a PBF or creates generated
+artifacts. After the preflight passes, the tool saves a state transition only
+after it verifies the relevant artifact or remote identity.
 
 ## Stop and resume
 
-Press Ctrl-C once and wait for the terminal prompt. The CLI returns exit code
-130, terminates the active osmium child safely, removes owned incomplete
-temporaries, and preserves finalized Parquet, manifests, and publication
-state. Rerun the same command:
+Press Ctrl-C one time. Wait for the terminal prompt. The CLI returns exit code
+130. It terminates the active osmium child safely. It removes the incomplete
+temporary files that it owns. It keeps the finalized Parquet files, the
+manifests, and the publication state. Run the same command again:
 
 ```bash
 just run-and-publish
 ```
 
 The orchestrator classifies each source as `build`, `reuse-local`, or
-`already-published`. It never rebuilds a verified local artifact whose source,
-schema, transform, area-policy, and output identities still agree.
+`already-published`. It does not rebuild a verified local artifact when the
+source, schema, transform, area-policy, and output identities still agree.
 
-If interrupted during deduplication, the staged canonical files remain under
-`.work/dedup/` and the next invocation finishes promotion before continuing to
-publication, provided the current inputs still match the recorded identities
-(or the expected hashes of files already promoted from that stage). Input drift
-is refused and the staged state is preserved for safe recovery. A completed
-deduplication state is reused when all input output identities and the policy
-hash still match.
+If an interruption occurs during deduplication, the staged canonical files stay
+under `.work/dedup/`. The next run finishes the promotion before it continues
+to publication. This applies if the current inputs still match the recorded
+identities, or the expected hashes of the files that the tool promoted from that
+stage. If the input changes, the tool refuses to continue. It keeps the staged
+state for a safe recovery. The tool reuses a completed deduplication state when
+all the input output identities and the policy hash still match.
 
 ## Legacy text repair
 
-Artifacts built before the successful-text contract stored description values
-exactly as OpenStreetMap held them, including leading and trailing whitespace.
-The final-artifact contract requires the canonical trimmed form, so
-`publish-plan` refuses such an artifact with `description text must be
-trimmed`.
+Artifacts that the tool built before the successful-text contract store the
+description values exactly as OpenStreetMap held them. This includes leading
+and trailing whitespace. The final-artifact contract needs the canonical
+trimmed form. Thus `publish-plan` refuses such an artifact with `description
+text must be trimmed`.
 
-`migrate-text` repairs them in place without reading raw PBFs:
+`migrate-text` repairs these artifacts in place. It does not read the raw PBF
+files:
 
 ```bash
 uv run osm-polygon-description-tag migrate-text
 ```
 
-It applies the same normalization the current build path applies, so a
-migrated artifact matches what a rebuild would produce for this defect. A
-value that is only whitespace carries no text and is dropped; a row left
-without any description text is excluded and recorded under the existing
-`no_nonempty_description` reason. Each Parquet is promoted before its manifest
-is updated, so an interrupted run resumes safely, and an artifact that is
-already canonical is left byte-identical.
+The command applies the same normalization as the current build path. Thus a
+migrated artifact is the same as the artifact that a rebuild produces for this
+defect. A value that has only whitespace has no text, and the tool drops it. A
+row that has no description text is excluded. The tool records it under the
+existing `no_nonempty_description` reason. The tool promotes each Parquet file
+before it updates its manifest. Thus you can resume an interrupted run safely.
+The tool does not change an artifact that is already canonical. The bytes stay
+the same.
 
-Run `generate-card` afterwards so `stats.json` and the card reflect the
+Afterwards, run `generate-card`. Then `stats.json` and the card show the
 repaired rows.
 
 ## Logs and diagnostics
 
-Events are written to:
+The tool writes the events to:
 
 ```text
 <data-root>/logs/run-and-publish.jsonl
 ```
 
-The active log rotates at 10 MiB with five backups using same-directory atomic
-operations. Human progress is stderr-only; stdout remains one machine-readable
-JSON report. Logs are redacted, allowlisted, flushed, and never published.
+The active log rotates at 10 MiB with five backups. It uses atomic operations
+in the same directory. The human progress goes only to stderr. Stdout stays one
+machine-readable JSON report. The logs are redacted, allowlisted, and flushed.
+The tool never publishes them.
 
 ## Hugging Face safety
 
-The target dataset is `NoeFlandre/osm-polygon-description-tag`. Every upload is
-an explicit allowlisted plan. Final metadata is uploaded separately as exactly five files:
-`README.md`, `stats.json`,
+The target dataset is `NoeFlandre/osm-polygon-description-tag`. Each upload is
+an explicit allowlisted plan. The tool uploads the final metadata separately as
+exactly five files: `README.md`, `stats.json`,
 `assets/description_polygon_density.png`, `assets/area_distribution.png`, and
 `assets/dataset-card-hero.png`.
 
-The H3 map is keyed by the identities of the complete validated local Parquet
-set. It is recomputed only when that dataset input identity changes. README-only
-or stats-only changes reuse the existing PNG bytes and preserve the true no-op
-metadata publication path when the allowlisted metadata is unchanged.
+The identities of the complete validated local Parquet set are the key of the
+H3 map. The tool computes the map again only when that dataset input identity
+changes. If only the README or only the stats change, the tool reuses the
+existing PNG bytes. The metadata publication stays a true no-op when the
+allowlisted metadata does not change.
 
-Trackio is local-first: metrics are written under the generated-data root while
-the pipeline runs, and the completed database is synchronized to the public
-static dashboard. A Trackio outage never interrupts extraction or publication.
+Trackio is local-first. The tool writes the metrics under the generated-data
+root while the pipeline runs. It synchronizes the completed database to the
+public static dashboard. A Trackio outage does not stop the extraction or the
+publication.
 
-Remote reconciliation removes only stale files below managed `data/` and
-`manifests/` namespaces. Unrelated repository files are preserved. The
-pipeline never uploads logs, caches, temporary files, publication state, or
+Remote reconciliation removes only the stale files below the managed `data/`
+and `manifests/` namespaces. It keeps the unrelated repository files. The
+pipeline never uploads logs, caches, temporary files, the publication state, or
 other PBF artifacts.
