@@ -6,23 +6,23 @@ The executable is:
 uv run osm-polygon-description-tag COMMAND
 ```
 
-Use `--help` on the executable or any command for the exact current option
-surface. Every option has a description there.
+Use `--help` on the executable or on a command to see the exact current
+options. Each option has a description there.
 
 ## Global options
 
-These come before the command, for example
-`osm-polygon-description-tag -q run-and-publish ...`:
+Put these options before the command. For example:
+`osm-polygon-description-tag -q run-and-publish ...`
 
 | Option | Effect |
 | --- | --- |
-| `--version` | Print the package version and exit 0. |
-| `-v`, `--verbose` | Also print DEBUG event lines on stderr, such as `resolved_config` (the roots, osmium and target repo in use). |
-| `-q`, `--quiet` | Print only WARNING and ERROR event lines on stderr. |
+| `--version` | Prints the package version and exits with code 0. |
+| `-v`, `--verbose` | Also prints DEBUG event lines on stderr, such as `resolved_config` (the roots, osmium, and target repo in use). |
+| `-q`, `--quiet` | Prints only WARNING and ERROR event lines on stderr. |
 
-`-v` and `-q` cannot be combined. They change only the human-readable stderr
-lines; the JSONL log under `logs/` always records every event, and stdout is
-unchanged.
+You cannot use `-v` and `-q` together. They change only the human-readable
+stderr lines. The JSONL log under `logs/` always records each event. Stdout
+does not change.
 
 ## Exit codes
 
@@ -31,26 +31,26 @@ unchanged.
 | `0` | Success. |
 | `1` | Any other failure (I/O, osmium export, orchestration, migration). |
 | `2` | Usage error: unknown command or option, bad value. |
-| `3` | Environment or configuration: preflight failed, a root is missing or unsafe. |
-| `4` | Validation failed: manifest, storage or statistics checks. |
-| `5` | Publication failed: upload plan mismatch, upload or Hub verification. |
+| `3` | Environment or configuration: the preflight failed, or a root is missing or unsafe. |
+| `4` | Validation failed: manifest, storage, or statistics checks. |
+| `5` | Publication failed: upload plan mismatch, upload, or Hub verification. |
 | `130` | Interrupted with Ctrl-C. |
 
-Errors print one line on stderr, never a traceback.
+An error prints one line on stderr. It never prints a traceback.
 
 ## Read-only and local commands
 
 | Command | Purpose | Main side effect |
 | --- | --- | --- |
-| `inspect` | Discover direct source PBFs | Read-only |
-| `build-one NAME` | Build one named source | Writes one Parquet and manifest under the data root |
-| `build-all` | Build all discovered sources | Writes validated local artifacts |
-| `validate` | Validate Parquet files and manifests | Read-only apart from bounded local work files |
-| `generate-card` | Recompute `stats.json` and `README.md` | Atomically writes changed metadata |
-| `migrate-schema` | Upgrade legacy Arrow-map Parquets to Hub-viewable key/value lists | Atomically rewrites existing data files; never reads raw PBFs |
-| `migrate-text` | Repair legacy untrimmed description text to its canonical form | Atomically rewrites affected data files and manifests; never reads raw PBFs |
-| `trackio-snapshot` | Log the completed dataset snapshot to Trackio | Writes local Trackio state and refreshes the public static dashboard |
-| `publish-plan` | Show the exact upload plan identity | Read-only |
+| `inspect` | Discovers the direct source PBFs | Read-only |
+| `build-one NAME` | Builds one named source | Writes one Parquet file and manifest under the data root |
+| `build-all` | Builds all discovered sources | Writes validated local artifacts |
+| `validate` | Validates the Parquet files and manifests | Read-only, except for bounded local work files |
+| `generate-card` | Computes `stats.json` and `README.md` again | Writes the changed metadata atomically |
+| `migrate-schema` | Upgrades legacy Arrow-map Parquet files to key/value lists that the Hub can show | Rewrites the existing data files atomically. Never reads raw PBFs |
+| `migrate-text` | Repairs legacy untrimmed description text to its canonical form | Rewrites the affected data files and manifests atomically. Never reads raw PBFs |
+| `trackio-snapshot` | Logs the completed dataset snapshot to Trackio | Writes local Trackio state and refreshes the public static dashboard |
+| `publish-plan` | Shows the exact upload plan identity | Read-only |
 
 Examples:
 
@@ -69,7 +69,7 @@ uv run osm-polygon-description-tag publish-plan
 
 ### `run-and-publish`
 
-The complete stoppable and resumable operation:
+This command is the complete operation. You can stop it and resume it:
 
 ```bash
 uv run osm-polygon-description-tag run-and-publish \
@@ -80,25 +80,24 @@ uv run osm-polygon-description-tag run-and-publish \
 
 Options:
 
-- `--source-root PATH`: immutable PBF directory. If omitted, read from
-  `OSM_POLYGON_SOURCE_ROOT`. Only `inspect`, `build-one`, `build-all`, and
-  `run-and-publish` need it; data-only commands ignore it.
-- `--data-root PATH`: generated-data directory. If omitted, read from
-  `OSM_POLYGON_DATA_ROOT`.
+- `--source-root PATH`: the immutable PBF directory. If you omit it, the tool
+  reads `OSM_POLYGON_SOURCE_ROOT`. Only `inspect`, `build-one`, `build-all`,
+  and `run-and-publish` need it. The data-only commands ignore it.
+- `--data-root PATH`: the generated-data directory. If you omit it, the tool
+  reads `OSM_POLYGON_DATA_ROOT`.
+- `--osmium NAME`: the executable name or path. The default is `osmium`.
+- `--confirm-repo REPO`: the exact target repository. This option is required.
 
-- `--osmium NAME`: executable name or path; defaults to `osmium`.
-- `--confirm-repo REPO`: required exact target repository confirmation.
-
-A root given neither way is an error (exit code 3) naming both the option and
-the variable; there is no machine-specific default.
+If you give a root in neither way, the tool shows an error (exit code 3). The
+error names the option and the variable. There is no machine-specific default.
 
 ### `release-stats`
 
-The statistics release wrapper. It validates the complete published Parquet
-inventory against its manifests, recomputes `stats.json` and `README.md` from
-every valid published row, and publishes only the card, the report, and the
-required visual assets. Source data, manifests, and unrelated Hub files are
-never touched.
+This command is the statistics release wrapper. It validates the complete
+published Parquet inventory against its manifests. It computes `stats.json` and
+`README.md` again from each valid published row. It publishes only the card,
+the report, and the required visual assets. It never touches the source data,
+the manifests, or the unrelated Hub files.
 
 ```bash
 # 1. Dry run: compute, validate, and print the exact plan. No network.
@@ -114,41 +113,51 @@ uv run osm-polygon-description-tag release-stats \
 
 Options:
 
-- `--confirm-repo REPO`: required; must equal
+- `--confirm-repo REPO`: required. It must be equal to
   `NoeFlandre/osm-polygon-description-tag`.
-- `--apply` / `--dry-run`: upload and verify, or compute only (the default).
+- `--apply` / `--dry-run`: `--apply` uploads and verifies. `--dry-run` only
+  computes. It is the default.
 
-Before `--apply` uploads anything, the command pins the current Hub revision
-and verifies the complete remote `data/` and `manifests/` inventory against the
-local Parquet/manifest bytes. It refuses to publish when that inventory cannot
-be verified or differs locally; it verifies the same inventory again at the
-resulting metadata commit to catch a concurrent data change. The JSON report
-records that preflight `data_revision`, the target repository, the plan
-identity, the verified metadata revision, every published file with its
-SHA-256 and size, the validated Parquet file count, and the published row
-count. Regeneration writes a file only when its bytes change, so a second run
-over unchanged artifacts is a no-op that yields the same plan identity.
+Before `--apply` uploads data, the command pins the current Hub revision. It
+verifies the complete remote `data/` and `manifests/` inventory against the
+local Parquet and manifest bytes. It refuses to publish when it cannot verify
+the inventory or when the inventory is different from the local one. It
+verifies the same inventory again at the resulting metadata commit. This finds
+a concurrent data change. The JSON report records these items:
 
-Equivalent recipes: `just release-stats-dry-run` and `just release-stats`.
+- the preflight `data_revision`;
+- the target repository;
+- the plan identity;
+- the verified metadata revision;
+- each published file with its SHA-256 and size;
+- the number of validated Parquet files;
+- the number of published rows.
+
+The regeneration writes a file only when its bytes change. A second run over
+unchanged artifacts is a no-op. It gives the same plan identity.
+
+The equivalent recipes are `just release-stats-dry-run` and `just
+release-stats`.
 
 ### `publish`
 
-The lower-level publication command requires an exact plan identity generated
-by `publish-plan` and existing authenticated Hugging Face credentials:
+The lower-level publication command needs an exact plan identity that
+`publish-plan` generates. It also needs existing authenticated Hugging Face
+credentials:
 
 ```bash
 uv run osm-polygon-description-tag publish --plan PLAN_IDENTITY_SHA256
 ```
 
-It does not authenticate, discover sources, rebuild data, or accept a token
-argument.
+The command does not authenticate. It does not discover sources. It does not
+build data again. It does not accept a token argument.
 
 ### `trackio-snapshot`
 
-For a completed dataset, this command derives a deterministic cumulative
-per-Parquet curve and summary metrics from validated local artifacts, stores the
-Trackio database under the data root, and synchronizes a public static
-dashboard:
+For a completed dataset, this command derives a deterministic cumulative curve
+for each Parquet file. It also derives summary metrics. It uses the validated
+local artifacts. It stores the Trackio database under the data root. It
+synchronizes a public static dashboard:
 
 ```bash
 uv run osm-polygon-description-tag trackio-snapshot \
@@ -156,18 +165,19 @@ uv run osm-polygon-description-tag trackio-snapshot \
   --run-name snapshot-2026-07-31
 ```
 
-The same recorder is used by `run-and-publish`: it logs source and aggregate
-points during a live run and syncs the completed local database after the run.
-The cumulative curves use PBF index steps sorted by filename, never elapsed
-time. The dashboard also contains the per-PBF table, summary, ranked regional
-plots, H3 map, and area histogram.
+`run-and-publish` uses the same recorder. During a live run, it logs the source
+points and the aggregate points. After the run, it syncs the completed local
+database. The cumulative curves use PBF index steps that the tool sorts by
+filename. They never use the elapsed time. The dashboard also has the per-PBF
+table, the summary, the ranked regional plots, the H3 map, and the area
+histogram.
 
 ## `language`
 
-The `language` group produces the additive `language-v1` annotations. Its default
-detector is Lingua 2.2.0 with the pinned GlotLID v3 fallback used only when
-Lingua is `uncertain`. It is documented in full, including limitations and
-recovery behaviour, in the [language detection runbook](language-detection.md).
+The `language` group produces the additive `language-v1` annotations. Its
+default detector is Lingua 2.2.0. The tool uses the pinned GlotLID v3 fallback
+only when Lingua is `uncertain`. The [language detection runbook](language-detection.md)
+describes the group in full. It includes the limits and the recovery behaviour.
 
 ```bash
 uv run osm-polygon-description-tag language prepare --source-root <src> --run-dir <run> --project-root .
@@ -177,16 +187,16 @@ uv run osm-polygon-description-tag language export --run-dir <run> --export-dir 
 uv run osm-polygon-description-tag language publish --export-dir <export> --repo <repo> --confirm-repo <repo>
 ```
 
-`prepare` freezes an immutable input snapshot, `run` spends a bounded
-processing budget on one shard and pauses resumably, and `validate` reports
-completeness read-only. `export` refuses anything but a fully complete run, and
-`publish` plans by default: it uploads only with `--apply` and a matching
-`--baseline-revision`.
+`prepare` freezes an immutable input snapshot. `run` uses a bounded processing
+budget on one shard and pauses so that you can resume it. `validate` reports
+the completeness and is read-only. `export` refuses each run that is not fully
+complete. `publish` makes a plan by default. It uploads only with `--apply` and
+a matching `--baseline-revision`.
 
-The nested `language grid` group prepares, stages, submits, reconciles, and collects one
-tiny Grid'5000 job. `submit` and `status` contact no scheduler unless `--apply`
-is passed, and the policy preflight fails closed on anything it cannot
-positively interpret.
+The nested `language grid` group prepares, stages, submits, reconciles, and
+collects one tiny Grid'5000 job. `submit` and `status` do not contact a
+scheduler unless you give `--apply`. The policy preflight fails closed on
+anything that it cannot interpret positively.
 
 ```bash
 uv run --no-sync osm-polygon-description-tag language grid stage --run-dir <run> --shard region.parquet \
@@ -198,24 +208,26 @@ uv run --no-sync osm-polygon-description-tag language grid status --run-dir <run
 uv run --no-sync osm-polygon-description-tag language grid collect --run-dir <run> --shard region.parquet
 ```
 
-`stage` prepares a portable one-shard payload locally and prints the transfer
-plan; `--apply` enables the transfer. Cascade Grid jobs require an explicit
-remote path to the pinned GlotLID v3 model. The paths must be visible in the current
-filesystem, normally on the site's frontend/shared storage. These commands use
-an already-installed operator environment; do not install dependencies on the
-frontend. `prepare` alone
-writes script metadata and does not transfer inputs. Both write the shard's
-initial zero-cursor checkpoint, so a job that dies during setup is still
-collectable; `stage` also reports any uncheckpointed orphan part or receipt it
-moved aside under `quarantined`. See the runbook for retrieval, terminal-job
-reconciliation, crash recovery, and explicit paused-run continuation. No
-Grid'5000 job, OAR command, SSH session, production run, or Hub upload has been
-executed for this implementation.
+`stage` prepares a portable one-shard payload locally. It prints the transfer
+plan. `--apply` enables the transfer. A Cascade Grid job needs an explicit
+remote path to the pinned GlotLID v3 model. The paths must be visible in the
+current filesystem. Normally they are on the shared storage or the frontend of
+the site. These commands use an operator environment that is already installed.
+
+WARNING: Do not install dependencies on the frontend.
+
+`prepare` alone writes script metadata. It does not transfer inputs. Both
+commands write the initial zero-cursor checkpoint of the shard. Thus you can
+collect a job that fails during setup. `stage` also reports each orphan part or
+receipt without a checkpoint that it moved aside, under `quarantined`. Refer to
+the runbook for these topics: retrieval, terminal-job reconciliation, crash
+recovery, and explicit paused-run continuation. This implementation did not
+run any Grid'5000 job, OAR command, SSH session, production run, or Hub upload.
 
 ## Output and exit codes
 
-Successful commands write one JSON report to stdout. Human diagnostics and
-interactive progress use stderr. Exit codes are:
+A successful command writes one JSON report to stdout. The human diagnostics
+and the interactive progress use stderr. The exit codes are:
 
 - `0`: successful operation, including a safe no-op;
 - `1`: operational failure;
