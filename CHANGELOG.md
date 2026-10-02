@@ -15,6 +15,7 @@ defined once, in `pyproject.toml`. `CITATION.cff` must have the same version.
 
 ### Fixed
 
+- The uploader retries on timeout messages in stderr. It keeps live output and a bounded error tail (#105).
 - The private `typer._click` import is isolated. The declared `typer` minimum version now works (#71).
 - The tool reports preflight timeouts and OS errors as `PreflightError` (#70).
 
