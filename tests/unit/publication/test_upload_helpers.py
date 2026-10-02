@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import subprocess
+import threading
+from io import BytesIO, StringIO, TextIOWrapper
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -128,19 +132,118 @@ def test_invoke_runner_uses_explicit_subprocess_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     seen: list[tuple[list[str], dict[str, Any]]] = []
+    process = MagicMock()
+    process.stderr = BytesIO()
+    process.wait.return_value = 0
+    process.__enter__.return_value = process
 
-    def run(command: list[str], **kwargs: Any) -> None:
+    def popen(command: list[str], **kwargs: Any) -> MagicMock:
         seen.append((command, kwargs))
+        return process
 
-    monkeypatch.setattr(upload.subprocess, "run", run)
+    monkeypatch.setattr(upload.subprocess, "Popen", popen)
     upload._invoke_runner(["hf", "upload"], 12.5, None)
 
     assert seen == [
         (
             ["hf", "upload"],
-            {"check": True, "shell": False, "timeout": 12.5},
+            {"shell": False, "stderr": subprocess.PIPE},
         )
     ]
+    process.wait.assert_called_once_with(timeout=12.5)
+
+
+def test_child_stderr_reader_uses_a_daemon_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_thread = threading.Thread
+    readers: list[threading.Thread] = []
+
+    def capture_thread(*args: Any, **kwargs: Any) -> threading.Thread:
+        reader = real_thread(*args, **kwargs)
+        readers.append(reader)
+        return reader
+
+    monkeypatch.setattr(upload.threading, "Thread", capture_thread)
+    upload._invoke_runner(["python", "-c", "pass"], None, None)
+
+    assert len(readers) == 1
+    assert readers[0].daemon is True
+    assert readers[0].name == "upload-stderr-reader"
+
+
+def test_stderr_forwarding_stops_after_a_broken_sink_but_keeps_draining(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class BrokenSink:
+        writes = 0
+
+        def write(self, _text: str) -> int:
+            self.writes += 1
+            raise BrokenPipeError
+
+        def flush(self) -> None:
+            return None
+
+    sink = BrokenSink()
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, b"a" * 8192 + b"tail")
+    os.close(write_fd)
+    pipe = os.fdopen(read_fd, "rb", buffering=0)
+    retained = upload._StderrTail()
+    read_sizes: list[int] = []
+    stop_reader = threading.Event()
+    # Make each poll bounded if a mutation causes the pipe to report no chunk.
+    stop_reader.set()
+    real_read = upload.os.read
+
+    def tracking_read(descriptor: int, size: int) -> bytes:
+        read_sizes.append(size)
+        return real_read(descriptor, size)
+
+    monkeypatch.setattr(upload.os, "read", tracking_read)
+    monkeypatch.setattr(upload.sys, "stderr", sink)
+
+    upload._drain_stderr(pipe, retained, stop_reader)
+
+    assert sink.writes == 1
+    assert retained.snapshot().endswith(b"tail")
+    assert read_sizes
+    assert all(size == upload._STDERR_CHUNK_BYTES for size in read_sizes)
+
+
+def test_stderr_pipe_read_errors_are_treated_as_end_of_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def failed_read(_descriptor: int, _size: int) -> bytes:
+        raise OSError("closed pipe")
+
+    monkeypatch.setattr(upload.os, "read", failed_read)
+
+    assert upload._try_read_stderr_chunk(123) == b""
+
+
+def test_stderr_forwarding_writes_raw_bytes_when_a_binary_buffer_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    binary_output = BytesIO()
+    stream = TextIOWrapper(binary_output, encoding="utf-8")
+    monkeypatch.setattr(upload.sys, "stderr", stream)
+
+    upload._write_stderr_chunk(b"diagnostic \xff")
+
+    assert binary_output.getvalue() == b"diagnostic \xff"
+
+
+def test_stderr_forwarding_decodes_when_no_binary_buffer_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stream = StringIO()
+    monkeypatch.setattr(upload.sys, "stderr", stream)
+
+    upload._write_stderr_chunk(b"diagnostic \xff")
+
+    assert stream.getvalue() == "diagnostic \ufffd"
 
 
 def test_called_error_retry_requires_retryable_error_and_remaining_attempt() -> None:

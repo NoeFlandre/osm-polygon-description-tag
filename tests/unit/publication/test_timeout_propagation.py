@@ -1,7 +1,7 @@
-"""RED tests proving ``upload_timeout`` is correctly threaded through the pipeline.
+"""Tests proving ``upload_timeout`` is correctly threaded through the pipeline.
 
 The CLI default must be ``None`` (no overall upload kill). An explicitly
-positive timeout must reach the underlying ``subprocess.run`` call. Ctrl-C
+positive timeout must reach the underlying subprocess call. Ctrl-C
 must immediately escape with exit code 130 and never be retried.
 """
 
@@ -55,7 +55,7 @@ def _fake_exporter_records() -> object:
 
 
 def test_default_runner_with_retry_accepts_timeout() -> None:
-    """The default runner forwards the timeout argument to subprocess.run."""
+    """The default runner forwards the timeout argument to the subprocess."""
     seen: list[float | None] = []
 
     def fake_subprocess(command: list[str], timeout: float | None = None) -> None:

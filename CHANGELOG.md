@@ -15,6 +15,7 @@ defined once, in `pyproject.toml`; `CITATION.cff` must match it.
 
 ### Fixed
 
+- Upload retries classify timeout messages from bounded stderr while preserving live diagnostics (#105).
 - Private `typer._click` import isolated; the declared `typer` floor now works (#71).
 - Preflight timeouts and OS errors are reported as `PreflightError` (#70).
 

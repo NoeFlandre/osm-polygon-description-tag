@@ -1,8 +1,10 @@
 import subprocess
 from collections.abc import Callable
 from dataclasses import replace
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -839,26 +841,38 @@ def test_execute_upload_detects_checksum_drift(
         execute_upload(plan, confirmation=plan.identity_sha256, runner=runner)
 
 
-def test_execute_upload_invokes_runner_with_subprocess_run_by_default(
-    publication_dataset_factory: Callable[[Path], None], tmp_path: Path
+def test_execute_upload_invokes_runner_with_subprocess_popen_by_default(
+    publication_dataset_factory: Callable[[Path], None],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     data_root = tmp_path / "generated"
     publication_dataset_factory(data_root)
     plan = create_upload_plan(data_root)
 
-    def fake_subprocess_run(command, **kwargs):  # type: ignore[no-untyped-def]
-        return subprocess.CompletedProcess(command, 0)
-
-    # Patch subprocess.run via the publication module import path.
     import osm_polygon_description_tag.publication.upload as publication
 
-    original = publication.subprocess.run
-    publication.subprocess.run = fake_subprocess_run  # type: ignore[assignment]
-    try:
-        # When invoked with the default runner, confirm it goes through subprocess.run.
-        execute_upload(plan, confirmation=plan.identity_sha256)
-    finally:
-        publication.subprocess.run = original  # type: ignore[assignment]
+    process = MagicMock()
+    process.stderr = BytesIO()
+    process.wait.return_value = 0
+    process.__enter__.return_value = process
+    popen_calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_popen(command: list[str], **kwargs: object) -> MagicMock:
+        popen_calls.append((command, kwargs))
+        return process
+
+    monkeypatch.setattr(publication.subprocess, "Popen", fake_popen)
+    execute_upload(plan, confirmation=plan.identity_sha256)
+
+    assert len(popen_calls) == 1
+    assert popen_calls[0][0][:3] == [
+        "hf",
+        "upload-large-folder",
+        "NoeFlandre/osm-polygon-description-tag",
+    ]
+    assert popen_calls[0][1] == {"shell": False, "stderr": subprocess.PIPE}
+    process.wait.assert_called_once_with(timeout=None)
 
 
 def test_execute_upload_rejects_missing_confirmation(

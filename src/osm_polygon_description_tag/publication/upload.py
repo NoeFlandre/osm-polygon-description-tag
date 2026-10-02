@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
+import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol, cast
+from typing import BinaryIO, Protocol, cast
 
 from osm_polygon_description_tag.dataset.manifest import file_sha256
 from osm_polygon_description_tag.publication.hub_client import (
@@ -22,6 +26,12 @@ from osm_polygon_description_tag.publication.models import (
     Runner,
     UploadPlan,
 )
+
+_STDERR_CHUNK_BYTES = 4096
+_MAX_STDERR_BYTES = 64 * 1024
+_MAX_STDERR_CHUNKS = _MAX_STDERR_BYTES // _STDERR_CHUNK_BYTES
+_STDERR_POLL_SECONDS = 0.01
+_STDERR_JOIN_TIMEOUT_SECONDS = 0.25
 
 
 def _verify_identity(plan: UploadPlan) -> None:
@@ -133,7 +143,7 @@ def _run_with_retry(
     for explicit termination.
 
     ``_runner`` is a private hook for tests; production code uses
-    :func:`subprocess.run`. KeyboardInterrupt always escapes immediately
+    :func:`subprocess.Popen`. KeyboardInterrupt always escapes immediately
     without retry.
     """
     attempt = 0
@@ -178,14 +188,112 @@ def _invoke_runner(
     runner: Callable[[list[str], float | None], None] | None,
 ) -> None:
     if runner is None:
-        subprocess.run(  # noqa: S603 - controlled argument array, no shell
-            command,
-            check=True,
-            shell=False,
-            timeout=timeout,
-        )
+        _run_subprocess(command, timeout)
         return
     runner(command, timeout)
+
+
+def _run_subprocess(command: list[str], timeout: float | None) -> None:
+    retained_stderr = _StderrTail()
+    stop_reader = threading.Event()
+    with subprocess.Popen(  # noqa: S603 - controlled argument array, no shell
+        command,
+        shell=False,
+        stderr=subprocess.PIPE,
+    ) as process:
+        stderr_pipe = cast(BinaryIO, process.stderr)  # pragma: no mutate - static narrowing only
+        reader = threading.Thread(
+            target=_drain_stderr,
+            args=(stderr_pipe, retained_stderr, stop_reader),
+            daemon=True,
+            name="upload-stderr-reader",
+        )
+        reader.start()
+        timeout_error: subprocess.TimeoutExpired | None = None
+        try:
+            return_code = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired as error:
+            process.kill()
+            process.wait()
+            timeout_error = error
+        except KeyboardInterrupt:
+            process.kill()
+            process.wait()
+            raise
+        finally:
+            stop_reader.set()
+            reader.join(timeout=_STDERR_JOIN_TIMEOUT_SECONDS)
+
+    stderr = retained_stderr.snapshot()
+    if timeout_error is not None:
+        timeout_error.stderr = stderr
+        raise timeout_error
+    if return_code:
+        raise subprocess.CalledProcessError(return_code, command, stderr=stderr)
+
+
+class _StderrTail:
+    def __init__(self) -> None:
+        self._chunks: deque[bytes] = deque(maxlen=_MAX_STDERR_CHUNKS)
+        self._lock = threading.Lock()
+
+    def append(self, chunk: bytes) -> None:
+        with self._lock:
+            self._chunks.append(chunk)
+
+    def snapshot(self) -> bytes:
+        with self._lock:
+            return b"".join(self._chunks)
+
+
+def _drain_stderr(pipe: BinaryIO, retained: _StderrTail, stop_reader: threading.Event) -> None:
+    """Forward child stderr while retaining only a bounded tail for errors."""
+    try:
+        descriptor = pipe.fileno()
+        os.set_blocking(
+            descriptor, False
+        )  # pragma: no mutate - None also means nonblocking to os.set_blocking
+    except (OSError, ValueError):
+        return
+    with pipe:
+        forwarding = True
+        while chunk := _read_stderr_chunk(descriptor, stop_reader):
+            retained.append(chunk)
+            if forwarding:
+                try:
+                    _write_stderr_chunk(chunk)
+                except (OSError, UnicodeError, ValueError):
+                    forwarding = False  # pragma: no mutate - any false sentinel has same effect
+
+
+def _read_stderr_chunk(descriptor: int, stop_reader: threading.Event) -> bytes | None:
+    while True:
+        chunk = _try_read_stderr_chunk(descriptor)
+        if chunk is not None:
+            return chunk
+        if stop_reader.wait(_STDERR_POLL_SECONDS):
+            return _try_read_stderr_chunk(descriptor)
+
+
+def _try_read_stderr_chunk(descriptor: int) -> bytes | None:
+    try:
+        return os.read(descriptor, _STDERR_CHUNK_BYTES)
+    except BlockingIOError:
+        return None
+    except OSError:
+        return b""
+
+
+def _write_stderr_chunk(chunk: bytes) -> None:
+    stream = sys.stderr
+    if stream is None:
+        return
+    binary_stream = getattr(stream, "buffer", None)
+    if binary_stream is None:
+        stream.write(chunk.decode(errors="replace"))
+    else:
+        binary_stream.write(chunk)
+    stream.flush()
 
 
 def _called_error_retry(
