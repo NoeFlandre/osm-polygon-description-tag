@@ -1,0 +1,39 @@
+name: SaT capability drift
+
+on:
+  workflow_dispatch:
+    inputs:
+      description_ref:
+        description: Description review commit or branch
+        default: main
+        type: string
+      website_ref:
+        description: Website review commit or branch
+        default: main
+        type: string
+      wikidata_ref:
+        description: Wikidata review commit or branch
+        default: main
+        type: string
+  schedule:
+    - cron: '17 8 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Report each consumer version and digest
+        env:
+          DESCRIPTION_REF: ${{ inputs.description_ref || 'main' }}
+          WEBSITE_REF: ${{ inputs.website_ref || 'main' }}
+          WIKIDATA_REF: ${{ inputs.wikidata_ref || 'main' }}
+        run: >-
+          python3 scripts/check_sat_capabilities.py
+          --description-ref "$DESCRIPTION_REF"
+          --website-ref "$WEBSITE_REF"
+          --wikidata-ref "$WIKIDATA_REF"

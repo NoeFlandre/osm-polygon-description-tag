@@ -7,6 +7,9 @@ defined once, in `pyproject.toml`. `CITATION.cff` must have the same version.
 
 ## [Unreleased]
 
+- Read SaT model capabilities from a versioned, digest-checked offline reference.
+  Preserve sentence-routing policy, runtime model pins, and historical fingerprints.
+
 ### Added
 
 - `language grid run`: the multi-shard Grid'5000 driver is now part of the installed CLI. It was `scripts/run_language_grid.py` (#56).

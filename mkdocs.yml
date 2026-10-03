@@ -48,6 +48,7 @@ exclude_docs: |
 strict: true
 
 nav:
+  - Shared SaT capabilities: sat-capabilities.md
   - Home: index.md
   - Getting started: getting-started.md
   - Dataset contract: dataset-contract.md

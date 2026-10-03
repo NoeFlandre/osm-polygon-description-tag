@@ -2,9 +2,9 @@
 
 SaT-3l-sm is a supervised mixture trained on 85 languages, and that list --- not
 the model's willingness to accept any string --- is what "competent" means here.
-The table below is the authority: it is pinned in source rather than read from
-the installed library at runtime, so a library upgrade that quietly widens or
-narrows the set changes a fingerprint instead of silently changing the dataset.
+The shared packaged capability reference supplies that set. The local table
+below admits detector aliases only; it does not define model capabilities.
+Library upgrades cannot change the reference or the published fingerprint.
 
 Two code systems meet at this boundary. The detector upstream emits ISO 639-3
 (``eng``), because that is what both Lingua and GlotLID report; SaT names its
@@ -25,6 +25,7 @@ import hashlib
 from collections.abc import Mapping
 from typing import Final
 
+from osm_polygon_description_tag.dataset.sentences.sat_capabilities import load_supported_languages
 from osm_polygon_description_tag.runtime.serialization import canonical_json_bytes
 
 _ISO_639_3_BY_SAT_LANGUAGE: Final[Mapping[str, tuple[str, ...]]] = {
@@ -155,8 +156,8 @@ _ISO_639_3_BY_SAT_LANGUAGE: Final[Mapping[str, tuple[str, ...]]] = {
     "zu": ("zul",),
 }
 
-SAT_SUPPORTED_LANGUAGES: Final[frozenset[str]] = frozenset(_ISO_639_3_BY_SAT_LANGUAGE)
-SAT_LANGUAGE_COUNT: Final[int] = len(_ISO_639_3_BY_SAT_LANGUAGE)
+SAT_SUPPORTED_LANGUAGES: Final[frozenset[str]] = frozenset(load_supported_languages())
+SAT_LANGUAGE_COUNT: Final[int] = len(SAT_SUPPORTED_LANGUAGES)
 
 
 def _inverted(table: Mapping[str, tuple[str, ...]]) -> dict[str, str]:
@@ -181,7 +182,8 @@ def sat_language_for(language_code: object) -> str | None:
     """
     if not isinstance(language_code, str):
         return None
-    return _SAT_LANGUAGE_BY_ISO_639_3.get(language_code)
+    sat_language = _SAT_LANGUAGE_BY_ISO_639_3.get(language_code)
+    return sat_language if sat_language in SAT_SUPPORTED_LANGUAGES else None
 
 
 def supported_languages_fingerprint() -> str:

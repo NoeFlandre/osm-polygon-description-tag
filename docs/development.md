@@ -269,3 +269,8 @@ local baseline. They fail on a mean regression of more than 50%. The advisory
 
 Reference baseline for the renderer: 26.5k cells took 20.5 s with one patch for
 each cell. They took about 6.7 s with a single `PolyCollection`.
+
+## Shared sentence-model capabilities
+
+See [Shared SaT capabilities](sat-capabilities.md) for ownership, offline pins,
+cross-repository drift checks, and the reviewed update procedure.
