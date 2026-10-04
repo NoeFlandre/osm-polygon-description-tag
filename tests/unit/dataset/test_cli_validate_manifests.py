@@ -427,6 +427,27 @@ def test_validate_rejects_string_encoded_manifest_contract_versions(
     assert "Traceback" not in error
 
 
+def test_validate_rejects_non_integer_manifest_schema_version(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    manifest_factory,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
+    manifest_path = tmp_path / "manifests" / "a.manifest.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload["manifest_schema_version"] = 2.0
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    exit_code = cli.run(["validate", "--data-root", str(tmp_path)])
+
+    assert exit_code == cli.EXIT_VALIDATION
+    error = capsys.readouterr().err
+    assert "unsupported manifest schema version" in error
+    assert "Traceback" not in error
+
+
 def test_validate_rejects_a_manifest_row_count_mismatch(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

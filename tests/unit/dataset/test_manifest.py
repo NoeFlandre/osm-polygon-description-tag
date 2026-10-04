@@ -324,6 +324,19 @@ def test_read_manifest_reports_invalid_payloads_as_manifest_errors(
         read_manifest(path)
 
 
+@pytest.mark.parametrize("value", [2.0, True, "2"])
+def test_read_manifest_rejects_non_integer_manifest_schema_version(
+    tmp_path: Path, value: object
+) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload["manifest_schema_version"] = value
+    path = tmp_path / "invalid-schema-version.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ManifestError, match="unsupported manifest schema version"):
+        read_manifest(path)
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
@@ -438,12 +451,12 @@ def test_read_manifest_rejects_non_object_counts(tmp_path: Path) -> None:
         (
             "mtime_ns",
             "1000",
-            "invalid manifest source.mtime_ns: expected a non-negative integer",
+            "invalid manifest source.mtime_ns: expected an integer",
         ),
         (
             "mtime_ns",
-            -1,
-            "invalid manifest source.mtime_ns: expected a non-negative integer",
+            1.5,
+            "invalid manifest source.mtime_ns: expected an integer",
         ),
         (
             "sha256",
@@ -573,6 +586,17 @@ def test_read_manifest_accepts_zero_sized_identities(tmp_path: Path) -> None:
     assert restored.source.size_bytes == 0
     assert restored.source.mtime_ns == 0
     assert restored.output.size_bytes == 0
+
+
+def test_read_manifest_accepts_pre_epoch_source_timestamp(tmp_path: Path) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload["source"]["mtime_ns"] = -1
+    path = tmp_path / "pre-epoch.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    restored = read_manifest(path)
+
+    assert restored.source.mtime_ns == -1
 
 
 def test_read_manifest_requests_utf8_and_preserves_read_error_context(tmp_path: Path) -> None:

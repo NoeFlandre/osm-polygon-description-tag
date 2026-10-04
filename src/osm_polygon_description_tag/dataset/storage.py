@@ -32,7 +32,9 @@ from shapely.geometry.base import BaseGeometry
 from osm_polygon_description_tag.dataset.constants import DEFAULT_WRITE_BATCH_SIZE
 from osm_polygon_description_tag.dataset.manifest import (
     MANIFEST_SCHEMA_VERSION,
+    Manifest,
     ManifestError,
+    OutputIdentity,
     _manifest_path_for,
     is_resumable,
     output_identity_for,
@@ -909,40 +911,67 @@ def _check_artifact_stems(parquets: list[Path], manifests: list[Path]) -> None:
 def _validate_manifest_pair(
     parquet: Path, manifests_dir: Path, *, require_current_contract: bool = False
 ) -> Path:
-    try:
-        is_symlink = parquet.is_symlink()
-        is_regular_file = parquet.is_file()
-    except OSError as error:
-        raise StorageError(f"cannot inspect finalized artifact {parquet}: {error}") from error
-    if is_symlink or not is_regular_file:
-        raise StorageError(f"finalized artifact is not a regular file: {parquet}")
+    _require_regular_file(parquet, "finalized artifact", "finalized artifact is not a regular file")
     manifest_path = _manifest_path_for(parquet.name, manifests_dir.parent)
+    _require_regular_file(manifest_path, "manifest", "manifest is not a regular file")
+    manifest = _read_paired_manifest(manifest_path)
+    _validate_supported_manifest_version(manifest)
+    output_identity = _read_paired_output_identity(parquet)
+    _validate_paired_output(parquet, manifest, output_identity)
+    _validate_current_manifest_contract(
+        manifest, output_identity, manifest_path, require_current_contract
+    )
+    return manifest_path
+
+
+def _require_regular_file(path: Path, label: str, invalid_message: str) -> None:
     try:
-        is_manifest_symlink = manifest_path.is_symlink()
-        is_regular_manifest = manifest_path.is_file()
+        is_symlink = path.is_symlink()
+        is_regular_file = path.is_file()
     except OSError as error:
-        raise StorageError(f"cannot inspect manifest {manifest_path}: {error}") from error
-    if is_manifest_symlink or not is_regular_manifest:
-        raise StorageError(f"manifest is not a regular file: {manifest_path}")
+        raise StorageError(f"cannot inspect {label} {path}: {error}") from error
+    if is_symlink or not is_regular_file:
+        raise StorageError(f"{invalid_message}: {path}")
+
+
+def _read_paired_manifest(manifest_path: Path) -> Manifest:
     try:
-        manifest = read_manifest(manifest_path)
+        return read_manifest(manifest_path)
     except ManifestError as error:
         raise StorageError(f"invalid manifest {manifest_path}: {error}") from error
+
+
+def _read_paired_output_identity(parquet: Path) -> OutputIdentity:
+    try:
+        return output_identity_for(parquet)
+    except OSError as error:
+        raise StorageError(f"cannot read finalized artifact {parquet}: {error}") from error
+
+
+def _validate_paired_output(
+    parquet: Path, manifest: Manifest, output_identity: OutputIdentity
+) -> None:
+    if manifest.output != output_identity:
+        raise StorageError(f"stale output identity for {parquet.name}")
+
+
+def _validate_supported_manifest_version(manifest: Manifest) -> None:
     if manifest.manifest_schema_version != MANIFEST_SCHEMA_VERSION:
         raise StorageError(
             f"manifest uses unsupported schema version: {manifest.manifest_schema_version}"
         )
-    try:
-        output_identity = output_identity_for(parquet)
-    except OSError as error:
-        raise StorageError(f"cannot read finalized artifact {parquet}: {error}") from error
-    if manifest.output != output_identity:
-        raise StorageError(f"stale output identity for {parquet.name}")
+
+
+def _validate_current_manifest_contract(
+    manifest: Manifest,
+    output_identity: OutputIdentity,
+    manifest_path: Path,
+    require_current_contract: bool,
+) -> None:
     if require_current_contract and not is_resumable(manifest, manifest.source, output_identity):
         raise StorageError(
             f"manifest contract does not match current configuration: {manifest_path}"
         )
-    return manifest_path
 
 
 def validate_finalized_artifacts_strict(data_root: Path) -> FinalizedArtifacts:

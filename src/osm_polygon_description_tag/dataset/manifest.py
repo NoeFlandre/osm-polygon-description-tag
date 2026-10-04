@@ -79,38 +79,36 @@ class RunCounts:
 def _parse_run_counts(raw: Any) -> RunCounts:
     if not isinstance(raw, dict):
         raise ManifestError("invalid manifest counts: expected an object")
+    return RunCounts(
+        emitted_features=_parse_count_value(raw, "emitted_features"),
+        included_rows=_parse_count_value(raw, "included_rows"),
+        rejections=_parse_rejection_counts(raw.get("rejections")),
+    )
 
-    emitted_features = raw["emitted_features"]
-    included_rows = raw["included_rows"]
-    rejections = raw["rejections"]
-    if type(emitted_features) is not int:
-        raise ManifestError("invalid manifest counts.emitted_features: expected an integer")
-    if type(included_rows) is not int:
-        raise ManifestError("invalid manifest counts.included_rows: expected an integer")
-    if emitted_features < 0:
-        raise ManifestError(
-            "invalid manifest counts.emitted_features: expected a non-negative integer"
-        )
-    if included_rows < 0:
-        raise ManifestError(
-            "invalid manifest counts.included_rows: expected a non-negative integer"
-        )
-    if not isinstance(rejections, dict) or any(
-        not isinstance(reason, str) or type(count) is not int
-        for reason, count in rejections.items()
-    ):
+
+def _parse_count_value(raw: dict[str, Any], field: str) -> int:
+    value = raw.get(field)
+    if type(value) is not int:
+        raise ManifestError(f"invalid manifest counts.{field}: expected an integer")
+    if value < 0:
+        raise ManifestError(f"invalid manifest counts.{field}: expected a non-negative integer")
+    return value
+
+
+def _parse_rejection_counts(raw: Any) -> dict[str, int]:
+    if not isinstance(raw, dict):
         raise ManifestError("invalid manifest counts.rejections: expected string keys and integers")
-    if any(count < 0 for count in rejections.values()):
+    if not _rejection_counts_have_expected_types(raw):
+        raise ManifestError("invalid manifest counts.rejections: expected string keys and integers")
+    if any(count < 0 for count in raw.values()):
         raise ManifestError(
             "invalid manifest counts.rejections: expected non-negative integer values"
         )
+    return cast(dict[str, int], raw)  # pragma: no mutate - type-only cast
 
-    typed_rejections = cast(dict[str, int], rejections)  # pragma: no mutate - type-only cast
-    return RunCounts(
-        emitted_features=emitted_features,
-        included_rows=included_rows,
-        rejections=typed_rejections,
-    )
+
+def _rejection_counts_have_expected_types(raw: dict[Any, Any]) -> bool:
+    return all(isinstance(reason, str) and type(count) is int for reason, count in raw.items())
 
 
 def _parse_nonnegative_version(raw: Any, field: str) -> int:
@@ -119,39 +117,60 @@ def _parse_nonnegative_version(raw: Any, field: str) -> int:
     return raw
 
 
-def _parse_source_identity(raw: Any) -> SourceIdentity:
+def _identity_mapping(raw: Any, identity_name: str) -> dict[str, Any]:
     if not isinstance(raw, dict):
-        raise ManifestError("invalid manifest source: expected an object")
-    name = raw.get("name")
-    if type(name) is not str or not name or Path(name).name != name or "\\" in name:
-        raise ManifestError("invalid manifest source.name: expected a file name")
+        raise ManifestError(f"invalid manifest {identity_name}: expected an object")
+    return cast(dict[str, Any], raw)
+
+
+def _parse_file_name(raw: Any, identity_name: str) -> str:
+    if type(raw) is not str or not raw or Path(raw).name != raw or "\\" in raw:
+        raise ManifestError(f"invalid manifest {identity_name}: expected a file name")
+    return raw
+
+
+def _parse_source_name(raw: Any) -> str:
+    name = _parse_file_name(raw, "source.name")
     if not name.endswith(".osm.pbf") or name == ".osm.pbf":
         raise ManifestError("invalid manifest source.name: expected an .osm.pbf file name")
-    size_bytes = raw.get("size_bytes")
-    if type(size_bytes) is not int or size_bytes < 0:
-        raise ManifestError("invalid manifest source.size_bytes: expected a non-negative integer")
-    mtime_ns = raw.get("mtime_ns")
-    if type(mtime_ns) is not int or mtime_ns < 0:
-        raise ManifestError("invalid manifest source.mtime_ns: expected a non-negative integer")
-    sha256 = raw.get("sha256")
-    if type(sha256) is not str or re.fullmatch(r"[0-9a-f]{64}", sha256) is None:
-        raise ManifestError("invalid manifest source.sha256: expected a SHA-256 digest")
-    return SourceIdentity(name, size_bytes, mtime_ns, sha256)
+    return name
+
+
+def _parse_identity_size(raw: Any, identity_name: str) -> int:
+    if type(raw) is not int or raw < 0:
+        raise ManifestError(f"invalid manifest {identity_name}: expected a non-negative integer")
+    return raw
+
+
+def _parse_source_mtime(raw: Any) -> int:
+    if type(raw) is not int:
+        raise ManifestError("invalid manifest source.mtime_ns: expected an integer")
+    return raw
+
+
+def _parse_sha256(raw: Any, identity_name: str) -> str:
+    if type(raw) is not str or re.fullmatch(r"[0-9a-f]{64}", raw) is None:
+        raise ManifestError(f"invalid manifest {identity_name}: expected a SHA-256 digest")
+    return raw
+
+
+def _parse_source_identity(raw: Any) -> SourceIdentity:
+    identity = _identity_mapping(raw, "source")
+    return SourceIdentity(
+        _parse_source_name(identity.get("name")),
+        _parse_identity_size(identity.get("size_bytes"), "source.size_bytes"),
+        _parse_source_mtime(identity.get("mtime_ns")),
+        _parse_sha256(identity.get("sha256"), "source.sha256"),
+    )
 
 
 def _parse_output_identity(raw: Any) -> OutputIdentity:
-    if not isinstance(raw, dict):
-        raise ManifestError("invalid manifest output: expected an object")
-    name = raw.get("name")
-    if type(name) is not str or not name or Path(name).name != name or "\\" in name:
-        raise ManifestError("invalid manifest output.name: expected a file name")
-    size_bytes = raw.get("size_bytes")
-    if type(size_bytes) is not int or size_bytes < 0:
-        raise ManifestError("invalid manifest output.size_bytes: expected a non-negative integer")
-    sha256 = raw.get("sha256")
-    if type(sha256) is not str or re.fullmatch(r"[0-9a-f]{64}", sha256) is None:
-        raise ManifestError("invalid manifest output.sha256: expected a SHA-256 digest")
-    return OutputIdentity(name, size_bytes, sha256)
+    identity = _identity_mapping(raw, "output")
+    return OutputIdentity(
+        _parse_file_name(identity.get("name"), "output.name"),
+        _parse_identity_size(identity.get("size_bytes"), "output.size_bytes"),
+        _parse_sha256(identity.get("sha256"), "output.sha256"),
+    )
 
 
 @dataclass(frozen=True)
@@ -208,7 +227,7 @@ class Manifest:
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "Manifest":
         version = payload.get("manifest_schema_version")
-        if version != MANIFEST_SCHEMA_VERSION:
+        if type(version) is not int or version != MANIFEST_SCHEMA_VERSION:
             raise ManifestError(f"unsupported manifest schema version: {version!r}")
         counts = _parse_run_counts(payload["counts"])
         schema_version = _parse_nonnegative_version(payload.get("schema_version"), "schema_version")
@@ -341,6 +360,10 @@ def write_manifest(manifest: Manifest, path: Path) -> None:
 
 def read_manifest(path: Path) -> Manifest:
     """Read and validate a manifest file."""
+    return _manifest_from_payload(_read_manifest_payload(path), path)
+
+
+def _read_manifest_payload(path: Path) -> dict[str, Any]:
     try:
         text = path.read_text(encoding="utf-8")  # pragma: no mutate - codec names are equivalent
     except OSError as error:
@@ -353,6 +376,10 @@ def read_manifest(path: Path) -> Manifest:
         raise ManifestError(f"corrupt manifest JSON {path}: {error}") from error
     if not isinstance(payload, dict):
         raise ManifestError(f"invalid manifest structure {path}: expected a JSON object")
+    return cast(dict[str, Any], payload)
+
+
+def _manifest_from_payload(payload: dict[str, Any], path: Path) -> Manifest:
     try:
         return Manifest.from_payload(payload)
     except ManifestError:

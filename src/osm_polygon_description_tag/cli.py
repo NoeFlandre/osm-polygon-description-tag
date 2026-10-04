@@ -23,6 +23,7 @@ from osm_polygon_description_tag.dataset.languages.detector import LanguageDetec
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     ManifestError,
+    SourceIdentity,
     read_manifest,
     source_identity_for,
 )
@@ -249,34 +250,65 @@ def handle_validate(args: SimpleNamespace) -> int:
     data_dir = data_root / "data"
     if not data_dir.is_dir():
         raise ValueError(f"missing data directory: {data_dir}")
+    parquets, manifests = _validation_artifacts(data_root, data_dir)
+    rows_total = _validate_artifact_pairs(parquets, manifests, source_root)
+    print_json({"files": len(parquets), "rows": rows_total})
+    return 0
+
+
+def _validation_artifacts(
+    data_root: Path, data_dir: Path
+) -> tuple[tuple[Path, ...], tuple[Path, ...]]:
     artifacts = validate_finalized_artifacts(data_root, require_current_contract=True)
     parquets = artifacts["parquets"]
     if not parquets:
         raise StorageError(f"no finalized data artifacts found in {data_dir}")
-    rows_total = 0
-    for parquet, manifest_path in zip(parquets, artifacts["manifests"], strict=True):
-        manifest = read_manifest(manifest_path)
-        rows = validate_geoparquet(parquet, expected_source_pbf=manifest.source.name)
-        expected_output_name = f"{manifest.source.name.removesuffix('.osm.pbf')}.parquet"
-        if expected_output_name != parquet.name:
-            raise StorageError(
-                f"manifest source identity mismatch for {parquet.name}: "
-                f"source {manifest.source.name!r} maps to {expected_output_name!r}"
-            )
-        if rows != manifest.counts.included_rows:
-            raise StorageError(
-                f"manifest row count mismatch for {parquet.name}: "
-                f"recorded {manifest.counts.included_rows}, found {rows}"
-            )
-        expected_emitted = manifest.counts.included_rows + sum(manifest.counts.rejections.values())
-        if manifest.counts.emitted_features != expected_emitted:
-            raise StorageError(f"manifest counts are inconsistent for {parquet.name}")
-        if source_root is not None:
-            _validate_source_file_identity(manifest, source_root)
-        rows_total += rows
-    files = len(parquets)
-    print_json({"files": files, "rows": rows_total})
-    return 0
+    return parquets, artifacts["manifests"]
+
+
+def _validate_artifact_pairs(
+    parquets: tuple[Path, ...],
+    manifests: tuple[Path, ...],
+    source_root: Path | None,
+) -> int:
+    return sum(
+        _validate_artifact_pair(parquet, manifest_path, source_root)
+        for parquet, manifest_path in zip(parquets, manifests, strict=True)
+    )
+
+
+def _validate_artifact_pair(parquet: Path, manifest_path: Path, source_root: Path | None) -> int:
+    manifest = read_manifest(manifest_path)
+    rows = validate_geoparquet(parquet, expected_source_pbf=manifest.source.name)
+    _validate_manifest_output_name(parquet, manifest)
+    _validate_manifest_row_count(parquet, manifest, rows)
+    _validate_manifest_counts(parquet, manifest)
+    if source_root is not None:
+        _validate_source_file_identity(manifest, source_root)
+    return rows
+
+
+def _validate_manifest_output_name(parquet: Path, manifest: Manifest) -> None:
+    expected_output_name = f"{manifest.source.name.removesuffix('.osm.pbf')}.parquet"
+    if expected_output_name != parquet.name:
+        raise StorageError(
+            f"manifest source identity mismatch for {parquet.name}: "
+            f"source {manifest.source.name!r} maps to {expected_output_name!r}"
+        )
+
+
+def _validate_manifest_row_count(parquet: Path, manifest: Manifest, rows: int) -> None:
+    if rows != manifest.counts.included_rows:
+        raise StorageError(
+            f"manifest row count mismatch for {parquet.name}: "
+            f"recorded {manifest.counts.included_rows}, found {rows}"
+        )
+
+
+def _validate_manifest_counts(parquet: Path, manifest: Manifest) -> None:
+    expected_emitted = manifest.counts.included_rows + sum(manifest.counts.rejections.values())
+    if manifest.counts.emitted_features != expected_emitted:
+        raise StorageError(f"manifest counts are inconsistent for {parquet.name}")
 
 
 def _validation_source_root(args: SimpleNamespace, data_root: Path) -> Path | None:
@@ -287,7 +319,13 @@ def _validation_source_root(args: SimpleNamespace, data_root: Path) -> Path | No
 
 
 def _validate_source_file_identity(manifest: Manifest, source_root: Path) -> None:
-    source_path = source_root / manifest.source.name
+    source_path = _require_regular_source_file(source_root / manifest.source.name)
+    source_identity = _read_source_identity(source_path)
+    if source_identity != manifest.source:
+        raise StorageError(f"source identity mismatch for {manifest.source.name}")
+
+
+def _require_regular_source_file(source_path: Path) -> Path:
     try:
         is_symlink = source_path.is_symlink()
         is_regular_file = source_path.is_file()
@@ -295,12 +333,14 @@ def _validate_source_file_identity(manifest: Manifest, source_root: Path) -> Non
         raise StorageError(f"cannot inspect source file {source_path}: {error}") from error
     if is_symlink or not is_regular_file:
         raise StorageError(f"source identity mismatch: missing regular source file {source_path}")
+    return source_path
+
+
+def _read_source_identity(source_path: Path) -> SourceIdentity:
     try:
-        source_identity = source_identity_for(source_path)
+        return source_identity_for(source_path)
     except OSError as error:
         raise StorageError(f"cannot read source file {source_path}: {error}") from error
-    if source_identity != manifest.source:
-        raise StorageError(f"source identity mismatch for {manifest.source.name}")
 
 
 def handle_card(args: SimpleNamespace) -> int:
