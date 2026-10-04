@@ -59,6 +59,30 @@ def test_validate_manifest_pair_preserves_artifact_inspection_context(
     assert str(error.value) == f"cannot inspect finalized artifact {parquet}: permission denied"
 
 
+def test_validate_manifest_pair_preserves_manifest_inspection_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    parquet = tmp_path / "region.parquet"
+    parquet.write_bytes(b"tiny parquet fixture")
+    manifests_dir = tmp_path / "manifests"
+    manifests_dir.mkdir()
+    manifest_path = manifests_dir / "region.manifest.json"
+    manifest_path.write_bytes(b"tiny manifest fixture")
+    original_is_symlink = Path.is_symlink
+
+    def fail_for_manifest(path: Path) -> bool:
+        if path == manifest_path:
+            raise OSError("permission denied")
+        return original_is_symlink(path)
+
+    monkeypatch.setattr(Path, "is_symlink", fail_for_manifest)
+
+    with pytest.raises(StorageError) as error:
+        storage._validate_manifest_pair(parquet, manifests_dir)
+
+    assert str(error.value) == f"cannot inspect manifest {manifest_path}: permission denied"
+
+
 def test_validate_manifest_pair_preserves_output_read_context(tmp_path: Path) -> None:
     parquet = tmp_path / "region.parquet"
     parquet.write_bytes(b"tiny parquet fixture")

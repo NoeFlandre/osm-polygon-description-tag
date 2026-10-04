@@ -119,3 +119,32 @@ def test_validate_passes_the_artifact_path_and_manifest_source_to_storage(
     assert exit_code == 0
     assert calls == [(parquet, {"expected_source_pbf": "region.osm.pbf"})]
     assert json.loads(capsys.readouterr().out) == {"files": 1, "rows": 1}
+
+
+def test_validate_reports_when_manifest_source_name_does_not_map_to_artifact(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    parquet = data_dir / "region.parquet"
+    manifest_path = tmp_path / "manifests" / "region.manifest.json"
+    manifest = SimpleNamespace(
+        source=SimpleNamespace(name="different.osm.pbf"),
+        counts=SimpleNamespace(included_rows=1, emitted_features=1, rejections={}),
+    )
+    monkeypatch.setattr(cli, "_validation_source_root", lambda *_args: None)
+    monkeypatch.setattr(
+        cli,
+        "validate_finalized_artifacts",
+        lambda *_args, **_kwargs: {"parquets": (parquet,), "manifests": (manifest_path,)},
+    )
+    monkeypatch.setattr(cli, "read_manifest", lambda _path: manifest)
+    monkeypatch.setattr(cli, "validate_geoparquet", lambda *_args, **_kwargs: 1)
+
+    with pytest.raises(StorageError) as error:
+        cli.handle_validate(SimpleNamespace(data_root=tmp_path))
+
+    assert str(error.value) == (
+        "manifest source identity mismatch for region.parquet: "
+        "source 'different.osm.pbf' maps to 'different.parquet'"
+    )
