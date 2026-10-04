@@ -179,6 +179,29 @@ def test_validate_rejects_fifo_entries_without_blocking(
     assert "Traceback" not in result.stderr
 
 
+@pytest.mark.parametrize("entry_kind", ["parquet", "manifest"])
+def test_validate_rejects_symlinked_entries(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    manifest_factory,
+    capsys: pytest.CaptureFixture[str],
+    entry_kind: str,
+) -> None:
+    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path: 1)
+    parquet = _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
+    entry = parquet if entry_kind == "parquet" else tmp_path / "manifests" / "a.manifest.json"
+    target = tmp_path / f"outside-{entry.name}"
+    entry.rename(target)
+    entry.symlink_to(target)
+
+    exit_code = cli.run(["validate", "--data-root", str(tmp_path)])
+
+    assert exit_code == cli.EXIT_VALIDATION
+    error = capsys.readouterr().err
+    assert "not a regular file" in error
+    assert "Traceback" not in error
+
+
 def test_validate_accepts_a_partial_set_with_matching_manifests(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, manifest_factory, capsys
 ) -> None:
