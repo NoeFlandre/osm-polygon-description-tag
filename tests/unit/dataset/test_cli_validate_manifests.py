@@ -97,10 +97,14 @@ def test_validate_reports_structurally_invalid_manifest_without_traceback(
 
 @pytest.mark.parametrize(
     "manifest_bytes",
-    [b"\xff", b"[" * 10_000 + b"0" + b"]" * 10_000],
-    ids=["invalid-utf8", "deeply-nested-json"],
+    [
+        b"\xff",
+        b"[" * 10_000 + b"0" + b"]" * 10_000,
+        b'{"value":' + b"9" * 5_000 + b"}",
+    ],
+    ids=["invalid-utf8", "deeply-nested-json", "integer-digit-limit"],
 )
-def test_validate_reports_manifest_decode_errors_without_traceback(
+def test_validate_reports_manifest_parse_errors_without_traceback(
     tmp_path: Path,
     manifest_factory,
     capsys: pytest.CaptureFixture[str],
