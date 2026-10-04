@@ -23,7 +23,7 @@ def test_runtime_image_is_locked_safe_and_has_required_osm_tools() -> None:
     assert "FROM ${UV_IMAGE} AS uv" in dockerfile
     assert "FROM python:3.12-slim-bookworm AS base" in dockerfile
     assert "COPY --from=uv /uv /uvx /usr/local/bin/" in dockerfile
-    assert "apt-get install -y --no-install-recommends osmium-tool" in dockerfile
+    assert "apt-get install -y --no-install-recommends libpcre2-8-0 osmium-tool" in dockerfile
     assert "uv sync --frozen --no-dev --no-editable" in dockerfile
     assert "USER app" in dockerfile
     assert 'ENTRYPOINT ["osm-polygon-description-tag"]' in dockerfile
@@ -95,6 +95,17 @@ def test_quality_ci_builds_and_smoke_tests_the_runtime_image() -> None:
     assert "docker run --rm" in workflow
     assert "--help" in workflow
     assert "osmium" in workflow
+
+
+def test_quality_ci_keeps_the_fixable_vulnerability_gate_and_updates_bookworm_pcre2() -> None:
+    dockerfile = _read("Dockerfile")
+    workflow = _read(".github/workflows/quality.yml")
+
+    assert "apt-get install -y --no-install-recommends libpcre2-8-0 osmium-tool" in dockerfile
+    assert "severity: HIGH,CRITICAL" in workflow
+    assert 'exit-code: "1"' in workflow
+    assert "ignore-unfixed: true" in workflow
+    assert "CVE-2026-103111" not in _read(".trivyignore")
 
 
 @pytest.mark.integration
