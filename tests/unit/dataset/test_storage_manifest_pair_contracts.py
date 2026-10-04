@@ -55,11 +55,14 @@ def test_validate_manifest_pair_enforces_current_contract_when_requested(
         patch.object(storage, "read_manifest", return_value=manifest),
         patch.object(storage, "output_identity_for", return_value=identity),
         patch.object(storage, "is_resumable", return_value=False) as is_resumable,
-        pytest.raises(StorageError, match="manifest contract does not match current configuration"),
+        pytest.raises(
+            StorageError, match="manifest contract does not match current configuration"
+        ) as error,
     ):
         storage._validate_manifest_pair(parquet, manifests_dir, require_current_contract=True)
 
     is_resumable.assert_called_once_with(manifest, manifest.source, identity)
+    assert str(manifests_dir / "region.manifest.json") in str(error.value)
 
 
 def test_validate_manifest_pair_names_a_non_regular_artifact(tmp_path: Path) -> None:
@@ -93,6 +96,20 @@ def test_validate_manifest_pair_names_a_non_regular_manifest(tmp_path: Path) -> 
         storage.validate_finalized_artifacts(data_root)
 
     assert str(error.value) == f"manifest is not a regular file: {manifest_path}"
+
+
+def test_validate_finalized_artifacts_rejects_a_symlinked_data_root(tmp_path: Path) -> None:
+    actual_root = tmp_path / "actual-root"
+    (actual_root / "data").mkdir(parents=True)
+    (actual_root / "manifests").mkdir()
+    data_root = tmp_path / "data-root"
+    try:
+        data_root.symlink_to(actual_root, target_is_directory=True)
+    except OSError:
+        pytest.skip("filesystem does not support directory symlinks")
+
+    with pytest.raises(StorageError, match="data root is not a regular directory"):
+        storage.validate_finalized_artifacts(data_root)
 
 
 def test_validate_manifest_pair_preserves_artifact_inspection_context(

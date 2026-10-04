@@ -176,6 +176,26 @@ def _parse_output_identity(raw: Any) -> OutputIdentity:
     )
 
 
+def _parse_optional_string(raw: Any, field: str) -> str | None:
+    if raw is not None and type(raw) is not str:
+        raise ManifestError(f"invalid manifest {field}: expected a string or null")
+    return raw
+
+
+def _parse_string(raw: Any, field: str) -> str:
+    if type(raw) is not str:
+        raise ManifestError(f"invalid manifest {field}: expected a string")
+    return raw
+
+
+def _parse_dependency_versions(raw: Any) -> dict[str, str]:
+    if not isinstance(raw, dict) or any(
+        type(name) is not str or type(version) is not str for name, version in raw.items()
+    ):
+        raise ManifestError("invalid manifest dependency_versions: expected string keys and values")
+    return cast(dict[str, str], raw)  # pragma: no mutate - cast is type-only
+
+
 @dataclass(frozen=True)
 class Manifest:
     manifest_schema_version: int
@@ -248,11 +268,11 @@ class Manifest:
             ),
             source=_parse_source_identity(payload["source"]),
             output=_parse_output_identity(payload["output"]),
-            osmium_version=cast("str | None", payload.get("osmium_version")),
-            dependency_versions=dict(cast(dict[str, str], payload["dependency_versions"])),
-            code_revision=cast("str | None", payload.get("code_revision")),
-            started_at=str(payload["started_at"]),
-            completed_at=str(payload["completed_at"]),
+            osmium_version=_parse_optional_string(payload.get("osmium_version"), "osmium_version"),
+            dependency_versions=_parse_dependency_versions(payload["dependency_versions"]),
+            code_revision=_parse_optional_string(payload.get("code_revision"), "code_revision"),
+            started_at=_parse_string(payload["started_at"], "started_at"),
+            completed_at=_parse_string(payload["completed_at"], "completed_at"),
             counts=counts,
         )
 

@@ -450,6 +450,65 @@ def test_validate_rejects_non_integer_manifest_schema_version(
     assert "Traceback" not in error
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        (
+            "osmium_version",
+            1,
+            "invalid manifest osmium_version: expected a string or null",
+        ),
+        (
+            "dependency_versions",
+            [],
+            "invalid manifest dependency_versions: expected string keys and values",
+        ),
+        (
+            "dependency_versions",
+            {"pyarrow": 1},
+            "invalid manifest dependency_versions: expected string keys and values",
+        ),
+        (
+            "code_revision",
+            [],
+            "invalid manifest code_revision: expected a string or null",
+        ),
+        (
+            "started_at",
+            123,
+            "invalid manifest started_at: expected a string",
+        ),
+        (
+            "completed_at",
+            None,
+            "invalid manifest completed_at: expected a string",
+        ),
+    ],
+)
+def test_validate_rejects_malformed_manifest_provenance_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    manifest_factory,
+    capsys: pytest.CaptureFixture[str],
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
+    manifest_path = tmp_path / "manifests" / "a.manifest.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload[field] = value
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    exit_code = cli.run(["validate", "--data-root", str(tmp_path)])
+
+    assert exit_code == cli.EXIT_VALIDATION
+    error = capsys.readouterr().err
+    assert message in error
+    assert "Traceback" not in error
+
+
 def test_validate_rejects_a_manifest_row_count_mismatch(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -414,6 +414,17 @@ def test_read_manifest_accepts_zero_counts(tmp_path: Path) -> None:
     assert manifest.counts.rejections == {"no_nonempty_description": 0}
 
 
+def test_read_manifest_accepts_nullable_provenance_fields(tmp_path: Path) -> None:
+    manifest = replace(_manifest(), osmium_version=None, code_revision=None)
+    path = tmp_path / "nullable-provenance.manifest.json"
+    write_manifest(manifest, path)
+
+    restored = read_manifest(path)
+
+    assert restored.osmium_version is None
+    assert restored.code_revision is None
+
+
 @pytest.mark.parametrize("reason", ["", " ", "\t\n"])
 def test_read_manifest_rejects_blank_rejection_reason(tmp_path: Path, reason: str) -> None:
     payload = json.loads(_manifest().to_json())

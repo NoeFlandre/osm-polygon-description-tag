@@ -866,6 +866,7 @@ def validate_finalized_artifacts(
     """
     data_dir = data_root / "data"
     manifests_dir = data_root / "manifests"
+    _require_artifact_root(data_root)
     _require_artifact_directories(data_dir, manifests_dir)
 
     parquets = sorted(
@@ -887,6 +888,11 @@ def validate_finalized_artifacts(
         "parquets": tuple(parquets),
         "manifests": tuple(validated_manifests),
     }
+
+
+def _require_artifact_root(data_root: Path) -> None:
+    if data_root.is_symlink():
+        raise StorageError(f"data root is not a regular directory: {data_root}")
 
 
 def _require_artifact_directories(data_dir: Path, manifests_dir: Path) -> None:
