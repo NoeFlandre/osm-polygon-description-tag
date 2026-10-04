@@ -279,6 +279,37 @@ def test_validate_accepts_a_matching_source_identity_with_source_root(
     assert json.loads(capsys.readouterr().out) == {"files": 1, "rows": 1}
 
 
+def test_validate_uses_source_root_environment_without_option(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    manifest_factory,
+    valid_records: list[dict[str, object]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source_root = tmp_path / "raw"
+    data_root = tmp_path / "generated"
+    source, _parquet, _manifest = _write_real_artifact_pair(
+        data_root, source_root, manifest_factory, valid_records[0]
+    )
+    source.write_bytes(b"changed source fixture")
+    monkeypatch.delenv("OSM_POLYGON_SOURCE_ROOT", raising=False)
+
+    exit_code = cli.run(["validate", "--data-root", str(data_root)])
+
+    assert exit_code == 0
+    capsys.readouterr()
+
+    monkeypatch.setenv("OSM_POLYGON_SOURCE_ROOT", str(source_root))
+
+    exit_code = cli.run(["validate", "--data-root", str(data_root)])
+
+    assert exit_code == cli.EXIT_VALIDATION
+    error = capsys.readouterr().err
+    assert "source identity mismatch" in error
+    assert "a.osm.pbf" in error
+    assert "Traceback" not in error
+
+
 def test_validate_accepts_a_source_name_discovered_with_an_empty_stem(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

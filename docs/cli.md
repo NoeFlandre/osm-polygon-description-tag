@@ -55,7 +55,7 @@ An error prints one line on stderr. It never prints a traceback.
 `validate` works with only a data root. It checks each manifest source name
 against the Parquet rows and output name. To also compare recorded source size,
 modification time, and SHA-256 with the original PBFs, provide
-`--source-root /path/to/pbfs`.
+`--source-root /path/to/pbfs` or set `OSM_POLYGON_SOURCE_ROOT`.
 
 Examples:
 

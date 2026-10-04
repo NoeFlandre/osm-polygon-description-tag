@@ -761,3 +761,12 @@ def test_the_exit_code_table_is_documented() -> None:
     cli_doc = (Path(__file__).resolve().parents[2] / "docs" / "cli.md").read_text(encoding="utf-8")
     for code in {code for _types, code in cli_module._EXIT_CODES} | {1, 2, 130}:
         assert f"| `{code}` |" in cli_doc
+
+
+def test_validate_docs_explain_source_root_environment_opt_in() -> None:
+    cli_doc = (Path(__file__).resolve().parents[2] / "docs" / "cli.md").read_text(encoding="utf-8")
+    validate_section = cli_doc.split("`validate` works with only a data root.", 1)[1].split(
+        "\nExamples:", 1
+    )[0]
+
+    assert "OSM_POLYGON_SOURCE_ROOT" in validate_section
