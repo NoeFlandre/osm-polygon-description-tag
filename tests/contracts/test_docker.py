@@ -9,7 +9,27 @@ from pathlib import Path
 
 import pytest
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+def _repository_root(test_file: Path) -> Path:
+    for candidate in test_file.resolve().parents:
+        if (candidate / "pyproject.toml").is_file() and (candidate / "Dockerfile").is_file():
+            return candidate
+    raise RuntimeError(f"Could not find the repository root above {test_file}")
+
+
+PROJECT_ROOT = _repository_root(Path(__file__))
+
+
+def test_repository_root_resolution_survives_mutation_copy(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    (repository / "pyproject.toml").touch()
+    (repository / "Dockerfile").touch()
+    mutation_copy = repository / "mutants" / "tests" / "contracts" / "test_docker.py"
+    mutation_copy.parent.mkdir(parents=True)
+    mutation_copy.touch()
+
+    assert _repository_root(mutation_copy) == repository
 
 
 def _read(name: str) -> str:
