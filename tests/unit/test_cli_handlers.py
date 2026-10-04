@@ -550,7 +550,11 @@ def test_cli_validate_sorts_and_accumulates_every_parquet(
         cli,
         "read_manifest",
         lambda path: SimpleNamespace(
-            counts=SimpleNamespace(included_rows={manifests[0]: 2, manifests[1]: 3}[path])
+            counts=SimpleNamespace(
+                included_rows={manifests[0]: 2, manifests[1]: 3}[path],
+                emitted_features={manifests[0]: 2, manifests[1]: 3}[path],
+                rejections={},
+            )
         ),
     )
 

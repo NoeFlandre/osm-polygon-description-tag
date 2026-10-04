@@ -200,7 +200,13 @@ def test_validate_success_payload_is_exact(
     monkeypatch.setattr(
         cli,
         "read_manifest",
-        lambda path: SimpleNamespace(counts=SimpleNamespace(included_rows=manifest_rows[path])),
+        lambda path: SimpleNamespace(
+            counts=SimpleNamespace(
+                included_rows=manifest_rows[path],
+                emitted_features=manifest_rows[path],
+                rejections={},
+            )
+        ),
     )
 
     exit_code, payload = _run_json(["validate", *_common_args(source_root, data_root)], capsys)

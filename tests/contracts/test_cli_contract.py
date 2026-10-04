@@ -496,7 +496,9 @@ def test_validate_handler_sums_rows(
     monkeypatch.setattr(
         cli,
         "read_manifest",
-        lambda _path: SimpleNamespace(counts=SimpleNamespace(included_rows=1)),
+        lambda _path: SimpleNamespace(
+            counts=SimpleNamespace(included_rows=1, emitted_features=1, rejections={})
+        ),
     )
     args = SimpleNamespace(
         source_root=source,

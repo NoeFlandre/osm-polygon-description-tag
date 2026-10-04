@@ -255,6 +255,9 @@ def handle_validate(args: SimpleNamespace) -> int:
                 f"manifest row count mismatch for {parquet.name}: "
                 f"recorded {manifest.counts.included_rows}, found {rows}"
             )
+        expected_emitted = manifest.counts.included_rows + sum(manifest.counts.rejections.values())
+        if manifest.counts.emitted_features != expected_emitted:
+            raise StorageError(f"manifest counts are inconsistent for {parquet.name}")
         rows_total += rows
     files = len(parquets)
     print_json({"files": files, "rows": rows_total})
