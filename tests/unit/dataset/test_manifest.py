@@ -414,6 +414,19 @@ def test_read_manifest_accepts_zero_counts(tmp_path: Path) -> None:
     assert manifest.counts.rejections == {"no_nonempty_description": 0}
 
 
+def test_read_manifest_rejects_empty_rejection_reason(tmp_path: Path) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload["counts"]["rejections"] = {"": 3}
+    path = tmp_path / "empty-rejection-reason.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(
+        ManifestError,
+        match="invalid manifest counts.rejections: expected string keys and integers",
+    ):
+        read_manifest(path)
+
+
 def test_read_manifest_rejects_non_object_counts(tmp_path: Path) -> None:
     payload = json.loads(_manifest().to_json())
     payload["counts"] = []
