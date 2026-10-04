@@ -11,6 +11,7 @@ all agree.
 import hashlib
 import json
 import os
+import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -104,11 +105,45 @@ def _parse_run_counts(raw: Any) -> RunCounts:
             "invalid manifest counts.rejections: expected non-negative integer values"
         )
 
+    typed_rejections = cast(dict[str, int], rejections)  # pragma: no mutate - type-only cast
     return RunCounts(
         emitted_features=emitted_features,
         included_rows=included_rows,
-        rejections=cast(dict[str, int], rejections),
+        rejections=typed_rejections,
     )
+
+
+def _parse_source_identity(raw: Any) -> SourceIdentity:
+    if not isinstance(raw, dict):
+        raise ManifestError("invalid manifest source: expected an object")
+    name = raw.get("name")
+    if type(name) is not str or not name or Path(name).name != name or "\\" in name:
+        raise ManifestError("invalid manifest source.name: expected a file name")
+    size_bytes = raw.get("size_bytes")
+    if type(size_bytes) is not int or size_bytes < 0:
+        raise ManifestError("invalid manifest source.size_bytes: expected a non-negative integer")
+    mtime_ns = raw.get("mtime_ns")
+    if type(mtime_ns) is not int or mtime_ns < 0:
+        raise ManifestError("invalid manifest source.mtime_ns: expected a non-negative integer")
+    sha256 = raw.get("sha256")
+    if type(sha256) is not str or re.fullmatch(r"[0-9a-f]{64}", sha256) is None:
+        raise ManifestError("invalid manifest source.sha256: expected a SHA-256 digest")
+    return SourceIdentity(name, size_bytes, mtime_ns, sha256)
+
+
+def _parse_output_identity(raw: Any) -> OutputIdentity:
+    if not isinstance(raw, dict):
+        raise ManifestError("invalid manifest output: expected an object")
+    name = raw.get("name")
+    if type(name) is not str or not name or Path(name).name != name or "\\" in name:
+        raise ManifestError("invalid manifest output.name: expected a file name")
+    size_bytes = raw.get("size_bytes")
+    if type(size_bytes) is not int or size_bytes < 0:
+        raise ManifestError("invalid manifest output.size_bytes: expected a non-negative integer")
+    sha256 = raw.get("sha256")
+    if type(sha256) is not str or re.fullmatch(r"[0-9a-f]{64}", sha256) is None:
+        raise ManifestError("invalid manifest output.sha256: expected a SHA-256 digest")
+    return OutputIdentity(name, size_bytes, sha256)
 
 
 @dataclass(frozen=True)
@@ -167,8 +202,6 @@ class Manifest:
         version = payload.get("manifest_schema_version")
         if version != MANIFEST_SCHEMA_VERSION:
             raise ManifestError(f"unsupported manifest schema version: {version!r}")
-        source_raw = cast(dict[str, Any], payload["source"])
-        output_raw = cast(dict[str, Any], payload["output"])
         counts = _parse_run_counts(payload["counts"])
         return cls(
             manifest_schema_version=int(payload["manifest_schema_version"]),
@@ -179,17 +212,8 @@ class Manifest:
             output_algorithm_revision=str(
                 payload.get("output_algorithm_revision") or _empty_policy_hash()
             ),
-            source=SourceIdentity(
-                name=str(source_raw["name"]),
-                size_bytes=int(source_raw["size_bytes"]),
-                mtime_ns=int(source_raw["mtime_ns"]),
-                sha256=str(source_raw["sha256"]),
-            ),
-            output=OutputIdentity(
-                name=str(output_raw["name"]),
-                size_bytes=int(output_raw["size_bytes"]),
-                sha256=str(output_raw["sha256"]),
-            ),
+            source=_parse_source_identity(payload["source"]),
+            output=_parse_output_identity(payload["output"]),
             osmium_version=cast("str | None", payload.get("osmium_version")),
             dependency_versions=dict(cast(dict[str, str], payload["dependency_versions"])),
             code_revision=cast("str | None", payload.get("code_revision")),

@@ -547,8 +547,15 @@ def _batch_columns(batch: pa.RecordBatch) -> dict[str, list[Any]]:
     return {name: batch.column(name).to_pylist() for name in _VALIDATION_COLUMNS}
 
 
-def _validate_source(state: _ValidationState, current: str) -> None:
+def _validate_source(
+    state: _ValidationState, current: str, expected_source_pbf: str | None = None
+) -> None:
     if state.source_pbf is None:
+        if expected_source_pbf is not None and current != expected_source_pbf:
+            raise StorageError(
+                "manifest source identity mismatch: "
+                f"expected {expected_source_pbf!r}, found {current!r}"
+            )
         state.source_pbf = current
     elif state.source_pbf != current:
         raise StorageError(f"mixed source_pbf within file: {state.source_pbf!r} and {current!r}")
@@ -724,11 +731,12 @@ def _validate_row(
     state: _ValidationState,
     *,
     require_successful_text: bool = True,
+    expected_source_pbf: str | None = None,
 ) -> None:
     osm_type = columns["osm_type"][index]
     osm_id = columns["osm_id"][index]
     state.uniqueness.check_and_add(osm_type, osm_id)
-    _validate_source(state, columns["source_pbf"][index])
+    _validate_source(state, columns["source_pbf"][index], expected_source_pbf)
     _validate_description_values(
         columns["description"][index],
         columns["localized_descriptions"][index],
@@ -755,6 +763,7 @@ def _validate_batch(
     state: _ValidationState,
     *,
     require_successful_text: bool = True,
+    expected_source_pbf: str | None = None,
 ) -> None:
     columns = _batch_columns(batch)
     for index in range(batch.num_rows):
@@ -763,6 +772,7 @@ def _validate_batch(
             index,
             state,
             require_successful_text=require_successful_text,
+            expected_source_pbf=expected_source_pbf,
         )
 
 
@@ -789,7 +799,12 @@ def _validate_metadata_bbox(state: _ValidationState, meta_bbox: object) -> None:
             raise StorageError(f"bbox mismatch: actual {actual_bbox} != metadata {expected_bbox}")
 
 
-def validate_geoparquet(path: Path, *, require_successful_text: bool = True) -> int:
+def validate_geoparquet(
+    path: Path,
+    *,
+    require_successful_text: bool = True,
+    expected_source_pbf: str | None = None,
+) -> int:
     """Validate a GeoParquet file in batches and return its row count.
 
     Strict validation requires every persisted row to contain successful,
@@ -817,6 +832,7 @@ def validate_geoparquet(path: Path, *, require_successful_text: bool = True) -> 
                     batch,
                     state,
                     require_successful_text=require_successful_text,
+                    expected_source_pbf=expected_source_pbf,
                 )
         finally:
             state.uniqueness.close()

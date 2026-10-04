@@ -52,6 +52,11 @@ An error prints one line on stderr. It never prints a traceback.
 | `trackio-snapshot` | Logs the completed dataset snapshot to Trackio | Writes local Trackio state and refreshes the public static dashboard |
 | `publish-plan` | Shows the exact upload plan identity | Read-only |
 
+`validate` works with only a data root. It checks each manifest source name
+against the Parquet rows and output name. To also compare recorded source size,
+modification time, and SHA-256 with the original PBFs, provide
+`--source-root /path/to/pbfs`.
+
 Examples:
 
 ```bash

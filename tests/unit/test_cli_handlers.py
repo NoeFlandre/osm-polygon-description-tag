@@ -524,6 +524,7 @@ def test_cli_validate_sorts_and_accumulates_every_parquet(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     args = _cli_args(tmp_path)
+    args.source_root = None
     data_dir = args.data_root / "data"
     data_dir.mkdir()
     first = data_dir / "a.parquet"
@@ -536,7 +537,7 @@ def test_cli_validate_sorts_and_accumulates_every_parquet(
         args.data_root / "manifests" / "b.manifest.json",
     )
 
-    def validate(path: Path) -> int:
+    def validate(path: Path, **_kwargs: object) -> int:
         calls.append(path)
         return {first: 2, second: 3}[path]
 
@@ -550,11 +551,12 @@ def test_cli_validate_sorts_and_accumulates_every_parquet(
         cli,
         "read_manifest",
         lambda path: SimpleNamespace(
+            source=SimpleNamespace(name=f"{path.name.removesuffix('.manifest.json')}.osm.pbf"),
             counts=SimpleNamespace(
                 included_rows={manifests[0]: 2, manifests[1]: 3}[path],
                 emitted_features={manifests[0]: 2, manifests[1]: 3}[path],
                 rejections={},
-            )
+            ),
         ),
     )
 

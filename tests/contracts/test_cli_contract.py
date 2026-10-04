@@ -475,13 +475,13 @@ def test_inspect_handler_prints_json_summary(
 def test_validate_handler_sums_rows(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    source = tmp_path / "raw"
     data = tmp_path / "generated"
     (data / "data").mkdir(parents=True)
     record = make_record_dict(
         Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
         {"description": "x"},
         osm_id=1,
+        source_pbf="a.osm.pbf",
     )
     write_geoparquet(iter([record]), data / "data" / "a.parquet", batch_size=10)
     parquet = data / "data" / "a.parquet"
@@ -497,11 +497,12 @@ def test_validate_handler_sums_rows(
         cli,
         "read_manifest",
         lambda _path: SimpleNamespace(
-            counts=SimpleNamespace(included_rows=1, emitted_features=1, rejections={})
+            source=SimpleNamespace(name="a.osm.pbf"),
+            counts=SimpleNamespace(included_rows=1, emitted_features=1, rejections={}),
         ),
     )
     args = SimpleNamespace(
-        source_root=source,
+        source_root=None,
         data_root=data,
         osmium="osmium",
         export_config=Path("config/osmium-export.json"),

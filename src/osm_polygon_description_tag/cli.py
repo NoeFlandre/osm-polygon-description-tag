@@ -20,7 +20,12 @@ from typer import rich_utils
 
 from osm_polygon_description_tag.dataset.docs import generate_dataset_docs
 from osm_polygon_description_tag.dataset.languages.detector import LanguageDetectionError
-from osm_polygon_description_tag.dataset.manifest import ManifestError, read_manifest
+from osm_polygon_description_tag.dataset.manifest import (
+    Manifest,
+    ManifestError,
+    read_manifest,
+    source_identity_for,
+)
 from osm_polygon_description_tag.dataset.migration import MigrationError, migrate_dataset_schema
 from osm_polygon_description_tag.dataset.stats import ReportingError
 from osm_polygon_description_tag.dataset.storage import (
@@ -48,6 +53,7 @@ from osm_polygon_description_tag.publication import (
 from osm_polygon_description_tag.publication.verification import HubVerificationError
 from osm_polygon_description_tag.runtime.click_compat import ClickException, Exit, UsageError
 from osm_polygon_description_tag.runtime.config import (
+    SOURCE_ROOT_ENV,
     MissingPathError,
     Paths,
     UnsafePathError,
@@ -80,7 +86,7 @@ SourceRoot = Annotated[
     typer.Option(
         "--source-root",
         help="Immutable PBF directory [default: $OSM_POLYGON_SOURCE_ROOT]. "
-        "Only commands that read PBFs use it.",
+        "Validation also checks source bytes when this is provided.",
     ),
 ]
 DataRoot = Annotated[
@@ -239,6 +245,7 @@ def handle_build_all(args: SimpleNamespace) -> int:
 
 def handle_validate(args: SimpleNamespace) -> int:
     data_root = _data_root(args)
+    source_root = _validation_source_root(args, data_root)
     data_dir = data_root / "data"
     if not data_dir.is_dir():
         raise ValueError(f"missing data directory: {data_dir}")
@@ -248,8 +255,14 @@ def handle_validate(args: SimpleNamespace) -> int:
         raise StorageError(f"no finalized data artifacts found in {data_dir}")
     rows_total = 0
     for parquet, manifest_path in zip(parquets, artifacts["manifests"], strict=True):
-        rows = validate_geoparquet(parquet)
         manifest = read_manifest(manifest_path)
+        rows = validate_geoparquet(parquet, expected_source_pbf=manifest.source.name)
+        expected_output_name = f"{manifest.source.name.removesuffix('.osm.pbf')}.parquet"
+        if expected_output_name != parquet.name:
+            raise StorageError(
+                f"manifest source identity mismatch for {parquet.name}: "
+                f"source {manifest.source.name!r} maps to {expected_output_name!r}"
+            )
         if rows != manifest.counts.included_rows:
             raise StorageError(
                 f"manifest row count mismatch for {parquet.name}: "
@@ -258,10 +271,36 @@ def handle_validate(args: SimpleNamespace) -> int:
         expected_emitted = manifest.counts.included_rows + sum(manifest.counts.rejections.values())
         if manifest.counts.emitted_features != expected_emitted:
             raise StorageError(f"manifest counts are inconsistent for {parquet.name}")
+        if source_root is not None:
+            _validate_source_file_identity(manifest, source_root)
         rows_total += rows
     files = len(parquets)
     print_json({"files": files, "rows": rows_total})
     return 0
+
+
+def _validation_source_root(args: SimpleNamespace, data_root: Path) -> Path | None:
+    source_root = getattr(args, "source_root", None)
+    if source_root is None and not os.environ.get(SOURCE_ROOT_ENV, "").strip():
+        return None
+    return Paths.resolve(source_root, data_root).source_root
+
+
+def _validate_source_file_identity(manifest: Manifest, source_root: Path) -> None:
+    source_path = source_root / manifest.source.name
+    try:
+        is_symlink = source_path.is_symlink()
+        is_regular_file = source_path.is_file()
+    except OSError as error:
+        raise StorageError(f"cannot inspect source file {source_path}: {error}") from error
+    if is_symlink or not is_regular_file:
+        raise StorageError(f"source identity mismatch: missing regular source file {source_path}")
+    try:
+        source_identity = source_identity_for(source_path)
+    except OSError as error:
+        raise StorageError(f"cannot read source file {source_path}: {error}") from error
+    if source_identity != manifest.source:
+        raise StorageError(f"source identity mismatch for {manifest.source.name}")
 
 
 def handle_card(args: SimpleNamespace) -> int:

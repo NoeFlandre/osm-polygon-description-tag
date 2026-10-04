@@ -325,26 +325,200 @@ def test_read_manifest_reports_invalid_payloads_as_manifest_errors(
 
 
 @pytest.mark.parametrize(
-    ("field", "value"),
+    ("field", "value", "message"),
     [
-        ("emitted_features", "1"),
-        ("included_rows", True),
-        ("rejections", {"no_nonempty_description": "1"}),
-        ("emitted_features", -1),
-        ("included_rows", -1),
-        ("rejections", {"no_nonempty_description": -1}),
+        (
+            "emitted_features",
+            "1",
+            "invalid manifest counts.emitted_features: expected an integer",
+        ),
+        ("included_rows", True, "invalid manifest counts.included_rows: expected an integer"),
+        (
+            "rejections",
+            {"no_nonempty_description": "1"},
+            "invalid manifest counts.rejections: expected string keys and integers",
+        ),
+        (
+            "rejections",
+            [],
+            "invalid manifest counts.rejections: expected string keys and integers",
+        ),
+        (
+            "emitted_features",
+            -1,
+            "invalid manifest counts.emitted_features: expected a non-negative integer",
+        ),
+        (
+            "included_rows",
+            -1,
+            "invalid manifest counts.included_rows: expected a non-negative integer",
+        ),
+        (
+            "rejections",
+            {"no_nonempty_description": -1},
+            "invalid manifest counts.rejections: expected non-negative integer values",
+        ),
     ],
 )
 def test_read_manifest_rejects_invalid_count_fields(
-    tmp_path: Path, field: str, value: object
+    tmp_path: Path, field: str, value: object, message: str
 ) -> None:
     payload = json.loads(_manifest().to_json())
     payload["counts"][field] = value
     path = tmp_path / "invalid-counts.manifest.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(ManifestError, match="counts"):
+    with pytest.raises(ManifestError) as error:
         read_manifest(path)
+
+    assert str(error.value) == message
+
+
+def test_read_manifest_accepts_zero_counts(tmp_path: Path) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload["counts"] = {
+        "emitted_features": 0,
+        "included_rows": 0,
+        "rejections": {"no_nonempty_description": 0},
+    }
+    path = tmp_path / "zero-counts.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    manifest = read_manifest(path)
+
+    assert manifest.counts.emitted_features == 0
+    assert manifest.counts.included_rows == 0
+    assert manifest.counts.rejections == {"no_nonempty_description": 0}
+
+
+def test_read_manifest_rejects_non_object_counts(tmp_path: Path) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload["counts"] = []
+    path = tmp_path / "invalid-counts.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ManifestError) as error:
+        read_manifest(path)
+
+    assert str(error.value) == "invalid manifest counts: expected an object"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("name", "../region.osm.pbf", "invalid manifest source.name: expected a file name"),
+        ("name", "folder\\region.osm.pbf", "invalid manifest source.name: expected a file name"),
+        ("name", "", "invalid manifest source.name: expected a file name"),
+        ("name", 123, "invalid manifest source.name: expected a file name"),
+        (
+            "size_bytes",
+            True,
+            "invalid manifest source.size_bytes: expected a non-negative integer",
+        ),
+        (
+            "size_bytes",
+            -1,
+            "invalid manifest source.size_bytes: expected a non-negative integer",
+        ),
+        (
+            "mtime_ns",
+            "1000",
+            "invalid manifest source.mtime_ns: expected a non-negative integer",
+        ),
+        (
+            "mtime_ns",
+            -1,
+            "invalid manifest source.mtime_ns: expected a non-negative integer",
+        ),
+        (
+            "sha256",
+            "z" * 64,
+            "invalid manifest source.sha256: expected a SHA-256 digest",
+        ),
+    ],
+)
+def test_read_manifest_rejects_invalid_source_identity_fields(
+    tmp_path: Path, field: str, value: object, message: str
+) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload["source"][field] = value
+    path = tmp_path / "invalid-source.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ManifestError) as error:
+        read_manifest(path)
+
+    assert str(error.value) == message
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("name", "../region.parquet", "invalid manifest output.name: expected a file name"),
+        ("name", "folder\\region.parquet", "invalid manifest output.name: expected a file name"),
+        ("name", "", "invalid manifest output.name: expected a file name"),
+        ("name", 123, "invalid manifest output.name: expected a file name"),
+        (
+            "size_bytes",
+            True,
+            "invalid manifest output.size_bytes: expected a non-negative integer",
+        ),
+        (
+            "size_bytes",
+            -1,
+            "invalid manifest output.size_bytes: expected a non-negative integer",
+        ),
+        ("sha256", "z" * 64, "invalid manifest output.sha256: expected a SHA-256 digest"),
+    ],
+)
+def test_read_manifest_rejects_invalid_output_identity_fields(
+    tmp_path: Path, field: str, value: object, message: str
+) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload["output"][field] = value
+    path = tmp_path / "invalid-output.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ManifestError) as error:
+        read_manifest(path)
+
+    assert str(error.value) == message
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("source", [], "invalid manifest source: expected an object"),
+        ("output", [], "invalid manifest output: expected an object"),
+    ],
+)
+def test_read_manifest_rejects_non_object_identities(
+    tmp_path: Path, field: str, value: object, message: str
+) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload[field] = value
+    path = tmp_path / "invalid-identity.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ManifestError) as error:
+        read_manifest(path)
+
+    assert str(error.value) == message
+
+
+def test_read_manifest_accepts_zero_sized_identities(tmp_path: Path) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload["source"]["size_bytes"] = 0
+    payload["source"]["mtime_ns"] = 0
+    payload["output"]["size_bytes"] = 0
+    path = tmp_path / "zero-identities.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    restored = read_manifest(path)
+
+    assert restored.source.size_bytes == 0
+    assert restored.source.mtime_ns == 0
+    assert restored.output.size_bytes == 0
 
 
 def test_read_manifest_requests_utf8_and_preserves_read_error_context(tmp_path: Path) -> None:

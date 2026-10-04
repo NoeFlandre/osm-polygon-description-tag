@@ -178,7 +178,7 @@ def test_validate_success_payload_is_exact(
     cli_roots: tuple[Path, Path],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    source_root, data_root = cli_roots
+    _, data_root = cli_roots
     data_dir = data_root / "data"
     data_dir.mkdir(parents=True)
     first = data_dir / "a.parquet"
@@ -190,7 +190,7 @@ def test_validate_success_payload_is_exact(
         data_root / "manifests" / "a.manifest.json",
         data_root / "manifests" / "b.manifest.json",
     )
-    monkeypatch.setattr(cli, "validate_geoparquet", rows.__getitem__)
+    monkeypatch.setattr(cli, "validate_geoparquet", lambda path, **_kwargs: rows[path])
     monkeypatch.setattr(
         cli,
         "validate_finalized_artifacts",
@@ -201,15 +201,16 @@ def test_validate_success_payload_is_exact(
         cli,
         "read_manifest",
         lambda path: SimpleNamespace(
+            source=SimpleNamespace(name=f"{path.name.removesuffix('.manifest.json')}.osm.pbf"),
             counts=SimpleNamespace(
                 included_rows=manifest_rows[path],
                 emitted_features=manifest_rows[path],
                 rejections={},
-            )
+            ),
         ),
     )
 
-    exit_code, payload = _run_json(["validate", *_common_args(source_root, data_root)], capsys)
+    exit_code, payload = _run_json(["validate", "--data-root", str(data_root)], capsys)
 
     assert exit_code == 0
     assert payload == {"files": 2, "rows": 5}
