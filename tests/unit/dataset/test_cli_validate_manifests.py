@@ -150,10 +150,14 @@ def test_validate_reports_unreadable_parquet_as_validation_error(
     assert "Traceback" not in error
 
 
-def test_validate_rejects_fifo_artifact_without_blocking(tmp_path: Path, manifest_factory) -> None:
+@pytest.mark.parametrize("entry_kind", ["parquet", "manifest"])
+def test_validate_rejects_fifo_entries_without_blocking(
+    tmp_path: Path, manifest_factory, entry_kind: str
+) -> None:
     parquet = _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
-    parquet.unlink()
-    os.mkfifo(parquet)
+    entry = parquet if entry_kind == "parquet" else tmp_path / "manifests" / "a.manifest.json"
+    entry.unlink()
+    os.mkfifo(entry)
 
     result = subprocess.run(  # noqa: S603 - runs the local CLI fixture
         [

@@ -626,6 +626,7 @@ def test_validate_manifest_pair_reads_the_expected_path_and_checks_identity(
     manifests_dir = tmp_path / "manifests"
     manifests_dir.mkdir()
     manifest_path = manifests_dir / "region.manifest.json"
+    manifest_path.write_bytes(b"tiny manifest fixture")
     expected_identity = object()
     manifest = SimpleNamespace(
         manifest_schema_version=storage.MANIFEST_SCHEMA_VERSION,
@@ -650,6 +651,7 @@ def test_validate_manifest_pair_wraps_invalid_manifest_errors(tmp_path: Path) ->
     manifests_dir = tmp_path / "manifests"
     manifests_dir.mkdir()
     manifest_path = manifests_dir / "region.manifest.json"
+    manifest_path.write_bytes(b"tiny manifest fixture")
 
     with (
         patch.object(storage, "read_manifest", side_effect=ManifestError("broken")),
@@ -678,6 +680,7 @@ def test_validate_manifest_pair_rejects_unsupported_or_stale_manifests(
     parquet.write_bytes(b"tiny parquet fixture")
     manifests_dir = tmp_path / "manifests"
     manifests_dir.mkdir()
+    (manifests_dir / "region.manifest.json").write_bytes(b"tiny manifest fixture")
     manifest = SimpleNamespace(manifest_schema_version=manifest_version, output=output)
 
     with (
