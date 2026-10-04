@@ -188,6 +188,29 @@ def test_validate_rechecks_output_identity_after_geoparquet_validation(
         cli.handle_validate(SimpleNamespace(data_root=data_root))
 
 
+def test_validate_preserves_context_when_rereading_output_identity_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    manifest_factory,
+    valid_records: list[dict[str, object]],
+) -> None:
+    data_root = tmp_path / "generated"
+    _, parquet, _ = _write_real_artifact_pair(
+        data_root, tmp_path / "raw", manifest_factory, valid_records[0]
+    )
+    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+
+    def fail_identity(_path: Path) -> None:
+        raise OSError("disk error")
+
+    monkeypatch.setattr(cli, "output_identity_for", fail_identity)
+
+    with pytest.raises(StorageError) as error:
+        cli.handle_validate(SimpleNamespace(data_root=data_root))
+
+    assert str(error.value) == f"cannot read finalized artifact {parquet}: disk error"
+
+
 def test_validate_does_not_reread_manifest_after_pair_validation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, manifest_factory
 ) -> None:
