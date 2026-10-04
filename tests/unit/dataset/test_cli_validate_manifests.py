@@ -69,8 +69,10 @@ def test_validate_rejects_empty_existing_artifact_directories(tmp_path: Path) ->
     (tmp_path / "data").mkdir()
     (tmp_path / "manifests").mkdir()
 
-    with pytest.raises(StorageError, match="no finalized data artifacts"):
+    with pytest.raises(StorageError, match="no finalized data artifacts") as exc_info:
         cli.handle_validate(SimpleNamespace(data_root=tmp_path))
+
+    assert str(tmp_path / "data") in str(exc_info.value)
 
 
 @pytest.mark.parametrize("unpaired", ["parquet", "manifest"])
