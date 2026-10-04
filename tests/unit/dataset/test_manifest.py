@@ -465,11 +465,6 @@ def test_read_manifest_rejects_non_object_counts(tmp_path: Path) -> None:
         ),
         (
             "name",
-            ".osm.pbf",
-            "invalid manifest source.name: expected an .osm.pbf file name",
-        ),
-        (
-            "name",
             "region.OSM.PBF",
             "invalid manifest source.name: expected an .osm.pbf file name",
         ),

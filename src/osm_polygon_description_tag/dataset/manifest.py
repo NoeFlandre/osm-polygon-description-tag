@@ -134,7 +134,7 @@ def _parse_file_name(raw: Any, identity_name: str) -> str:
 
 def _parse_source_name(raw: Any) -> str:
     name = _parse_file_name(raw, "source.name")
-    if not name.endswith(".osm.pbf") or name == ".osm.pbf":
+    if not name.endswith(".osm.pbf"):
         raise ManifestError("invalid manifest source.name: expected an .osm.pbf file name")
     return name
 

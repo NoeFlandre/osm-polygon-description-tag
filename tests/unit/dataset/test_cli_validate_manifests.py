@@ -15,6 +15,7 @@ from osm_polygon_description_tag.dataset.manifest import (
     write_manifest,
 )
 from osm_polygon_description_tag.dataset.storage import StorageError, write_geoparquet
+from osm_polygon_description_tag.osm.discovery import discover_sources
 
 
 def _write_artifact_pair(
@@ -272,6 +273,42 @@ def test_validate_accepts_a_matching_source_identity_with_source_root(
             "--data-root",
             str(tmp_path / "generated"),
         ]
+    )
+
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out) == {"files": 1, "rows": 1}
+
+
+def test_validate_accepts_a_source_name_discovered_with_an_empty_stem(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    manifest_factory,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    source_root = tmp_path / "raw"
+    source_root.mkdir()
+    source_path = source_root / ".osm.pbf"
+    source_path.write_bytes(b"tiny source fixture")
+    (source,) = discover_sources(source_root)
+    assert (source.name, source.output_name) == (".osm.pbf", ".parquet")
+
+    data_root = tmp_path / "generated"
+    data_dir = data_root / "data"
+    data_dir.mkdir(parents=True)
+    (data_root / "manifests").mkdir()
+    parquet = data_dir / source.output_name
+    parquet.write_bytes(b"tiny parquet fixture")
+    write_manifest(
+        manifest_factory(
+            source=source_identity_for(source.path),
+            output=output_identity_for(parquet),
+        ),
+        _manifest_path_for(parquet.name, data_root),
+    )
+
+    exit_code = cli.run(
+        ["validate", "--source-root", str(source_root), "--data-root", str(data_root)]
     )
 
     assert exit_code == 0
