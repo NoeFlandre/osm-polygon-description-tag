@@ -277,9 +277,11 @@ def read_manifest(path: Path) -> Manifest:
         text = path.read_text(encoding="utf-8")  # pragma: no mutate - codec names are equivalent
     except OSError as error:
         raise ManifestError(f"cannot read manifest {path}: {error}") from error
+    except UnicodeError as error:
+        raise ManifestError(f"invalid manifest encoding {path}: {error}") from error
     try:
         payload = json.loads(text)
-    except json.JSONDecodeError as error:
+    except (json.JSONDecodeError, RecursionError) as error:
         raise ManifestError(f"corrupt manifest JSON {path}: {error}") from error
     if not isinstance(payload, dict):
         raise ManifestError(f"invalid manifest structure {path}: expected a JSON object")
