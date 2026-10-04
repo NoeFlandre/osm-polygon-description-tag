@@ -165,6 +165,29 @@ def test_validate_rejects_a_parquet_that_no_longer_matches_its_manifest(
         cli.handle_validate(SimpleNamespace(data_root=tmp_path))
 
 
+def test_validate_rechecks_output_identity_after_geoparquet_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    manifest_factory,
+    valid_records: list[dict[str, object]],
+) -> None:
+    data_root = tmp_path / "generated"
+    _, parquet, _ = _write_real_artifact_pair(
+        data_root, tmp_path / "raw", manifest_factory, valid_records[0]
+    )
+    validate_geoparquet = cli.validate_geoparquet
+
+    def replace_after_validation(path: Path, **_kwargs: object) -> int:
+        rows = validate_geoparquet(path, expected_source_pbf="a.osm.pbf")
+        write_geoparquet([dict(valid_records[1], source_pbf="a.osm.pbf")], path)
+        return rows
+
+    monkeypatch.setattr(cli, "validate_geoparquet", replace_after_validation)
+
+    with pytest.raises(StorageError, match="stale output identity for a.parquet"):
+        cli.handle_validate(SimpleNamespace(data_root=data_root))
+
+
 def test_validate_does_not_reread_manifest_after_pair_validation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, manifest_factory
 ) -> None:
@@ -680,8 +703,10 @@ def test_validate_requires_artifact_and_manifest_results_to_have_equal_lengths(
     (tmp_path / "data").mkdir()
     parquet = tmp_path / "data" / "a.parquet"
     manifest_path = tmp_path / "manifests" / "a.manifest.json"
+    output_identity = object()
     manifest = SimpleNamespace(
         source=SimpleNamespace(name="a.osm.pbf"),
+        output=output_identity,
         counts=SimpleNamespace(included_rows=1, emitted_features=1, rejections={}),
     )
     monkeypatch.setattr(
@@ -694,6 +719,7 @@ def test_validate_requires_artifact_and_manifest_results_to_have_equal_lengths(
         },
     )
     monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    monkeypatch.setattr(cli, "output_identity_for", lambda _path: output_identity)
 
     with pytest.raises(ValueError, match=r"zip\(\) argument 2 is shorter than argument 1"):
         cli.handle_validate(SimpleNamespace(data_root=tmp_path))

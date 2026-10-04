@@ -202,6 +202,7 @@ def test_validate_success_payload_is_exact(
                     source=SimpleNamespace(
                         name=f"{path.name.removesuffix('.manifest.json')}.osm.pbf"
                     ),
+                    output=cli.output_identity_for(parquet),
                     counts=SimpleNamespace(
                         included_rows=rows[parquet],
                         emitted_features=rows[parquet],

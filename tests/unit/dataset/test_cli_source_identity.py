@@ -93,9 +93,11 @@ def test_validate_passes_the_artifact_path_and_manifest_source_to_storage(
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     parquet = data_dir / "region.parquet"
+    parquet.touch()
     manifest_path = tmp_path / "manifests" / "region.manifest.json"
     manifest = SimpleNamespace(
         source=SimpleNamespace(name="region.osm.pbf"),
+        output=cli.output_identity_for(parquet),
         counts=SimpleNamespace(included_rows=1, emitted_features=1, rejections={}),
     )
     calls: list[tuple[Path, dict[str, str]]] = []
@@ -130,9 +132,11 @@ def test_validate_reports_when_manifest_source_name_does_not_map_to_artifact(
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     parquet = data_dir / "region.parquet"
+    parquet.touch()
     manifest_path = tmp_path / "manifests" / "region.manifest.json"
     manifest = SimpleNamespace(
         source=SimpleNamespace(name="different.osm.pbf"),
+        output=cli.output_identity_for(parquet),
         counts=SimpleNamespace(included_rows=1, emitted_features=1, rejections={}),
     )
     monkeypatch.setattr(cli, "_validation_source_root", lambda *_args: None)

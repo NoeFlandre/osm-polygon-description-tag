@@ -31,8 +31,9 @@ def test_validate_manifest_pair_default_does_not_require_current_contract(
         patch.object(storage, "output_identity_for", return_value=identity),
         patch.object(storage, "is_resumable") as is_resumable,
     ):
-        assert storage._validate_manifest_pair(parquet, manifests_dir) == manifest_path
+        pair = storage._validate_manifest_pair_record(parquet, manifests_dir)
 
+    assert pair.path == manifest_path
     is_resumable.assert_not_called()
 
 

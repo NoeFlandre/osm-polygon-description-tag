@@ -24,6 +24,7 @@ from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     ManifestError,
     SourceIdentity,
+    output_identity_for,
     source_identity_for,
 )
 from osm_polygon_description_tag.dataset.migration import MigrationError, migrate_dataset_schema
@@ -278,6 +279,12 @@ def _validate_artifact_pairs(
 
 def _validate_artifact_pair(parquet: Path, manifest: Manifest, source_root: Path | None) -> int:
     rows = validate_geoparquet(parquet, expected_source_pbf=manifest.source.name)
+    try:
+        output_identity = output_identity_for(parquet)
+    except OSError as error:
+        raise StorageError(f"cannot read finalized artifact {parquet}: {error}") from error
+    if output_identity != manifest.output:
+        raise StorageError(f"stale output identity for {parquet.name}")
     _validate_manifest_output_name(parquet, manifest)
     _validate_manifest_row_count(parquet, manifest, rows)
     _validate_manifest_counts(parquet, manifest)

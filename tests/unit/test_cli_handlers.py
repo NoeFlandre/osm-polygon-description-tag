@@ -553,6 +553,7 @@ def test_cli_validate_sorts_and_accumulates_every_parquet(
                     source=SimpleNamespace(
                         name=f"{path.name.removesuffix('.manifest.json')}.osm.pbf"
                     ),
+                    output=cli.output_identity_for(parquet),
                     counts=SimpleNamespace(
                         included_rows=rows[parquet],
                         emitted_features=rows[parquet],

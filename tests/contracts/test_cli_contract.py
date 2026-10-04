@@ -494,6 +494,7 @@ def test_validate_handler_sums_rows(
             "manifest_records": (
                 SimpleNamespace(
                     source=SimpleNamespace(name="a.osm.pbf"),
+                    output=cli.output_identity_for(parquet),
                     counts=SimpleNamespace(included_rows=1, emitted_features=1, rejections={}),
                 ),
             ),
