@@ -330,9 +330,12 @@ def test_read_manifest_reports_invalid_payloads_as_manifest_errors(
         ("emitted_features", "1"),
         ("included_rows", True),
         ("rejections", {"no_nonempty_description": "1"}),
+        ("emitted_features", -1),
+        ("included_rows", -1),
+        ("rejections", {"no_nonempty_description": -1}),
     ],
 )
-def test_read_manifest_rejects_non_integer_count_fields(
+def test_read_manifest_rejects_invalid_count_fields(
     tmp_path: Path, field: str, value: object
 ) -> None:
     payload = json.loads(_manifest().to_json())

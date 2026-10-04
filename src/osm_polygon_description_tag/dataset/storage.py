@@ -872,8 +872,12 @@ def validate_finalized_artifacts(
 
 
 def _require_artifact_directories(data_dir: Path, manifests_dir: Path) -> None:
+    if data_dir.is_symlink():
+        raise StorageError(f"data directory must be a real directory: {data_dir}")
     if not data_dir.is_dir():
         raise StorageError(f"missing data directory: {data_dir}")
+    if manifests_dir.is_symlink():
+        raise StorageError(f"manifest directory must be a real directory: {manifests_dir}")
     if not manifests_dir.is_dir():
         raise StorageError(f"missing manifests directory: {manifests_dir}")
 

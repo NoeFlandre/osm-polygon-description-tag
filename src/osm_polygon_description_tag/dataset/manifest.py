@@ -86,11 +86,23 @@ def _parse_run_counts(raw: Any) -> RunCounts:
         raise ManifestError("invalid manifest counts.emitted_features: expected an integer")
     if type(included_rows) is not int:
         raise ManifestError("invalid manifest counts.included_rows: expected an integer")
+    if emitted_features < 0:
+        raise ManifestError(
+            "invalid manifest counts.emitted_features: expected a non-negative integer"
+        )
+    if included_rows < 0:
+        raise ManifestError(
+            "invalid manifest counts.included_rows: expected a non-negative integer"
+        )
     if not isinstance(rejections, dict) or any(
         not isinstance(reason, str) or type(count) is not int
         for reason, count in rejections.items()
     ):
         raise ManifestError("invalid manifest counts.rejections: expected string keys and integers")
+    if any(count < 0 for count in rejections.values()):
+        raise ManifestError(
+            "invalid manifest counts.rejections: expected non-negative integer values"
+        )
 
     return RunCounts(
         emitted_features=emitted_features,

@@ -202,6 +202,29 @@ def test_validate_rejects_symlinked_entries(
     assert "Traceback" not in error
 
 
+@pytest.mark.parametrize("directory_kind", ["data", "manifests"])
+def test_validate_rejects_symlinked_artifact_directories(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    manifest_factory,
+    capsys: pytest.CaptureFixture[str],
+    directory_kind: str,
+) -> None:
+    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path: 1)
+    _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
+    directory = tmp_path / directory_kind
+    target = tmp_path / f"outside-{directory_kind}"
+    directory.rename(target)
+    directory.symlink_to(target, target_is_directory=True)
+
+    exit_code = cli.run(["validate", "--data-root", str(tmp_path)])
+
+    assert exit_code == cli.EXIT_VALIDATION
+    error = capsys.readouterr().err
+    assert "must be a real directory" in error
+    assert "Traceback" not in error
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
