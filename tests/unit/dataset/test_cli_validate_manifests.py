@@ -1,4 +1,7 @@
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -143,8 +146,33 @@ def test_validate_reports_unreadable_parquet_as_validation_error(
 
     assert exit_code == cli.EXIT_VALIDATION
     error = capsys.readouterr().err
-    assert "cannot read finalized artifact" in error
+    assert "not a regular file" in error
     assert "Traceback" not in error
+
+
+def test_validate_rejects_fifo_artifact_without_blocking(tmp_path: Path, manifest_factory) -> None:
+    parquet = _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
+    parquet.unlink()
+    os.mkfifo(parquet)
+
+    result = subprocess.run(  # noqa: S603 - runs the local CLI fixture
+        [
+            sys.executable,
+            "-m",
+            "osm_polygon_description_tag.cli",
+            "validate",
+            "--data-root",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=3,
+        check=False,
+    )
+
+    assert result.returncode == cli.EXIT_VALIDATION
+    assert "not a regular file" in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 def test_validate_accepts_a_partial_set_with_matching_manifests(

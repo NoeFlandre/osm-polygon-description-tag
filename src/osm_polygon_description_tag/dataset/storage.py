@@ -877,6 +877,12 @@ def _check_artifact_stems(parquets: list[Path], manifests: list[Path]) -> None:
 
 
 def _validate_manifest_pair(parquet: Path, manifests_dir: Path) -> Path:
+    try:
+        is_regular_file = parquet.is_file()
+    except OSError as error:
+        raise StorageError(f"cannot inspect finalized artifact {parquet}: {error}") from error
+    if not is_regular_file:
+        raise StorageError(f"finalized artifact is not a regular file: {parquet}")
     manifest_path = _manifest_path_for(parquet.name, manifests_dir.parent)
     try:
         manifest = read_manifest(manifest_path)

@@ -622,6 +622,7 @@ def test_validate_manifest_pair_reads_the_expected_path_and_checks_identity(
     tmp_path: Path,
 ) -> None:
     parquet = tmp_path / "region.parquet"
+    parquet.write_bytes(b"tiny parquet fixture")
     manifests_dir = tmp_path / "manifests"
     manifests_dir.mkdir()
     manifest_path = manifests_dir / "region.manifest.json"
@@ -645,6 +646,7 @@ def test_validate_manifest_pair_reads_the_expected_path_and_checks_identity(
 
 def test_validate_manifest_pair_wraps_invalid_manifest_errors(tmp_path: Path) -> None:
     parquet = tmp_path / "region.parquet"
+    parquet.write_bytes(b"tiny parquet fixture")
     manifests_dir = tmp_path / "manifests"
     manifests_dir.mkdir()
     manifest_path = manifests_dir / "region.manifest.json"
@@ -673,6 +675,7 @@ def test_validate_manifest_pair_rejects_unsupported_or_stale_manifests(
     message: str,
 ) -> None:
     parquet = tmp_path / "region.parquet"
+    parquet.write_bytes(b"tiny parquet fixture")
     manifests_dir = tmp_path / "manifests"
     manifests_dir.mkdir()
     manifest = SimpleNamespace(manifest_schema_version=manifest_version, output=output)
