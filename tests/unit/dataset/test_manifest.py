@@ -682,3 +682,15 @@ def test_a_manifest_without_policy_digests_reads_them_as_the_empty_digest(
 
     assert restored.area_policy_sha256 == hashlib.sha256(b"").hexdigest()
     assert restored.output_algorithm_revision == hashlib.sha256(b"").hexdigest()
+
+
+def test_manifest_reports_invalid_dependency_versions_with_a_stable_error() -> None:
+    payload = _manifest().to_payload()
+    payload["dependency_versions"] = []
+
+    with pytest.raises(ManifestError) as error:
+        Manifest.from_payload(payload)
+
+    assert str(error.value) == (
+        "invalid manifest dependency_versions: expected string keys and values"
+    )
