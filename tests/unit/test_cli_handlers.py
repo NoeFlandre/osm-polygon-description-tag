@@ -531,6 +531,10 @@ def test_cli_validate_sorts_and_accumulates_every_parquet(
     first.write_bytes(b"a")
     second.write_bytes(b"b")
     calls: list[Path] = []
+    manifests = (
+        args.data_root / "manifests" / "a.manifest.json",
+        args.data_root / "manifests" / "b.manifest.json",
+    )
 
     def validate(path: Path) -> int:
         calls.append(path)
@@ -539,9 +543,16 @@ def test_cli_validate_sorts_and_accumulates_every_parquet(
     monkeypatch.setattr(
         cli,
         "validate_finalized_artifacts",
-        lambda _root, **_kwargs: {"parquets": (first, second), "manifests": ()},
+        lambda _root, **_kwargs: {"parquets": (first, second), "manifests": manifests},
     )
     monkeypatch.setattr(cli, "validate_geoparquet", validate)
+    monkeypatch.setattr(
+        cli,
+        "read_manifest",
+        lambda path: SimpleNamespace(
+            counts=SimpleNamespace(included_rows={manifests[0]: 2, manifests[1]: 3}[path])
+        ),
+    )
 
     assert cli.handle_validate(args) == 0
     assert calls == [first, second]

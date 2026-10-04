@@ -488,7 +488,15 @@ def test_validate_handler_sums_rows(
     monkeypatch.setattr(
         cli,
         "validate_finalized_artifacts",
-        lambda _root, **_kwargs: {"parquets": (parquet,), "manifests": ()},
+        lambda _root, **_kwargs: {
+            "parquets": (parquet,),
+            "manifests": (data / "manifests" / "a.manifest.json",),
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "read_manifest",
+        lambda _path: SimpleNamespace(counts=SimpleNamespace(included_rows=1)),
     )
     args = SimpleNamespace(
         source_root=source,

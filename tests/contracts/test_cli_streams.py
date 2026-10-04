@@ -6,6 +6,7 @@ import hashlib
 import json
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from shapely import to_wkb
@@ -185,11 +186,21 @@ def test_validate_success_payload_is_exact(
     first.touch()
     second.touch()
     rows = {first: 2, second: 3}
+    manifests = (
+        data_root / "manifests" / "a.manifest.json",
+        data_root / "manifests" / "b.manifest.json",
+    )
     monkeypatch.setattr(cli, "validate_geoparquet", rows.__getitem__)
     monkeypatch.setattr(
         cli,
         "validate_finalized_artifacts",
-        lambda _root: {"parquets": (first, second), "manifests": ()},
+        lambda _root, **_kwargs: {"parquets": (first, second), "manifests": manifests},
+    )
+    manifest_rows = dict(zip(manifests, rows.values(), strict=True))
+    monkeypatch.setattr(
+        cli,
+        "read_manifest",
+        lambda path: SimpleNamespace(counts=SimpleNamespace(included_rows=manifest_rows[path])),
     )
 
     exit_code, payload = _run_json(["validate", *_common_args(source_root, data_root)], capsys)

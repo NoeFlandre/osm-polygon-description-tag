@@ -20,7 +20,7 @@ from typer import rich_utils
 
 from osm_polygon_description_tag.dataset.docs import generate_dataset_docs
 from osm_polygon_description_tag.dataset.languages.detector import LanguageDetectionError
-from osm_polygon_description_tag.dataset.manifest import ManifestError
+from osm_polygon_description_tag.dataset.manifest import ManifestError, read_manifest
 from osm_polygon_description_tag.dataset.migration import MigrationError, migrate_dataset_schema
 from osm_polygon_description_tag.dataset.stats import ReportingError
 from osm_polygon_description_tag.dataset.storage import (
@@ -246,7 +246,16 @@ def handle_validate(args: SimpleNamespace) -> int:
     parquets = artifacts["parquets"]
     if not parquets:
         raise StorageError(f"no finalized data artifacts found in {data_dir}")
-    rows_total = sum(validate_geoparquet(parquet) for parquet in parquets)
+    rows_total = 0
+    for parquet, manifest_path in zip(parquets, artifacts["manifests"], strict=True):
+        rows = validate_geoparquet(parquet)
+        manifest = read_manifest(manifest_path)
+        if rows != manifest.counts.included_rows:
+            raise StorageError(
+                f"manifest row count mismatch for {parquet.name}: "
+                f"recorded {manifest.counts.included_rows}, found {rows}"
+            )
+        rows_total += rows
     files = len(parquets)
     print_json({"files": files, "rows": rows_total})
     return 0

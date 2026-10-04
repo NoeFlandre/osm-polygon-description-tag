@@ -324,6 +324,26 @@ def test_read_manifest_reports_invalid_payloads_as_manifest_errors(
         read_manifest(path)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("emitted_features", "1"),
+        ("included_rows", True),
+        ("rejections", {"no_nonempty_description": "1"}),
+    ],
+)
+def test_read_manifest_rejects_non_integer_count_fields(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload["counts"][field] = value
+    path = tmp_path / "invalid-counts.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ManifestError, match="counts"):
+        read_manifest(path)
+
+
 def test_read_manifest_requests_utf8_and_preserves_read_error_context(tmp_path: Path) -> None:
     path = tmp_path / "region.manifest.json"
     payload = _manifest().to_json()

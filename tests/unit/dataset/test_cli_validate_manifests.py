@@ -235,10 +235,35 @@ def test_validate_rejects_a_stale_manifest_contract(
     assert "Traceback" not in error
 
 
+def test_validate_rejects_a_manifest_row_count_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    manifest_factory,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path: 1)
+    _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
+    manifest_path = tmp_path / "manifests" / "a.manifest.json"
+    payload = json.loads(manifest_path.read_text())
+    payload["counts"]["included_rows"] = 2
+    manifest_path.write_text(json.dumps(payload))
+
+    exit_code = cli.run(["validate", "--data-root", str(tmp_path)])
+
+    assert exit_code == cli.EXIT_VALIDATION
+    error = capsys.readouterr().err
+    assert "manifest row count mismatch for a.parquet" in error
+    assert "Traceback" not in error
+
+
 def test_validate_accepts_a_partial_set_with_matching_manifests(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, manifest_factory, capsys
 ) -> None:
     parquet = _write_artifact_pair(tmp_path, tmp_path, manifest_factory, "one-of-many")
+    manifest_path = tmp_path / "manifests" / "one-of-many.manifest.json"
+    payload = json.loads(manifest_path.read_text())
+    payload["counts"]["included_rows"] = 2
+    manifest_path.write_text(json.dumps(payload))
     monkeypatch.setattr(cli, "validate_geoparquet", lambda path: 2 if path == parquet else 0)
 
     assert cli.handle_validate(SimpleNamespace(data_root=tmp_path)) == 0

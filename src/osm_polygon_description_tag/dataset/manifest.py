@@ -75,6 +75,30 @@ class RunCounts:
     rejections: dict[str, int]
 
 
+def _parse_run_counts(raw: Any) -> RunCounts:
+    if not isinstance(raw, dict):
+        raise ManifestError("invalid manifest counts: expected an object")
+
+    emitted_features = raw["emitted_features"]
+    included_rows = raw["included_rows"]
+    rejections = raw["rejections"]
+    if type(emitted_features) is not int:
+        raise ManifestError("invalid manifest counts.emitted_features: expected an integer")
+    if type(included_rows) is not int:
+        raise ManifestError("invalid manifest counts.included_rows: expected an integer")
+    if not isinstance(rejections, dict) or any(
+        not isinstance(reason, str) or type(count) is not int
+        for reason, count in rejections.items()
+    ):
+        raise ManifestError("invalid manifest counts.rejections: expected string keys and integers")
+
+    return RunCounts(
+        emitted_features=emitted_features,
+        included_rows=included_rows,
+        rejections=cast(dict[str, int], rejections),
+    )
+
+
 @dataclass(frozen=True)
 class Manifest:
     manifest_schema_version: int
@@ -133,7 +157,7 @@ class Manifest:
             raise ManifestError(f"unsupported manifest schema version: {version!r}")
         source_raw = cast(dict[str, Any], payload["source"])
         output_raw = cast(dict[str, Any], payload["output"])
-        counts_raw = cast(dict[str, Any], payload["counts"])
+        counts = _parse_run_counts(payload["counts"])
         return cls(
             manifest_schema_version=int(payload["manifest_schema_version"]),
             schema_version=int(payload["schema_version"]),
@@ -159,11 +183,7 @@ class Manifest:
             code_revision=cast("str | None", payload.get("code_revision")),
             started_at=str(payload["started_at"]),
             completed_at=str(payload["completed_at"]),
-            counts=RunCounts(
-                emitted_features=int(counts_raw["emitted_features"]),
-                included_rows=int(counts_raw["included_rows"]),
-                rejections=dict(cast(dict[str, int], counts_raw["rejections"])),
-            ),
+            counts=counts,
         )
 
 
