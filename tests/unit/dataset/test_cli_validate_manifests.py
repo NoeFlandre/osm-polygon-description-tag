@@ -187,6 +187,28 @@ def test_validate_rejects_a_manifest_source_name_that_disagrees_with_parquet(
     assert "Traceback" not in error
 
 
+def test_validate_rejects_a_manifest_source_name_without_pbf_suffix(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    manifest_factory,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    _write_artifact_pair(tmp_path, tmp_path, manifest_factory, name="region")
+    manifest_path = tmp_path / "manifests" / "region.manifest.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload["source"]["name"] = "region"
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    exit_code = cli.run(["validate", "--data-root", str(tmp_path)])
+
+    assert exit_code == cli.EXIT_VALIDATION
+    error = capsys.readouterr().err
+    assert "invalid manifest source.name" in error
+    assert ".osm.pbf" in error
+    assert "Traceback" not in error
+
+
 @pytest.mark.parametrize("field", ["size_bytes", "mtime_ns", "sha256"])
 def test_validate_checks_full_source_identity_when_source_root_is_supplied(
     tmp_path: Path,
@@ -374,6 +396,34 @@ def test_validate_rejects_a_stale_manifest_contract(
     assert exit_code == cli.EXIT_VALIDATION
     error = capsys.readouterr().err
     assert "manifest contract does not match current configuration" in error
+    assert "Traceback" not in error
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("schema_version", "3"), ("transform_algorithm_version", "3")],
+)
+def test_validate_rejects_string_encoded_manifest_contract_versions(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    manifest_factory,
+    capsys: pytest.CaptureFixture[str],
+    field: str,
+    value: str,
+) -> None:
+    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
+    manifest_path = tmp_path / "manifests" / "a.manifest.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload[field] = value
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    exit_code = cli.run(["validate", "--data-root", str(tmp_path)])
+
+    assert exit_code == cli.EXIT_VALIDATION
+    error = capsys.readouterr().err
+    assert f"invalid manifest {field}" in error
+    assert "non-negative integer" in error
     assert "Traceback" not in error
 
 

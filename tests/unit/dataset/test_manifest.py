@@ -411,6 +411,11 @@ def test_read_manifest_rejects_non_object_counts(tmp_path: Path) -> None:
         ("name", "", "invalid manifest source.name: expected a file name"),
         ("name", 123, "invalid manifest source.name: expected a file name"),
         (
+            "name",
+            "region",
+            "invalid manifest source.name: expected an .osm.pbf file name",
+        ),
+        (
             "size_bytes",
             True,
             "invalid manifest source.size_bytes: expected a non-negative integer",
@@ -443,6 +448,31 @@ def test_read_manifest_rejects_invalid_source_identity_fields(
     payload = json.loads(_manifest().to_json())
     payload["source"][field] = value
     path = tmp_path / "invalid-source.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ManifestError) as error:
+        read_manifest(path)
+
+    assert str(error.value) == message
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("schema_version", "3", "invalid manifest schema_version: expected a non-negative integer"),
+        (
+            "transform_algorithm_version",
+            "3",
+            "invalid manifest transform_algorithm_version: expected a non-negative integer",
+        ),
+    ],
+)
+def test_read_manifest_rejects_string_encoded_contract_versions(
+    tmp_path: Path, field: str, value: object, message: str
+) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload[field] = value
+    path = tmp_path / "invalid-version.manifest.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(ManifestError) as error:

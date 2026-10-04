@@ -113,12 +113,20 @@ def _parse_run_counts(raw: Any) -> RunCounts:
     )
 
 
+def _parse_nonnegative_version(raw: Any, field: str) -> int:
+    if type(raw) is not int or raw < 0:
+        raise ManifestError(f"invalid manifest {field}: expected a non-negative integer")
+    return raw
+
+
 def _parse_source_identity(raw: Any) -> SourceIdentity:
     if not isinstance(raw, dict):
         raise ManifestError("invalid manifest source: expected an object")
     name = raw.get("name")
     if type(name) is not str or not name or Path(name).name != name or "\\" in name:
         raise ManifestError("invalid manifest source.name: expected a file name")
+    if not name.endswith(".osm.pbf") or name == ".osm.pbf":
+        raise ManifestError("invalid manifest source.name: expected an .osm.pbf file name")
     size_bytes = raw.get("size_bytes")
     if type(size_bytes) is not int or size_bytes < 0:
         raise ManifestError("invalid manifest source.size_bytes: expected a non-negative integer")
@@ -203,11 +211,15 @@ class Manifest:
         if version != MANIFEST_SCHEMA_VERSION:
             raise ManifestError(f"unsupported manifest schema version: {version!r}")
         counts = _parse_run_counts(payload["counts"])
+        schema_version = _parse_nonnegative_version(payload.get("schema_version"), "schema_version")
+        transform_algorithm_version = _parse_nonnegative_version(
+            payload.get("transform_algorithm_version", 0), "transform_algorithm_version"
+        )
         return cls(
             manifest_schema_version=int(payload["manifest_schema_version"]),
-            schema_version=int(payload["schema_version"]),
+            schema_version=schema_version,
             geoparquet_version=str(payload["geoparquet_version"]),
-            transform_algorithm_version=int(payload.get("transform_algorithm_version", 0)),
+            transform_algorithm_version=transform_algorithm_version,
             area_policy_sha256=str(payload.get("area_policy_sha256") or _empty_policy_hash()),
             output_algorithm_revision=str(
                 payload.get("output_algorithm_revision") or _empty_policy_hash()
