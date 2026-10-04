@@ -886,7 +886,11 @@ def _validate_manifest_pair(parquet: Path, manifests_dir: Path) -> Path:
         raise StorageError(
             f"manifest uses unsupported schema version: {manifest.manifest_schema_version}"
         )
-    if manifest.output != output_identity_for(parquet):
+    try:
+        output_identity = output_identity_for(parquet)
+    except OSError as error:
+        raise StorageError(f"cannot read finalized artifact {parquet}: {error}") from error
+    if manifest.output != output_identity:
         raise StorageError(f"stale output identity for {parquet.name}")
     return manifest_path
 

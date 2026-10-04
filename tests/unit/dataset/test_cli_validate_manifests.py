@@ -132,6 +132,21 @@ def test_validate_rejects_a_parquet_that_no_longer_matches_its_manifest(
         cli.handle_validate(SimpleNamespace(data_root=tmp_path))
 
 
+def test_validate_reports_unreadable_parquet_as_validation_error(
+    tmp_path: Path, manifest_factory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    parquet = _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
+    parquet.unlink()
+    parquet.mkdir()
+
+    exit_code = cli.run(["validate", "--data-root", str(tmp_path)])
+
+    assert exit_code == cli.EXIT_VALIDATION
+    error = capsys.readouterr().err
+    assert "cannot read finalized artifact" in error
+    assert "Traceback" not in error
+
+
 def test_validate_accepts_a_partial_set_with_matching_manifests(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, manifest_factory, capsys
 ) -> None:
