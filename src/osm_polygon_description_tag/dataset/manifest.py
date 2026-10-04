@@ -120,7 +120,7 @@ def _parse_nonnegative_version(raw: Any, field: str) -> int:
 def _identity_mapping(raw: Any, identity_name: str) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ManifestError(f"invalid manifest {identity_name}: expected an object")
-    return cast(dict[str, Any], raw)
+    return cast(dict[str, Any], raw)  # pragma: no mutate - cast is type-only
 
 
 def _parse_file_name(raw: Any, identity_name: str) -> str:
@@ -376,7 +376,7 @@ def _read_manifest_payload(path: Path) -> dict[str, Any]:
         raise ManifestError(f"corrupt manifest JSON {path}: {error}") from error
     if not isinstance(payload, dict):
         raise ManifestError(f"invalid manifest structure {path}: expected a JSON object")
-    return cast(dict[str, Any], payload)
+    return cast(dict[str, Any], payload)  # pragma: no mutate - cast is type-only
 
 
 def _manifest_from_payload(payload: dict[str, Any], path: Path) -> Manifest:

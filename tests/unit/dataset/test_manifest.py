@@ -324,6 +324,16 @@ def test_read_manifest_reports_invalid_payloads_as_manifest_errors(
         read_manifest(path)
 
 
+def test_read_manifest_preserves_path_for_invalid_structure(tmp_path: Path) -> None:
+    path = tmp_path / "invalid.manifest.json"
+    path.write_text('{"manifest_schema_version":2}', encoding="utf-8")
+
+    with pytest.raises(ManifestError, match="invalid manifest structure") as error:
+        read_manifest(path)
+
+    assert str(path) in str(error.value)
+
+
 @pytest.mark.parametrize("value", [2.0, True, "2"])
 def test_read_manifest_rejects_non_integer_manifest_schema_version(
     tmp_path: Path, value: object

@@ -36,6 +36,65 @@ def test_validate_manifest_pair_default_does_not_require_current_contract(
     is_resumable.assert_not_called()
 
 
+def test_validate_manifest_pair_enforces_current_contract_when_requested(
+    tmp_path: Path,
+) -> None:
+    parquet = tmp_path / "region.parquet"
+    parquet.write_bytes(b"tiny parquet fixture")
+    manifests_dir = tmp_path / "manifests"
+    manifests_dir.mkdir()
+    (manifests_dir / "region.manifest.json").write_bytes(b"tiny manifest fixture")
+    identity = object()
+    manifest = SimpleNamespace(
+        manifest_schema_version=storage.MANIFEST_SCHEMA_VERSION,
+        source=object(),
+        output=identity,
+    )
+
+    with (
+        patch.object(storage, "read_manifest", return_value=manifest),
+        patch.object(storage, "output_identity_for", return_value=identity),
+        patch.object(storage, "is_resumable", return_value=False) as is_resumable,
+        pytest.raises(StorageError, match="manifest contract does not match current configuration"),
+    ):
+        storage._validate_manifest_pair(parquet, manifests_dir, require_current_contract=True)
+
+    is_resumable.assert_called_once_with(manifest, manifest.source, identity)
+
+
+def test_validate_manifest_pair_names_a_non_regular_artifact(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    data_dir = data_root / "data"
+    data_dir.mkdir(parents=True)
+    parquet = data_dir / "region.parquet"
+    parquet.mkdir()
+    manifests_dir = data_root / "manifests"
+    manifests_dir.mkdir()
+    (manifests_dir / "region.manifest.json").write_bytes(b"tiny manifest fixture")
+
+    with pytest.raises(StorageError) as error:
+        storage.validate_finalized_artifacts(data_root)
+
+    assert str(error.value) == f"finalized artifact is not a regular file: {parquet}"
+
+
+def test_validate_manifest_pair_names_a_non_regular_manifest(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    data_dir = data_root / "data"
+    data_dir.mkdir(parents=True)
+    parquet = data_dir / "region.parquet"
+    parquet.write_bytes(b"tiny parquet fixture")
+    manifests_dir = data_root / "manifests"
+    manifests_dir.mkdir()
+    manifest_path = manifests_dir / "region.manifest.json"
+    manifest_path.mkdir()
+
+    with pytest.raises(StorageError) as error:
+        storage.validate_finalized_artifacts(data_root)
+
+    assert str(error.value) == f"manifest is not a regular file: {manifest_path}"
+
+
 def test_validate_manifest_pair_preserves_artifact_inspection_context(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
