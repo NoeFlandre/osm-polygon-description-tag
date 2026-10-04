@@ -9,6 +9,7 @@ import pytest
 from shapely.geometry import Polygon
 from typer import rich_utils
 
+from osm_polygon_description_tag import cli
 from osm_polygon_description_tag.cli import (
     handle_inspect,
     handle_publish,
@@ -393,10 +394,13 @@ def test_data_only_commands_do_not_need_a_source_root(
     monkeypatch.delenv(runtime_config.SOURCE_ROOT_ENV, raising=False)
     data_root = tmp_path / "generated"
     (data_root / "data").mkdir(parents=True)
+    (data_root / "manifests").mkdir()
 
-    assert run(["validate", "--data-root", str(data_root)]) == 0
+    assert run(["validate", "--data-root", str(data_root)]) == 4
 
-    assert json.loads(capsys.readouterr().out) == {"files": 0, "rows": 0}
+    error = capsys.readouterr().err
+    assert "no finalized data artifacts" in error
+    assert "--source-root" not in error
 
 
 def test_publish_rejects_wrong_plan_identity(
@@ -468,7 +472,9 @@ def test_inspect_handler_prints_json_summary(
     assert payload["sources"][0]["output_name"] == "a.parquet"
 
 
-def test_validate_handler_sums_rows(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_validate_handler_sums_rows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     source = tmp_path / "raw"
     data = tmp_path / "generated"
     (data / "data").mkdir(parents=True)
@@ -478,6 +484,12 @@ def test_validate_handler_sums_rows(tmp_path: Path, capsys: pytest.CaptureFixtur
         osm_id=1,
     )
     write_geoparquet(iter([record]), data / "data" / "a.parquet", batch_size=10)
+    parquet = data / "data" / "a.parquet"
+    monkeypatch.setattr(
+        cli,
+        "validate_finalized_artifacts",
+        lambda _root: {"parquets": (parquet,), "manifests": ()},
+    )
     args = SimpleNamespace(
         source_root=source,
         data_root=data,

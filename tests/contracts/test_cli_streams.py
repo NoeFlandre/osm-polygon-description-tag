@@ -186,6 +186,11 @@ def test_validate_success_payload_is_exact(
     second.touch()
     rows = {first: 2, second: 3}
     monkeypatch.setattr(cli, "validate_geoparquet", rows.__getitem__)
+    monkeypatch.setattr(
+        cli,
+        "validate_finalized_artifacts",
+        lambda _root: {"parquets": (first, second), "manifests": ()},
+    )
 
     exit_code, payload = _run_json(["validate", *_common_args(source_root, data_root)], capsys)
 

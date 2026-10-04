@@ -23,7 +23,11 @@ from osm_polygon_description_tag.dataset.languages.detector import LanguageDetec
 from osm_polygon_description_tag.dataset.manifest import ManifestError
 from osm_polygon_description_tag.dataset.migration import MigrationError, migrate_dataset_schema
 from osm_polygon_description_tag.dataset.stats import ReportingError
-from osm_polygon_description_tag.dataset.storage import StorageError, validate_geoparquet
+from osm_polygon_description_tag.dataset.storage import (
+    StorageError,
+    validate_finalized_artifacts,
+    validate_geoparquet,
+)
 from osm_polygon_description_tag.dataset.text_migration import (
     TextMigrationError,
     migrate_dataset_text,
@@ -238,11 +242,12 @@ def handle_validate(args: SimpleNamespace) -> int:
     data_dir = data_root / "data"
     if not data_dir.is_dir():
         raise ValueError(f"missing data directory: {data_dir}")
-    rows_total = 0
-    files = 0
-    for parquet in sorted(data_dir.glob("*.parquet")):
-        rows_total += validate_geoparquet(parquet)
-        files += 1
+    artifacts = validate_finalized_artifacts(data_root)
+    parquets = artifacts["parquets"]
+    if not parquets:
+        raise StorageError(f"no finalized data artifacts found in {data_dir}")
+    rows_total = sum(validate_geoparquet(parquet) for parquet in parquets)
+    files = len(parquets)
     print_json({"files": files, "rows": rows_total})
     return 0
 

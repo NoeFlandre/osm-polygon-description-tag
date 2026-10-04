@@ -536,15 +536,12 @@ def test_cli_validate_sorts_and_accumulates_every_parquet(
         calls.append(path)
         return {first: 2, second: 3}[path]
 
+    monkeypatch.setattr(
+        cli,
+        "validate_finalized_artifacts",
+        lambda _root: {"parquets": (first, second), "manifests": ()},
+    )
     monkeypatch.setattr(cli, "validate_geoparquet", validate)
-    original_glob = Path.glob
-
-    def reverse_glob(path: Path, pattern: str) -> list[Path]:
-        if path == data_dir and pattern == "*.parquet":
-            return [second, first]
-        return list(original_glob(path, pattern))
-
-    monkeypatch.setattr(Path, "glob", reverse_glob)
 
     assert cli.handle_validate(args) == 0
     assert calls == [first, second]
