@@ -303,6 +303,27 @@ def test_read_manifest_rejects_corrupt_json(tmp_path: Path) -> None:
         read_manifest(path)
 
 
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        (b"\xff", "invalid manifest encoding"),
+        (b"[" * 10_000 + b"0" + b"]" * 10_000, "corrupt manifest JSON"),
+        (b'{"value":' + b"9" * 5_000 + b"}", "corrupt manifest JSON"),
+        (b"[]", "expected a JSON object"),
+        (b'{"manifest_schema_version":2}', "invalid manifest structure"),
+    ],
+    ids=["invalid-utf8", "deeply-nested", "integer-digit-limit", "non-object", "missing-field"],
+)
+def test_read_manifest_reports_invalid_payloads_as_manifest_errors(
+    tmp_path: Path, payload: bytes, message: str
+) -> None:
+    path = tmp_path / "invalid.manifest.json"
+    path.write_bytes(payload)
+
+    with pytest.raises(ManifestError, match=message):
+        read_manifest(path)
+
+
 def test_read_manifest_requests_utf8_and_preserves_read_error_context(tmp_path: Path) -> None:
     path = tmp_path / "region.manifest.json"
     payload = _manifest().to_json()
