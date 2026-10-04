@@ -194,20 +194,23 @@ def test_validate_success_payload_is_exact(
     monkeypatch.setattr(
         cli,
         "validate_finalized_artifacts",
-        lambda _root, **_kwargs: {"parquets": (first, second), "manifests": manifests},
-    )
-    manifest_rows = dict(zip(manifests, rows.values(), strict=True))
-    monkeypatch.setattr(
-        cli,
-        "read_manifest",
-        lambda path: SimpleNamespace(
-            source=SimpleNamespace(name=f"{path.name.removesuffix('.manifest.json')}.osm.pbf"),
-            counts=SimpleNamespace(
-                included_rows=manifest_rows[path],
-                emitted_features=manifest_rows[path],
-                rejections={},
+        lambda _root, **_kwargs: {
+            "parquets": (first, second),
+            "manifests": manifests,
+            "manifest_records": tuple(
+                SimpleNamespace(
+                    source=SimpleNamespace(
+                        name=f"{path.name.removesuffix('.manifest.json')}.osm.pbf"
+                    ),
+                    counts=SimpleNamespace(
+                        included_rows=rows[parquet],
+                        emitted_features=rows[parquet],
+                        rejections={},
+                    ),
+                )
+                for path, parquet in zip(manifests, (first, second), strict=True)
             ),
-        ),
+        },
     )
 
     exit_code, payload = _run_json(["validate", "--data-root", str(data_root)], capsys)

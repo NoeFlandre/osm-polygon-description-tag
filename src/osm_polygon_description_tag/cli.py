@@ -24,7 +24,6 @@ from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     ManifestError,
     SourceIdentity,
-    read_manifest,
     source_identity_for,
 )
 from osm_polygon_description_tag.dataset.migration import MigrationError, migrate_dataset_schema
@@ -250,35 +249,34 @@ def handle_validate(args: SimpleNamespace) -> int:
     data_dir = data_root / "data"
     if not data_dir.is_dir():
         raise ValueError(f"missing data directory: {data_dir}")
-    parquets, manifests = _validation_artifacts(data_root, data_dir)
-    rows_total = _validate_artifact_pairs(parquets, manifests, source_root)
+    parquets, manifest_records = _validation_artifacts(data_root, data_dir)
+    rows_total = _validate_artifact_pairs(parquets, manifest_records, source_root)
     print_json({"files": len(parquets), "rows": rows_total})
     return 0
 
 
 def _validation_artifacts(
     data_root: Path, data_dir: Path
-) -> tuple[tuple[Path, ...], tuple[Path, ...]]:
+) -> tuple[tuple[Path, ...], tuple[Manifest, ...]]:
     artifacts = validate_finalized_artifacts(data_root, require_current_contract=True)
     parquets = artifacts["parquets"]
     if not parquets:
         raise StorageError(f"no finalized data artifacts found in {data_dir}")
-    return parquets, artifacts["manifests"]
+    return parquets, artifacts["manifest_records"]
 
 
 def _validate_artifact_pairs(
     parquets: tuple[Path, ...],
-    manifests: tuple[Path, ...],
+    manifest_records: tuple[Manifest, ...],
     source_root: Path | None,
 ) -> int:
     return sum(
-        _validate_artifact_pair(parquet, manifest_path, source_root)
-        for parquet, manifest_path in zip(parquets, manifests, strict=True)
+        _validate_artifact_pair(parquet, manifest, source_root)
+        for parquet, manifest in zip(parquets, manifest_records, strict=True)
     )
 
 
-def _validate_artifact_pair(parquet: Path, manifest_path: Path, source_root: Path | None) -> int:
-    manifest = read_manifest(manifest_path)
+def _validate_artifact_pair(parquet: Path, manifest: Manifest, source_root: Path | None) -> int:
     rows = validate_geoparquet(parquet, expected_source_pbf=manifest.source.name)
     _validate_manifest_output_name(parquet, manifest)
     _validate_manifest_row_count(parquet, manifest, rows)

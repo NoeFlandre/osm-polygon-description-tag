@@ -532,6 +532,7 @@ def test_cli_validate_sorts_and_accumulates_every_parquet(
     first.write_bytes(b"a")
     second.write_bytes(b"b")
     calls: list[Path] = []
+    rows = {first: 2, second: 3}
     manifests = (
         args.data_root / "manifests" / "a.manifest.json",
         args.data_root / "manifests" / "b.manifest.json",
@@ -539,26 +540,30 @@ def test_cli_validate_sorts_and_accumulates_every_parquet(
 
     def validate(path: Path, **_kwargs: object) -> int:
         calls.append(path)
-        return {first: 2, second: 3}[path]
+        return rows[path]
 
     monkeypatch.setattr(
         cli,
         "validate_finalized_artifacts",
-        lambda _root, **_kwargs: {"parquets": (first, second), "manifests": manifests},
+        lambda _root, **_kwargs: {
+            "parquets": (first, second),
+            "manifests": manifests,
+            "manifest_records": tuple(
+                SimpleNamespace(
+                    source=SimpleNamespace(
+                        name=f"{path.name.removesuffix('.manifest.json')}.osm.pbf"
+                    ),
+                    counts=SimpleNamespace(
+                        included_rows=rows[parquet],
+                        emitted_features=rows[parquet],
+                        rejections={},
+                    ),
+                )
+                for path, parquet in zip(manifests, (first, second), strict=True)
+            ),
+        },
     )
     monkeypatch.setattr(cli, "validate_geoparquet", validate)
-    monkeypatch.setattr(
-        cli,
-        "read_manifest",
-        lambda path: SimpleNamespace(
-            source=SimpleNamespace(name=f"{path.name.removesuffix('.manifest.json')}.osm.pbf"),
-            counts=SimpleNamespace(
-                included_rows={manifests[0]: 2, manifests[1]: 3}[path],
-                emitted_features={manifests[0]: 2, manifests[1]: 3}[path],
-                rejections={},
-            ),
-        ),
-    )
 
     assert cli.handle_validate(args) == 0
     assert calls == [first, second]

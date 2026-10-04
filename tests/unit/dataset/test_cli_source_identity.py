@@ -104,9 +104,12 @@ def test_validate_passes_the_artifact_path_and_manifest_source_to_storage(
     monkeypatch.setattr(
         cli,
         "validate_finalized_artifacts",
-        lambda *_args, **_kwargs: {"parquets": (parquet,), "manifests": (manifest_path,)},
+        lambda *_args, **_kwargs: {
+            "parquets": (parquet,),
+            "manifests": (manifest_path,),
+            "manifest_records": (manifest,),
+        },
     )
-    monkeypatch.setattr(cli, "read_manifest", lambda _path: manifest)
 
     def validate(path: Path, **kwargs: str) -> int:
         calls.append((path, kwargs))
@@ -136,9 +139,12 @@ def test_validate_reports_when_manifest_source_name_does_not_map_to_artifact(
     monkeypatch.setattr(
         cli,
         "validate_finalized_artifacts",
-        lambda *_args, **_kwargs: {"parquets": (parquet,), "manifests": (manifest_path,)},
+        lambda *_args, **_kwargs: {
+            "parquets": (parquet,),
+            "manifests": (manifest_path,),
+            "manifest_records": (manifest,),
+        },
     )
-    monkeypatch.setattr(cli, "read_manifest", lambda _path: manifest)
     monkeypatch.setattr(cli, "validate_geoparquet", lambda *_args, **_kwargs: 1)
 
     with pytest.raises(StorageError) as error:

@@ -491,15 +491,13 @@ def test_validate_handler_sums_rows(
         lambda _root, **_kwargs: {
             "parquets": (parquet,),
             "manifests": (data / "manifests" / "a.manifest.json",),
+            "manifest_records": (
+                SimpleNamespace(
+                    source=SimpleNamespace(name="a.osm.pbf"),
+                    counts=SimpleNamespace(included_rows=1, emitted_features=1, rejections={}),
+                ),
+            ),
         },
-    )
-    monkeypatch.setattr(
-        cli,
-        "read_manifest",
-        lambda _path: SimpleNamespace(
-            source=SimpleNamespace(name="a.osm.pbf"),
-            counts=SimpleNamespace(included_rows=1, emitted_features=1, rejections={}),
-        ),
     )
     args = SimpleNamespace(
         source_root=None,

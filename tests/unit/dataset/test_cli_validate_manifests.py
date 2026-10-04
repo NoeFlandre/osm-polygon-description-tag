@@ -9,6 +9,7 @@ import pytest
 
 from osm_polygon_description_tag import cli
 from osm_polygon_description_tag.dataset.manifest import (
+    Manifest,
     _manifest_path_for,
     output_identity_for,
     source_identity_for,
@@ -162,6 +163,27 @@ def test_validate_rejects_a_parquet_that_no_longer_matches_its_manifest(
 
     with pytest.raises(StorageError, match="stale output identity for a.parquet"):
         cli.handle_validate(SimpleNamespace(data_root=tmp_path))
+
+
+def test_validate_does_not_reread_manifest_after_pair_validation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, manifest_factory
+) -> None:
+    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
+    manifest_path = tmp_path / "manifests" / "a.manifest.json"
+    replacement_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    replacement_payload["output"]["sha256"] = "f" * 64
+    replacement = Manifest.from_payload(replacement_payload)
+    reread_paths: list[Path] = []
+
+    def read_replacement(path: Path) -> Manifest:
+        reread_paths.append(path)
+        return replacement
+
+    monkeypatch.setattr(cli, "read_manifest", read_replacement, raising=False)
+
+    assert cli.handle_validate(SimpleNamespace(data_root=tmp_path)) == 0
+    assert reread_paths == []
 
 
 def test_validate_rejects_a_manifest_source_name_that_disagrees_with_parquet(
@@ -668,10 +690,10 @@ def test_validate_requires_artifact_and_manifest_results_to_have_equal_lengths(
         lambda *_args, **_kwargs: {
             "parquets": (parquet, parquet),
             "manifests": (manifest_path,),
+            "manifest_records": (manifest,),
         },
     )
     monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
-    monkeypatch.setattr(cli, "read_manifest", lambda _path: manifest)
 
     with pytest.raises(ValueError, match=r"zip\(\) argument 2 is shorter than argument 1"):
         cli.handle_validate(SimpleNamespace(data_root=tmp_path))

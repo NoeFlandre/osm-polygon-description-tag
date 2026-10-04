@@ -710,13 +710,17 @@ def test_validate_finalized_artifacts_returns_sorted_pairs_and_validates_each(
         (data_dir / f"{name}.parquet").write_bytes(b"")
         (manifests_dir / f"{name}.manifest.json").write_bytes(b"")
 
-    validated = [manifests_dir / "a.manifest.json", manifests_dir / "b.manifest.json"]
-    with patch.object(storage, "_validate_manifest_pair", side_effect=validated) as check:
+    validated = [
+        storage._ValidatedManifestPair(manifests_dir / "a.manifest.json", object()),
+        storage._ValidatedManifestPair(manifests_dir / "b.manifest.json", object()),
+    ]
+    with patch.object(storage, "_validate_manifest_pair_record", side_effect=validated) as check:
         result = validate_finalized_artifacts(tmp_path)
 
     assert result == {
         "parquets": (data_dir / "a.parquet", data_dir / "b.parquet"),
-        "manifests": tuple(validated),
+        "manifests": tuple(pair.path for pair in validated),
+        "manifest_records": tuple(pair.manifest for pair in validated),
     }
     assert check.call_args_list == [
         call(data_dir / "a.parquet", manifests_dir, require_current_contract=False),

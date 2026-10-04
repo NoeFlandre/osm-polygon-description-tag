@@ -849,6 +849,13 @@ class FinalizedArtifacts(TypedDict):
 
     parquets: tuple[Path, ...]
     manifests: tuple[Path, ...]
+    manifest_records: tuple[Manifest, ...]
+
+
+@dataclass(frozen=True)
+class _ValidatedManifestPair:
+    path: Path
+    manifest: Manifest
 
 
 def validate_finalized_artifacts(
@@ -862,7 +869,8 @@ def validate_finalized_artifacts(
     :func:`validate_geoparquet`; that stricter byte-level validation is
     performed separately, downstream, when the artifact is loaded. Callers
     that report whether an artifact set matches the current dataset contract
-    can request that check explicitly.
+    can request that check explicitly. The result includes each parsed
+    manifest record so follow-up checks can use the same validated read.
     """
     data_dir = data_root / "data"
     manifests_dir = data_root / "manifests"
@@ -877,8 +885,8 @@ def validate_finalized_artifacts(
     )  # pragma: no mutate - all paths share one parent
     _check_artifact_stems(parquets, manifest_paths)
 
-    validated_manifests = [
-        _validate_manifest_pair(
+    validated_pairs = [
+        _validate_manifest_pair_record(
             parquet, manifests_dir, require_current_contract=require_current_contract
         )
         for parquet in parquets
@@ -886,7 +894,8 @@ def validate_finalized_artifacts(
 
     return {
         "parquets": tuple(parquets),
-        "manifests": tuple(validated_manifests),
+        "manifests": tuple(pair.path for pair in validated_pairs),
+        "manifest_records": tuple(pair.manifest for pair in validated_pairs),
     }
 
 
@@ -917,6 +926,14 @@ def _check_artifact_stems(parquets: list[Path], manifests: list[Path]) -> None:
 def _validate_manifest_pair(
     parquet: Path, manifests_dir: Path, *, require_current_contract: bool = False
 ) -> Path:
+    return _validate_manifest_pair_record(
+        parquet, manifests_dir, require_current_contract=require_current_contract
+    ).path
+
+
+def _validate_manifest_pair_record(
+    parquet: Path, manifests_dir: Path, *, require_current_contract: bool = False
+) -> _ValidatedManifestPair:
     _require_regular_file(parquet, "finalized artifact", "finalized artifact is not a regular file")
     manifest_path = _manifest_path_for(parquet.name, manifests_dir.parent)
     _require_regular_file(manifest_path, "manifest", "manifest is not a regular file")
@@ -927,7 +944,7 @@ def _validate_manifest_pair(
     _validate_current_manifest_contract(
         manifest, output_identity, manifest_path, require_current_contract
     )
-    return manifest_path
+    return _ValidatedManifestPair(manifest_path, manifest)
 
 
 def _require_regular_file(path: Path, label: str, invalid_message: str) -> None:
