@@ -202,6 +202,39 @@ def test_validate_rejects_symlinked_entries(
     assert "Traceback" not in error
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("schema_version", 999),
+        ("geoparquet_version", "0.0.0"),
+        ("transform_algorithm_version", 999),
+        ("area_policy_sha256", "0" * 64),
+        ("output_algorithm_revision", "0:0000000000000000"),
+    ],
+)
+def test_validate_rejects_a_stale_manifest_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    manifest_factory,
+    capsys: pytest.CaptureFixture[str],
+    field: str,
+    value: object,
+) -> None:
+    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path: 1)
+    _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
+    manifest_path = tmp_path / "manifests" / "a.manifest.json"
+    payload = json.loads(manifest_path.read_text())
+    payload[field] = value
+    manifest_path.write_text(json.dumps(payload))
+
+    exit_code = cli.run(["validate", "--data-root", str(tmp_path)])
+
+    assert exit_code == cli.EXIT_VALIDATION
+    error = capsys.readouterr().err
+    assert "manifest contract does not match current configuration" in error
+    assert "Traceback" not in error
+
+
 def test_validate_accepts_a_partial_set_with_matching_manifests(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, manifest_factory, capsys
 ) -> None:

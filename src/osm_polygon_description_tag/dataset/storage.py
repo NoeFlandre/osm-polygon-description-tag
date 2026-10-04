@@ -34,6 +34,7 @@ from osm_polygon_description_tag.dataset.manifest import (
     MANIFEST_SCHEMA_VERSION,
     ManifestError,
     _manifest_path_for,
+    is_resumable,
     output_identity_for,
     read_manifest,
 )
@@ -906,6 +907,10 @@ def _validate_manifest_pair(parquet: Path, manifests_dir: Path) -> Path:
         raise StorageError(f"cannot read finalized artifact {parquet}: {error}") from error
     if manifest.output != output_identity:
         raise StorageError(f"stale output identity for {parquet.name}")
+    if not is_resumable(manifest, manifest.source, output_identity):
+        raise StorageError(
+            f"manifest contract does not match current configuration: {manifest_path}"
+        )
     return manifest_path
 
 
