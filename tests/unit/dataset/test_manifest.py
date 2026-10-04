@@ -416,6 +416,16 @@ def test_read_manifest_rejects_non_object_counts(tmp_path: Path) -> None:
             "invalid manifest source.name: expected an .osm.pbf file name",
         ),
         (
+            "name",
+            ".osm.pbf",
+            "invalid manifest source.name: expected an .osm.pbf file name",
+        ),
+        (
+            "name",
+            "region.OSM.PBF",
+            "invalid manifest source.name: expected an .osm.pbf file name",
+        ),
+        (
             "size_bytes",
             True,
             "invalid manifest source.size_bytes: expected a non-negative integer",
@@ -454,6 +464,20 @@ def test_read_manifest_rejects_invalid_source_identity_fields(
         read_manifest(path)
 
     assert str(error.value) == message
+
+
+@pytest.mark.parametrize("value", [0, 3])
+def test_parse_nonnegative_version_accepts_nonnegative_integers(value: int) -> None:
+    assert manifest_module._parse_nonnegative_version(value, "schema_version") == value
+
+
+@pytest.mark.parametrize("value", [True, 2.0, "2", -1, None])
+def test_parse_nonnegative_version_rejects_invalid_values(value: object) -> None:
+    with pytest.raises(
+        ManifestError,
+        match="invalid manifest schema_version: expected a non-negative integer",
+    ):
+        manifest_module._parse_nonnegative_version(value, "schema_version")
 
 
 @pytest.mark.parametrize(
