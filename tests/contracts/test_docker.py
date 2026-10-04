@@ -12,7 +12,10 @@ import pytest
 
 def _repository_root(test_file: Path) -> Path:
     for candidate in test_file.resolve().parents:
-        if (candidate / "pyproject.toml").is_file() and (candidate / "Dockerfile").is_file():
+        if all(
+            (candidate / marker).is_file()
+            for marker in ("pyproject.toml", "Dockerfile", ".trivyignore")
+        ):
             return candidate
     raise RuntimeError(f"Could not find the repository root above {test_file}")
 
@@ -25,6 +28,11 @@ def test_repository_root_resolution_survives_mutation_copy(tmp_path: Path) -> No
     repository.mkdir()
     (repository / "pyproject.toml").touch()
     (repository / "Dockerfile").touch()
+    (repository / ".trivyignore").touch()
+    mutation_root = repository / "mutants"
+    mutation_root.mkdir()
+    (mutation_root / "pyproject.toml").touch()
+    (mutation_root / "Dockerfile").touch()
     mutation_copy = repository / "mutants" / "tests" / "contracts" / "test_docker.py"
     mutation_copy.parent.mkdir(parents=True)
     mutation_copy.touch()
