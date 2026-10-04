@@ -281,7 +281,14 @@ def read_manifest(path: Path) -> Manifest:
         payload = json.loads(text)
     except json.JSONDecodeError as error:
         raise ManifestError(f"corrupt manifest JSON {path}: {error}") from error
-    return Manifest.from_payload(payload)
+    if not isinstance(payload, dict):
+        raise ManifestError(f"invalid manifest structure {path}: expected a JSON object")
+    try:
+        return Manifest.from_payload(payload)
+    except ManifestError:
+        raise
+    except (AttributeError, IndexError, KeyError, OverflowError, TypeError, ValueError) as error:
+        raise ManifestError(f"invalid manifest structure {path}: {error}") from error
 
 
 def current_dependency_versions() -> dict[str, str]:

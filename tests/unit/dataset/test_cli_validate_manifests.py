@@ -78,6 +78,23 @@ def test_validate_rejects_a_corrupt_manifest(
         cli.handle_validate(SimpleNamespace(data_root=tmp_path))
 
 
+def test_validate_reports_structurally_invalid_manifest_without_traceback(
+    tmp_path: Path, manifest_factory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
+    manifest_path = tmp_path / "manifests" / "a.manifest.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload.pop("source")
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    exit_code = cli.run(["validate", "--data-root", str(tmp_path)])
+
+    assert exit_code == cli.EXIT_VALIDATION
+    error = capsys.readouterr().err
+    assert "invalid manifest" in error
+    assert "Traceback" not in error
+
+
 def test_validate_rejects_a_parquet_that_no_longer_matches_its_manifest(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, manifest_factory
 ) -> None:
