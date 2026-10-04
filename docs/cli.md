@@ -86,8 +86,9 @@ uv run osm-polygon-description-tag run-and-publish \
 Options:
 
 - `--source-root PATH`: the immutable PBF directory. If you omit it, the tool
-  reads `OSM_POLYGON_SOURCE_ROOT`. Only `inspect`, `build-one`, `build-all`,
-  and `run-and-publish` need it. The data-only commands ignore it.
+  reads `OSM_POLYGON_SOURCE_ROOT`. `validate` also uses it optionally to check
+  source identities. Only `inspect`, `build-one`, `build-all`, and
+  `run-and-publish` require it. Other data-only commands ignore it.
 - `--data-root PATH`: the generated-data directory. If you omit it, the tool
   reads `OSM_POLYGON_DATA_ROOT`.
 - `--osmium NAME`: the executable name or path. The default is `osmium`.

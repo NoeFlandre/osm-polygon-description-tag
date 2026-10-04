@@ -770,3 +770,12 @@ def test_validate_docs_explain_source_root_environment_opt_in() -> None:
     )[0]
 
     assert "OSM_POLYGON_SOURCE_ROOT" in validate_section
+
+
+def test_source_root_option_docs_include_optional_validate_identity_check() -> None:
+    cli_doc = (Path(__file__).resolve().parents[2] / "docs" / "cli.md").read_text(encoding="utf-8")
+    source_root_option = cli_doc.split("- `--source-root PATH`:", 1)[1].split(
+        "- `--data-root PATH`:", 1
+    )[0]
+
+    assert "`validate`" in source_root_option
