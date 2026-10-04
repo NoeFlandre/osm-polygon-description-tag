@@ -24,7 +24,7 @@ ENV UV_LINK_MODE=copy \
 # The production CLI invokes the real osmium-tool binary. Install it in the
 # shared base so development and runtime images use the same binary contract.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends osmium-tool \
+    && apt-get install -y --no-install-recommends libpcre2-8-0 osmium-tool \
     && rm -rf /var/lib/apt/lists/*
 
 FROM base AS build
