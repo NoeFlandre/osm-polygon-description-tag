@@ -414,10 +414,11 @@ def test_read_manifest_accepts_zero_counts(tmp_path: Path) -> None:
     assert manifest.counts.rejections == {"no_nonempty_description": 0}
 
 
-def test_read_manifest_rejects_empty_rejection_reason(tmp_path: Path) -> None:
+@pytest.mark.parametrize("reason", ["", " ", "\t\n"])
+def test_read_manifest_rejects_blank_rejection_reason(tmp_path: Path, reason: str) -> None:
     payload = json.loads(_manifest().to_json())
-    payload["counts"]["rejections"] = {"": 3}
-    path = tmp_path / "empty-rejection-reason.manifest.json"
+    payload["counts"]["rejections"] = {reason: 3}
+    path = tmp_path / "blank-rejection-reason.manifest.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(

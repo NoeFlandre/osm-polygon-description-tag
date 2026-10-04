@@ -109,7 +109,7 @@ def _parse_rejection_counts(raw: Any) -> dict[str, int]:
 
 def _rejection_counts_have_expected_types(raw: dict[Any, Any]) -> bool:
     return all(
-        isinstance(reason, str) and reason != "" and type(count) is int
+        isinstance(reason, str) and reason.strip() != "" and type(count) is int
         for reason, count in raw.items()
     )
 
