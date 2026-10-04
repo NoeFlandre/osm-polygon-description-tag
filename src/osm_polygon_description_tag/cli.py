@@ -242,7 +242,7 @@ def handle_validate(args: SimpleNamespace) -> int:
     data_dir = data_root / "data"
     if not data_dir.is_dir():
         raise ValueError(f"missing data directory: {data_dir}")
-    artifacts = validate_finalized_artifacts(data_root)
+    artifacts = validate_finalized_artifacts(data_root, require_current_contract=True)
     parquets = artifacts["parquets"]
     if not parquets:
         raise StorageError(f"no finalized data artifacts found in {data_dir}")

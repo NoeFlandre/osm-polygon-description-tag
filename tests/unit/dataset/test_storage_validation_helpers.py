@@ -641,7 +641,10 @@ def test_validate_manifest_pair_reads_the_expected_path_and_checks_identity(
         ) as output_identity,
         patch.object(storage, "is_resumable", return_value=True) as is_resumable,
     ):
-        assert _validate_manifest_pair(parquet, manifests_dir) == manifest_path
+        assert (
+            _validate_manifest_pair(parquet, manifests_dir, require_current_contract=True)
+            == manifest_path
+        )
 
     read_manifest.assert_called_once_with(manifest_path)
     output_identity.assert_called_once_with(parquet)
@@ -716,8 +719,8 @@ def test_validate_finalized_artifacts_returns_sorted_pairs_and_validates_each(
         "manifests": tuple(validated),
     }
     assert check.call_args_list == [
-        call(data_dir / "a.parquet", manifests_dir),
-        call(data_dir / "b.parquet", manifests_dir),
+        call(data_dir / "a.parquet", manifests_dir, require_current_contract=False),
+        call(data_dir / "b.parquet", manifests_dir, require_current_contract=False),
     ]
 
 

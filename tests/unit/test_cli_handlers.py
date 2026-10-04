@@ -539,7 +539,7 @@ def test_cli_validate_sorts_and_accumulates_every_parquet(
     monkeypatch.setattr(
         cli,
         "validate_finalized_artifacts",
-        lambda _root: {"parquets": (first, second), "manifests": ()},
+        lambda _root, **_kwargs: {"parquets": (first, second), "manifests": ()},
     )
     monkeypatch.setattr(cli, "validate_geoparquet", validate)
 

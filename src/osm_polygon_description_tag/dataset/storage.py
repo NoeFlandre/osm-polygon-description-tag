@@ -833,14 +833,18 @@ class FinalizedArtifacts(TypedDict):
     manifests: tuple[Path, ...]
 
 
-def validate_finalized_artifacts(data_root: Path) -> FinalizedArtifacts:
+def validate_finalized_artifacts(
+    data_root: Path, *, require_current_contract: bool = False
+) -> FinalizedArtifacts:
     """Validate every finalized Parquet/manifest pair under data_root.
 
     The validation is intentionally minimal: it only checks that every
     Parquet has a matching, parseable, schema-current manifest whose
     output identity matches the Parquet. It does NOT call
     :func:`validate_geoparquet`; that stricter byte-level validation is
-    performed separately, downstream, when the artifact is loaded.
+    performed separately, downstream, when the artifact is loaded. Callers
+    that report whether an artifact set matches the current dataset contract
+    can request that check explicitly.
     """
     data_dir = data_root / "data"
     manifests_dir = data_root / "manifests"
@@ -854,7 +858,12 @@ def validate_finalized_artifacts(data_root: Path) -> FinalizedArtifacts:
     )  # pragma: no mutate - all paths share one parent
     _check_artifact_stems(parquets, manifest_paths)
 
-    validated_manifests = [_validate_manifest_pair(parquet, manifests_dir) for parquet in parquets]
+    validated_manifests = [
+        _validate_manifest_pair(
+            parquet, manifests_dir, require_current_contract=require_current_contract
+        )
+        for parquet in parquets
+    ]
 
     return {
         "parquets": tuple(parquets),
@@ -877,7 +886,9 @@ def _check_artifact_stems(parquets: list[Path], manifests: list[Path]) -> None:
         raise StorageError(f"artifact/manifest mismatch (missing or extra): {sorted(mismatch)}")
 
 
-def _validate_manifest_pair(parquet: Path, manifests_dir: Path) -> Path:
+def _validate_manifest_pair(
+    parquet: Path, manifests_dir: Path, *, require_current_contract: bool = False
+) -> Path:
     try:
         is_symlink = parquet.is_symlink()
         is_regular_file = parquet.is_file()
@@ -907,7 +918,7 @@ def _validate_manifest_pair(parquet: Path, manifests_dir: Path) -> Path:
         raise StorageError(f"cannot read finalized artifact {parquet}: {error}") from error
     if manifest.output != output_identity:
         raise StorageError(f"stale output identity for {parquet.name}")
-    if not is_resumable(manifest, manifest.source, output_identity):
+    if require_current_contract and not is_resumable(manifest, manifest.source, output_identity):
         raise StorageError(
             f"manifest contract does not match current configuration: {manifest_path}"
         )

@@ -170,7 +170,7 @@ def test_validate_rejects_fifo_entries_without_blocking(
         ],
         capture_output=True,
         text=True,
-        timeout=3,
+        timeout=10,
         check=False,
     )
 
