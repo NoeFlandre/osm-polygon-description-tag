@@ -33,6 +33,11 @@ def atomic_write_bytes(path: Path, content: bytes) -> None:
     atomic_write_via(path, lambda temp: temp.write_bytes(content))
 
 
+def atomic_write_text(path: Path, text: str) -> None:
+    """Durably replace ``path`` with ``text`` encoded as UTF-8, without newline translation."""
+    atomic_write_via(path, lambda temp: temp.write_text(text, encoding="utf-8", newline=""))
+
+
 def atomic_write_json(path: Path, payload: object) -> None:
     """Durably replace ``path`` with the canonical JSON encoding of ``payload``."""
     atomic_write_bytes(path, canonical_json_bytes(payload))
@@ -59,6 +64,7 @@ def atomic_write_via(path: Path, produce: Callable[[Path], object]) -> None:
 __all__ = [
     "atomic_write_bytes",
     "atomic_write_json",
+    "atomic_write_text",
     "atomic_write_via",
     "fsync_dir",
     "fsync_file",

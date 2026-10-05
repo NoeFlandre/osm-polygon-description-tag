@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 import osm_polygon_description_tag.dataset.manifest as manifest_module
+import osm_polygon_description_tag.runtime.atomic as atomic_module
 from osm_polygon_description_tag.dataset.manifest import (
     MANIFEST_SCHEMA_VERSION,
     Manifest,
@@ -40,10 +41,6 @@ def test_sha256_reads_without_mutating(tmp_path: Path) -> None:
     after = path.stat()
     assert after.st_mtime_ns == before.st_mtime_ns
     assert after.st_size == before.st_size
-
-
-def test_fsync_dir_accepts_an_existing_directory(tmp_path: Path) -> None:
-    manifest_module._fsync_dir(tmp_path)
 
 
 def test_manifest_path_for_uses_parquet_name_without_extension() -> None:
@@ -261,7 +258,7 @@ def test_write_and_read_manifest_roundtrip(tmp_path: Path) -> None:
 def test_write_manifest_creates_nested_parent_and_fsyncs_that_directory(tmp_path: Path) -> None:
     path = tmp_path / "nested" / "deeper" / "region.manifest.json"
 
-    with patch.object(manifest_module, "_fsync_dir") as fsync_dir:
+    with patch.object(atomic_module, "fsync_dir") as fsync_dir:
         write_manifest(_manifest(), path)
 
     assert path.is_file()
@@ -271,15 +268,15 @@ def test_write_manifest_creates_nested_parent_and_fsyncs_that_directory(tmp_path
 def test_write_manifest_fsyncs_the_directory_after_the_rename(tmp_path: Path) -> None:
     path = tmp_path / "region.manifest.json"
     events: list[str] = []
-    real_replace = manifest_module.os.replace
+    real_replace = atomic_module.os.replace
 
     def replace_then_record(source: Path, destination: Path) -> None:
         real_replace(source, destination)
         events.append("replace")
 
     with (
-        patch.object(manifest_module.os, "replace", replace_then_record),
-        patch.object(manifest_module, "_fsync_dir", lambda _d: events.append("fsync_dir")),
+        patch.object(atomic_module.os, "replace", replace_then_record),
+        patch.object(atomic_module, "fsync_dir", lambda _d: events.append("fsync_dir")),
     ):
         write_manifest(_manifest(), path)
 

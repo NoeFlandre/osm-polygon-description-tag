@@ -10,15 +10,13 @@ all agree.
 
 import hashlib
 import json
-import os
 import re
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
 from osm_polygon_description_tag.dataset.schema import GEOPARQUET_VERSION, SCHEMA_VERSION
-from osm_polygon_description_tag.runtime.atomic import fsync_dir as _fsync_dir
+from osm_polygon_description_tag.runtime.atomic import atomic_write_bytes
 from osm_polygon_description_tag.runtime.resources import (
     osmium_export_config,
     project_code_revision,
@@ -365,20 +363,10 @@ def current_output_algorithm_revision() -> str:
 
 def write_manifest(manifest: Manifest, path: Path) -> None:
     """Atomically write ``manifest`` to ``path`` as canonical UTF-8 JSON."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        # pragma: no mutate start - codec names are equivalent
-        encoded = manifest.to_json().encode("utf-8")
-        # pragma: no mutate end
-        temp.write_bytes(encoded)
-        with Path(temp).open("rb") as handle:  # pragma: no mutate - only the descriptor is used
-            os.fsync(handle.fileno())
-        Path(temp).replace(path)
-        _fsync_dir(path.parent)
-    finally:
-        if temp.exists():
-            temp.unlink()
+    # pragma: no mutate start - codec names are equivalent
+    encoded = manifest.to_json().encode("utf-8")
+    # pragma: no mutate end
+    atomic_write_bytes(path, encoded)
 
 
 def read_manifest(path: Path) -> Manifest:

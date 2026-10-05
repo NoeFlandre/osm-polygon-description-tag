@@ -8,7 +8,6 @@ global pass over validated GeoParquets, keeps one canonical row for each
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -44,6 +43,7 @@ from osm_polygon_description_tag.dataset.storage import (
     write_geoparquet_batches,
 )
 from osm_polygon_description_tag.dataset.text import sql_literal as _sql_literal
+from osm_polygon_description_tag.runtime.atomic import atomic_write_text
 
 DEDUPLICATION_POLICY_VERSION = CANONICAL_ROW_POLICY_VERSION
 DUPLICATE_REJECTION_REASON = "duplicate_osm_object"
@@ -95,25 +95,8 @@ def _read_state(path: Path) -> dict[str, Any] | None:
 
 
 def _write_state(path: Path, payload: Mapping[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        temp.write_text(
-            # Explicitly keep Unicode in the byte-stable state payload.
-            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        with Path(temp).open("rb") as handle:
-            os.fsync(handle.fileno())
-        Path(temp).replace(path)
-        directory_fd = os.open(str(path.parent), os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-    finally:
-        if temp.exists():
-            temp.unlink()
+    body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    atomic_write_text(path, body)
 
 
 def _input_hashes(parquets: Iterable[Path]) -> dict[str, str]:

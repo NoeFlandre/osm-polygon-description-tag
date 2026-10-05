@@ -9,11 +9,11 @@ prose is preserved byte-for-byte.
 
 from __future__ import annotations
 
-import os
 import re
-import uuid
 from pathlib import Path
 from typing import Final
+
+from osm_polygon_description_tag.runtime.atomic import atomic_write_text
 
 H3_MAP_START_MARKER: Final[str] = "<!-- GENERATED:H3_MAP:START -->"
 H3_MAP_END_MARKER: Final[str] = "<!-- GENERATED:H3_MAP:END -->"
@@ -190,15 +190,7 @@ def _template_with_map_markers(text: str, asset_relative_path: str) -> str:
 
 
 def _atomic_write_template(template_path: Path, new_text: str) -> None:
-    tmp = template_path.with_name(f".{template_path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        tmp.write_text(new_text, encoding="utf-8")
-        with tmp.open("rb") as handle:
-            os.fsync(handle.fileno())
-        tmp.replace(template_path)
-    finally:
-        if tmp.exists():
-            tmp.unlink()
+    atomic_write_text(template_path, new_text)
 
 
 __all__ = [

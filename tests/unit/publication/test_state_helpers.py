@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+import osm_polygon_description_tag.runtime.atomic as atomic_module
 from osm_polygon_description_tag.publication import state
 from osm_polygon_description_tag.publication.state import PublicationStateError
 
@@ -19,27 +20,10 @@ def test_atomic_write_json_creates_parents_and_stable_utf8_json(
 ) -> None:
     path = tmp_path / "nested" / "deeper" / "state.json"
     payload = {"z": "é", "a": {"number": 1}}
-    write_encodings: list[object] = []
-    open_modes: list[str] = []
-    real_write_text = Path.write_text
-    real_open = Path.open
-
-    def write_text(self: Path, data: str, *args: Any, **kwargs: Any) -> int:
-        write_encodings.append(kwargs.get("encoding"))
-        return real_write_text(self, data, *args, **kwargs)
-
-    def open_file(self: Path, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
-        open_modes.append(mode)
-        return real_open(self, mode, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "write_text", write_text)
-    monkeypatch.setattr(Path, "open", open_file)
 
     state._atomic_write_json(path, payload)
 
     assert path.read_bytes() == ('{\n  "a": {\n    "number": 1\n  },\n  "z": "é"\n}\n'.encode())
-    assert write_encodings == ["utf-8"]
-    assert "rb" in open_modes
     assert list(path.parent.glob(f".{path.name}.*.tmp")) == []
 
 
@@ -327,16 +311,16 @@ def test_atomic_write_json_fsyncs_the_files_own_directory(
     """
     target = tmp_path / "publication-state.json"
     opened: list[tuple[str | bytes, int]] = []
-    real_open = state.os.open
+    real_open = atomic_module.os.open
 
     def capture_open(path: str | bytes, flags: int, *args: object, **kwargs: object) -> int:
         opened.append((path, flags))
         return real_open(path, flags, *args, **kwargs)
 
-    monkeypatch.setattr(state.os, "open", capture_open)
+    monkeypatch.setattr(atomic_module.os, "open", capture_open)
 
     state._atomic_write_json(target, {"schema_version": 1})
 
     assert json.loads(target.read_text(encoding="utf-8")) == {"schema_version": 1}
     assert [entry.name for entry in tmp_path.glob("*.tmp")] == []
-    assert opened == [(str(tmp_path), state.os.O_RDONLY)]
+    assert opened == [(str(tmp_path), atomic_module.os.O_RDONLY)]

@@ -12,6 +12,7 @@ from shapely.geometry import Polygon
 
 import osm_polygon_description_tag.dataset.deduplication as dedup_module
 import osm_polygon_description_tag.dataset.stats as stats_module
+import osm_polygon_description_tag.runtime.atomic as atomic_module
 from osm_polygon_description_tag.dataset import canonical_rows
 from osm_polygon_description_tag.dataset.deduplication import (
     DUPLICATE_REJECTION_REASON,
@@ -240,40 +241,29 @@ def test_write_state_preserves_unicode_json_bytes(tmp_path: Path) -> None:
     assert '"café"'.encode() in path.read_bytes()
 
 
-def test_write_state_uses_utf8_text_and_binary_fsync_reads(
+def test_write_state_writes_sorted_indented_unicode_json_bytes(tmp_path: Path) -> None:
+    path = tmp_path / "state.json"
+
+    _write_state(path, {"z": "é", "a": 1})
+
+    assert path.read_bytes() == '{\n  "a": 1,\n  "z": "é"\n}\n'.encode()
+
+
+def test_write_state_keeps_unicode_unescaped(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    encodings: list[str | None] = []
-    modes: list[str | None] = []
-    json_options: dict[str, object] = {}
-    original_write_text = Path.write_text
-    original_open = Path.open
+    options: dict[str, object] = {}
     original_dumps = dedup_module.json.dumps
 
-    def write_text(path: Path, data: str, *args: object, **kwargs: object) -> int:
-        encodings.append(kwargs.get("encoding"))  # type: ignore[arg-type]
-        return original_write_text(path, data, *args, **kwargs)  # type: ignore[arg-type]
-
-    def open_file(self: Path, *args: object, **kwargs: object) -> object:
-        # write_text opens through Path.open too, by keyword; record only
-        # the positional mode the fsync read passes.
-        if args:
-            modes.append(args[0])  # type: ignore[arg-type]
-        return original_open(self, *args, **kwargs)  # type: ignore[arg-type]
-
     def dumps(value: object, *args: object, **kwargs: object) -> str:
-        json_options.update(kwargs)
+        options.update(kwargs)
         return original_dumps(value, *args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(Path, "write_text", write_text)
-    monkeypatch.setattr(Path, "open", open_file)
     monkeypatch.setattr(dedup_module.json, "dumps", dumps)
 
-    _write_state(tmp_path / "state.json", {"value": "durable"})
+    _write_state(tmp_path / "state.json", {"value": "café"})
 
-    assert encodings == ["utf-8"]
-    assert modes == ["rb"]
-    assert json_options["ensure_ascii"] is False
+    assert options["ensure_ascii"] is False
 
 
 def test_write_state_creates_nested_parent_and_atomically_replaces_existing_state(
@@ -301,15 +291,15 @@ def test_write_state_fsyncs_the_file_and_parent_directory(
         return directory_fd
 
     monkeypatch.setattr(
-        dedup_module.os,
+        atomic_module.os,
         "open",
         open_directory,
     )
     monkeypatch.setattr(
-        dedup_module.os, "fsync", lambda descriptor: synced_descriptors.append(descriptor)
+        atomic_module.os, "fsync", lambda descriptor: synced_descriptors.append(descriptor)
     )
     monkeypatch.setattr(
-        dedup_module.os, "close", lambda descriptor: closed_descriptors.append(descriptor)
+        atomic_module.os, "close", lambda descriptor: closed_descriptors.append(descriptor)
     )
     path = tmp_path / ".work" / "state.json"
 
