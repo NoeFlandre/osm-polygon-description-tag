@@ -513,9 +513,9 @@ def test_execute_upload_uses_parented_metadata_commit(
         def create_commit(self, **kwargs: object) -> None:
             commits.append(kwargs)
 
-    monkeypatch.setattr(verification._huggingface_hub, "HfApi", lambda: Api())
+    monkeypatch.setattr(verification.lazy_huggingface_hub, "HfApi", lambda: Api())
     monkeypatch.setattr(
-        verification._huggingface_hub,
+        verification.lazy_huggingface_hub,
         "CommitOperationAdd",
         Operation,
         raising=False,
@@ -554,7 +554,7 @@ def test_execute_upload_reports_parented_metadata_commit_failure(
         def create_commit(self, **_kwargs: object) -> None:
             raise RuntimeError("remote changed")
 
-    monkeypatch.setattr(verification._huggingface_hub, "HfApi", lambda: Api())
+    monkeypatch.setattr(verification.lazy_huggingface_hub, "HfApi", lambda: Api())
 
     with pytest.raises(
         PublicationError,

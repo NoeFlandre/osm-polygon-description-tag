@@ -33,7 +33,7 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
 from osm_polygon_description_tag.dataset.languages.validation import RunReport
 from osm_polygon_description_tag.dataset.manifest import file_sha256
 
-from .bundle import _read_job_config, _read_json, read_bundle
+from .bundle import read_bundle, read_job_config, read_json
 from .models import (
     BUNDLE_FILENAME,
     JOB_CONFIG_FILENAME,
@@ -47,19 +47,19 @@ from .models import (
     JobBundle,
     PreparedJob,
     StagedFile,
-    _validate_fingerprint,
-    _validate_relative_parquet,
-    _validate_stage_relative_file,
+    validate_fingerprint,
+    validate_relative_parquet,
+    validate_stage_relative_file,
 )
 from .reconciliation import collect_results
-from .script import _validate_remote_path
+from .script import validate_remote_path
 from .stage import (
-    _copy_regular_file,
-    _copy_snapshot,
-    _payload_files,
-    _project_source_root,
-    _resume_state_fingerprint,
-    _validate_resume_state,
+    copy_regular_file,
+    copy_snapshot,
+    payload_files,
+    project_source_root,
+    resume_state_fingerprint,
+    validate_resume_state,
 )
 from .state import submission_lock
 
@@ -68,7 +68,7 @@ def verify_prepared_bundle(
     payload_root: Path, *, expected_bundle: JobBundle | None = None
 ) -> JobBundle:
     """Verify every staged byte and identity before a compute job can run."""
-    files = _payload_files(payload_root)
+    files = payload_files(payload_root)
     bundle = _read_expected_bundle(payload_root, expected_bundle)
     stage_path, stage = _read_stage_manifest(payload_root, bundle)
     descriptors, resume_fingerprint = _stage_descriptors(stage)
@@ -90,7 +90,7 @@ def _read_stage_manifest(payload_root: Path, bundle: JobBundle) -> tuple[Path, P
     if stage_path.is_symlink() or not stage_path.is_file():
         raise GridOperatorError("portable payload is missing its stage manifest")
     stage = require_object(
-        _read_json(stage_path, "stage manifest"), error=GridOperatorError, label="stage"
+        read_json(stage_path, "stage manifest"), error=GridOperatorError, label="stage"
     )
     if stage.integer("stage_schema_version") != STAGE_SCHEMA_VERSION:
         raise GridOperatorError("unsupported stage schema version")
@@ -101,7 +101,7 @@ def _read_stage_manifest(payload_root: Path, bundle: JobBundle) -> tuple[Path, P
 
 def _stage_descriptors(stage: PayloadReader) -> tuple[tuple[StagedFile, ...], str]:
     resume_fingerprint = stage.text("resume_state_fingerprint")
-    _validate_fingerprint(resume_fingerprint, "resume state fingerprint")
+    validate_fingerprint(resume_fingerprint, "resume state fingerprint")
     descriptors = tuple(StagedFile.from_payload(item) for item in stage.items("files"))
     return descriptors, resume_fingerprint
 
@@ -148,13 +148,13 @@ def _verify_staged_file(payload_root: Path, descriptor: StagedFile) -> None:
 
 
 def _verify_resume_binding(payload_root: Path, bundle: JobBundle, expected: str) -> None:
-    actual = _resume_state_fingerprint(payload_root / STAGE_RUN_DIRNAME, bundle.shard)
+    actual = resume_state_fingerprint(payload_root / STAGE_RUN_DIRNAME, bundle.shard)
     if actual != expected:
         raise GridOperatorError("stage manifest resume state fingerprint does not match payload")
 
 
 def _payload_file(root: Path, relative_path: str) -> Path:
-    normalized = _validate_stage_relative_file(relative_path)
+    normalized = validate_stage_relative_file(relative_path)
     current = root
     for part in Path(normalized).parts:
         current /= part
@@ -202,12 +202,12 @@ def _payload_directories(payload_root: Path) -> tuple[Path, Path, Path]:
 
 
 def _verify_payload_layout(payload_root: Path, project_root: Path, bundle: JobBundle) -> None:
-    source_root = _project_source_root(project_root)
+    source_root = project_source_root(project_root)
     if source_root.is_symlink() or not source_root.is_dir():
         raise GridOperatorError("portable payload is missing project source code")
     if not os.access(payload_root / JOB_SCRIPT_FILENAME, os.X_OK):
         raise GridOperatorError("portable job script is not executable")
-    _read_job_config(payload_root / JOB_CONFIG_FILENAME, bundle)
+    read_job_config(payload_root / JOB_CONFIG_FILENAME, bundle)
 
 
 def _verify_payload_identity(
@@ -239,13 +239,13 @@ def _validate_staged_project(project_root: Path, bundle: JobBundle) -> None:
 
 
 def _verify_one_staged_input(source_root: Path, bundle: JobBundle) -> None:
-    source_files = tuple(_payload_files(source_root))
+    source_files = tuple(payload_files(source_root))
     if tuple(path.relative_to(source_root).as_posix() for path in source_files) != (bundle.shard,):
         raise GridOperatorError("portable payload must contain exactly one input shard")
 
 
 def _verify_staged_resume(run_root: Path, shard: str) -> None:
-    _validate_resume_state(run_root, shard)
+    validate_resume_state(run_root, shard)
 
 
 def build_bundle_transfer_argv(prepared: PreparedJob, remote_bundle_dir: str) -> tuple[str, ...]:
@@ -253,7 +253,7 @@ def build_bundle_transfer_argv(prepared: PreparedJob, remote_bundle_dir: str) ->
     if not isinstance(prepared, PreparedJob):
         raise GridOperatorError("prepared bundle must be a PreparedJob")
     verify_prepared_bundle(prepared.payload_root, expected_bundle=prepared.bundle)
-    _validate_remote_path(remote_bundle_dir, "remote bundle directory")
+    validate_remote_path(remote_bundle_dir, "remote bundle directory")
     destination = remote_bundle_dir.rstrip("/") or "/"
     return (
         "rsync",
@@ -270,8 +270,8 @@ def build_result_retrieval_argv(
     remote_run_dir: str, local_staging_dir: Path, shard: str
 ) -> tuple[str, ...]:
     """Return an explicit argv for retrieving one validated shard directory."""
-    _validate_remote_path(remote_run_dir, "remote run directory")
-    normalized_shard = _validate_relative_parquet(shard, "shard")
+    validate_remote_path(remote_run_dir, "remote run directory")
+    normalized_shard = validate_relative_parquet(shard, "shard")
     if local_staging_dir.is_symlink() or (
         local_staging_dir.exists() and not local_staging_dir.is_dir()
     ):
@@ -294,7 +294,7 @@ def build_result_retrieval_argv(
 
 def import_retrieved_results(local_run_dir: Path, retrieved_run_dir: Path, shard: str) -> RunReport:
     """Validate retrieved state and commit its checkpoint last under both locks."""
-    normalized_shard = _validate_relative_parquet(shard, "shard")
+    normalized_shard = validate_relative_parquet(shard, "shard")
     _require_regular_directory(retrieved_run_dir, "retrieved run directory")
     with submission_lock(local_run_dir), exclusive_worker_lock(local_run_dir):
         return _import_retrieved_results(local_run_dir, retrieved_run_dir, normalized_shard)
@@ -406,7 +406,7 @@ def _reject_overlapping_paths(source: Path, destination: Path) -> None:
 def _staged_collection(local_run: Path, source: Path, shard: str) -> Iterator[Path]:
     with tempfile.TemporaryDirectory(prefix=".collection-", dir=local_run) as temporary:
         staged = Path(temporary)
-        _copy_snapshot(local_run, staged)
+        copy_snapshot(local_run, staged)
         _copy_tree_no_symlinks(source, shard_paths(staged, shard).root)
         yield staged
 
@@ -444,6 +444,6 @@ def _copy_tree_entry(source: Path, destination: Path) -> None:
     if source.is_dir():
         _copy_tree_no_symlinks(source, destination)
     elif source.is_file():
-        _copy_regular_file(source, destination)
+        copy_regular_file(source, destination)
     else:
         raise GridOperatorError(f"retrieved results contain a non-file: {source}")

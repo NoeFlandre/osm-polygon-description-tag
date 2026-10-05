@@ -27,7 +27,6 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
     prepare_snapshot,
 )
 from osm_polygon_description_tag.dataset.languages.worker import ProcessingBudget, process_shard
-from osm_polygon_description_tag.workflow import grid_operator
 from osm_polygon_description_tag.workflow.grid_operator import (
     GridOperatorError,
     JobBundle,
@@ -43,6 +42,9 @@ from osm_polygon_description_tag.workflow.grid_operator import (
     submit_job,
     verify_prepared_bundle,
 )
+from osm_polygon_description_tag.workflow.grid_operator import bundle as grid_bundle
+from osm_polygon_description_tag.workflow.grid_operator import script as grid_script
+from osm_polygon_description_tag.workflow.grid_operator import verify as grid_verify
 from osm_polygon_description_tag.workflow.grid_policy import (
     MAX_PROCESSING_SECONDS,
     MAX_WALLTIME_SECONDS,
@@ -57,6 +59,7 @@ from tests.helpers.grid_operator import (
     queued_command_runner as _runner,
 )
 from tests.helpers.messages import exactly
+from tests.helpers.patching import patch_modules
 from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH, fake_splitter
 
 SHARD = "region.parquet"
@@ -138,7 +141,7 @@ def shell_safe_tmp(tmp_path: Path) -> Path:
     end-to-end job-script runs below need a plain path to stand in for one.
     """
     offending = [
-        character for character in grid_operator._SHELL_METACHARACTERS if character in str(tmp_path)
+        character for character in grid_script._SHELL_METACHARACTERS if character in str(tmp_path)
     ]
     if offending:
         pytest.skip(
@@ -558,8 +561,6 @@ def test_interrupted_collection_keeps_the_old_checkpoint_and_can_retry(
     collection_runs: tuple[Path, Path, Path, SnapshotManifest],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from osm_polygon_description_tag.workflow import grid_operator
-
     source, local, incoming, snapshot = collection_runs
     _process_collection_fixture(
         source, local, snapshot, budget=ProcessingBudget(1, clock=iter([0.0, 2.0]).__next__)
@@ -567,19 +568,33 @@ def test_interrupted_collection_keeps_the_old_checkpoint_and_can_retry(
     _process_collection_fixture(source, incoming, snapshot)
     checkpoint = shard_paths(local, SHARD).checkpoint
     before = checkpoint.read_bytes()
-    original = grid_operator.atomic_write_bytes
+    original = grid_bundle.atomic_write_bytes
 
     def interrupt_checkpoint(path: Path, content: bytes) -> None:
         if path == checkpoint:
             raise KeyboardInterrupt
         original(path, content)
 
-    monkeypatch.setattr(grid_operator, "atomic_write_bytes", interrupt_checkpoint)
+    patch_modules(
+        monkeypatch,
+        (
+            (grid_bundle, "atomic_write_bytes"),
+            (grid_verify, "atomic_write_bytes"),
+        ),
+        interrupt_checkpoint,
+    )
     with pytest.raises(KeyboardInterrupt):
         import_retrieved_results(local, incoming, SHARD)
     assert checkpoint.read_bytes() == before
 
-    monkeypatch.setattr(grid_operator, "atomic_write_bytes", original)
+    patch_modules(
+        monkeypatch,
+        (
+            (grid_bundle, "atomic_write_bytes"),
+            (grid_verify, "atomic_write_bytes"),
+        ),
+        original,
+    )
     assert import_retrieved_results(local, incoming, SHARD).is_complete
 
 

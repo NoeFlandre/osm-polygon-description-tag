@@ -11,10 +11,16 @@ from types import SimpleNamespace
 
 import pytest
 
-from osm_polygon_description_tag import language_cli
+from osm_polygon_description_tag import (
+    grid_transport,
+    grid_workflow,
+    language_cli,
+    language_workflow,
+)
 from osm_polygon_description_tag.workflow.grid_operator import GridOperatorError
 from osm_polygon_description_tag.workflow.grid_scheduler import SchedulerError
 from tests.helpers.messages import exactly
+from tests.helpers.patching import patch_modules
 
 SHARD = "region.parquet"
 
@@ -27,10 +33,10 @@ def test_missing_account_evidence_leaves_the_job_count_unknown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        language_cli, "gather_policy_evidence", lambda site, runner: ("usage", "quota", None)
+        grid_transport, "gather_policy_evidence", lambda site, runner: ("usage", "quota", None)
     )
 
-    usage, quota, count, captured_at = language_cli._capture_policy("nancy", runner=None)
+    usage, quota, count, captured_at = grid_transport.capture_policy("nancy", runner=None)
 
     assert (usage, quota, count) == ("usage", "quota", None)
     assert captured_at.tzinfo is not None
@@ -38,22 +44,22 @@ def test_missing_account_evidence_leaves_the_job_count_unknown(
 
 def test_invalid_account_evidence_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        language_cli, "gather_policy_evidence", lambda site, runner: ("usage", "quota", "garbage")
+        grid_transport, "gather_policy_evidence", lambda site, runner: ("usage", "quota", "garbage")
     )
 
     def refuse(output: str) -> int:
         raise SchedulerError("unreadable job map")
 
-    monkeypatch.setattr(language_cli, "account_active_job_count", refuse)
+    monkeypatch.setattr(grid_transport, "account_active_job_count", refuse)
 
     with pytest.raises(GridOperatorError, match="account-wide scheduler evidence is invalid"):
-        language_cli._capture_policy("nancy", runner=None)
+        grid_transport.capture_policy("nancy", runner=None)
 
 
 def test_no_payload_candidates_without_a_job_directory(tmp_path: Path) -> None:
     paths = SimpleNamespace(root=tmp_path / "absent", payload_root=tmp_path / "absent" / "payload")
 
-    assert language_cli._portable_payload_candidates(paths) == ()  # type: ignore[arg-type]
+    assert grid_workflow._portable_payload_candidates(paths) == ()  # type: ignore[arg-type]
 
 
 def test_a_symlinked_job_directory_is_rejected(tmp_path: Path) -> None:
@@ -61,7 +67,7 @@ def test_a_symlinked_job_directory_is_rejected(tmp_path: Path) -> None:
     root.symlink_to(tmp_path / "elsewhere", target_is_directory=True)
 
     with pytest.raises(GridOperatorError, match="must not be a symlink"):
-        language_cli._existing_job_directory(root)
+        grid_workflow._existing_job_directory(root)
 
 
 def test_a_job_path_that_is_not_a_directory_is_rejected(tmp_path: Path) -> None:
@@ -69,11 +75,11 @@ def test_a_job_path_that_is_not_a_directory_is_rejected(tmp_path: Path) -> None:
     root.write_text("not a directory\n", encoding="utf-8")
 
     with pytest.raises(GridOperatorError, match="not a regular directory"):
-        language_cli._existing_job_directory(root)
+        grid_workflow._existing_job_directory(root)
 
 
 def test_an_absent_job_directory_is_reported_as_missing(tmp_path: Path) -> None:
-    assert language_cli._existing_job_directory(tmp_path / "absent") is None
+    assert grid_workflow._existing_job_directory(tmp_path / "absent") is None
 
 
 def test_non_sibling_remote_paths_cannot_infer_a_portable_root() -> None:
@@ -83,7 +89,7 @@ def test_non_sibling_remote_paths_cannot_infer_a_portable_root() -> None:
             "staged portable submission requires sibling remote project/source/run paths"
         ),
     ):
-        language_cli._infer_remote_bundle_dir(
+        grid_workflow._infer_remote_bundle_dir(
             "/scratch/bundle/project", "/other/place/source", "/scratch/bundle/run"
         )
 
@@ -111,7 +117,7 @@ def test_a_local_artifact_that_differs_from_the_payload_is_rejected(
         paths.bundle.symlink_to(payload / "bundle.json")
 
     with pytest.raises(GridOperatorError, match="differs from staged payload"):
-        language_cli._verify_local_staged_files(paths, payload)  # type: ignore[arg-type]
+        grid_workflow._verify_local_staged_files(paths, payload)  # type: ignore[arg-type]
 
 
 def test_seeding_keeps_an_existing_retrieved_snapshot(tmp_path: Path) -> None:
@@ -122,7 +128,7 @@ def test_seeding_keeps_an_existing_retrieved_snapshot(tmp_path: Path) -> None:
     retrieved.mkdir()
     (retrieved / "snapshot.json").write_text('{"already": true}\n', encoding="utf-8")
 
-    language_cli._seed_retrieval_snapshot(local, retrieved)
+    grid_transport.seed_retrieval_snapshot(local, retrieved)
 
     assert (retrieved / "snapshot.json").read_text(encoding="utf-8") == '{"already": true}\n'
 
@@ -159,13 +165,20 @@ def test_collecting_an_already_retrieved_run_imports_and_acknowledges(
         observed.append(("ack", received_paths, received_report))
         return acknowledgment
 
-    monkeypatch.setattr(language_cli, "import_retrieved_results", fake_import, raising=False)
-    monkeypatch.setattr(language_cli, "acknowledge_collected_results", fake_ack, raising=False)
-    monkeypatch.setattr(language_cli, "read_snapshot", lambda _: object())
-    monkeypatch.setattr(language_cli, "bundle_for_shard", lambda *_: object())
-    monkeypatch.setattr(language_cli, "job_paths", lambda *_: paths)
+    monkeypatch.setattr(grid_workflow, "import_retrieved_results", fake_import, raising=False)
+    monkeypatch.setattr(grid_workflow, "acknowledge_collected_results", fake_ack, raising=False)
+    patch_modules(
+        monkeypatch,
+        (
+            (language_workflow, "read_snapshot"),
+            (grid_workflow, "read_snapshot"),
+        ),
+        lambda _: object(),
+    )
+    monkeypatch.setattr(grid_workflow, "bundle_for_shard", lambda *_: object())
+    monkeypatch.setattr(grid_workflow, "job_paths", lambda *_: paths)
     monkeypatch.setattr(
-        language_cli,
+        grid_workflow,
         "adopt_retrieved_intent",
         lambda received_paths, incoming, _bundle: observed.append(
             ("adopt", received_paths, incoming)

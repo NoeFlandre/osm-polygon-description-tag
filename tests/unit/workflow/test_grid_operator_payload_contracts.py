@@ -19,6 +19,10 @@ from osm_polygon_description_tag.workflow.grid_operator import (
     GridOperatorError,
     StagedFile,
 )
+from osm_polygon_description_tag.workflow.grid_operator import bundle as grid_bundle
+from osm_polygon_description_tag.workflow.grid_operator import models as grid_models
+from osm_polygon_description_tag.workflow.grid_operator import stage as grid_stage
+from osm_polygon_description_tag.workflow.grid_operator import verify as grid_verify
 from tests.helpers.messages import exactly
 
 
@@ -39,19 +43,19 @@ def test_a_payload_lists_its_files_in_one_deterministic_order(tmp_path: Path) ->
     """
     root = _tree(tmp_path)
 
-    assert grid_operator._payload_files(root) == (root / "a.txt", root / "a" / "b.txt")
+    assert grid_stage.payload_files(root) == (root / "a.txt", root / "a" / "b.txt")
 
 
 def test_project_source_files_are_listed_in_one_deterministic_order(tmp_path: Path) -> None:
     root = _tree(tmp_path)
 
-    assert grid_operator._project_source_files(root) == (root / "a.txt", root / "a" / "b.txt")
+    assert grid_stage._project_source_files(root) == (root / "a.txt", root / "a" / "b.txt")
 
 
 def test_resume_files_are_listed_in_one_deterministic_order(tmp_path: Path) -> None:
     root = _tree(tmp_path)
 
-    assert [item.relative_path for item in grid_operator._resume_files(root)] == [
+    assert [item.relative_path for item in grid_stage._resume_files(root)] == [
         "a.txt",
         "a/b.txt",
     ]
@@ -65,7 +69,7 @@ def test_copying_into_an_existing_destination_is_not_an_error(tmp_path: Path) ->
     destination = tmp_path / "destination"
     destination.mkdir()
 
-    grid_operator._copy_tree_no_symlinks(source, destination)
+    grid_verify._copy_tree_no_symlinks(source, destination)
 
     assert (destination / "file.txt").read_text(encoding="utf-8") == "payload\n"
 
@@ -80,7 +84,7 @@ def test_a_source_that_is_not_a_directory_is_refused_under_its_own_label(
     with pytest.raises(
         GridOperatorError, match=exactly(f"source directory is not a regular directory: {source}")
     ):
-        grid_operator._copy_tree_no_symlinks(source, tmp_path / "destination")
+        grid_verify._copy_tree_no_symlinks(source, tmp_path / "destination")
 
 
 def test_a_retrieved_symlink_is_refused_and_names_the_path_it_found(tmp_path: Path) -> None:
@@ -91,7 +95,7 @@ def test_a_retrieved_symlink_is_refused_and_names_the_path_it_found(tmp_path: Pa
         GridOperatorError,
         match=exactly(f"retrieved results contain a symlink: {source}"),
     ):
-        grid_operator._copy_tree_entry(source, tmp_path / "destination")
+        grid_verify._copy_tree_entry(source, tmp_path / "destination")
 
 
 def test_a_retrieved_non_file_is_refused_and_names_the_path_it_found(tmp_path: Path) -> None:
@@ -104,7 +108,7 @@ def test_a_retrieved_non_file_is_refused_and_names_the_path_it_found(tmp_path: P
         GridOperatorError,
         match=exactly(f"retrieved results contain a non-file: {source}"),
     ):
-        grid_operator._copy_tree_entry(source, tmp_path / "destination")
+        grid_verify._copy_tree_entry(source, tmp_path / "destination")
 
 
 def test_a_staged_file_whose_bytes_changed_without_its_size_is_refused(
@@ -122,7 +126,7 @@ def test_a_staged_file_whose_bytes_changed_without_its_size_is_refused(
     )
 
     with pytest.raises(GridOperatorError, match=exactly("staged file hash does not match: job.sh")):
-        grid_operator._verify_staged_file(payload_root, descriptor)
+        grid_verify._verify_staged_file(payload_root, descriptor)
 
 
 def test_a_quarantine_destination_is_created_even_when_its_parent_exists(
@@ -138,8 +142,8 @@ def test_a_quarantine_destination_is_created_even_when_its_parent_exists(
     (state.root / first).write_bytes(b"first")
     (state.root / second).write_bytes(b"second")
 
-    grid_operator._quarantine_artifact(state, first)
-    grid_operator._quarantine_artifact(state, second)
+    grid_bundle._quarantine_artifact(state, first)
+    grid_bundle._quarantine_artifact(state, second)
 
     quarantine = state.root / grid_operator.QUARANTINE_DIRNAME
     assert (quarantine / first).read_bytes() == b"first"
@@ -161,4 +165,4 @@ def test_an_optional_intent_field_of_the_wrong_type_is_named_in_full(
     with pytest.raises(
         GridOperatorError, match=exactly(f"intent field {label} must be a string or null")
     ):
-        grid_operator._optional_text(7, label)
+        grid_models._optional_text(7, label)

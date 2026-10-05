@@ -6,17 +6,11 @@ produced are all independently repeatable. Every successful command writes one
 JSON document to stdout; diagnostics stay on stderr.
 """
 
-import sys
 from pathlib import Path
-from types import ModuleType
 from typing import Annotated
 
 import typer
 
-from osm_polygon_description_tag import grid_transport as _grid_transport_module
-from osm_polygon_description_tag import grid_workflow as _grid_workflow_module
-from osm_polygon_description_tag import language_workflow as _language_workflow_module
-from osm_polygon_description_tag import publication_workflow as _publication_workflow_module
 from osm_polygon_description_tag.dataset.languages.models import cascade_model_identity
 from osm_polygon_description_tag.dataset.languages.worker import (
     DEFAULT_BATCH_SIZE,
@@ -30,10 +24,10 @@ from osm_polygon_description_tag.grid_workflow import (
     handle_grid_submit,
 )
 from osm_polygon_description_tag.language_workflow import (
-    _policy,
     handle_prepare,
     handle_run,
     handle_validate,
+    resolve_language_policy,
 )
 from osm_polygon_description_tag.publication_workflow import handle_export, handle_publish
 from osm_polygon_description_tag.workflow import grid_driver as _grid_driver
@@ -41,36 +35,6 @@ from osm_polygon_description_tag.workflow.grid_policy import (
     MAX_PROCESSING_SECONDS,
     MAX_WALLTIME_SECONDS,
 )
-
-_WORKFLOW_MODULES = (
-    _language_workflow_module,
-    _grid_transport_module,
-    _grid_workflow_module,
-    _publication_workflow_module,
-)
-
-
-class _LanguageCliModule(ModuleType):
-    """Preserve the historical monkeypatch seam while handlers live elsewhere."""
-
-    def __setattr__(self, name: str, value: object) -> None:
-        for module in _WORKFLOW_MODULES:
-            if name in vars(module):
-                setattr(module, name, value)
-        super().__setattr__(name, value)
-
-
-def __getattr__(name: str) -> object:
-    """Resolve compatibility imports from the focused workflow modules."""
-    for module in _WORKFLOW_MODULES:
-        try:
-            return getattr(module, name)
-        except AttributeError:
-            continue
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-sys.modules[__name__].__class__ = _LanguageCliModule
 
 language_app = typer.Typer(
     name="language",
@@ -122,7 +86,7 @@ def prepare_command(
     min_alphabetic_chars: MinChars = None,
     policy_version: PolicyVersion = "v1",
 ) -> None:
-    policy = _policy(min_alphabetic_chars, policy_version=policy_version)
+    policy = resolve_language_policy(min_alphabetic_chars, policy_version=policy_version)
     handle_prepare(
         source_root,
         run_dir,

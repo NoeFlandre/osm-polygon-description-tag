@@ -404,7 +404,7 @@ def test_published_entry_defaults_missing_state_sections_to_empty(
 
 
 def test_publication_state_call_translates_errors_and_preserves_cause() -> None:
-    call_state = source_runner._call_publication_state
+    call_state = source_runner.call_publication_state
     state_error = PublicationStateError("malformed state")
 
     def fail() -> str:

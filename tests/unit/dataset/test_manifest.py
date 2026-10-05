@@ -44,7 +44,7 @@ def test_sha256_reads_without_mutating(tmp_path: Path) -> None:
 
 
 def test_manifest_path_for_uses_parquet_name_without_extension() -> None:
-    assert manifest_module._manifest_path_for(
+    assert manifest_module.manifest_path_for(
         "region.latest.parquet",
         Path("generated"),
     ) == Path("generated/manifests/region.latest.manifest.json")

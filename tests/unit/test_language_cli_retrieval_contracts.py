@@ -12,13 +12,13 @@ from pathlib import Path
 
 import pytest
 
-from osm_polygon_description_tag.language_cli import (
+from osm_polygon_description_tag.grid_transport import (
     _prepare_retrieval_directory,
-    _remote_child,
-    _require_retrieved_run_dir,
     _retrieval_snapshot_source,
     _retrieval_snapshot_target,
+    remote_child,
 )
+from osm_polygon_description_tag.grid_workflow import _require_retrieved_run_dir
 from osm_polygon_description_tag.workflow.grid_operator import GridOperatorError
 
 
@@ -34,14 +34,14 @@ from osm_polygon_description_tag.workflow.grid_operator import GridOperatorError
 def test_a_remote_child_is_joined_with_exactly_one_separator(
     base: str, name: str, expected: str
 ) -> None:
-    assert _remote_child(base, name) == expected
+    assert remote_child(base, name) == expected
 
 
 def test_a_bundle_root_that_is_only_slashes_still_yields_an_absolute_child() -> None:
     """`rstrip('/')` empties `///`, and the fallback must keep the path absolute."""
     base = "///".rstrip("/") or "/"
 
-    assert _remote_child(base, "run") == "/run"
+    assert remote_child(base, "run") == "/run"
 
 
 def test_the_snapshot_is_copied_between_the_two_lowercase_filenames(tmp_path: Path) -> None:

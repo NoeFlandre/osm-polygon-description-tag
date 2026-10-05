@@ -29,16 +29,16 @@ from osm_polygon_description_tag.workflow.finalization import (
     _log_metadata_state,
     _metadata_retry_observer,
     _metadata_skip_revision,
-    _metadata_state_matches,
     _persist_metadata_state,
     _read_publication_state,
     _run_metadata_upload,
     _upload_metadata,
     _verify_metadata,
-    _write_metadata_state,
+    metadata_state_matches,
     refresh_dataset_docs,
     upload_final_metadata,
     verify_final_completeness,
+    write_metadata_state,
 )
 from tests.helpers.messages import exactly
 
@@ -172,7 +172,7 @@ def test_metadata_state_wrapper_forwards_plan_and_translates_errors(
         return True
 
     monkeypatch.setattr(finalization_module, "_state_metadata_state_matches", matches)
-    assert _metadata_state_matches(tmp_path, plan) is True
+    assert metadata_state_matches(tmp_path, plan) is True
     assert calls == [(tmp_path, plan)]
 
     def fail(_root: Path, _plan: UploadPlan) -> bool:
@@ -180,7 +180,7 @@ def test_metadata_state_wrapper_forwards_plan_and_translates_errors(
 
     monkeypatch.setattr(finalization_module, "_state_metadata_state_matches", fail)
     with pytest.raises(OrchestratorError, match=r"^malformed metadata state$"):
-        _metadata_state_matches(tmp_path, plan)
+        metadata_state_matches(tmp_path, plan)
 
 
 def test_write_metadata_state_wrapper_forwards_all_fields(
@@ -194,7 +194,7 @@ def test_write_metadata_state_wrapper_forwards_all_fields(
         return {"written": True}
 
     monkeypatch.setattr(finalization_module, "_state_write_metadata_state", write)
-    result = _write_metadata_state(
+    result = write_metadata_state(
         tmp_path,
         identity_sha256="identity",
         readme_sha256="readme",
@@ -235,7 +235,7 @@ def test_metadata_state_wrapper_translates_unsupported_schema(tmp_path: Path) ->
     with pytest.raises(
         OrchestratorError, match=exactly("unsupported publication state schema: 999")
     ):
-        _write_metadata_state(
+        write_metadata_state(
             tmp_path,
             identity_sha256="id",
             readme_sha256="readme",
@@ -455,7 +455,7 @@ def test_upload_final_metadata_returns_existing_revision_before_upload(
     (data_dir / "region.parquet").write_bytes(b"parquet")
     plan = _metadata_plan(paths.data_root)
     monkeypatch.setattr(finalization_module, "build_metadata_only_upload_plan", lambda _root: plan)
-    monkeypatch.setattr(finalization_module, "_metadata_state_matches", lambda _root, _plan: True)
+    monkeypatch.setattr(finalization_module, "metadata_state_matches", lambda _root, _plan: True)
     monkeypatch.setattr(finalization_module, "_metadata_skip_revision", lambda *_args: "existing")
     monkeypatch.setattr(
         finalization_module,
@@ -783,7 +783,7 @@ def test_persist_metadata_state_records_all_managed_artifact_identities(
         seen_paths.append(path)
         return real_file_sha256(path)
 
-    monkeypatch.setattr(finalization_module, "_write_metadata_state", write_state)
+    monkeypatch.setattr(finalization_module, "write_metadata_state", write_state)
     monkeypatch.setattr(finalization_module, "file_sha256", file_hash)
 
     _persist_metadata_state(tmp_path, _metadata_plan(tmp_path), "remote-revision", lambda: "now")
@@ -829,7 +829,7 @@ def test_metadata_skip_revision_returns_revision_and_logs_when_state_matches(
         return True
 
     monkeypatch.setattr(
-        "osm_polygon_description_tag.workflow.finalization._metadata_state_matches",
+        "osm_polygon_description_tag.workflow.finalization.metadata_state_matches",
         state_matches,
     )
     seen_roots: list[Path] = []
@@ -855,7 +855,7 @@ def test_metadata_skip_revision_logs_empty_revision_when_metadata_is_absent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     logger = _EventLogger()
-    monkeypatch.setattr(finalization_module, "_metadata_state_matches", lambda *_args: True)
+    monkeypatch.setattr(finalization_module, "metadata_state_matches", lambda *_args: True)
     monkeypatch.setattr(
         finalization_module,
         "_read_publication_state",
@@ -869,7 +869,7 @@ def test_metadata_skip_revision_logs_empty_revision_when_metadata_is_absent(
 def test_metadata_skip_revision_treats_missing_metadata_as_empty_state(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(finalization_module, "_metadata_state_matches", lambda *_args: True)
+    monkeypatch.setattr(finalization_module, "metadata_state_matches", lambda *_args: True)
     monkeypatch.setattr(finalization_module, "_read_publication_state", lambda _root: {})
 
     assert _metadata_skip_revision(tmp_path, _metadata_plan(tmp_path), None) is None
@@ -879,7 +879,7 @@ def test_metadata_skip_revision_does_not_read_state_when_identity_differs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(
-        "osm_polygon_description_tag.workflow.finalization._metadata_state_matches",
+        "osm_polygon_description_tag.workflow.finalization.metadata_state_matches",
         lambda _root, _plan: False,
     )
     monkeypatch.setattr(

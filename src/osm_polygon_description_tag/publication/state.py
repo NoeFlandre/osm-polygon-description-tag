@@ -48,7 +48,7 @@ def read_publication_state(data_root: Path) -> dict[str, object]:
     return cast_dict(json.loads(state_text))
 
 
-def _write_publication_state(
+def write_publication_state(
     data_root: Path,
     *,
     source_name: str,
@@ -74,7 +74,7 @@ def _write_publication_state(
     return state
 
 
-def _metadata_state_matches(data_root: Path, metadata_plan: UploadPlan) -> bool:
+def metadata_state_matches(data_root: Path, metadata_plan: UploadPlan) -> bool:
     """True only when the recorded metadata state matches the current plan."""
     state = read_publication_state(data_root)
     metadata = state.get("metadata")
@@ -105,7 +105,7 @@ def _metadata_identity_matches(metadata: dict[str, object], paths: dict[str, Pat
     )
 
 
-def _write_metadata_state(
+def write_metadata_state(
     data_root: Path,
     *,
     identity_sha256: str,

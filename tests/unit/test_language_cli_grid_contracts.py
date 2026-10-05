@@ -16,7 +16,13 @@ from typing import Any
 
 import pytest
 
-from osm_polygon_description_tag import language_cli
+from osm_polygon_description_tag import (
+    grid_transport,
+    grid_workflow,
+    language_cli,
+    language_workflow,
+    publication_workflow,
+)
 from osm_polygon_description_tag.dataset.languages.models import (
     CASCADE_DETECTOR_NAME,
     DEFAULT_LANGUAGE_SCOPE,
@@ -26,6 +32,7 @@ from osm_polygon_description_tag.dataset.languages.models import (
 from osm_polygon_description_tag.dataset.languages.snapshot import SnapshotError
 from osm_polygon_description_tag.workflow.grid_operator import GridOperatorError
 from tests.helpers.messages import exactly
+from tests.helpers.patching import patch_modules
 from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH
 
 SHARD = "region.parquet"
@@ -41,7 +48,7 @@ def _report(**payload: object) -> SimpleNamespace:
 
 def test_the_default_policy_preset_is_the_v1_preset() -> None:
     """The default must stay ``v1``; a corrupted default would be refused outright."""
-    assert language_cli._policy(None) == language_cli._POLICY_PRESETS["v1"]
+    assert language_cli.resolve_language_policy(None) == language_workflow._POLICY_PRESETS["v1"]
 
 
 @pytest.mark.parametrize(
@@ -89,19 +96,19 @@ def test_the_portable_remote_paths_are_exact_for_any_bundle_root(
     base: str, expected: dict[str, str]
 ) -> None:
     """These four strings become the job script's own paths on the compute node."""
-    assert language_cli._portable_remote_paths(base) == expected
+    assert grid_transport.portable_remote_paths(base) == expected
 
 
 def test_a_transport_timeout_is_refused_with_its_exact_reason() -> None:
     timed_out = SimpleNamespace(timed_out=True, returncode=-1, stderr="")
 
     with pytest.raises(GridOperatorError, match=exactly("transport command timed out")):
-        language_cli._raise_transport_failure(timed_out)  # type: ignore[arg-type]
+        grid_transport._raise_transport_failure(timed_out)  # type: ignore[arg-type]
 
 
 def test_a_model_identity_of_the_wrong_type_is_refused_with_its_exact_reason() -> None:
     with pytest.raises(TypeError, match=exactly("model_identity must be a LanguageModelIdentity")):
-        language_cli._prepare_identity(LanguagePolicy(), object())  # type: ignore[arg-type]
+        language_workflow._prepare_identity(LanguagePolicy(), object())  # type: ignore[arg-type]
 
 
 def test_a_model_identity_for_another_policy_is_refused_with_its_exact_reason() -> None:
@@ -112,7 +119,7 @@ def test_a_model_identity_for_another_policy_is_refused_with_its_exact_reason() 
         SnapshotError,
         match=exactly("model identity policy does not match the requested policy"),
     ):
-        language_cli._prepare_identity(other, identity)
+        language_workflow._prepare_identity(other, identity)
 
 
 def test_preparing_a_snapshot_forwards_the_requested_identity_unchanged(
@@ -126,9 +133,9 @@ def test_preparing_a_snapshot_forwards_the_requested_identity_unchanged(
         seen.append((policy, model_identity))
         return identity
 
-    monkeypatch.setattr(language_cli, "_prepare_identity", fake_prepare_identity)
+    monkeypatch.setattr(language_workflow, "_prepare_identity", fake_prepare_identity)
     monkeypatch.setattr(
-        language_cli,
+        language_workflow,
         "prepare_snapshot",
         lambda *_args, **_kwargs: SimpleNamespace(
             snapshot_id="s" * 64,
@@ -136,10 +143,18 @@ def test_preparing_a_snapshot_forwards_the_requested_identity_unchanged(
             to_payload=dict,
         ),
     )
-    monkeypatch.setattr(language_cli, "print_json", lambda _payload: None)
-    monkeypatch.setattr(language_cli, "_prepare_report", lambda *_args: {})
-    monkeypatch.setattr(language_cli, "fingerprint_project_source", lambda _root: "a" * 64)
-    monkeypatch.setattr(language_cli, "fingerprint_lockfile", lambda _root: "b" * 64)
+    patch_modules(
+        monkeypatch,
+        (
+            (language_workflow, "print_json"),
+            (grid_workflow, "print_json"),
+            (publication_workflow, "print_json"),
+        ),
+        lambda _payload: None,
+    )
+    monkeypatch.setattr(language_workflow, "_prepare_report", lambda *_args: {})
+    monkeypatch.setattr(language_workflow, "fingerprint_project_source", lambda _root: "a" * 64)
+    monkeypatch.setattr(language_workflow, "fingerprint_lockfile", lambda _root: "b" * 64)
 
     language_cli.handle_prepare(
         Path("/source"),
@@ -160,7 +175,7 @@ def test_a_lingua_snapshot_refuses_a_glotlid_model_path_with_its_exact_reason(
     with pytest.raises(
         SnapshotError, match=exactly("GlotLID model path requires a cascade snapshot")
     ):
-        language_cli._build_detector_for_snapshot(
+        language_workflow._build_detector_for_snapshot(
             identity, glotlid_model_path=tmp_path / "model.bin"
         )
 
@@ -173,7 +188,7 @@ def test_an_unknown_detector_in_a_snapshot_names_the_detector_it_refused() -> No
     )
 
     with pytest.raises(SnapshotError, match=exactly("unsupported detector in snapshot: 'mystery'")):
-        language_cli._build_detector_for_snapshot(identity, glotlid_model_path=None)  # type: ignore[arg-type]
+        language_workflow._build_detector_for_snapshot(identity, glotlid_model_path=None)  # type: ignore[arg-type]
 
 
 def test_a_narrowed_language_scope_reaches_the_constructed_cascade_detector(
@@ -192,9 +207,9 @@ def test_a_narrowed_language_scope_reaches_the_constructed_cascade_detector(
         seen.append((policy, kwargs))
         return object()
 
-    monkeypatch.setattr(language_cli, "build_language_detector", fake_build)
+    monkeypatch.setattr(language_workflow, "build_language_detector", fake_build)
 
-    language_cli._build_detector_for_snapshot(identity, glotlid_model_path=None)  # type: ignore[arg-type]
+    language_workflow._build_detector_for_snapshot(identity, glotlid_model_path=None)  # type: ignore[arg-type]
 
     assert seen == [
         (identity.policy, {"language_codes": scope, "glotlid_model_path": None}),
@@ -206,7 +221,7 @@ def test_local_collection_reports_the_run_directory_it_validated(
 ) -> None:
     """The payload is an operator's record of which run directory was read."""
     monkeypatch.setattr(
-        language_cli, "collect_results", lambda *_args: _report(complete=True, issues=[])
+        grid_workflow, "collect_results", lambda *_args: _report(complete=True, issues=[])
     )
 
     language_cli.handle_grid_collect(tmp_path / "run", SHARD)
@@ -248,12 +263,19 @@ def _install_collection_fakes(
     def fake_adopt(received_paths: object, incoming: Path, received_bundle: object) -> None:
         observed.append(("adopt", received_paths, incoming, received_bundle))
 
-    monkeypatch.setattr(language_cli, "import_retrieved_results", fake_import, raising=False)
-    monkeypatch.setattr(language_cli, "read_snapshot", fake_read_snapshot)
-    monkeypatch.setattr(language_cli, "bundle_for_shard", fake_bundle_for_shard)
-    monkeypatch.setattr(language_cli, "job_paths", fake_job_paths)
-    monkeypatch.setattr(language_cli, "acknowledge_collected_results", fake_ack, raising=False)
-    monkeypatch.setattr(language_cli, "adopt_retrieved_intent", fake_adopt, raising=False)
+    monkeypatch.setattr(grid_workflow, "import_retrieved_results", fake_import, raising=False)
+    patch_modules(
+        monkeypatch,
+        (
+            (language_workflow, "read_snapshot"),
+            (grid_workflow, "read_snapshot"),
+        ),
+        fake_read_snapshot,
+    )
+    monkeypatch.setattr(grid_workflow, "bundle_for_shard", fake_bundle_for_shard)
+    monkeypatch.setattr(grid_workflow, "job_paths", fake_job_paths)
+    monkeypatch.setattr(grid_workflow, "acknowledge_collected_results", fake_ack, raising=False)
+    monkeypatch.setattr(grid_workflow, "adopt_retrieved_intent", fake_adopt, raising=False)
     return snapshot, paths
 
 
@@ -310,7 +332,7 @@ def test_a_retrieval_transfers_the_remote_run_child_of_the_bundle_root(
         argv_calls.append((remote_dir, local_dir, shard))
         return ("rsync", "--archive")
 
-    monkeypatch.setattr(language_cli, "build_result_retrieval_argv", fake_argv)
+    monkeypatch.setattr(grid_workflow, "build_result_retrieval_argv", fake_argv)
 
     def fake_runner(argv: tuple[str, ...], timeout: float) -> SimpleNamespace:
         return SimpleNamespace(
@@ -353,7 +375,7 @@ def test_a_retrieval_imports_nothing_unless_the_apply_gate_is_passed(
     observed: list[object] = []
     _install_collection_fakes(monkeypatch, observed, _report(complete=True), object())
     monkeypatch.setattr(
-        language_cli, "build_result_retrieval_argv", lambda *_args: ("rsync", "--archive")
+        grid_workflow, "build_result_retrieval_argv", lambda *_args: ("rsync", "--archive")
     )
 
     language_cli.handle_grid_collect(
@@ -385,7 +407,7 @@ def test_a_staged_payload_directory_with_the_stable_name_is_a_candidate(
     (root / "bundle.json").write_text("{}", encoding="utf-8")
     paths = SimpleNamespace(root=root, payload_root=root / "payload")
 
-    candidates = language_cli._portable_payload_candidates(paths)  # type: ignore[arg-type]
+    candidates = grid_workflow._portable_payload_candidates(paths)  # type: ignore[arg-type]
 
     assert candidates == (root / "payload", root / "payload-0001")
 
@@ -403,8 +425,15 @@ def test_preparing_a_job_forwards_the_requested_budget_and_reports_its_directory
         seen.append(kwargs)
         return bundle, paths
 
-    monkeypatch.setattr(language_cli, "read_snapshot", lambda _run: object())
-    monkeypatch.setattr(language_cli, "prepare_job", fake_prepare_job)
+    patch_modules(
+        monkeypatch,
+        (
+            (language_workflow, "read_snapshot"),
+            (grid_workflow, "read_snapshot"),
+        ),
+        lambda _run: object(),
+    )
+    monkeypatch.setattr(grid_workflow, "prepare_job", fake_prepare_job)
 
     language_cli.handle_grid_prepare(
         tmp_path / "run",
@@ -450,12 +479,19 @@ def test_reconciling_a_job_forwards_the_apply_gate_it_was_given(
         seen.append(apply)
         return reconciliation
 
-    monkeypatch.setattr(language_cli, "read_snapshot", lambda _run: object())
-    monkeypatch.setattr(
-        language_cli, "bundle_for_shard", lambda *_args: SimpleNamespace(bundle_id="bundle-status")
+    patch_modules(
+        monkeypatch,
+        (
+            (language_workflow, "read_snapshot"),
+            (grid_workflow, "read_snapshot"),
+        ),
+        lambda _run: object(),
     )
-    monkeypatch.setattr(language_cli, "job_paths", lambda *_args: object())
-    monkeypatch.setattr(language_cli, "reconcile_job", fake_reconcile)
+    monkeypatch.setattr(
+        grid_workflow, "bundle_for_shard", lambda *_args: SimpleNamespace(bundle_id="bundle-status")
+    )
+    monkeypatch.setattr(grid_workflow, "job_paths", lambda *_args: object())
+    monkeypatch.setattr(grid_workflow, "reconcile_job", fake_reconcile)
 
     language_cli.handle_grid_status(tmp_path / "run", SHARD, False)
     language_cli.handle_grid_status(tmp_path / "run", SHARD, True)
@@ -488,12 +524,12 @@ def test_a_reused_staged_payload_is_verified_against_this_shards_bundle(
     def fake_verify(payload: Path, *, expected_bundle: object) -> None:
         seen.append((payload, expected_bundle))
 
-    monkeypatch.setattr(language_cli, "bundle_for_shard", lambda *_args: bundle)
-    monkeypatch.setattr(language_cli, "job_paths", lambda *_args: paths)
-    monkeypatch.setattr(language_cli, "verify_prepared_bundle", fake_verify)
-    monkeypatch.setattr(language_cli, "prepare_job", lambda *_args, **_kwargs: (bundle, paths))
+    monkeypatch.setattr(grid_workflow, "bundle_for_shard", lambda *_args: bundle)
+    monkeypatch.setattr(grid_workflow, "job_paths", lambda *_args: paths)
+    monkeypatch.setattr(grid_workflow, "verify_prepared_bundle", fake_verify)
+    monkeypatch.setattr(grid_workflow, "prepare_job", lambda *_args, **_kwargs: (bundle, paths))
 
-    language_cli._reuse_verified_staged_job(
+    grid_workflow._reuse_verified_staged_job(
         run_dir,
         object(),  # type: ignore[arg-type]
         SHARD,
@@ -527,11 +563,18 @@ def test_submitting_forwards_the_budget_and_the_daytime_authorisation(
         policies.append(kwargs["allow_daytime"])
         return SimpleNamespace(decision="allowed")
 
-    monkeypatch.setattr(language_cli, "read_snapshot", lambda _run: object())
-    monkeypatch.setattr(language_cli, "_reuse_verified_staged_job", fake_reuse)
-    monkeypatch.setattr(language_cli, "evaluate_policy", fake_evaluate)
+    patch_modules(
+        monkeypatch,
+        (
+            (language_workflow, "read_snapshot"),
+            (grid_workflow, "read_snapshot"),
+        ),
+        lambda _run: object(),
+    )
+    monkeypatch.setattr(grid_workflow, "_reuse_verified_staged_job", fake_reuse)
+    monkeypatch.setattr(grid_workflow, "evaluate_policy", fake_evaluate)
     monkeypatch.setattr(
-        language_cli,
+        grid_workflow,
         "submit_job",
         lambda *_args, **_kwargs: (SimpleNamespace(to_payload=dict), None),
     )
@@ -580,14 +623,21 @@ def test_a_first_submission_prepares_the_job_with_the_requested_budget(
         prepared.append(kwargs)
         return bundle, paths
 
-    monkeypatch.setattr(language_cli, "read_snapshot", lambda _run: object())
-    monkeypatch.setattr(language_cli, "_reuse_verified_staged_job", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(language_cli, "prepare_job", fake_prepare_job)
+    patch_modules(
+        monkeypatch,
+        (
+            (language_workflow, "read_snapshot"),
+            (grid_workflow, "read_snapshot"),
+        ),
+        lambda _run: object(),
+    )
+    monkeypatch.setattr(grid_workflow, "_reuse_verified_staged_job", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(grid_workflow, "prepare_job", fake_prepare_job)
     monkeypatch.setattr(
-        language_cli, "evaluate_policy", lambda **_kwargs: SimpleNamespace(decision="allowed")
+        grid_workflow, "evaluate_policy", lambda **_kwargs: SimpleNamespace(decision="allowed")
     )
     monkeypatch.setattr(
-        language_cli,
+        grid_workflow,
         "submit_job",
         lambda *_args, **_kwargs: (SimpleNamespace(to_payload=dict), None),
     )
@@ -631,12 +681,19 @@ def _submit_with_queue(
     paths = SimpleNamespace(root=run_dir / "jobs")
     queues: list[object] = []
 
-    monkeypatch.setattr(language_cli, "read_snapshot", lambda _run: object())
-    monkeypatch.setattr(
-        language_cli, "_reuse_verified_staged_job", lambda *_a, **_k: (object(), paths)
+    patch_modules(
+        monkeypatch,
+        (
+            (language_workflow, "read_snapshot"),
+            (grid_workflow, "read_snapshot"),
+        ),
+        lambda _run: object(),
     )
     monkeypatch.setattr(
-        language_cli,
+        grid_workflow, "_reuse_verified_staged_job", lambda *_a, **_k: (object(), paths)
+    )
+    monkeypatch.setattr(
+        grid_workflow,
         "evaluate_policy",
         lambda **_kwargs: SimpleNamespace(decision="allowed"),
     )
@@ -645,7 +702,7 @@ def _submit_with_queue(
         queues.append(kwargs.get("queue"))
         return SimpleNamespace(to_payload=dict), None
 
-    monkeypatch.setattr(language_cli, "submit_job", fake_submit)
+    monkeypatch.setattr(grid_workflow, "submit_job", fake_submit)
 
     language_cli.handle_grid_submit(
         run_dir,

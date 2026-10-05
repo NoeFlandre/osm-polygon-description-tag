@@ -37,7 +37,7 @@ from osm_polygon_description_tag.workflow.grid_policy import (
 
 from .bundle import prepare_job
 from .models import (
-    _FINGERPRINT_PATTERN,
+    FINGERPRINT_PATTERN,
     QUARANTINE_DIRNAME,
     STAGE_MANIFEST_FILENAME,
     STAGE_PROJECT_DIRNAME,
@@ -51,7 +51,7 @@ from .models import (
     StagedFile,
 )
 from .reconciliation import collect_results
-from .script import _validate_remote_path
+from .script import validate_remote_path
 from .state import (
     fsync_directory,
     resume_checkpoint_is_present,
@@ -81,11 +81,11 @@ def prepare_portable_job(
     snapshot-listed source shard, and every validated resume artifact. No
     transport is called here.
     """
-    _validate_remote_path(remote_bundle_dir, "remote bundle directory")
+    validate_remote_path(remote_bundle_dir, "remote bundle directory")
     base = remote_bundle_dir.rstrip("/") or "/"
-    remote_project = _remote_child(base, STAGE_PROJECT_DIRNAME)
-    remote_source = _remote_child(base, STAGE_SOURCE_DIRNAME)
-    remote_run = _remote_child(base, STAGE_RUN_DIRNAME)
+    remote_project = remote_child(base, STAGE_PROJECT_DIRNAME)
+    remote_source = remote_child(base, STAGE_SOURCE_DIRNAME)
+    remote_run = remote_child(base, STAGE_RUN_DIRNAME)
     with submission_lock(run_dir):
         bundle, paths = prepare_job(
             run_dir,
@@ -105,7 +105,7 @@ def prepare_portable_job(
         return _stage_portable_payload(paths, bundle, project_root, source_dir, snapshot)
 
 
-def _remote_child(base: str, name: str) -> str:
+def remote_child(base: str, name: str) -> str:
     return f"/{name}" if base == "/" else f"{base}/{name}"
 
 
@@ -118,7 +118,7 @@ def _stage_portable_payload(
 ) -> PreparedJob:
     _require_payload_root(paths.payload_root)
     _verify_stage_inputs(paths, bundle, project_root, source_dir, snapshot)
-    resume_fingerprint = _resume_state_fingerprint(paths.run_dir, bundle.shard)
+    resume_fingerprint = resume_state_fingerprint(paths.run_dir, bundle.shard)
     payload_root = _select_payload_root(paths, bundle, resume_fingerprint)
     if payload_root.exists():
         return _prepared_view(paths, bundle, payload_root)
@@ -188,10 +188,10 @@ def _copy_payload_inputs(
     snapshot: SnapshotManifest,
 ) -> None:
     for source in (paths.bundle, paths.config, paths.script):
-        _copy_regular_file(source, temporary / source.name)
+        copy_regular_file(source, temporary / source.name)
     _copy_project(project_root, temporary / STAGE_PROJECT_DIRNAME)
     _copy_source_shard(snapshot, source_dir, temporary / STAGE_SOURCE_DIRNAME, bundle.shard)
-    _copy_snapshot(paths.run_dir, temporary / STAGE_RUN_DIRNAME)
+    copy_snapshot(paths.run_dir, temporary / STAGE_RUN_DIRNAME)
     _copy_resume_state(paths.run_dir, temporary / STAGE_RUN_DIRNAME, bundle.shard)
 
 
@@ -226,7 +226,7 @@ def _verify_stage_inputs(
         raise GridOperatorError(str(error)) from error
 
 
-def _copy_regular_file(source: Path, destination: Path) -> None:
+def copy_regular_file(source: Path, destination: Path) -> None:
     if source.is_symlink() or not source.is_file():
         raise GridOperatorError(f"staging input must be a regular file: {source}")
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -237,7 +237,7 @@ def _copy_regular_file(source: Path, destination: Path) -> None:
         raise GridOperatorError(f"cannot stage {source}: {error}") from error
 
 
-def _project_source_root(project_root: Path) -> Path:
+def project_source_root(project_root: Path) -> Path:
     """Return the one source directory a portable payload carries."""
     return project_root / "src"
 
@@ -250,7 +250,7 @@ def _project_files(project_root: Path) -> tuple[Path, ...]:
     optional_readme = _optional_project_readme(readme)
     if optional_readme is not None:
         candidates.append(optional_readme)
-    source = _project_source_root(project_root)
+    source = project_source_root(project_root)
     _require_project_source(source)
     candidates.extend(_project_source_files(source))
     return tuple(candidates)
@@ -305,7 +305,7 @@ def _is_project_cache_file(path: Path, relative: Path) -> bool:
 
 def _copy_project(project_root: Path, destination: Path) -> None:
     for source in _project_files(project_root):
-        _copy_regular_file(source, destination / source.relative_to(project_root))
+        copy_regular_file(source, destination / source.relative_to(project_root))
 
 
 def _copy_source_shard(
@@ -315,11 +315,11 @@ def _copy_source_shard(
         source_path = source_path_for(snapshot, source_dir, shard)
     except SnapshotError as error:
         raise GridOperatorError(str(error)) from error
-    _copy_regular_file(source_path, destination / Path(shard))
+    copy_regular_file(source_path, destination / Path(shard))
 
 
-def _copy_snapshot(run_dir: Path, destination: Path) -> None:
-    _copy_regular_file(run_dir / SNAPSHOT_FILENAME, destination / SNAPSHOT_FILENAME)
+def copy_snapshot(run_dir: Path, destination: Path) -> None:
+    copy_regular_file(run_dir / SNAPSHOT_FILENAME, destination / SNAPSHOT_FILENAME)
 
 
 def _copy_resume_state(run_dir: Path, destination: Path, shard: str) -> None:
@@ -328,17 +328,17 @@ def _copy_resume_state(run_dir: Path, destination: Path, shard: str) -> None:
         raise GridOperatorError("resume checkpoint must not be a symlink")
     if not source_paths.checkpoint.is_file():
         return
-    _validate_resume_state(run_dir, shard)
+    validate_resume_state(run_dir, shard)
     target = shards_root(destination) / source_paths.root.name
     checkpoint = read_checkpoint(source_paths.checkpoint)
-    _copy_regular_file(source_paths.checkpoint, target / source_paths.checkpoint.name)
+    copy_regular_file(source_paths.checkpoint, target / source_paths.checkpoint.name)
     for part_name in checkpoint.completed_parts:
-        _copy_regular_file(source_paths.part(part_name), target / "parts" / part_name)
+        copy_regular_file(source_paths.part(part_name), target / "parts" / part_name)
         receipt = source_paths.receipt(part_name)
-        _copy_regular_file(receipt, target / "receipts" / receipt.name)
+        copy_regular_file(receipt, target / "receipts" / receipt.name)
 
 
-def _validate_resume_state(run_dir: Path, shard: str) -> None:
+def validate_resume_state(run_dir: Path, shard: str) -> None:
     state = shard_paths(run_dir, shard)
     validate_resume_root(state)
     if not resume_checkpoint_is_present(state):
@@ -383,8 +383,8 @@ def _resume_file_descriptor(path: Path, root: Path) -> StagedFile | None:
     raise GridOperatorError(f"resume state contains a non-file: {path}")
 
 
-def _resume_state_fingerprint(run_dir: Path, shard: str) -> str:
-    _validate_resume_state(run_dir, shard)
+def resume_state_fingerprint(run_dir: Path, shard: str) -> str:
+    validate_resume_state(run_dir, shard)
     payload = {
         "shard": shard,
         "files": [
@@ -400,7 +400,7 @@ def _staged_resume_fingerprint(payload_root: Path) -> str | None:
     if stage_path.is_symlink() or not stage_path.is_file():
         return None
     value = _read_staged_resume_field(stage_path)
-    return value if isinstance(value, str) and _FINGERPRINT_PATTERN.fullmatch(value) else None
+    return value if isinstance(value, str) and FINGERPRINT_PATTERN.fullmatch(value) else None
 
 
 def _read_staged_resume_field(stage_path: Path) -> object:
@@ -408,7 +408,7 @@ def _read_staged_resume_field(stage_path: Path) -> object:
 
     A manifest that cannot be read or is not an object means "nothing staged to
     reuse", and that answer carries no message, so the read is done here rather
-    than through ``_read_json``'s labelled refusal. A manifest that *is* an
+    than through ``read_json``'s labelled refusal. A manifest that *is* an
     object still has to carry the field, and that refusal does reach the caller.
     """
     try:
@@ -419,7 +419,7 @@ def _read_staged_resume_field(stage_path: Path) -> object:
     return reader.raw("resume_state_fingerprint")
 
 
-def _payload_files(root: Path) -> tuple[Path, ...]:
+def payload_files(root: Path) -> tuple[Path, ...]:
     if root.is_symlink() or not root.is_dir():
         raise GridOperatorError(f"portable payload root is not a regular directory: {root}")
     files: list[Path] = []
@@ -447,7 +447,7 @@ def _write_stage_manifest(root: Path, bundle: JobBundle, resume_fingerprint: str
             size_bytes=path.stat().st_size,
             sha256=file_sha256(path),
         ).to_payload()
-        for path in _payload_files(root)
+        for path in payload_files(root)
     )
     atomic_write_json(
         root / STAGE_MANIFEST_FILENAME,

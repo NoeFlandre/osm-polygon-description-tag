@@ -6,7 +6,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from osm_polygon_description_tag import language_cli
+from osm_polygon_description_tag import (
+    grid_transport,
+    grid_workflow,
+    language_cli,
+    language_workflow,
+    publication_workflow,
+)
 from osm_polygon_description_tag.cli import run
 from osm_polygon_description_tag.dataset.languages.checkpoint import (
     part_name_for_offset,
@@ -36,6 +42,7 @@ from tests.helpers.language_cli import (
 from tests.helpers.language_cli import (
     stub_detector as _language_cli_stub_detector,  # noqa: F401
 )
+from tests.helpers.patching import patch_modules
 
 _REMOTE = [
     "--remote-project-dir",
@@ -138,7 +145,14 @@ def test_grid_stage_then_submit_reuses_the_exact_staged_script_contract(  # noqa
             )
         raise AssertionError(f"unexpected fake command: {received}")
 
-    monkeypatch.setattr(language_cli, "grid_command_runner", fake_runner)
+    patch_modules(
+        monkeypatch,
+        (
+            (grid_transport, "grid_command_runner"),
+            (grid_workflow, "grid_command_runner"),
+        ),
+        fake_runner,
+    )
 
     assert (
         run(
@@ -312,7 +326,14 @@ def test_grid_prepare_then_submit_reuses_the_legacy_script_contract(
             )
         raise AssertionError(f"unexpected fake command: {received}")
 
-    monkeypatch.setattr(language_cli, "grid_command_runner", fake_runner)
+    patch_modules(
+        monkeypatch,
+        (
+            (grid_transport, "grid_command_runner"),
+            (grid_workflow, "grid_command_runner"),
+        ),
+        fake_runner,
+    )
 
     assert (
         run(
@@ -506,7 +527,7 @@ def test_publish_without_the_apply_gate_uploads_nothing(
 ) -> None:
     export_dir = _export(tmp_path, project, source, capsys)
     hub = _StubHub()
-    monkeypatch.setattr(language_cli, "build_language_hub", lambda **kwargs: hub)
+    monkeypatch.setattr(publication_workflow, "build_language_hub", lambda **kwargs: hub)
 
     code = run(
         [
@@ -542,7 +563,7 @@ def test_publish_requires_a_matching_repository_confirmation(
 ) -> None:
     export_dir = _export(tmp_path, project, source, capsys)
     hub = _StubHub()
-    monkeypatch.setattr(language_cli, "build_language_hub", lambda **kwargs: hub)
+    monkeypatch.setattr(publication_workflow, "build_language_hub", lambda **kwargs: hub)
 
     code = run(
         [
@@ -573,7 +594,7 @@ def test_publish_requires_a_baseline_revision_before_applying(
 ) -> None:
     export_dir = _export(tmp_path, project, source, capsys)
     hub = _StubHub()
-    monkeypatch.setattr(language_cli, "build_language_hub", lambda **kwargs: hub)
+    monkeypatch.setattr(publication_workflow, "build_language_hub", lambda **kwargs: hub)
 
     code = run(
         [
@@ -605,7 +626,7 @@ def test_publish_with_the_apply_gate_uploads_and_verifies(
 ) -> None:
     export_dir = _export(tmp_path, project, source, capsys)
     hub = _StubHub()
-    monkeypatch.setattr(language_cli, "build_language_hub", lambda **kwargs: hub)
+    monkeypatch.setattr(publication_workflow, "build_language_hub", lambda **kwargs: hub)
     arguments = [
         "language",
         "publish",
@@ -642,7 +663,7 @@ def test_publish_refuses_a_repository_that_moved(
 ) -> None:
     export_dir = _export(tmp_path, project, source, capsys)
     hub = _StubHub()
-    monkeypatch.setattr(language_cli, "build_language_hub", lambda **kwargs: hub)
+    monkeypatch.setattr(publication_workflow, "build_language_hub", lambda **kwargs: hub)
 
     code = run(
         [
@@ -686,7 +707,14 @@ def test_prepare_command_forwards_all_language_policy_options(
             policy=policy,
         )
 
-    monkeypatch.setattr(language_cli, "handle_prepare", fake_handle_prepare)
+    patch_modules(
+        monkeypatch,
+        (
+            (language_cli, "handle_prepare"),
+            (language_workflow, "handle_prepare"),
+        ),
+        fake_handle_prepare,
+    )
 
     language_cli.prepare_command(
         Path("/source"),

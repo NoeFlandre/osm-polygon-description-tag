@@ -293,7 +293,7 @@ def test_hub_identity_passes_exact_dataset_repository_arguments(
             calls.append(("repo_info", repo_id, repo_type))
             return SimpleNamespace(sha="remote-sha")
 
-    monkeypatch.setattr(preflight._huggingface_hub, "HfApi", StrictApi)
+    monkeypatch.setattr(preflight.lazy_huggingface_hub, "HfApi", StrictApi)
 
     api, identity = preflight._hub_identity()
 
@@ -312,7 +312,7 @@ def test_hub_identity_reports_empty_identity_and_missing_sha_exactly(
         def repo_info(self, *_args: Any, **_kwargs: Any) -> SimpleNamespace:
             return SimpleNamespace(sha="sha")
 
-    monkeypatch.setattr(preflight._huggingface_hub, "HfApi", EmptyIdentityApi)
+    monkeypatch.setattr(preflight.lazy_huggingface_hub, "HfApi", EmptyIdentityApi)
     with pytest.raises(PreflightError, match=r"^Hub identity is empty; check HF_TOKEN$"):
         preflight._hub_identity()
 
@@ -323,7 +323,7 @@ def test_hub_identity_reports_empty_identity_and_missing_sha_exactly(
         def repo_info(self, *_args: Any, **_kwargs: Any) -> SimpleNamespace:
             return SimpleNamespace()
 
-    monkeypatch.setattr(preflight._huggingface_hub, "HfApi", MissingShaApi)
+    monkeypatch.setattr(preflight.lazy_huggingface_hub, "HfApi", MissingShaApi)
     with pytest.raises(PreflightError, match=r"^Hub repository .+ returned no commit SHA$"):
         preflight._hub_identity()
 

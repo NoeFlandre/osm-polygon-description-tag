@@ -17,7 +17,6 @@ from osm_polygon_description_tag.dataset import storage
 from osm_polygon_description_tag.dataset.manifest import ManifestError
 from osm_polygon_description_tag.dataset.storage import (
     StorageError,
-    _arrow_record,
     _batch_columns,
     _check_artifact_stems,
     _check_field,
@@ -47,6 +46,7 @@ from osm_polygon_description_tag.dataset.storage import (
     _validate_row,
     _validate_source,
     _ValidationState,
+    arrow_record,
     validate_finalized_artifacts,
     validate_finalized_artifacts_strict,
     write_geoparquet,
@@ -55,7 +55,7 @@ from tests.helpers.messages import exactly
 
 
 def _columns(row: dict[str, object]) -> dict[str, list[object]]:
-    arrow_row = _arrow_record(row)
+    arrow_row = arrow_record(row)
     return {
         name: [arrow_row[name]]
         for name in (
@@ -82,7 +82,7 @@ def test_arrow_record_preserves_scalars_and_normalizes_key_value_columns() -> No
         "tags": {"description": "Hello"},
     }
 
-    assert _arrow_record(record) == {
+    assert arrow_record(record) == {
         "source_pbf": "region.osm.pbf",
         "localized_descriptions": [{"key": "fr", "value": "Bonjour"}],
         "localized_names": [],
@@ -751,7 +751,7 @@ def test_validate_finalized_artifacts_strict_validates_every_parquet(
 def test_batch_columns_materializes_all_validation_columns(
     way_record_dict: dict[str, object],
 ) -> None:
-    batch = pa.RecordBatch.from_pylist([_arrow_record(way_record_dict)], schema=storage.SCHEMA)
+    batch = pa.RecordBatch.from_pylist([arrow_record(way_record_dict)], schema=storage.SCHEMA)
 
     columns = _batch_columns(batch)
 
@@ -858,7 +858,7 @@ def test_write_geoparquet_uses_contract_writer_options_and_default_batch_size(
         temp_data,
         storage.SCHEMA,
         compression="zstd",
-        use_dictionary=storage._DICTIONARY_COLUMNS,
+        use_dictionary=storage.DICTIONARY_COLUMNS,
     )
     stream.assert_called_once_with(records, writer, 1024)
     rewrite.assert_called_once_with(
@@ -919,7 +919,7 @@ def test_stream_rewrite_passes_exact_metadata_writer_options(
             }
         },
     }
-    assert writer_kwargs == {"compression": "zstd", "use_dictionary": storage._DICTIONARY_COLUMNS}
+    assert writer_kwargs == {"compression": "zstd", "use_dictionary": storage.DICTIONARY_COLUMNS}
     reader.iter_batches.assert_called_once_with(batch_size=4096)
     writer.write_batch.assert_called_once_with(batch)
 

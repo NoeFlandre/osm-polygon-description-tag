@@ -15,13 +15,17 @@ from pathlib import Path
 import pytest
 
 from osm_polygon_description_tag.dataset.languages.payloads import require_object
-from osm_polygon_description_tag.workflow import grid_operator
 from osm_polygon_description_tag.workflow.grid_operator import (
     STAGE_MANIFEST_FILENAME,
     GridOperatorError,
     JobBundle,
     read_bundle,
 )
+from osm_polygon_description_tag.workflow.grid_operator import bundle as grid_bundle
+from osm_polygon_description_tag.workflow.grid_operator import models as grid_models
+from osm_polygon_description_tag.workflow.grid_operator import script as grid_script
+from osm_polygon_description_tag.workflow.grid_operator import stage as grid_stage
+from osm_polygon_description_tag.workflow.grid_operator import verify as grid_verify
 from tests.helpers.messages import exactly
 
 
@@ -32,7 +36,7 @@ def test_an_unreadable_job_config_is_named_as_a_job_config(
     path.write_text("{not json", encoding="utf-8")
 
     with pytest.raises(GridOperatorError) as caught:
-        grid_operator._read_job_config(path, job_bundle_factory())
+        grid_bundle.read_job_config(path, job_bundle_factory())
 
     assert str(caught.value).startswith(f"cannot read job config {path}: ")
 
@@ -44,7 +48,7 @@ def test_a_job_config_that_is_not_an_object_is_named_as_a_job_config(
     path.write_text("[]", encoding="utf-8")
 
     with pytest.raises(GridOperatorError, match=exactly("job config payload must be an object")):
-        grid_operator._read_job_config(path, job_bundle_factory())
+        grid_bundle.read_job_config(path, job_bundle_factory())
 
 
 def test_an_unreadable_stage_manifest_is_named_as_a_stage_manifest(
@@ -56,7 +60,7 @@ def test_an_unreadable_stage_manifest_is_named_as_a_stage_manifest(
     stage_path.write_text("{not json", encoding="utf-8")
 
     with pytest.raises(GridOperatorError) as caught:
-        grid_operator._read_stage_manifest(payload_root, job_bundle_factory())
+        grid_verify._read_stage_manifest(payload_root, job_bundle_factory())
 
     assert str(caught.value).startswith(f"cannot read stage manifest {stage_path}: ")
 
@@ -69,7 +73,7 @@ def test_a_stage_manifest_that_is_not_an_object_is_named_as_a_stage(
     (payload_root / STAGE_MANIFEST_FILENAME).write_text("[]", encoding="utf-8")
 
     with pytest.raises(GridOperatorError, match=exactly("stage payload must be an object")):
-        grid_operator._read_stage_manifest(payload_root, job_bundle_factory())
+        grid_verify._read_stage_manifest(payload_root, job_bundle_factory())
 
 
 def test_a_stage_manifest_without_a_readable_fingerprint_reads_as_absent(tmp_path: Path) -> None:
@@ -78,7 +82,7 @@ def test_a_stage_manifest_without_a_readable_fingerprint_reads_as_absent(tmp_pat
     payload_root.mkdir()
     (payload_root / STAGE_MANIFEST_FILENAME).write_text("[]", encoding="utf-8")
 
-    assert grid_operator._staged_resume_fingerprint(payload_root) is None
+    assert grid_stage._staged_resume_fingerprint(payload_root) is None
 
 
 def test_a_staged_resume_fingerprint_is_read_from_the_stage_manifest(tmp_path: Path) -> None:
@@ -88,7 +92,7 @@ def test_a_staged_resume_fingerprint_is_read_from_the_stage_manifest(tmp_path: P
         json.dumps({"resume_state_fingerprint": "f" * 64}), encoding="utf-8"
     )
 
-    assert grid_operator._staged_resume_fingerprint(payload_root) == "f" * 64
+    assert grid_stage._staged_resume_fingerprint(payload_root) == "f" * 64
 
 
 def test_a_symlinked_stage_manifest_is_refused_rather_than_followed(tmp_path: Path) -> None:
@@ -99,7 +103,7 @@ def test_a_symlinked_stage_manifest_is_refused_rather_than_followed(tmp_path: Pa
     external.write_text(json.dumps({"resume_state_fingerprint": "f" * 64}), encoding="utf-8")
     (payload_root / STAGE_MANIFEST_FILENAME).symlink_to(external)
 
-    assert grid_operator._staged_resume_fingerprint(payload_root) is None
+    assert grid_stage._staged_resume_fingerprint(payload_root) is None
 
 
 def test_an_unreadable_bundle_is_named_as_a_bundle(tmp_path: Path) -> None:
@@ -122,7 +126,7 @@ def test_an_unreadable_bundle_is_named_as_a_bundle(tmp_path: Path) -> None:
 )
 def test_an_unusable_shard_path_is_refused_under_the_shard_label(value: str, message: str) -> None:
     with pytest.raises(GridOperatorError, match=exactly(message)):
-        grid_operator._validate_relative_parquet(value, "shard")
+        grid_models.validate_relative_parquet(value, "shard")
 
 
 @pytest.mark.parametrize(
@@ -137,7 +141,7 @@ def test_an_unusable_staged_file_path_is_refused_under_its_own_label(
     value: str, message: str
 ) -> None:
     with pytest.raises(GridOperatorError, match=exactly(message)):
-        grid_operator._validate_stage_relative_file(value)
+        grid_models.validate_stage_relative_file(value)
 
 
 def test_an_unusable_resume_fingerprint_is_refused_under_its_own_label() -> None:
@@ -151,7 +155,7 @@ def test_an_unusable_resume_fingerprint_is_refused_under_its_own_label() -> None
         GridOperatorError,
         match=exactly("resume state fingerprint must be a lowercase SHA-256 hex fingerprint"),
     ):
-        grid_operator._stage_descriptors(stage)
+        grid_verify._stage_descriptors(stage)
 
 
 @pytest.mark.parametrize(
@@ -169,7 +173,7 @@ def test_a_grid_job_refuses_a_detector_and_model_path_that_disagree(
     snapshot = _snapshot_with_detector(detector)
 
     with pytest.raises(GridOperatorError, match=exactly(message)):
-        grid_operator._glotlid_model_path_for_snapshot(snapshot, model_path)
+        grid_script.glotlid_model_path_for_snapshot(snapshot, model_path)
 
 
 def _snapshot_with_detector(detector_name: str) -> object:
@@ -189,7 +193,7 @@ def test_an_absent_prepared_job_config_is_refused_with_its_exact_reason(
     with pytest.raises(
         GridOperatorError, match=exactly("prepared job config is immutable and must be present")
     ):
-        grid_operator._verify_immutable_config(path, {})
+        grid_bundle._verify_immutable_config(path, {})
 
 
 @pytest.mark.parametrize("shape", ["symlink", "missing"])
@@ -204,7 +208,7 @@ def test_an_absent_prepared_job_script_is_refused_with_its_exact_reason(
         GridOperatorError,
         match=exactly("prepared job config is immutable and its script must be present"),
     ):
-        grid_operator._verify_immutable_script(path, b"")
+        grid_bundle._verify_immutable_script(path, b"")
 
 
 def test_a_prepared_job_config_that_changed_is_refused_and_names_the_document(
@@ -215,7 +219,7 @@ def test_a_prepared_job_config_that_changed_is_refused_and_names_the_document(
     path.write_text("{not json", encoding="utf-8")
 
     with pytest.raises(GridOperatorError) as caught:
-        grid_operator._verify_immutable_config(path, {})
+        grid_bundle._verify_immutable_config(path, {})
 
     assert str(caught.value).startswith(f"cannot read job config {path}: ")
 
@@ -225,7 +229,7 @@ def test_a_payload_missing_required_files_lists_every_one_of_them(
 ) -> None:
     """The operator restages exactly what is listed, so the whole list is the contract."""
     with pytest.raises(GridOperatorError) as caught:
-        grid_operator._require_payload_files(job_bundle_factory(), {"bundle.json"})
+        grid_verify._require_payload_files(job_bundle_factory(), {"bundle.json"})
 
     message = str(caught.value)
     assert message.startswith("portable payload is missing required files: ")
@@ -242,7 +246,7 @@ def test_an_unusable_shard_artifact_is_named_by_its_own_file_name(tmp_path: Path
         GridOperatorError,
         match=exactly(f"shard state contains an unusable artifact: {artifact.name}"),
     ):
-        grid_operator._require_generated_artifact(artifact, lambda _name: True)
+        grid_bundle._require_generated_artifact(artifact, lambda _name: True)
 
 
 def test_an_unrecognised_shard_artifact_is_named_by_its_own_file_name(tmp_path: Path) -> None:
@@ -253,7 +257,7 @@ def test_an_unrecognised_shard_artifact_is_named_by_its_own_file_name(tmp_path: 
         GridOperatorError,
         match=exactly(f"shard state contains an unknown artifact: {artifact.name}"),
     ):
-        grid_operator._require_generated_artifact(artifact, lambda _name: False)
+        grid_bundle._require_generated_artifact(artifact, lambda _name: False)
 
 
 def test_an_unreadable_snapshot_is_reported_under_the_snapshot_readers_own_words(
@@ -266,7 +270,7 @@ def test_an_unreadable_snapshot_is_reported_under_the_snapshot_readers_own_words
     retrieved.mkdir()
 
     with pytest.raises(GridOperatorError) as caught:
-        grid_operator._require_matching_snapshots(local, retrieved)
+        grid_verify._require_matching_snapshots(local, retrieved)
 
     assert str(caught.value).startswith("cannot read snapshot ")
 
@@ -284,4 +288,4 @@ def test_a_stage_manifest_object_without_the_fingerprint_field_is_refused_by_nam
     with pytest.raises(
         GridOperatorError, match=exactly("stage payload is missing resume_state_fingerprint")
     ):
-        grid_operator._staged_resume_fingerprint(payload_root)
+        grid_stage._staged_resume_fingerprint(payload_root)

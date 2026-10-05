@@ -153,7 +153,7 @@ declared as `lambda *_: value` proves only that a call happened.
 redundant.** Each simplification removed the mutant by removing the redundancy.
 Each one is an improvement on its own terms:
 
-- `shards_root`, `jobs_root`, and `_project_source_root` give each of the three
+- `shards_root`, `jobs_root`, and `project_source_root` give each of the three
   owned directory names one definition. One test pins them by value. A
   filesystem assertion cannot pin the spelling of a path on a case-insensitive
   volume. For this reason `shards` versus `SHARDS` survived for a long time.
@@ -164,7 +164,7 @@ Each one is an improvement on its own terms:
   reached the call.
 - `_run_directory_exists` returned a bool that nobody read. It is now a
   `_require_regular_run_directory` validator.
-- `_validate_remote_path` rejected a `.` component that `PurePath` had already
+- `validate_remote_path` rejected a `.` component that `PurePath` had already
   dropped while it parsed.
 - `_run_wide_intent_block` skipped the intent file of its own job two times. A
   job directory has the name of its bundle. `_iter_intents` already refuses an

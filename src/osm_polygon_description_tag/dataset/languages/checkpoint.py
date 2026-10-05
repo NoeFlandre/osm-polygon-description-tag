@@ -54,7 +54,7 @@ def _validate_fingerprint(value: object, label: str) -> None:
         raise CheckpointError(f"{label} must be a lowercase SHA-256 fingerprint")
 
 
-def _validate_batch_size(value: object) -> None:
+def validate_batch_size(value: object) -> None:
     if type(value) is not int or value <= 0:
         raise CheckpointError("checkpoint batch_size must be positive")
     if value > MAX_BATCH_SIZE:
@@ -278,7 +278,7 @@ class ShardCheckpoint:
         self._validate_counts()
 
     def _validate_counts(self) -> None:
-        _validate_batch_size(self.batch_size)
+        validate_batch_size(self.batch_size)
         _validate_cursor(self.input_row_count, "input_row_count")
         _validate_cursor(self.input_cursor, "input_cursor")
         _validate_cursor(self.annotation_count, "checkpoint annotation_count")

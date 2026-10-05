@@ -17,7 +17,7 @@ from osm_polygon_description_tag.dataset.canonical_rows import (
     select_canonical_row,
 )
 from osm_polygon_description_tag.dataset.schema import SCHEMA
-from osm_polygon_description_tag.dataset.storage import _arrow_record
+from osm_polygon_description_tag.dataset.storage import arrow_record
 from tests.conftest import make_record_dict
 
 _TIMESTAMPS = st.one_of(
@@ -115,7 +115,7 @@ def test_duckdb_canonical_rows_match_python_selection(
     ]
     # Guarantee at least one eligible candidate for the text-aware selector.
     rows[0]["description"] = "eligible"
-    table = pa.Table.from_pylist([_arrow_record(row) for row in rows], schema=SCHEMA)
+    table = pa.Table.from_pylist([arrow_record(row) for row in rows], schema=SCHEMA)
     # Compare the Python selector against the exact millisecond-resolution rows
     # DuckDB receives, including their list-of-struct storage representation.
     rows = table.to_pylist()
@@ -130,7 +130,7 @@ def test_duckdb_canonical_rows_match_python_selection(
             )
             actual = _SQL_CONNECTION.execute(query).to_arrow_table().to_pylist()
 
-            assert actual == [_arrow_record(expected)]
+            assert actual == [arrow_record(expected)]
     finally:
         _SQL_CONNECTION.unregister("canonical_candidates")
 

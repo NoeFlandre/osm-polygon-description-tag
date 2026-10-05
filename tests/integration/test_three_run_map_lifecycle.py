@@ -99,7 +99,7 @@ def _install_hf_stubs(
     monkeypatch.setattr(pub, "default_runner_with_retry", runner_wrapper)
     monkeypatch.setattr(orch, "default_hub_verifier_factory", lambda: verifier)
     monkeypatch.setattr(orch, "_default_clock", lambda: "2026-01-01T00:00:00+00:00")
-    monkeypatch.setattr(preflight_module._huggingface_hub, "HfApi", hfapi_factory)
+    monkeypatch.setattr(preflight_module.lazy_huggingface_hub, "HfApi", hfapi_factory)
     monkeypatch.setattr(preflight_module.subprocess, "run", preflight_runner)
     monkeypatch.setattr(preflight_module.shutil, "which", lambda executable: executable)
     return log

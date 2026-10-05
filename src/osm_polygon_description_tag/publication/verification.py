@@ -7,8 +7,8 @@ from typing import Any, Protocol
 
 from osm_polygon_description_tag.dataset.manifest import file_sha256
 from osm_polygon_description_tag.publication.hub_client import (
-    _huggingface_hub,
-    _HuggingFaceHub,
+    HuggingFaceHub,
+    lazy_huggingface_hub,
     new_hf_api,
 )
 from osm_polygon_description_tag.publication.models import UploadItem
@@ -60,7 +60,7 @@ def _entries_by_path(requested_paths: list[str], entries: list[Any]) -> dict[str
 
 def _authenticated_api() -> Any:
     # Resolve the HfApi lazily at invocation time so monkeypatching
-    # _huggingface_hub.HfApi is honored by tests.
+    # lazy_huggingface_hub.HfApi is honored by tests.
     api = new_hf_api()
     try:
         identity = api.whoami()
@@ -358,7 +358,7 @@ def default_hub_verifier_factory(*, cache_dir: Path | None = None) -> HubVerifie
        mismatch so a caller can safely decide to publish.
 
     The ``HfApi`` is resolved at invocation time (not at factory time), so
-    tests may monkeypatch ``orch._huggingface_hub.HfApi`` BEFORE the
+    tests may monkeypatch ``orch.lazy_huggingface_hub.HfApi`` BEFORE the
     verifier is actually called.
     """
     return _DefaultHubVerifier(cache_dir)
@@ -372,8 +372,8 @@ def build_default_hub_verifier() -> HubVerifier:
 __all__ = [
     "HubVerificationError",
     "HubVerifier",
-    "_HuggingFaceHub",
-    "_huggingface_hub",
+    "HuggingFaceHub",
     "build_default_hub_verifier",
     "default_hub_verifier_factory",
+    "lazy_huggingface_hub",
 ]

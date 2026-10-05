@@ -35,14 +35,14 @@ _GLOTLID_METADATA: dict[str, Any] = {
 }
 
 
-def _policy() -> LanguagePolicy:
+def resolve_language_policy() -> LanguagePolicy:
     return LanguagePolicy()
 
 
 def test_a_lingua_identity_carrying_external_metadata_is_refused_exactly() -> None:
     with pytest.raises(ValueError) as caught:
         LanguageModelIdentity(
-            policy=_policy(),
+            policy=resolve_language_policy(),
             language_scope=DEFAULT_LANGUAGE_SCOPE,
             model_repository=GLOTLID_MODEL_REPOSITORY,
         )
@@ -56,9 +56,9 @@ def test_a_glotlid_identity_missing_one_pinned_field_is_refused_exactly(dropped:
 
     with pytest.raises(ValueError) as caught:
         LanguageModelIdentity(
-            policy=_policy(),
+            policy=resolve_language_policy(),
             language_scope=DEFAULT_LANGUAGE_SCOPE,
-            detector_name=glotlid_model_identity(_policy()).detector_name,
+            detector_name=glotlid_model_identity(resolve_language_policy()).detector_name,
             **metadata,
         )
 
@@ -68,7 +68,7 @@ def test_a_glotlid_identity_missing_one_pinned_field_is_refused_exactly(dropped:
 
 
 def test_the_glotlid_identity_records_the_pinned_library_and_artifact() -> None:
-    identity = glotlid_model_identity(_policy())
+    identity = glotlid_model_identity(resolve_language_policy())
 
     assert identity.library_name == GLOTLID_LIBRARY_NAME
     assert identity.library_version == GLOTLID_LIBRARY_VERSION
@@ -94,7 +94,7 @@ def test_the_pinned_glotlid_constants_are_the_documented_v3_artifact() -> None:
 
 
 def test_a_lingua_identity_leaves_every_external_field_unset() -> None:
-    identity = language_model_identity(_policy())
+    identity = language_model_identity(resolve_language_policy())
 
     assert identity.model_repository is None
     assert identity.model_filename is None
@@ -105,11 +105,14 @@ def test_a_lingua_identity_leaves_every_external_field_unset() -> None:
 
 
 def test_the_cascade_identity_keeps_lingua_as_its_library_and_glotlid_as_its_artifact() -> None:
-    cascade = cascade_model_identity(_policy())
-    primary = language_model_identity(_policy())
+    cascade = cascade_model_identity(resolve_language_policy())
+    primary = language_model_identity(resolve_language_policy())
 
     assert cascade.library_name == primary.library_name
     assert cascade.library_version == primary.library_version
     assert cascade.binary_artifact_hash == GLOTLID_MODEL_SHA256
     assert cascade.config_fingerprint != primary.config_fingerprint
-    assert cascade.config_fingerprint != glotlid_model_identity(_policy()).config_fingerprint
+    assert (
+        cascade.config_fingerprint
+        != glotlid_model_identity(resolve_language_policy()).config_fingerprint
+    )

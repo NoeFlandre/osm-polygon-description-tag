@@ -9,7 +9,11 @@ from pathlib import Path
 import pytest
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag import language_cli
+from osm_polygon_description_tag import (
+    grid_transport,
+    grid_workflow,
+    language_workflow,
+)
 from osm_polygon_description_tag.cli import run
 from osm_polygon_description_tag.dataset.languages.detector import LanguageDetector
 from osm_polygon_description_tag.dataset.languages.models import (
@@ -20,6 +24,7 @@ from osm_polygon_description_tag.dataset.languages.models import (
 )
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from tests.conftest import make_record_dict
+from tests.helpers.patching import patch_modules
 from tests.helpers.sentences import fake_splitter
 
 SAT_MODEL_PATH = "/models/sat-3l-sm/model.safetensors"
@@ -30,13 +35,22 @@ NIGHT_INSTANT = datetime(2026, 9, 8, 20, 0, tzinfo=UTC)
 @pytest.fixture(name="_fake_sentence_splitter", autouse=True)
 def _fake_sentence_splitter(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep CLI tests about wiring; the real adapter has separate tests."""
-    monkeypatch.setattr(language_cli, "build_sat_splitter", lambda *, model_dir: fake_splitter())
+    monkeypatch.setattr(
+        language_workflow, "build_sat_splitter", lambda *, model_dir: fake_splitter()
+    )
 
 
 @pytest.fixture(name="night_clock")
 def night_clock(monkeypatch: pytest.MonkeyPatch) -> datetime:
     """Freeze Grid handlers so their day/night policy is deterministic."""
-    monkeypatch.setattr(language_cli, "_utc_now", lambda: NIGHT_INSTANT)
+    patch_modules(
+        monkeypatch,
+        (
+            (grid_transport, "utc_now"),
+            (grid_workflow, "utc_now"),
+        ),
+        lambda: NIGHT_INSTANT,
+    )
     return NIGHT_INSTANT
 
 
@@ -78,8 +92,8 @@ def stub_detector(monkeypatch: pytest.MonkeyPatch) -> list[LanguagePolicy]:
             ),
         )
 
-    monkeypatch.setattr(language_cli, "build_lingua_detector", build)
-    monkeypatch.setattr(language_cli, "build_language_detector", build_cascade)
+    monkeypatch.setattr(language_workflow, "build_lingua_detector", build)
+    monkeypatch.setattr(language_workflow, "build_language_detector", build_cascade)
     return policies
 
 

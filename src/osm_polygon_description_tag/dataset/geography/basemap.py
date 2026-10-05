@@ -14,8 +14,8 @@ from pathlib import Path
 from typing import Any, Final
 
 LAND_BASEMAP_FILENAME: Final[str] = "ne_110m_land.geojson"
-_LAND_COLOR: Final[str] = "#e8e0d0"
-_LAND_EDGE: Final[str] = "#b8aa90"
+LAND_COLOR: Final[str] = "#e8e0d0"
+LAND_EDGE: Final[str] = "#b8aa90"
 
 
 def bundled_basemap_path() -> Path:
@@ -64,8 +64,8 @@ def _draw_ring(ax: Any, ring: Sequence[Sequence[float]]) -> None:
         patches.Polygon(
             coordinates,
             closed=True,
-            facecolor=_LAND_COLOR,
-            edgecolor=_LAND_EDGE,
+            facecolor=LAND_COLOR,
+            edgecolor=LAND_EDGE,
             linewidth=0.2,
             zorder=1,
         )

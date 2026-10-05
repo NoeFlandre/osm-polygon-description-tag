@@ -333,8 +333,8 @@ def test_published_inventory_forwards_non_strict_text_validation(
         calls.append((_root, kwargs))
         return [data_item]
 
-    monkeypatch.setattr(release_module, "_collect_data_items", record_data_items)
-    monkeypatch.setattr(release_module, "_collect_manifest_items", lambda _root: [])
+    monkeypatch.setattr(release_module, "collect_data_items", record_data_items)
+    monkeypatch.setattr(release_module, "collect_manifest_items", lambda _root: [])
 
     inventory = release_module._published_inventory(
         data_root,

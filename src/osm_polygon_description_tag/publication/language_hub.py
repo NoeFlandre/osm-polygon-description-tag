@@ -18,9 +18,9 @@ from typing import Any, Final, cast
 
 from osm_polygon_description_tag.dataset.manifest import file_sha256
 from osm_polygon_description_tag.publication.hub_client import (
-    _huggingface_hub,
     commit_operation_add,
     create_dataset_commit,
+    lazy_huggingface_hub,
     new_hf_api,
 )
 from osm_polygon_description_tag.publication.language import (
@@ -232,7 +232,7 @@ class HuggingFaceLanguageHub:
     def _viewer_http_session(self) -> Any:
         if self._http_session is None:
             try:
-                factory: Any = _huggingface_hub.get_session
+                factory: Any = lazy_huggingface_hub.get_session
                 self._http_session = factory()
             except Exception as error:
                 raise LanguagePublicationError(

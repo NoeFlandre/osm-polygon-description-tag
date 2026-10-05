@@ -37,7 +37,7 @@ from osm_polygon_description_tag.runtime.presentation import print_json
 _POLICY_PRESETS = {"v1": DEFAULT_LANGUAGE_POLICY}
 
 
-def _policy(
+def resolve_language_policy(
     min_alphabetic_chars: int | None,
     *,
     policy_version: str = "v1",

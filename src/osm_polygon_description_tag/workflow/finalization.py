@@ -14,9 +14,9 @@ from pathlib import Path
 from osm_polygon_description_tag.dataset.docs import generate_dataset_docs
 from osm_polygon_description_tag.dataset.manifest import (
     ManifestError,
-    _manifest_path_for,
     file_sha256,
     is_resumable,
+    manifest_path_for,
     output_identity_for,
     read_manifest,
     source_identity_for,
@@ -44,16 +44,16 @@ from osm_polygon_description_tag.publication.state import (
     PublicationStateError as PublicationStateError,
 )
 from osm_polygon_description_tag.publication.state import (
-    _metadata_state_matches as _state_metadata_state_matches,
-)
-from osm_polygon_description_tag.publication.state import (
-    _write_metadata_state as _state_write_metadata_state,
-)
-from osm_polygon_description_tag.publication.state import (
     cast_dict as _state_cast_dict,
 )
 from osm_polygon_description_tag.publication.state import (
+    metadata_state_matches as _state_metadata_state_matches,
+)
+from osm_polygon_description_tag.publication.state import (
     read_publication_state as _state_read_publication_state,
+)
+from osm_polygon_description_tag.publication.state import (
+    write_metadata_state as _state_write_metadata_state,
 )
 from osm_polygon_description_tag.publication.upload import execute_upload
 from osm_polygon_description_tag.publication.verification import HubVerifier
@@ -62,7 +62,7 @@ from osm_polygon_description_tag.runtime.logging import RunLogger
 from osm_polygon_description_tag.runtime.resources import dataset_card_template
 from osm_polygon_description_tag.workflow.source_runner import (
     OrchestratorError,
-    _call_publication_state,
+    call_publication_state,
 )
 
 H3_MAP_ASSET_RELATIVE = H3_MAP_ARTIFACT.relative_path
@@ -71,18 +71,18 @@ DATASET_CARD_HERO_ASSET_RELATIVE = DATASET_CARD_HERO_ARTIFACT.relative_path
 
 
 def _read_publication_state(data_root: Path) -> dict[str, object]:
-    return _call_publication_state(_state_read_publication_state, data_root)
+    return call_publication_state(_state_read_publication_state, data_root)
 
 
 def _cast_dict(value: object) -> dict[str, object]:
-    return _call_publication_state(_state_cast_dict, value)
+    return call_publication_state(_state_cast_dict, value)
 
 
-def _metadata_state_matches(data_root: Path, metadata_plan: UploadPlan) -> bool:
-    return _call_publication_state(_state_metadata_state_matches, data_root, metadata_plan)
+def metadata_state_matches(data_root: Path, metadata_plan: UploadPlan) -> bool:
+    return call_publication_state(_state_metadata_state_matches, data_root, metadata_plan)
 
 
-def _write_metadata_state(
+def write_metadata_state(
     data_root: Path,
     *,
     identity_sha256: str,
@@ -99,7 +99,7 @@ def _write_metadata_state(
     verified_revision: str,
     completed_at: str,
 ) -> dict[str, object]:
-    return _call_publication_state(
+    return call_publication_state(
         _state_write_metadata_state,
         data_root,
         identity_sha256=identity_sha256,
@@ -184,7 +184,7 @@ def _inspect_artifact(
     source_name = f"{stem}.osm.pbf"
     if source_name not in discovered:
         return None, stem, None
-    manifest_path = _manifest_path_for(parquet.name, paths.data_root)
+    manifest_path = manifest_path_for(parquet.name, paths.data_root)
     if not manifest_path.is_file():
         return None, None, f"{stem}.manifest.json"
     try:
@@ -237,7 +237,7 @@ def upload_final_metadata(
 def _metadata_skip_revision(
     data_root: Path, metadata_plan: UploadPlan, logger: RunLogger | None
 ) -> str | None:
-    if not _metadata_state_matches(data_root, metadata_plan):
+    if not metadata_state_matches(data_root, metadata_plan):
         return None
     state_payload = _read_publication_state(data_root)
     metadata_state = _cast_dict(state_payload.get("metadata", {}))
@@ -339,7 +339,7 @@ def _persist_metadata_state(
     clock: Callable[[], str],
 ) -> None:
     paths = metadata_paths(data_root)
-    _write_metadata_state(
+    write_metadata_state(
         data_root,
         identity_sha256=metadata_plan.identity_sha256,
         readme_sha256=file_sha256(paths["readme"]),

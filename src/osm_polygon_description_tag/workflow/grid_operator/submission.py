@@ -26,12 +26,12 @@ from osm_polygon_description_tag.workflow.grid_scheduler import (
 )
 
 from .bundle import (
-    _existing_bundle,
-    _read_job_config,
-    _require_bound_checkpoint,
-    _shard_checkpoint,
+    existing_bundle,
     read_bundle,
     read_intent,
+    read_job_config,
+    require_bound_checkpoint,
+    shard_checkpoint,
 )
 from .models import (
     BUNDLE_FILENAME,
@@ -249,10 +249,10 @@ def _validate_prepared_submission(
     paths: JobPaths, bundle: JobBundle, walltime_seconds: int
 ) -> None:
     _validate_submission_walltime(walltime_seconds)
-    stored = _existing_bundle(paths)
+    stored = existing_bundle(paths)
     if stored is None or stored != bundle:
         raise GridOperatorError("prepared bundle does not match the requested submission")
-    config = _read_job_config(paths.config, bundle)
+    config = read_job_config(paths.config, bundle)
     if config["walltime_seconds"] != walltime_seconds:
         raise GridOperatorError("submission walltime differs from prepared job config")
 
@@ -298,13 +298,13 @@ def _shard_state_block(
 
 def _initial_checkpoint_block(paths: JobPaths, bundle: JobBundle) -> str | None:
     try:
-        checkpoint = _shard_checkpoint(shard_paths(paths.run_dir, bundle.shard))
+        checkpoint = shard_checkpoint(shard_paths(paths.run_dir, bundle.shard))
     except GridOperatorError as error:
         return str(error)
     if checkpoint is None:
         return "no initial shard checkpoint exists; prepare this job again before submitting"
     try:
-        _require_bound_checkpoint(checkpoint, bundle)
+        require_bound_checkpoint(checkpoint, bundle)
     except GridOperatorError as error:
         return str(error)
     return None

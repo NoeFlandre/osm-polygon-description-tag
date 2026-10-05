@@ -56,7 +56,7 @@ def _translate_state_error(error: PublicationStateError) -> OrchestratorError:
     return OrchestratorError(str(error))
 
 
-def _call_publication_state(
+def call_publication_state(
     operation: Callable[_P, _R], /, *args: _P.args, **kwargs: _P.kwargs
 ) -> _R:
     try:
@@ -66,11 +66,11 @@ def _call_publication_state(
 
 
 def read_publication_state(data_root: Path) -> dict[str, object]:
-    return _call_publication_state(_state_read_publication_state, data_root)
+    return call_publication_state(_state_read_publication_state, data_root)
 
 
 def cast_dict(value: object) -> dict[str, object]:
-    return _call_publication_state(_state_cast_dict, value)
+    return call_publication_state(_state_cast_dict, value)
 
 
 @dataclass

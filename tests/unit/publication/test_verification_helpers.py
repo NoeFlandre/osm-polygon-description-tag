@@ -96,7 +96,7 @@ class _StrictVerifierHub:
 
 
 def _install_hub(monkeypatch: pytest.MonkeyPatch, hub: object) -> None:
-    monkeypatch.setattr(verification._huggingface_hub, "HfApi", lambda: hub)
+    monkeypatch.setattr(verification.lazy_huggingface_hub, "HfApi", lambda: hub)
 
 
 def test_default_verifier_checks_multiple_files_with_lfs_and_download_fallback(
@@ -600,7 +600,7 @@ def test_lazy_hub_wrapper_resolves_once_and_forwards_attribute(
 ) -> None:
     module = SimpleNamespace(answer=42)
     monkeypatch.setitem(__import__("sys").modules, "huggingface_hub", module)
-    hub = verification._HuggingFaceHub()
+    hub = verification.HuggingFaceHub()
 
     assert hub._module is None
     assert hub._resolve_module() is module
@@ -610,7 +610,7 @@ def test_lazy_hub_wrapper_resolves_once_and_forwards_attribute(
 
 def test_lazy_hub_wrapper_uses_existing_module_without_import() -> None:
     module = SimpleNamespace(answer=42)
-    hub = verification._HuggingFaceHub()
+    hub = verification.HuggingFaceHub()
     hub._module = module
 
     assert hub.answer == 42

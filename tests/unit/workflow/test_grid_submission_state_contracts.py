@@ -21,6 +21,9 @@ from osm_polygon_description_tag.workflow.grid_operator import (
     JobState,
     SubmissionIntent,
 )
+from osm_polygon_description_tag.workflow.grid_operator import reconciliation as grid_reconciliation
+from osm_polygon_description_tag.workflow.grid_operator import results as grid_results
+from osm_polygon_description_tag.workflow.grid_operator import submission as grid_submission
 from osm_polygon_description_tag.workflow.grid_policy import (
     PolicyDecision,
     PolicyEvidence,
@@ -54,7 +57,7 @@ def test_an_acknowledgment_records_the_moment_it_was_given(
     intent = _intent(bundle, job_id=7, terminal_state="terminated")
     report = type("Report", (), {"is_complete": True})()
 
-    updated = operator._acknowledge_intent(intent, report, _MOMENT)  # type: ignore[arg-type]
+    updated = grid_results._acknowledge_intent(intent, report, _MOMENT)  # type: ignore[arg-type]
 
     assert updated.collected_at == "2026-09-15T22:00:00+00:00"
     assert updated.result_acknowledged is True
@@ -69,7 +72,7 @@ def test_an_acknowledgment_without_a_clock_records_an_offset_aware_moment(
     intent = _intent(bundle, job_id=7, terminal_state="terminated")
     report = type("Report", (), {"is_complete": False})()
 
-    updated = operator._acknowledge_intent(intent, report, None)  # type: ignore[arg-type]
+    updated = grid_results._acknowledge_intent(intent, report, None)  # type: ignore[arg-type]
 
     assert updated.collected_at is not None
     assert datetime.fromisoformat(updated.collected_at).tzinfo is not None
@@ -81,7 +84,7 @@ def test_a_terminal_reconciliation_records_the_moment_it_happened(
     _, bundle, paths = job
     intent = _intent(bundle, job_id=7)
 
-    updated = operator._record_terminal_reconciliation(
+    updated = grid_reconciliation._record_terminal_reconciliation(
         paths,  # type: ignore[arg-type]
         intent,
         JobState.TERMINATED,
@@ -100,7 +103,7 @@ def test_a_terminal_reconciliation_without_a_clock_is_offset_aware(
     _, bundle, paths = job
     intent = _intent(bundle, job_id=7)
 
-    updated = operator._record_terminal_reconciliation(
+    updated = grid_reconciliation._record_terminal_reconciliation(
         paths,  # type: ignore[arg-type]
         intent,
         JobState.TERMINATED,
@@ -124,7 +127,7 @@ def test_a_recorded_outcome_keeps_the_schedulers_own_detail(
         "oarsub timed out; a job may or may not be queued, so do not resubmit",
     )
 
-    operator._record_outcome(paths, intent, result)  # type: ignore[arg-type]
+    grid_submission._record_outcome(paths, intent, result)  # type: ignore[arg-type]
 
     recorded = json.loads(paths.intent.read_text(encoding="utf-8"))  # type: ignore[attr-defined]
     assert recorded["detail"] == (
@@ -179,7 +182,7 @@ def test_an_unresolved_intent_without_a_job_id_says_what_to_reconcile(
 ) -> None:
     _, bundle, _ = job
 
-    assert operator._active_intent_reason(_intent(bundle)) == (
+    assert grid_submission._active_intent_reason(_intent(bundle)) == (
         "a previous submission left an unresolved intent; "
         "reconcile whether a job exists before submitting again"
     )
@@ -190,7 +193,7 @@ def test_an_unresolved_intent_with_a_job_id_names_that_job(
 ) -> None:
     _, bundle, _ = job
 
-    assert operator._active_intent_reason(_intent(bundle, job_id=7)) == (
+    assert grid_submission._active_intent_reason(_intent(bundle, job_id=7)) == (
         "job 7 was already submitted for this bundle; reconcile it first"
     )
 
@@ -205,7 +208,7 @@ def test_an_already_complete_shard_is_not_retried(job: tuple[Path, object, objec
         result_complete=True,
     )
 
-    assert operator._intent_retry_block(intent, None) == (
+    assert grid_submission._intent_retry_block(intent, None) == (
         "complete results have already been acknowledged for this shard"
     )
 
@@ -226,7 +229,7 @@ def test_unusable_policy_freshness_is_named_exactly(
         PolicyEvidence(0, False, True, (), captured_at=captured_at),
     )
 
-    assert operator._policy_freshness_block(verdict, _MOMENT) == reason
+    assert grid_submission._policy_freshness_block(verdict, _MOMENT) == reason
 
 
 def test_a_plan_names_the_bundle_and_shard_it_would_submit(

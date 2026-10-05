@@ -8,14 +8,14 @@ from pathlib import Path
 from osm_polygon_description_tag.dataset.languages.snapshot import SnapshotManifest, read_snapshot
 from osm_polygon_description_tag.dataset.languages.validation import RunReport
 from osm_polygon_description_tag.grid_transport import (
-    _capture_policy,
-    _execute_transport,
-    _portable_remote_paths,
-    _remote_child,
-    _seed_retrieval_snapshot,
-    _transport_payload,
-    _utc_now,
+    capture_policy,
+    execute_transport,
     grid_command_runner,
+    portable_remote_paths,
+    remote_child,
+    seed_retrieval_snapshot,
+    transport_payload,
+    utc_now,
 )
 from osm_polygon_description_tag.runtime.presentation import print_json
 from osm_polygon_description_tag.workflow.grid_operator import (
@@ -131,14 +131,14 @@ def handle_grid_submit(
     bundle, paths = prepared
     command_runner = runner or grid_command_runner
     if apply:
-        usage_output, quota_output, account_job_count, captured_at = _capture_policy(
+        usage_output, quota_output, account_job_count, captured_at = capture_policy(
             site, runner=command_runner
         )
     else:
         usage_output, quota_output = None, None
         account_job_count, captured_at = None, None
     # Evaluate no earlier than the evidence was captured, or it reads as future.
-    moment = _utc_now()
+    moment = utc_now()
     verdict = evaluate_policy(
         moment=moment,
         usage_policy_output=usage_output,
@@ -311,8 +311,8 @@ def handle_grid_stage(
         glotlid_model_path=glotlid_model_path,
     )
     transfer_argv = build_bundle_transfer_argv(prepared, remote_bundle_dir)
-    remote_paths = _portable_remote_paths(remote_bundle_dir)
-    result = _execute_transport(transfer_argv, runner) if apply else None
+    remote_paths = portable_remote_paths(remote_bundle_dir)
+    result = execute_transport(transfer_argv, runner) if apply else None
     print_json(
         {
             "applied": result is not None,
@@ -328,7 +328,7 @@ def handle_grid_stage(
             **remote_paths,
             "shard": prepared.bundle.shard,
             "transfer_argv": list(transfer_argv),
-            "transfer_result": _transport_payload(transfer_argv, result),
+            "transfer_result": transport_payload(transfer_argv, result),
         }
     )
 
@@ -410,13 +410,13 @@ def _retrieve_and_collect(
     apply: bool,
     runner: CommandRunner | None,
 ) -> None:
-    remote_run_dir = _remote_child(remote_bundle_dir.rstrip("/") or "/", "run")
+    remote_run_dir = remote_child(remote_bundle_dir.rstrip("/") or "/", "run")
     transfer_argv = build_result_retrieval_argv(remote_run_dir, retrieved_run_dir, shard)
     if not apply:
         _emit_retrieval_plan(run_dir, shard, retrieved_run_dir, transfer_argv)
         return
-    _seed_retrieval_snapshot(run_dir, retrieved_run_dir)
-    result = _execute_transport(transfer_argv, runner)
+    seed_retrieval_snapshot(run_dir, retrieved_run_dir)
+    result = execute_transport(transfer_argv, runner)
     report = import_retrieved_results(run_dir, retrieved_run_dir, shard)
     acknowledgment = _acknowledge_imported_results(run_dir, shard, report, retrieved_run_dir)
     print_json(
@@ -428,7 +428,7 @@ def _retrieve_and_collect(
             "run_dir": str(run_dir),
             "shard": shard,
             "transfer_argv": list(transfer_argv),
-            "transfer_result": _transport_payload(transfer_argv, result),
+            "transfer_result": transport_payload(transfer_argv, result),
         }
     )
 

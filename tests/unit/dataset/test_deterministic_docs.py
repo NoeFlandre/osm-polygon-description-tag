@@ -539,7 +539,7 @@ def _install_subprocess_recorder(monkeypatch: pytest.MonkeyPatch, *, action: str
     monkeypatch.setattr(preflight_module.shutil, "which", lambda executable: executable)
     monkeypatch.setattr(orch, "default_hub_verifier_factory", verifier_factory)
     monkeypatch.setattr(orch, "_default_clock", lambda: "2026-01-01T00:00:00+00:00")
-    monkeypatch.setattr(preflight_module._huggingface_hub, "HfApi", hfapi_factory)
+    monkeypatch.setattr(preflight_module.lazy_huggingface_hub, "HfApi", hfapi_factory)
     return log
 
 

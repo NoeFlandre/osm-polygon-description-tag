@@ -85,7 +85,7 @@ def test_three_run_scenario(tmp_path: Path) -> None:  # noqa: PLR0915 - long tes
     # Patch the per-PBF state writer to raise on the second source.
     from osm_polygon_description_tag.workflow import orchestrator
 
-    real_write = orchestrator._write_publication_state
+    real_write = orchestrator.write_publication_state
     written: list[str] = []
 
     def flaky_write(*args, **kwargs):
@@ -96,7 +96,7 @@ def test_three_run_scenario(tmp_path: Path) -> None:  # noqa: PLR0915 - long tes
         return real_write(*args, **kwargs)
 
     monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(orchestrator, "_write_publication_state", flaky_write)
+    monkeypatch.setattr(orchestrator, "write_publication_state", flaky_write)
 
     with pytest.raises(Exception, match="simulated crash"):
         run_and_publish(

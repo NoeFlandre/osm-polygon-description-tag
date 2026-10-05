@@ -11,7 +11,7 @@ from osm_polygon_description_tag.dataset.manifest import (
 )
 from osm_polygon_description_tag.osm.discovery import discover_sources
 from osm_polygon_description_tag.publication.models import REPO_ID
-from osm_polygon_description_tag.publication.verification import _huggingface_hub
+from osm_polygon_description_tag.publication.verification import lazy_huggingface_hub
 from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.runtime.resources import (
     dataset_card_template,
@@ -112,7 +112,7 @@ def _validate_data_roots(paths: Paths) -> tuple[object, ...]:
 
 def _hub_identity() -> tuple[Any, Any]:
     try:
-        hf_api: Any = _huggingface_hub.HfApi
+        hf_api: Any = lazy_huggingface_hub.HfApi
         api = hf_api()
         identity = api.whoami()
         repo_info = api.repo_info(REPO_ID, repo_type="dataset")

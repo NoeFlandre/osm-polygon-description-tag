@@ -12,8 +12,8 @@ import pyarrow.parquet as pq
 
 from osm_polygon_description_tag.dataset.manifest import (
     TRANSFORM_ALGORITHM_VERSION,
-    _manifest_path_for,
     current_output_algorithm_revision,
+    manifest_path_for,
     output_identity_for,
     read_manifest,
     write_manifest,
@@ -22,7 +22,7 @@ from osm_polygon_description_tag.dataset.schema import KEY_VALUE_COLUMNS, SCHEMA
 from osm_polygon_description_tag.dataset.storage import (
     GEOPARQUET_COMPRESSION,
     StorageError,
-    _arrow_record,
+    arrow_record,
     validate_geoparquet,
 )
 from osm_polygon_description_tag.runtime.atomic import fsync_dir as _fsync_dir
@@ -55,7 +55,7 @@ def _migrate_parquet(path: Path) -> bool:
     metadata = SCHEMA.with_metadata(schema.metadata or {})
     try:
         _rewrite_legacy_parquet(reader, temporary, metadata)
-        _promote_migrated_parquet(temporary, path)
+        promote_migrated_parquet(temporary, path)
         return True
     except (OSError, pa.ArrowException, StorageError) as error:
         raise MigrationError(f"cannot migrate {path}: {error}") from error
@@ -79,12 +79,12 @@ def _rewrite_legacy_parquet(
 ) -> None:
     with pq.ParquetWriter(temporary, metadata, compression=GEOPARQUET_COMPRESSION) as writer:
         for batch in reader.iter_batches(batch_size=4096):
-            rows = [_arrow_record(row) for row in batch.to_pylist()]
+            rows = [arrow_record(row) for row in batch.to_pylist()]
             writer.write_table(pa.Table.from_pylist(rows, schema=metadata))
     validate_geoparquet(temporary)
 
 
-def _promote_migrated_parquet(temporary: Path, target: Path) -> None:
+def promote_migrated_parquet(temporary: Path, target: Path) -> None:
     with Path(temporary).open("rb") as handle:
         os.fsync(handle.fileno())
     Path(temporary).replace(target)
@@ -100,15 +100,15 @@ def migrate_dataset_schema(data_root: Path) -> int:
     """
     data_dir = data_root / "data"
     manifests_dir = data_root / "manifests"
-    _require_migration_directories(data_dir, manifests_dir, data_root)
+    require_migration_directories(data_dir, manifests_dir, data_root)
     migrated = 0
     for parquet in sorted(data_dir.glob("*.parquet"), key=lambda path: path.name):
-        manifest_path = _manifest_path_for(parquet.name, data_root)
+        manifest_path = manifest_path_for(parquet.name, data_root)
         migrated += _migrate_one_artifact(parquet, manifest_path)
     return migrated
 
 
-def _require_migration_directories(
+def require_migration_directories(
     data_dir: Path,
     manifests_dir: Path,
     data_root: Path,

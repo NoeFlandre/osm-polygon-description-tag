@@ -10,7 +10,7 @@ import pytest
 from osm_polygon_description_tag import cli
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
-    _manifest_path_for,
+    manifest_path_for,
     output_identity_for,
     source_identity_for,
     write_manifest,
@@ -36,7 +36,7 @@ def _write_artifact_pair(
             source=source_identity_for(source),
             output=output_identity_for(parquet),
         ),
-        _manifest_path_for(parquet.name, data_root),
+        manifest_path_for(parquet.name, data_root),
     )
     return parquet
 
@@ -56,7 +56,7 @@ def _write_real_artifact_pair(
     source.write_bytes(b"tiny source fixture")
     parquet = data_dir / "a.parquet"
     write_geoparquet([dict(record, source_pbf=source.name)], parquet)
-    manifest_path = _manifest_path_for(parquet.name, data_root)
+    manifest_path = manifest_path_for(parquet.name, data_root)
     write_manifest(
         manifest_factory(
             source=source_identity_for(source),
@@ -403,7 +403,7 @@ def test_validate_accepts_a_source_name_discovered_with_an_empty_stem(
             source=source_identity_for(source.path),
             output=output_identity_for(parquet),
         ),
-        _manifest_path_for(parquet.name, data_root),
+        manifest_path_for(parquet.name, data_root),
     )
 
     exit_code = cli.run(

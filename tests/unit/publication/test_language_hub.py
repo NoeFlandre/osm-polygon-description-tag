@@ -365,7 +365,7 @@ def test_upload_reports_a_commit_operation_failure(
             raise RuntimeError("operation rejected")
 
     monkeypatch.setattr(
-        language_hub_module._huggingface_hub,
+        language_hub_module.lazy_huggingface_hub,
         "CommitOperationAdd",
         FailingOperation,
         raising=False,
@@ -787,7 +787,7 @@ def test_dataset_viewer_uses_the_lazy_http_session_factory(
     response = _FakeResponse({"splits": [], "pending": [], "failed": []})
     http = _FakeHttp(response)
     monkeypatch.setattr(
-        language_hub_module._huggingface_hub,
+        language_hub_module.lazy_huggingface_hub,
         "get_session",
         lambda: http,
         raising=False,
@@ -802,7 +802,9 @@ def test_dataset_viewer_reports_a_session_factory_failure(
     def fail() -> Any:
         raise RuntimeError("session unavailable")
 
-    monkeypatch.setattr(language_hub_module._huggingface_hub, "get_session", fail, raising=False)
+    monkeypatch.setattr(
+        language_hub_module.lazy_huggingface_hub, "get_session", fail, raising=False
+    )
 
     with pytest.raises(LanguagePublicationError, match="cannot read Dataset Viewer splits"):
         HuggingFaceLanguageHub(_FakeApi()).dataset_viewer_splits(REPO)
@@ -814,7 +816,9 @@ def test_dataset_viewer_session_factory_failure_keeps_its_exact_cause(
     def fail() -> Any:
         raise RuntimeError("session unavailable")
 
-    monkeypatch.setattr(language_hub_module._huggingface_hub, "get_session", fail, raising=False)
+    monkeypatch.setattr(
+        language_hub_module.lazy_huggingface_hub, "get_session", fail, raising=False
+    )
 
     with pytest.raises(LanguagePublicationError) as caught:
         HuggingFaceLanguageHub(_FakeApi())._viewer_http_session()
@@ -880,7 +884,7 @@ def test_the_api_is_resolved_lazily(monkeypatch: pytest.MonkeyPatch) -> None:
         def __init__(self) -> None:
             created.append("built")
 
-    monkeypatch.setattr(verification._huggingface_hub, "HfApi", _Api, raising=False)
+    monkeypatch.setattr(verification.lazy_huggingface_hub, "HfApi", _Api, raising=False)
     hub = build_language_hub()
 
     assert created == []

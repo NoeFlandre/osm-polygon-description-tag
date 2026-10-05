@@ -205,7 +205,7 @@ def test_validate_manifest_pair_uses_the_data_root_for_manifest_lookup(
         lookup_calls.append((output_name, data_root))
         return manifest_path
 
-    monkeypatch.setattr(storage, "_manifest_path_for", resolve_manifest)
+    monkeypatch.setattr(storage, "manifest_path_for", resolve_manifest)
     with (
         patch.object(storage, "read_manifest", return_value=manifest),
         patch.object(storage, "output_identity_for", return_value=identity),

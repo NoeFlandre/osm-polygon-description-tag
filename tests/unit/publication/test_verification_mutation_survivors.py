@@ -69,7 +69,7 @@ def test_matching_revision_forwards_cache_dir_to_download_fallback(
     item = _item("README.md", content)
     cache_dir = tmp_path / "hub-cache"
     api = _MatchingFallbackApi(tmp_path, content, cache_dir)
-    monkeypatch.setattr(verification._huggingface_hub, "HfApi", lambda: api)
+    monkeypatch.setattr(verification.lazy_huggingface_hub, "HfApi", lambda: api)
 
     verifier = verification.default_hub_verifier_factory(cache_dir=cache_dir)
 

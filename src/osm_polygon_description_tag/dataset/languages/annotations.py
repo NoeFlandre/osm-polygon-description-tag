@@ -54,7 +54,7 @@ ANNOTATION_SCHEMA: Final = pa.schema(
     ]
 )
 
-_DICTIONARY_COLUMNS: Final = (
+DICTIONARY_COLUMNS: Final = (
     "osm_type",
     "tag_key",
     "language_code",
@@ -179,7 +179,7 @@ def _write_parquet(path: Path, table: pa.Table) -> None:
         path,
         ANNOTATION_SCHEMA,
         compression=ANNOTATION_COMPRESSION,
-        use_dictionary=_DICTIONARY_COLUMNS,
+        use_dictionary=DICTIONARY_COLUMNS,
     ) as writer:
         writer.write_table(table)
 

@@ -233,7 +233,7 @@ def test_migrate_parquet_returns_true_after_promoting_a_migration(
     path = tmp_path / "legacy.parquet"
     _write_legacy_parquet(path)
     monkeypatch.setattr(migration, "_rewrite_legacy_parquet", lambda *_args: None)
-    monkeypatch.setattr(migration, "_promote_migrated_parquet", lambda *_args: None)
+    monkeypatch.setattr(migration, "promote_migrated_parquet", lambda *_args: None)
 
     assert migration._migrate_parquet(path) is True
 
@@ -254,7 +254,7 @@ def test_migrate_parquet_forwards_rewrite_inputs_and_schema_metadata(
         promote_args.append((temporary, target))
 
     monkeypatch.setattr(migration, "_rewrite_legacy_parquet", rewrite)
-    monkeypatch.setattr(migration, "_promote_migrated_parquet", promote)
+    monkeypatch.setattr(migration, "promote_migrated_parquet", promote)
 
     assert migration._migrate_parquet(path) is True
     assert len(rewrite_args) == 1
@@ -419,7 +419,7 @@ def test_promote_migrated_parquet_fsyncs_a_binary_handle_before_replace(
         lambda directory: observed.setdefault("fsync_dir", directory),
     )
 
-    migration._promote_migrated_parquet(temporary, target)
+    migration.promote_migrated_parquet(temporary, target)
 
     assert observed == {
         "open": (temporary, "rb"),
@@ -437,7 +437,7 @@ def test_migration_requires_both_directories(tmp_path: Path, missing: str) -> No
     (manifests_dir if missing == "data" else data_dir).mkdir()
 
     with pytest.raises(MigrationError, match=re.escape(str(tmp_path))):
-        migration._require_migration_directories(data_dir, manifests_dir, tmp_path)
+        migration.require_migration_directories(data_dir, manifests_dir, tmp_path)
 
 
 def test_migrate_dataset_schema_sorts_by_name_and_accumulates_results(
@@ -527,7 +527,7 @@ def test_migrate_dataset_schema_uses_the_lowercase_data_boundaries(
         )
 
     root = Root()
-    monkeypatch.setattr(migration, "_require_migration_directories", fake_require)
+    monkeypatch.setattr(migration, "require_migration_directories", fake_require)
 
     assert migration.migrate_dataset_schema(root) == 0
     assert observed == {"data_dir": "data", "manifests_dir": "manifests", "data_root": root}

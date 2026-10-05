@@ -22,7 +22,6 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
     prepare_snapshot,
 )
 from osm_polygon_description_tag.dataset.languages.worker import process_shard
-from osm_polygon_description_tag.workflow import grid_operator
 from osm_polygon_description_tag.workflow.grid_operator import (
     GridOperatorError,
     bundle_for_shard,
@@ -37,6 +36,9 @@ from osm_polygon_description_tag.workflow.grid_operator import (
     resolve_job_name,
     submit_job,
 )
+from osm_polygon_description_tag.workflow.grid_operator import script as grid_script
+from osm_polygon_description_tag.workflow.grid_operator import stage as grid_stage
+from osm_polygon_description_tag.workflow.grid_operator import submission as grid_submission
 from osm_polygon_description_tag.workflow.grid_policy import (
     MAX_WALLTIME_SECONDS,
 )
@@ -617,7 +619,7 @@ def test_the_job_name_is_the_bundle_id_truncated_to_sixteen_characters(
     _, run, snapshot = prepared
     bundle, paths = prepare_job(run, snapshot, SHARD, **REMOTE)
 
-    request = grid_operator._submission_request(bundle, MAX_WALLTIME_SECONDS, True, paths)
+    request = grid_submission._submission_request(bundle, MAX_WALLTIME_SECONDS, True, paths)
 
     assert request.name == f"lang-{bundle.bundle_id[:16]}"
     assert len(request.name) == len("lang-") + 16
@@ -629,13 +631,13 @@ def test_a_batch_size_that_is_not_a_positive_integer_is_refused_exactly(
     batch_size: object,
 ) -> None:
     with pytest.raises(GridOperatorError) as caught:
-        grid_operator._validate_batch_size(batch_size)
+        grid_script.validate_batch_size(batch_size)
 
     assert str(caught.value) == "batch size must be a positive integer"
 
 
 def test_the_smallest_positive_batch_size_is_accepted() -> None:
-    assert grid_operator._validate_batch_size(1) == 1
+    assert grid_script.validate_batch_size(1) == 1
 
 
 def test_payload_files_are_listed_in_posix_relative_path_order(tmp_path: Path) -> None:
@@ -646,7 +648,7 @@ def test_payload_files_are_listed_in_posix_relative_path_order(tmp_path: Path) -
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("x", encoding="utf-8")
 
-    listed = [path.relative_to(root).as_posix() for path in grid_operator._payload_files(root)]
+    listed = [path.relative_to(root).as_posix() for path in grid_stage.payload_files(root)]
 
     assert listed == sorted(listed)
     assert listed == ["a/b.txt", "a/y.txt", "b/z.txt", "top.txt"]

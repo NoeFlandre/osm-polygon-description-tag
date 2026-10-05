@@ -208,7 +208,7 @@ def test_publish_source_uploads_stale_state_and_persists_verified_identity(
         captured["args"] = args
         captured["kwargs"] = kwargs
 
-    monkeypatch.setattr(orchestrator, "_write_publication_state", write_state)
+    monkeypatch.setattr(orchestrator, "write_publication_state", write_state)
 
     returned, uploaded = orchestrator._publish_source_if_needed(
         paths,
@@ -359,7 +359,7 @@ def test_publish_source_retains_deduplicated_note_when_state_write_fails(
     )
     monkeypatch.setattr(
         orchestrator,
-        "_write_publication_state",
+        "write_publication_state",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("state unavailable")),
     )
 
@@ -602,7 +602,7 @@ def test_publication_state_wrappers_preserve_success_and_translate_failures(
         return {"written": True}
 
     monkeypatch.setattr(orchestrator, "_state_write_publication_state", write_state)
-    assert orchestrator._write_publication_state("root", source_name="region") == {"written": True}
+    assert orchestrator.write_publication_state("root", source_name="region") == {"written": True}
     assert write_calls == [(("root",), {"source_name": "region"})]
 
     read_error = orchestrator.PublicationStateError("read is broken")
@@ -622,7 +622,7 @@ def test_publication_state_wrappers_preserve_success_and_translate_failures(
 
     monkeypatch.setattr(orchestrator, "_state_write_publication_state", fail_write)
     with pytest.raises(OrchestratorError, match=r"^write is broken$") as write_info:
-        orchestrator._write_publication_state("root")
+        orchestrator.write_publication_state("root")
     assert write_info.value.__cause__ is write_error
 
 

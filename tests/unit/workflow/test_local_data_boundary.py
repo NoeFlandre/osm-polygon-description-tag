@@ -60,7 +60,7 @@ def test_hub_verifier_download_cache_is_below_data_root(
             return str(artifact)
 
     monkeypatch.setattr(
-        "osm_polygon_description_tag.workflow.preflight._huggingface_hub.HfApi",
+        "osm_polygon_description_tag.workflow.preflight.lazy_huggingface_hub.HfApi",
         Api,
     )
     import hashlib
@@ -126,7 +126,7 @@ def test_default_verifier_reconciles_only_stale_managed_artifacts(
             return SimpleNamespace(oid="revision-after-delete")
 
     monkeypatch.setattr(
-        "osm_polygon_description_tag.workflow.preflight._huggingface_hub.HfApi",
+        "osm_polygon_description_tag.workflow.preflight.lazy_huggingface_hub.HfApi",
         Api,
     )
     verifier = default_hub_verifier_factory()
