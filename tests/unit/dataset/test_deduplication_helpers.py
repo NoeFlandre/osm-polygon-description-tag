@@ -249,6 +249,23 @@ def test_write_state_writes_sorted_indented_unicode_json_bytes(tmp_path: Path) -
     assert path.read_bytes() == '{\n  "a": 1,\n  "z": "é"\n}\n'.encode()
 
 
+def test_write_state_keeps_unicode_unescaped(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    options: dict[str, object] = {}
+    original_dumps = dedup_module.json.dumps
+
+    def dumps(value: object, *args: object, **kwargs: object) -> str:
+        options.update(kwargs)
+        return original_dumps(value, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(dedup_module.json, "dumps", dumps)
+
+    _write_state(tmp_path / "state.json", {"value": "café"})
+
+    assert options["ensure_ascii"] is False
+
+
 def test_write_state_creates_nested_parent_and_atomically_replaces_existing_state(
     tmp_path: Path,
 ) -> None:

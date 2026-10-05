@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 from typing import Final
 
-from osm_polygon_description_tag.runtime.atomic import atomic_write_bytes
+from osm_polygon_description_tag.runtime.atomic import atomic_write_text
 
 H3_MAP_START_MARKER: Final[str] = "<!-- GENERATED:H3_MAP:START -->"
 H3_MAP_END_MARKER: Final[str] = "<!-- GENERATED:H3_MAP:END -->"
@@ -190,9 +190,7 @@ def _template_with_map_markers(text: str, asset_relative_path: str) -> str:
 
 
 def _atomic_write_template(template_path: Path, new_text: str) -> None:
-    atomic_write_bytes(
-        template_path, new_text.encode("utf-8")
-    )  # pragma: no mutate - codec names are case-insensitive
+    atomic_write_text(template_path, new_text)
 
 
 __all__ = [

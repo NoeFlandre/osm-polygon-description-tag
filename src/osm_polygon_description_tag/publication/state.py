@@ -15,7 +15,7 @@ from osm_polygon_description_tag.publication.artifacts import (
     metadata_paths,
 )
 from osm_polygon_description_tag.publication.models import UploadPlan
-from osm_polygon_description_tag.runtime.atomic import atomic_write_bytes
+from osm_polygon_description_tag.runtime.atomic import atomic_write_text
 
 PUBLICATION_STATE_FILENAME = "publication-state.json"
 H3_MAP_ASSET_RELATIVE_PATH = H3_MAP_ARTIFACT.relative_path
@@ -35,9 +35,7 @@ def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
     # pragma: no mutate start - None and False are equivalent for json.ensure_ascii
     body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     # pragma: no mutate end
-    atomic_write_bytes(
-        path, body.encode("utf-8")
-    )  # pragma: no mutate - codec names are case-insensitive
+    atomic_write_text(path, body)
 
 
 def read_publication_state(data_root: Path) -> dict[str, object]:

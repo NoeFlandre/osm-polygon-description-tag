@@ -43,7 +43,7 @@ from osm_polygon_description_tag.dataset.storage import (
     write_geoparquet_batches,
 )
 from osm_polygon_description_tag.dataset.text import sql_literal as _sql_literal
-from osm_polygon_description_tag.runtime.atomic import atomic_write_bytes
+from osm_polygon_description_tag.runtime.atomic import atomic_write_text
 
 DEDUPLICATION_POLICY_VERSION = CANONICAL_ROW_POLICY_VERSION
 DUPLICATE_REJECTION_REASON = "duplicate_osm_object"
@@ -95,10 +95,8 @@ def _read_state(path: Path) -> dict[str, Any] | None:
 
 
 def _write_state(path: Path, payload: Mapping[str, object]) -> None:
-    # pragma: no mutate start - equivalent ensure_ascii and codec-name mutants
     body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    atomic_write_bytes(path, body.encode("utf-8"))
-    # pragma: no mutate end
+    atomic_write_text(path, body)
 
 
 def _input_hashes(parquets: Iterable[Path]) -> dict[str, str]:

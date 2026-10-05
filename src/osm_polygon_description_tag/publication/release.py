@@ -37,7 +37,7 @@ from osm_polygon_description_tag.publication.verification import (
     HubVerifier,
     build_default_hub_verifier,
 )
-from osm_polygon_description_tag.runtime.atomic import atomic_write_bytes
+from osm_polygon_description_tag.runtime.atomic import atomic_write_text
 
 
 @dataclass(frozen=True)
@@ -350,9 +350,7 @@ def _sync_remote_card(
     current = target.read_text(encoding="utf-8") if target.is_file() else None  # pragma: no mutate
     if current == remote_readme:
         return
-    atomic_write_bytes(
-        target, remote_readme.encode("utf-8")
-    )  # pragma: no mutate - codec names are case-insensitive
+    atomic_write_text(target, remote_readme)
 
 
 __all__ = ["ReleaseReport", "release_metadata", "validate_published_inventory"]
