@@ -32,8 +32,11 @@ from shapely.geometry.base import BaseGeometry
 from osm_polygon_description_tag.dataset.constants import DEFAULT_WRITE_BATCH_SIZE
 from osm_polygon_description_tag.dataset.manifest import (
     MANIFEST_SCHEMA_VERSION,
+    Manifest,
     ManifestError,
+    OutputIdentity,
     _manifest_path_for,
+    is_resumable,
     output_identity_for,
     read_manifest,
 )
@@ -546,8 +549,15 @@ def _batch_columns(batch: pa.RecordBatch) -> dict[str, list[Any]]:
     return {name: batch.column(name).to_pylist() for name in _VALIDATION_COLUMNS}
 
 
-def _validate_source(state: _ValidationState, current: str) -> None:
+def _validate_source(
+    state: _ValidationState, current: str, expected_source_pbf: str | None = None
+) -> None:
     if state.source_pbf is None:
+        if expected_source_pbf is not None and current != expected_source_pbf:
+            raise StorageError(
+                "manifest source identity mismatch: "
+                f"expected {expected_source_pbf!r}, found {current!r}"
+            )
         state.source_pbf = current
     elif state.source_pbf != current:
         raise StorageError(f"mixed source_pbf within file: {state.source_pbf!r} and {current!r}")
@@ -723,11 +733,12 @@ def _validate_row(
     state: _ValidationState,
     *,
     require_successful_text: bool = True,
+    expected_source_pbf: str | None = None,
 ) -> None:
     osm_type = columns["osm_type"][index]
     osm_id = columns["osm_id"][index]
     state.uniqueness.check_and_add(osm_type, osm_id)
-    _validate_source(state, columns["source_pbf"][index])
+    _validate_source(state, columns["source_pbf"][index], expected_source_pbf)
     _validate_description_values(
         columns["description"][index],
         columns["localized_descriptions"][index],
@@ -754,6 +765,7 @@ def _validate_batch(
     state: _ValidationState,
     *,
     require_successful_text: bool = True,
+    expected_source_pbf: str | None = None,
 ) -> None:
     columns = _batch_columns(batch)
     for index in range(batch.num_rows):
@@ -762,6 +774,7 @@ def _validate_batch(
             index,
             state,
             require_successful_text=require_successful_text,
+            expected_source_pbf=expected_source_pbf,
         )
 
 
@@ -788,7 +801,12 @@ def _validate_metadata_bbox(state: _ValidationState, meta_bbox: object) -> None:
             raise StorageError(f"bbox mismatch: actual {actual_bbox} != metadata {expected_bbox}")
 
 
-def validate_geoparquet(path: Path, *, require_successful_text: bool = True) -> int:
+def validate_geoparquet(
+    path: Path,
+    *,
+    require_successful_text: bool = True,
+    expected_source_pbf: str | None = None,
+) -> int:
     """Validate a GeoParquet file in batches and return its row count.
 
     Strict validation requires every persisted row to contain successful,
@@ -816,6 +834,7 @@ def validate_geoparquet(path: Path, *, require_successful_text: bool = True) -> 
                     batch,
                     state,
                     require_successful_text=require_successful_text,
+                    expected_source_pbf=expected_source_pbf,
                 )
         finally:
             state.uniqueness.close()
@@ -830,19 +849,32 @@ class FinalizedArtifacts(TypedDict):
 
     parquets: tuple[Path, ...]
     manifests: tuple[Path, ...]
+    manifest_records: tuple[Manifest, ...]
 
 
-def validate_finalized_artifacts(data_root: Path) -> FinalizedArtifacts:
+@dataclass(frozen=True)
+class _ValidatedManifestPair:
+    path: Path
+    manifest: Manifest
+
+
+def validate_finalized_artifacts(
+    data_root: Path, *, require_current_contract: bool = False
+) -> FinalizedArtifacts:
     """Validate every finalized Parquet/manifest pair under data_root.
 
     The validation is intentionally minimal: it only checks that every
     Parquet has a matching, parseable, schema-current manifest whose
     output identity matches the Parquet. It does NOT call
     :func:`validate_geoparquet`; that stricter byte-level validation is
-    performed separately, downstream, when the artifact is loaded.
+    performed separately, downstream, when the artifact is loaded. Callers
+    that report whether an artifact set matches the current dataset contract
+    can request that check explicitly. The result includes each parsed
+    manifest record so follow-up checks can use the same validated read.
     """
     data_dir = data_root / "data"
     manifests_dir = data_root / "manifests"
+    _require_artifact_root(data_root)
     _require_artifact_directories(data_dir, manifests_dir)
 
     parquets = sorted(
@@ -853,17 +885,32 @@ def validate_finalized_artifacts(data_root: Path) -> FinalizedArtifacts:
     )  # pragma: no mutate - all paths share one parent
     _check_artifact_stems(parquets, manifest_paths)
 
-    validated_manifests = [_validate_manifest_pair(parquet, manifests_dir) for parquet in parquets]
+    validated_pairs = [
+        _validate_manifest_pair_record(
+            parquet, manifests_dir, require_current_contract=require_current_contract
+        )
+        for parquet in parquets
+    ]
 
     return {
         "parquets": tuple(parquets),
-        "manifests": tuple(validated_manifests),
+        "manifests": tuple(pair.path for pair in validated_pairs),
+        "manifest_records": tuple(pair.manifest for pair in validated_pairs),
     }
 
 
+def _require_artifact_root(data_root: Path) -> None:
+    if data_root.is_symlink():
+        raise StorageError(f"data root is not a regular directory: {data_root}")
+
+
 def _require_artifact_directories(data_dir: Path, manifests_dir: Path) -> None:
+    if data_dir.is_symlink():
+        raise StorageError(f"data directory must be a real directory: {data_dir}")
     if not data_dir.is_dir():
         raise StorageError(f"missing data directory: {data_dir}")
+    if manifests_dir.is_symlink():
+        raise StorageError(f"manifest directory must be a real directory: {manifests_dir}")
     if not manifests_dir.is_dir():
         raise StorageError(f"missing manifests directory: {manifests_dir}")
 
@@ -876,19 +923,78 @@ def _check_artifact_stems(parquets: list[Path], manifests: list[Path]) -> None:
         raise StorageError(f"artifact/manifest mismatch (missing or extra): {sorted(mismatch)}")
 
 
-def _validate_manifest_pair(parquet: Path, manifests_dir: Path) -> Path:
+def _validate_manifest_pair(
+    parquet: Path, manifests_dir: Path, *, require_current_contract: bool = False
+) -> Path:
+    return _validate_manifest_pair_record(
+        parquet, manifests_dir, require_current_contract=require_current_contract
+    ).path
+
+
+def _validate_manifest_pair_record(
+    parquet: Path, manifests_dir: Path, *, require_current_contract: bool = False
+) -> _ValidatedManifestPair:
+    _require_regular_file(parquet, "finalized artifact", "finalized artifact is not a regular file")
     manifest_path = _manifest_path_for(parquet.name, manifests_dir.parent)
+    _require_regular_file(manifest_path, "manifest", "manifest is not a regular file")
+    manifest = _read_paired_manifest(manifest_path)
+    _validate_supported_manifest_version(manifest)
+    output_identity = _read_paired_output_identity(parquet)
+    _validate_paired_output(parquet, manifest, output_identity)
+    _validate_current_manifest_contract(
+        manifest, output_identity, manifest_path, require_current_contract
+    )
+    return _ValidatedManifestPair(manifest_path, manifest)
+
+
+def _require_regular_file(path: Path, label: str, invalid_message: str) -> None:
     try:
-        manifest = read_manifest(manifest_path)
+        is_symlink = path.is_symlink()
+        is_regular_file = path.is_file()
+    except OSError as error:
+        raise StorageError(f"cannot inspect {label} {path}: {error}") from error
+    if is_symlink or not is_regular_file:
+        raise StorageError(f"{invalid_message}: {path}")
+
+
+def _read_paired_manifest(manifest_path: Path) -> Manifest:
+    try:
+        return read_manifest(manifest_path)
     except ManifestError as error:
         raise StorageError(f"invalid manifest {manifest_path}: {error}") from error
+
+
+def _read_paired_output_identity(parquet: Path) -> OutputIdentity:
+    try:
+        return output_identity_for(parquet)
+    except OSError as error:
+        raise StorageError(f"cannot read finalized artifact {parquet}: {error}") from error
+
+
+def _validate_paired_output(
+    parquet: Path, manifest: Manifest, output_identity: OutputIdentity
+) -> None:
+    if manifest.output != output_identity:
+        raise StorageError(f"stale output identity for {parquet.name}")
+
+
+def _validate_supported_manifest_version(manifest: Manifest) -> None:
     if manifest.manifest_schema_version != MANIFEST_SCHEMA_VERSION:
         raise StorageError(
             f"manifest uses unsupported schema version: {manifest.manifest_schema_version}"
         )
-    if manifest.output != output_identity_for(parquet):
-        raise StorageError(f"stale output identity for {parquet.name}")
-    return manifest_path
+
+
+def _validate_current_manifest_contract(
+    manifest: Manifest,
+    output_identity: OutputIdentity,
+    manifest_path: Path,
+    require_current_contract: bool,
+) -> None:
+    if require_current_contract and not is_resumable(manifest, manifest.source, output_identity):
+        raise StorageError(
+            f"manifest contract does not match current configuration: {manifest_path}"
+        )
 
 
 def validate_finalized_artifacts_strict(data_root: Path) -> FinalizedArtifacts:

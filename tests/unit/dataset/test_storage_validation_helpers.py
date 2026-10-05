@@ -622,12 +622,15 @@ def test_validate_manifest_pair_reads_the_expected_path_and_checks_identity(
     tmp_path: Path,
 ) -> None:
     parquet = tmp_path / "region.parquet"
+    parquet.write_bytes(b"tiny parquet fixture")
     manifests_dir = tmp_path / "manifests"
     manifests_dir.mkdir()
     manifest_path = manifests_dir / "region.manifest.json"
+    manifest_path.write_bytes(b"tiny manifest fixture")
     expected_identity = object()
     manifest = SimpleNamespace(
         manifest_schema_version=storage.MANIFEST_SCHEMA_VERSION,
+        source=object(),
         output=expected_identity,
     )
 
@@ -636,18 +639,25 @@ def test_validate_manifest_pair_reads_the_expected_path_and_checks_identity(
         patch.object(
             storage, "output_identity_for", return_value=expected_identity
         ) as output_identity,
+        patch.object(storage, "is_resumable", return_value=True) as is_resumable,
     ):
-        assert _validate_manifest_pair(parquet, manifests_dir) == manifest_path
+        assert (
+            _validate_manifest_pair(parquet, manifests_dir, require_current_contract=True)
+            == manifest_path
+        )
 
     read_manifest.assert_called_once_with(manifest_path)
     output_identity.assert_called_once_with(parquet)
+    is_resumable.assert_called_once_with(manifest, manifest.source, expected_identity)
 
 
 def test_validate_manifest_pair_wraps_invalid_manifest_errors(tmp_path: Path) -> None:
     parquet = tmp_path / "region.parquet"
+    parquet.write_bytes(b"tiny parquet fixture")
     manifests_dir = tmp_path / "manifests"
     manifests_dir.mkdir()
     manifest_path = manifests_dir / "region.manifest.json"
+    manifest_path.write_bytes(b"tiny manifest fixture")
 
     with (
         patch.object(storage, "read_manifest", side_effect=ManifestError("broken")),
@@ -673,8 +683,10 @@ def test_validate_manifest_pair_rejects_unsupported_or_stale_manifests(
     message: str,
 ) -> None:
     parquet = tmp_path / "region.parquet"
+    parquet.write_bytes(b"tiny parquet fixture")
     manifests_dir = tmp_path / "manifests"
     manifests_dir.mkdir()
+    (manifests_dir / "region.manifest.json").write_bytes(b"tiny manifest fixture")
     manifest = SimpleNamespace(manifest_schema_version=manifest_version, output=output)
 
     with (
@@ -698,17 +710,21 @@ def test_validate_finalized_artifacts_returns_sorted_pairs_and_validates_each(
         (data_dir / f"{name}.parquet").write_bytes(b"")
         (manifests_dir / f"{name}.manifest.json").write_bytes(b"")
 
-    validated = [manifests_dir / "a.manifest.json", manifests_dir / "b.manifest.json"]
-    with patch.object(storage, "_validate_manifest_pair", side_effect=validated) as check:
+    validated = [
+        storage._ValidatedManifestPair(manifests_dir / "a.manifest.json", object()),
+        storage._ValidatedManifestPair(manifests_dir / "b.manifest.json", object()),
+    ]
+    with patch.object(storage, "_validate_manifest_pair_record", side_effect=validated) as check:
         result = validate_finalized_artifacts(tmp_path)
 
     assert result == {
         "parquets": (data_dir / "a.parquet", data_dir / "b.parquet"),
-        "manifests": tuple(validated),
+        "manifests": tuple(pair.path for pair in validated),
+        "manifest_records": tuple(pair.manifest for pair in validated),
     }
     assert check.call_args_list == [
-        call(data_dir / "a.parquet", manifests_dir),
-        call(data_dir / "b.parquet", manifests_dir),
+        call(data_dir / "a.parquet", manifests_dir, require_current_contract=False),
+        call(data_dir / "b.parquet", manifests_dir, require_current_contract=False),
     ]
 
 

@@ -303,6 +303,332 @@ def test_read_manifest_rejects_corrupt_json(tmp_path: Path) -> None:
         read_manifest(path)
 
 
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        (b"\xff", "invalid manifest encoding"),
+        (b"[" * 10_000 + b"0" + b"]" * 10_000, "corrupt manifest JSON"),
+        (b'{"value":' + b"9" * 5_000 + b"}", "corrupt manifest JSON"),
+        (b"[]", "expected a JSON object"),
+        (b'{"manifest_schema_version":2}', "invalid manifest structure"),
+    ],
+    ids=["invalid-utf8", "deeply-nested", "integer-digit-limit", "non-object", "missing-field"],
+)
+def test_read_manifest_reports_invalid_payloads_as_manifest_errors(
+    tmp_path: Path, payload: bytes, message: str
+) -> None:
+    path = tmp_path / "invalid.manifest.json"
+    path.write_bytes(payload)
+
+    with pytest.raises(ManifestError, match=message):
+        read_manifest(path)
+
+
+def test_read_manifest_preserves_path_for_invalid_structure(tmp_path: Path) -> None:
+    path = tmp_path / "invalid.manifest.json"
+    path.write_text('{"manifest_schema_version":2}', encoding="utf-8")
+
+    with pytest.raises(ManifestError, match="invalid manifest structure") as error:
+        read_manifest(path)
+
+    assert str(path) in str(error.value)
+
+
+@pytest.mark.parametrize("value", [2.0, True, "2"])
+def test_read_manifest_rejects_non_integer_manifest_schema_version(
+    tmp_path: Path, value: object
+) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload["manifest_schema_version"] = value
+    path = tmp_path / "invalid-schema-version.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ManifestError, match="unsupported manifest schema version"):
+        read_manifest(path)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        (
+            "emitted_features",
+            "1",
+            "invalid manifest counts.emitted_features: expected an integer",
+        ),
+        ("included_rows", True, "invalid manifest counts.included_rows: expected an integer"),
+        (
+            "rejections",
+            {"no_nonempty_description": "1"},
+            "invalid manifest counts.rejections: expected string keys and integers",
+        ),
+        (
+            "rejections",
+            [],
+            "invalid manifest counts.rejections: expected string keys and integers",
+        ),
+        (
+            "emitted_features",
+            -1,
+            "invalid manifest counts.emitted_features: expected a non-negative integer",
+        ),
+        (
+            "included_rows",
+            -1,
+            "invalid manifest counts.included_rows: expected a non-negative integer",
+        ),
+        (
+            "rejections",
+            {"no_nonempty_description": -1},
+            "invalid manifest counts.rejections: expected non-negative integer values",
+        ),
+    ],
+)
+def test_read_manifest_rejects_invalid_count_fields(
+    tmp_path: Path, field: str, value: object, message: str
+) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload["counts"][field] = value
+    path = tmp_path / "invalid-counts.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ManifestError) as error:
+        read_manifest(path)
+
+    assert str(error.value) == message
+
+
+def test_read_manifest_accepts_zero_counts(tmp_path: Path) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload["counts"] = {
+        "emitted_features": 0,
+        "included_rows": 0,
+        "rejections": {"no_nonempty_description": 0},
+    }
+    path = tmp_path / "zero-counts.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    manifest = read_manifest(path)
+
+    assert manifest.counts.emitted_features == 0
+    assert manifest.counts.included_rows == 0
+    assert manifest.counts.rejections == {"no_nonempty_description": 0}
+
+
+def test_read_manifest_accepts_nullable_provenance_fields(tmp_path: Path) -> None:
+    manifest = replace(_manifest(), osmium_version=None, code_revision=None)
+    path = tmp_path / "nullable-provenance.manifest.json"
+    write_manifest(manifest, path)
+
+    restored = read_manifest(path)
+
+    assert restored.osmium_version is None
+    assert restored.code_revision is None
+
+
+@pytest.mark.parametrize("reason", ["", " ", "\t\n"])
+def test_read_manifest_rejects_blank_rejection_reason(tmp_path: Path, reason: str) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload["counts"]["rejections"] = {reason: 3}
+    path = tmp_path / "blank-rejection-reason.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(
+        ManifestError,
+        match="invalid manifest counts.rejections: expected string keys and integers",
+    ):
+        read_manifest(path)
+
+
+def test_read_manifest_rejects_non_object_counts(tmp_path: Path) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload["counts"] = []
+    path = tmp_path / "invalid-counts.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ManifestError) as error:
+        read_manifest(path)
+
+    assert str(error.value) == "invalid manifest counts: expected an object"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("name", "../region.osm.pbf", "invalid manifest source.name: expected a file name"),
+        ("name", "folder\\region.osm.pbf", "invalid manifest source.name: expected a file name"),
+        ("name", "", "invalid manifest source.name: expected a file name"),
+        ("name", 123, "invalid manifest source.name: expected a file name"),
+        (
+            "name",
+            "region",
+            "invalid manifest source.name: expected an .osm.pbf file name",
+        ),
+        (
+            "name",
+            "region.OSM.PBF",
+            "invalid manifest source.name: expected an .osm.pbf file name",
+        ),
+        (
+            "size_bytes",
+            True,
+            "invalid manifest source.size_bytes: expected a non-negative integer",
+        ),
+        (
+            "size_bytes",
+            -1,
+            "invalid manifest source.size_bytes: expected a non-negative integer",
+        ),
+        (
+            "mtime_ns",
+            "1000",
+            "invalid manifest source.mtime_ns: expected an integer",
+        ),
+        (
+            "mtime_ns",
+            1.5,
+            "invalid manifest source.mtime_ns: expected an integer",
+        ),
+        (
+            "sha256",
+            "z" * 64,
+            "invalid manifest source.sha256: expected a SHA-256 digest",
+        ),
+    ],
+)
+def test_read_manifest_rejects_invalid_source_identity_fields(
+    tmp_path: Path, field: str, value: object, message: str
+) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload["source"][field] = value
+    path = tmp_path / "invalid-source.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ManifestError) as error:
+        read_manifest(path)
+
+    assert str(error.value) == message
+
+
+@pytest.mark.parametrize("value", [0, 3])
+def test_parse_nonnegative_version_accepts_nonnegative_integers(value: int) -> None:
+    assert manifest_module._parse_nonnegative_version(value, "schema_version") == value
+
+
+@pytest.mark.parametrize("value", [True, 2.0, "2", -1, None])
+def test_parse_nonnegative_version_rejects_invalid_values(value: object) -> None:
+    with pytest.raises(
+        ManifestError,
+        match="invalid manifest schema_version: expected a non-negative integer",
+    ):
+        manifest_module._parse_nonnegative_version(value, "schema_version")
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("schema_version", "3", "invalid manifest schema_version: expected a non-negative integer"),
+        (
+            "transform_algorithm_version",
+            "3",
+            "invalid manifest transform_algorithm_version: expected a non-negative integer",
+        ),
+    ],
+)
+def test_read_manifest_rejects_string_encoded_contract_versions(
+    tmp_path: Path, field: str, value: object, message: str
+) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload[field] = value
+    path = tmp_path / "invalid-version.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ManifestError) as error:
+        read_manifest(path)
+
+    assert str(error.value) == message
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("name", "../region.parquet", "invalid manifest output.name: expected a file name"),
+        ("name", "folder\\region.parquet", "invalid manifest output.name: expected a file name"),
+        ("name", "", "invalid manifest output.name: expected a file name"),
+        ("name", 123, "invalid manifest output.name: expected a file name"),
+        (
+            "size_bytes",
+            True,
+            "invalid manifest output.size_bytes: expected a non-negative integer",
+        ),
+        (
+            "size_bytes",
+            -1,
+            "invalid manifest output.size_bytes: expected a non-negative integer",
+        ),
+        ("sha256", "z" * 64, "invalid manifest output.sha256: expected a SHA-256 digest"),
+    ],
+)
+def test_read_manifest_rejects_invalid_output_identity_fields(
+    tmp_path: Path, field: str, value: object, message: str
+) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload["output"][field] = value
+    path = tmp_path / "invalid-output.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ManifestError) as error:
+        read_manifest(path)
+
+    assert str(error.value) == message
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("source", [], "invalid manifest source: expected an object"),
+        ("output", [], "invalid manifest output: expected an object"),
+    ],
+)
+def test_read_manifest_rejects_non_object_identities(
+    tmp_path: Path, field: str, value: object, message: str
+) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload[field] = value
+    path = tmp_path / "invalid-identity.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ManifestError) as error:
+        read_manifest(path)
+
+    assert str(error.value) == message
+
+
+def test_read_manifest_accepts_zero_sized_identities(tmp_path: Path) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload["source"]["size_bytes"] = 0
+    payload["source"]["mtime_ns"] = 0
+    payload["output"]["size_bytes"] = 0
+    path = tmp_path / "zero-identities.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    restored = read_manifest(path)
+
+    assert restored.source.size_bytes == 0
+    assert restored.source.mtime_ns == 0
+    assert restored.output.size_bytes == 0
+
+
+def test_read_manifest_accepts_pre_epoch_source_timestamp(tmp_path: Path) -> None:
+    payload = json.loads(_manifest().to_json())
+    payload["source"]["mtime_ns"] = -1
+    path = tmp_path / "pre-epoch.manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    restored = read_manifest(path)
+
+    assert restored.source.mtime_ns == -1
+
+
 def test_read_manifest_requests_utf8_and_preserves_read_error_context(tmp_path: Path) -> None:
     path = tmp_path / "region.manifest.json"
     payload = _manifest().to_json()
@@ -356,3 +682,15 @@ def test_a_manifest_without_policy_digests_reads_them_as_the_empty_digest(
 
     assert restored.area_policy_sha256 == hashlib.sha256(b"").hexdigest()
     assert restored.output_algorithm_revision == hashlib.sha256(b"").hexdigest()
+
+
+def test_manifest_reports_invalid_dependency_versions_with_a_stable_error() -> None:
+    payload = _manifest().to_payload()
+    payload["dependency_versions"] = []
+
+    with pytest.raises(ManifestError) as error:
+        Manifest.from_payload(payload)
+
+    assert str(error.value) == (
+        "invalid manifest dependency_versions: expected string keys and values"
+    )

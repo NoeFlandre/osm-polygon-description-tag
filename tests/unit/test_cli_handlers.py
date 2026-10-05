@@ -524,6 +524,7 @@ def test_cli_validate_sorts_and_accumulates_every_parquet(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     args = _cli_args(tmp_path)
+    args.source_root = None
     data_dir = args.data_root / "data"
     data_dir.mkdir()
     first = data_dir / "a.parquet"
@@ -531,20 +532,39 @@ def test_cli_validate_sorts_and_accumulates_every_parquet(
     first.write_bytes(b"a")
     second.write_bytes(b"b")
     calls: list[Path] = []
+    rows = {first: 2, second: 3}
+    manifests = (
+        args.data_root / "manifests" / "a.manifest.json",
+        args.data_root / "manifests" / "b.manifest.json",
+    )
 
-    def validate(path: Path) -> int:
+    def validate(path: Path, **_kwargs: object) -> int:
         calls.append(path)
-        return {first: 2, second: 3}[path]
+        return rows[path]
 
+    monkeypatch.setattr(
+        cli,
+        "validate_finalized_artifacts",
+        lambda _root, **_kwargs: {
+            "parquets": (first, second),
+            "manifests": manifests,
+            "manifest_records": tuple(
+                SimpleNamespace(
+                    source=SimpleNamespace(
+                        name=f"{path.name.removesuffix('.manifest.json')}.osm.pbf"
+                    ),
+                    output=cli.output_identity_for(parquet),
+                    counts=SimpleNamespace(
+                        included_rows=rows[parquet],
+                        emitted_features=rows[parquet],
+                        rejections={},
+                    ),
+                )
+                for path, parquet in zip(manifests, (first, second), strict=True)
+            ),
+        },
+    )
     monkeypatch.setattr(cli, "validate_geoparquet", validate)
-    original_glob = Path.glob
-
-    def reverse_glob(path: Path, pattern: str) -> list[Path]:
-        if path == data_dir and pattern == "*.parquet":
-            return [second, first]
-        return list(original_glob(path, pattern))
-
-    monkeypatch.setattr(Path, "glob", reverse_glob)
 
     assert cli.handle_validate(args) == 0
     assert calls == [first, second]

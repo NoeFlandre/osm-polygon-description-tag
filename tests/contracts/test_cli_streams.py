@@ -6,6 +6,7 @@ import hashlib
 import json
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from shapely import to_wkb
@@ -177,7 +178,7 @@ def test_validate_success_payload_is_exact(
     cli_roots: tuple[Path, Path],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    source_root, data_root = cli_roots
+    _, data_root = cli_roots
     data_dir = data_root / "data"
     data_dir.mkdir(parents=True)
     first = data_dir / "a.parquet"
@@ -185,9 +186,35 @@ def test_validate_success_payload_is_exact(
     first.touch()
     second.touch()
     rows = {first: 2, second: 3}
-    monkeypatch.setattr(cli, "validate_geoparquet", rows.__getitem__)
+    manifests = (
+        data_root / "manifests" / "a.manifest.json",
+        data_root / "manifests" / "b.manifest.json",
+    )
+    monkeypatch.setattr(cli, "validate_geoparquet", lambda path, **_kwargs: rows[path])
+    monkeypatch.setattr(
+        cli,
+        "validate_finalized_artifacts",
+        lambda _root, **_kwargs: {
+            "parquets": (first, second),
+            "manifests": manifests,
+            "manifest_records": tuple(
+                SimpleNamespace(
+                    source=SimpleNamespace(
+                        name=f"{path.name.removesuffix('.manifest.json')}.osm.pbf"
+                    ),
+                    output=cli.output_identity_for(parquet),
+                    counts=SimpleNamespace(
+                        included_rows=rows[parquet],
+                        emitted_features=rows[parquet],
+                        rejections={},
+                    ),
+                )
+                for path, parquet in zip(manifests, (first, second), strict=True)
+            ),
+        },
+    )
 
-    exit_code, payload = _run_json(["validate", *_common_args(source_root, data_root)], capsys)
+    exit_code, payload = _run_json(["validate", "--data-root", str(data_root)], capsys)
 
     assert exit_code == 0
     assert payload == {"files": 2, "rows": 5}

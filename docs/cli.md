@@ -52,6 +52,11 @@ An error prints one line on stderr. It never prints a traceback.
 | `trackio-snapshot` | Logs the completed dataset snapshot to Trackio | Writes local Trackio state and refreshes the public static dashboard |
 | `publish-plan` | Shows the exact upload plan identity | Read-only |
 
+`validate` works with only a data root. It checks each manifest source name
+against the Parquet rows and output name. To also compare recorded source size,
+modification time, and SHA-256 with the original PBFs, provide
+`--source-root /path/to/pbfs` or set `OSM_POLYGON_SOURCE_ROOT`.
+
 Examples:
 
 ```bash
@@ -81,8 +86,9 @@ uv run osm-polygon-description-tag run-and-publish \
 Options:
 
 - `--source-root PATH`: the immutable PBF directory. If you omit it, the tool
-  reads `OSM_POLYGON_SOURCE_ROOT`. Only `inspect`, `build-one`, `build-all`,
-  and `run-and-publish` need it. The data-only commands ignore it.
+  reads `OSM_POLYGON_SOURCE_ROOT`. `validate` also uses it optionally to check
+  source identities. Only `inspect`, `build-one`, `build-all`, and
+  `run-and-publish` require it. Other data-only commands ignore it.
 - `--data-root PATH`: the generated-data directory. If you omit it, the tool
   reads `OSM_POLYGON_DATA_ROOT`.
 - `--osmium NAME`: the executable name or path. The default is `osmium`.

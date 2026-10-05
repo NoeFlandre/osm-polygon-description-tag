@@ -20,10 +20,20 @@ from typer import rich_utils
 
 from osm_polygon_description_tag.dataset.docs import generate_dataset_docs
 from osm_polygon_description_tag.dataset.languages.detector import LanguageDetectionError
-from osm_polygon_description_tag.dataset.manifest import ManifestError
+from osm_polygon_description_tag.dataset.manifest import (
+    Manifest,
+    ManifestError,
+    SourceIdentity,
+    output_identity_for,
+    source_identity_for,
+)
 from osm_polygon_description_tag.dataset.migration import MigrationError, migrate_dataset_schema
 from osm_polygon_description_tag.dataset.stats import ReportingError
-from osm_polygon_description_tag.dataset.storage import StorageError, validate_geoparquet
+from osm_polygon_description_tag.dataset.storage import (
+    StorageError,
+    validate_finalized_artifacts,
+    validate_geoparquet,
+)
 from osm_polygon_description_tag.dataset.text_migration import (
     TextMigrationError,
     migrate_dataset_text,
@@ -44,6 +54,7 @@ from osm_polygon_description_tag.publication import (
 from osm_polygon_description_tag.publication.verification import HubVerificationError
 from osm_polygon_description_tag.runtime.click_compat import ClickException, Exit, UsageError
 from osm_polygon_description_tag.runtime.config import (
+    SOURCE_ROOT_ENV,
     MissingPathError,
     Paths,
     UnsafePathError,
@@ -76,7 +87,7 @@ SourceRoot = Annotated[
     typer.Option(
         "--source-root",
         help="Immutable PBF directory [default: $OSM_POLYGON_SOURCE_ROOT]. "
-        "Only commands that read PBFs use it.",
+        "Validation also checks source bytes when this is provided.",
     ),
 ]
 DataRoot = Annotated[
@@ -235,16 +246,106 @@ def handle_build_all(args: SimpleNamespace) -> int:
 
 def handle_validate(args: SimpleNamespace) -> int:
     data_root = _data_root(args)
+    source_root = _validation_source_root(args, data_root)
     data_dir = data_root / "data"
     if not data_dir.is_dir():
         raise ValueError(f"missing data directory: {data_dir}")
-    rows_total = 0
-    files = 0
-    for parquet in sorted(data_dir.glob("*.parquet")):
-        rows_total += validate_geoparquet(parquet)
-        files += 1
-    print_json({"files": files, "rows": rows_total})
+    parquets, manifest_records = _validation_artifacts(data_root, data_dir)
+    rows_total = _validate_artifact_pairs(parquets, manifest_records, source_root)
+    print_json({"files": len(parquets), "rows": rows_total})
     return 0
+
+
+def _validation_artifacts(
+    data_root: Path, data_dir: Path
+) -> tuple[tuple[Path, ...], tuple[Manifest, ...]]:
+    artifacts = validate_finalized_artifacts(data_root, require_current_contract=True)
+    parquets = artifacts["parquets"]
+    if not parquets:
+        raise StorageError(f"no finalized data artifacts found in {data_dir}")
+    return parquets, artifacts["manifest_records"]
+
+
+def _validate_artifact_pairs(
+    parquets: tuple[Path, ...],
+    manifest_records: tuple[Manifest, ...],
+    source_root: Path | None,
+) -> int:
+    return sum(
+        _validate_artifact_pair(parquet, manifest, source_root)
+        for parquet, manifest in zip(parquets, manifest_records, strict=True)
+    )
+
+
+def _validate_artifact_pair(parquet: Path, manifest: Manifest, source_root: Path | None) -> int:
+    rows = validate_geoparquet(parquet, expected_source_pbf=manifest.source.name)
+    try:
+        output_identity = output_identity_for(parquet)
+    except OSError as error:
+        raise StorageError(f"cannot read finalized artifact {parquet}: {error}") from error
+    if output_identity != manifest.output:
+        raise StorageError(f"stale output identity for {parquet.name}")
+    _validate_manifest_output_name(parquet, manifest)
+    _validate_manifest_row_count(parquet, manifest, rows)
+    _validate_manifest_counts(parquet, manifest)
+    if source_root is not None:
+        _validate_source_file_identity(manifest, source_root)
+    return rows
+
+
+def _validate_manifest_output_name(parquet: Path, manifest: Manifest) -> None:
+    expected_output_name = f"{manifest.source.name.removesuffix('.osm.pbf')}.parquet"
+    if expected_output_name != parquet.name:
+        raise StorageError(
+            f"manifest source identity mismatch for {parquet.name}: "
+            f"source {manifest.source.name!r} maps to {expected_output_name!r}"
+        )
+
+
+def _validate_manifest_row_count(parquet: Path, manifest: Manifest, rows: int) -> None:
+    if rows != manifest.counts.included_rows:
+        raise StorageError(
+            f"manifest row count mismatch for {parquet.name}: "
+            f"recorded {manifest.counts.included_rows}, found {rows}"
+        )
+
+
+def _validate_manifest_counts(parquet: Path, manifest: Manifest) -> None:
+    expected_emitted = manifest.counts.included_rows + sum(manifest.counts.rejections.values())
+    if manifest.counts.emitted_features != expected_emitted:
+        raise StorageError(f"manifest counts are inconsistent for {parquet.name}")
+
+
+def _validation_source_root(args: SimpleNamespace, data_root: Path) -> Path | None:
+    source_root = getattr(args, "source_root", None)
+    if source_root is None and not os.environ.get(SOURCE_ROOT_ENV, "").strip():
+        return None
+    return Paths.resolve(source_root, data_root).source_root
+
+
+def _validate_source_file_identity(manifest: Manifest, source_root: Path) -> None:
+    source_path = _require_regular_source_file(source_root / manifest.source.name)
+    source_identity = _read_source_identity(source_path)
+    if source_identity != manifest.source:
+        raise StorageError(f"source identity mismatch for {manifest.source.name}")
+
+
+def _require_regular_source_file(source_path: Path) -> Path:
+    try:
+        is_symlink = source_path.is_symlink()
+        is_regular_file = source_path.is_file()
+    except OSError as error:
+        raise StorageError(f"cannot inspect source file {source_path}: {error}") from error
+    if is_symlink or not is_regular_file:
+        raise StorageError(f"source identity mismatch: missing regular source file {source_path}")
+    return source_path
+
+
+def _read_source_identity(source_path: Path) -> SourceIdentity:
+    try:
+        return source_identity_for(source_path)
+    except OSError as error:
+        raise StorageError(f"cannot read source file {source_path}: {error}") from error
 
 
 def handle_card(args: SimpleNamespace) -> int:

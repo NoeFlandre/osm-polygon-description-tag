@@ -11,6 +11,7 @@ all agree.
 import hashlib
 import json
 import os
+import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,6 +76,126 @@ class RunCounts:
     rejections: dict[str, int]
 
 
+def _parse_run_counts(raw: Any) -> RunCounts:
+    if not isinstance(raw, dict):
+        raise ManifestError("invalid manifest counts: expected an object")
+    return RunCounts(
+        emitted_features=_parse_count_value(raw, "emitted_features"),
+        included_rows=_parse_count_value(raw, "included_rows"),
+        rejections=_parse_rejection_counts(raw.get("rejections")),
+    )
+
+
+def _parse_count_value(raw: dict[str, Any], field: str) -> int:
+    value = raw.get(field)
+    if type(value) is not int:
+        raise ManifestError(f"invalid manifest counts.{field}: expected an integer")
+    if value < 0:
+        raise ManifestError(f"invalid manifest counts.{field}: expected a non-negative integer")
+    return value
+
+
+def _parse_rejection_counts(raw: Any) -> dict[str, int]:
+    if not isinstance(raw, dict):
+        raise ManifestError("invalid manifest counts.rejections: expected string keys and integers")
+    if not _rejection_counts_have_expected_types(raw):
+        raise ManifestError("invalid manifest counts.rejections: expected string keys and integers")
+    if any(count < 0 for count in raw.values()):
+        raise ManifestError(
+            "invalid manifest counts.rejections: expected non-negative integer values"
+        )
+    return cast(dict[str, int], raw)  # pragma: no mutate - type-only cast
+
+
+def _rejection_counts_have_expected_types(raw: dict[Any, Any]) -> bool:
+    return all(
+        isinstance(reason, str) and reason.strip() != "" and type(count) is int
+        for reason, count in raw.items()
+    )
+
+
+def _parse_nonnegative_version(raw: Any, field: str) -> int:
+    if type(raw) is not int or raw < 0:
+        raise ManifestError(f"invalid manifest {field}: expected a non-negative integer")
+    return raw
+
+
+def _identity_mapping(raw: Any, identity_name: str) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ManifestError(f"invalid manifest {identity_name}: expected an object")
+    return cast(dict[str, Any], raw)  # pragma: no mutate - cast is type-only
+
+
+def _parse_file_name(raw: Any, identity_name: str) -> str:
+    if type(raw) is not str or not raw or Path(raw).name != raw or "\\" in raw:
+        raise ManifestError(f"invalid manifest {identity_name}: expected a file name")
+    return raw
+
+
+def _parse_source_name(raw: Any) -> str:
+    name = _parse_file_name(raw, "source.name")
+    if not name.endswith(".osm.pbf"):
+        raise ManifestError("invalid manifest source.name: expected an .osm.pbf file name")
+    return name
+
+
+def _parse_identity_size(raw: Any, identity_name: str) -> int:
+    if type(raw) is not int or raw < 0:
+        raise ManifestError(f"invalid manifest {identity_name}: expected a non-negative integer")
+    return raw
+
+
+def _parse_source_mtime(raw: Any) -> int:
+    if type(raw) is not int:
+        raise ManifestError("invalid manifest source.mtime_ns: expected an integer")
+    return raw
+
+
+def _parse_sha256(raw: Any, identity_name: str) -> str:
+    if type(raw) is not str or re.fullmatch(r"[0-9a-f]{64}", raw) is None:
+        raise ManifestError(f"invalid manifest {identity_name}: expected a SHA-256 digest")
+    return raw
+
+
+def _parse_source_identity(raw: Any) -> SourceIdentity:
+    identity = _identity_mapping(raw, "source")
+    return SourceIdentity(
+        _parse_source_name(identity.get("name")),
+        _parse_identity_size(identity.get("size_bytes"), "source.size_bytes"),
+        _parse_source_mtime(identity.get("mtime_ns")),
+        _parse_sha256(identity.get("sha256"), "source.sha256"),
+    )
+
+
+def _parse_output_identity(raw: Any) -> OutputIdentity:
+    identity = _identity_mapping(raw, "output")
+    return OutputIdentity(
+        _parse_file_name(identity.get("name"), "output.name"),
+        _parse_identity_size(identity.get("size_bytes"), "output.size_bytes"),
+        _parse_sha256(identity.get("sha256"), "output.sha256"),
+    )
+
+
+def _parse_optional_string(raw: Any, field: str) -> str | None:
+    if raw is not None and type(raw) is not str:
+        raise ManifestError(f"invalid manifest {field}: expected a string or null")
+    return raw
+
+
+def _parse_string(raw: Any, field: str) -> str:
+    if type(raw) is not str:
+        raise ManifestError(f"invalid manifest {field}: expected a string")
+    return raw
+
+
+def _parse_dependency_versions(raw: Any) -> dict[str, str]:
+    if not isinstance(raw, dict) or any(
+        type(name) is not str or type(version) is not str for name, version in raw.items()
+    ):
+        raise ManifestError("invalid manifest dependency_versions: expected string keys and values")
+    return cast(dict[str, str], raw)  # pragma: no mutate - cast is type-only
+
+
 @dataclass(frozen=True)
 class Manifest:
     manifest_schema_version: int
@@ -129,41 +250,30 @@ class Manifest:
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "Manifest":
         version = payload.get("manifest_schema_version")
-        if version != MANIFEST_SCHEMA_VERSION:
+        if type(version) is not int or version != MANIFEST_SCHEMA_VERSION:
             raise ManifestError(f"unsupported manifest schema version: {version!r}")
-        source_raw = cast(dict[str, Any], payload["source"])
-        output_raw = cast(dict[str, Any], payload["output"])
-        counts_raw = cast(dict[str, Any], payload["counts"])
+        counts = _parse_run_counts(payload["counts"])
+        schema_version = _parse_nonnegative_version(payload.get("schema_version"), "schema_version")
+        transform_algorithm_version = _parse_nonnegative_version(
+            payload.get("transform_algorithm_version", 0), "transform_algorithm_version"
+        )
         return cls(
             manifest_schema_version=int(payload["manifest_schema_version"]),
-            schema_version=int(payload["schema_version"]),
+            schema_version=schema_version,
             geoparquet_version=str(payload["geoparquet_version"]),
-            transform_algorithm_version=int(payload.get("transform_algorithm_version", 0)),
+            transform_algorithm_version=transform_algorithm_version,
             area_policy_sha256=str(payload.get("area_policy_sha256") or _empty_policy_hash()),
             output_algorithm_revision=str(
                 payload.get("output_algorithm_revision") or _empty_policy_hash()
             ),
-            source=SourceIdentity(
-                name=str(source_raw["name"]),
-                size_bytes=int(source_raw["size_bytes"]),
-                mtime_ns=int(source_raw["mtime_ns"]),
-                sha256=str(source_raw["sha256"]),
-            ),
-            output=OutputIdentity(
-                name=str(output_raw["name"]),
-                size_bytes=int(output_raw["size_bytes"]),
-                sha256=str(output_raw["sha256"]),
-            ),
-            osmium_version=cast("str | None", payload.get("osmium_version")),
-            dependency_versions=dict(cast(dict[str, str], payload["dependency_versions"])),
-            code_revision=cast("str | None", payload.get("code_revision")),
-            started_at=str(payload["started_at"]),
-            completed_at=str(payload["completed_at"]),
-            counts=RunCounts(
-                emitted_features=int(counts_raw["emitted_features"]),
-                included_rows=int(counts_raw["included_rows"]),
-                rejections=dict(cast(dict[str, int], counts_raw["rejections"])),
-            ),
+            source=_parse_source_identity(payload["source"]),
+            output=_parse_output_identity(payload["output"]),
+            osmium_version=_parse_optional_string(payload.get("osmium_version"), "osmium_version"),
+            dependency_versions=_parse_dependency_versions(payload["dependency_versions"]),
+            code_revision=_parse_optional_string(payload.get("code_revision"), "code_revision"),
+            started_at=_parse_string(payload["started_at"], "started_at"),
+            completed_at=_parse_string(payload["completed_at"], "completed_at"),
+            counts=counts,
         )
 
 
@@ -273,15 +383,32 @@ def write_manifest(manifest: Manifest, path: Path) -> None:
 
 def read_manifest(path: Path) -> Manifest:
     """Read and validate a manifest file."""
+    return _manifest_from_payload(_read_manifest_payload(path), path)
+
+
+def _read_manifest_payload(path: Path) -> dict[str, Any]:
     try:
         text = path.read_text(encoding="utf-8")  # pragma: no mutate - codec names are equivalent
     except OSError as error:
         raise ManifestError(f"cannot read manifest {path}: {error}") from error
+    except UnicodeError as error:
+        raise ManifestError(f"invalid manifest encoding {path}: {error}") from error
     try:
         payload = json.loads(text)
-    except json.JSONDecodeError as error:
+    except (RecursionError, ValueError) as error:
         raise ManifestError(f"corrupt manifest JSON {path}: {error}") from error
-    return Manifest.from_payload(payload)
+    if not isinstance(payload, dict):
+        raise ManifestError(f"invalid manifest structure {path}: expected a JSON object")
+    return cast(dict[str, Any], payload)  # pragma: no mutate - cast is type-only
+
+
+def _manifest_from_payload(payload: dict[str, Any], path: Path) -> Manifest:
+    try:
+        return Manifest.from_payload(payload)
+    except ManifestError:
+        raise
+    except (AttributeError, IndexError, KeyError, OverflowError, TypeError, ValueError) as error:
+        raise ManifestError(f"invalid manifest structure {path}: {error}") from error
 
 
 def current_dependency_versions() -> dict[str, str]:

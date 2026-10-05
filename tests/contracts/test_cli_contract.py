@@ -9,6 +9,7 @@ import pytest
 from shapely.geometry import Polygon
 from typer import rich_utils
 
+from osm_polygon_description_tag import cli
 from osm_polygon_description_tag.cli import (
     handle_inspect,
     handle_publish,
@@ -393,10 +394,13 @@ def test_data_only_commands_do_not_need_a_source_root(
     monkeypatch.delenv(runtime_config.SOURCE_ROOT_ENV, raising=False)
     data_root = tmp_path / "generated"
     (data_root / "data").mkdir(parents=True)
+    (data_root / "manifests").mkdir()
 
-    assert run(["validate", "--data-root", str(data_root)]) == 0
+    assert run(["validate", "--data-root", str(data_root)]) == 4
 
-    assert json.loads(capsys.readouterr().out) == {"files": 0, "rows": 0}
+    error = capsys.readouterr().err
+    assert "no finalized data artifacts" in error
+    assert "--source-root" not in error
 
 
 def test_publish_rejects_wrong_plan_identity(
@@ -468,18 +472,36 @@ def test_inspect_handler_prints_json_summary(
     assert payload["sources"][0]["output_name"] == "a.parquet"
 
 
-def test_validate_handler_sums_rows(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    source = tmp_path / "raw"
+def test_validate_handler_sums_rows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     data = tmp_path / "generated"
     (data / "data").mkdir(parents=True)
     record = make_record_dict(
         Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
         {"description": "x"},
         osm_id=1,
+        source_pbf="a.osm.pbf",
     )
     write_geoparquet(iter([record]), data / "data" / "a.parquet", batch_size=10)
+    parquet = data / "data" / "a.parquet"
+    monkeypatch.setattr(
+        cli,
+        "validate_finalized_artifacts",
+        lambda _root, **_kwargs: {
+            "parquets": (parquet,),
+            "manifests": (data / "manifests" / "a.manifest.json",),
+            "manifest_records": (
+                SimpleNamespace(
+                    source=SimpleNamespace(name="a.osm.pbf"),
+                    output=cli.output_identity_for(parquet),
+                    counts=SimpleNamespace(included_rows=1, emitted_features=1, rejections={}),
+                ),
+            ),
+        },
+    )
     args = SimpleNamespace(
-        source_root=source,
+        source_root=None,
         data_root=data,
         osmium="osmium",
         export_config=Path("config/osmium-export.json"),
@@ -738,3 +760,21 @@ def test_the_exit_code_table_is_documented() -> None:
     cli_doc = (Path(__file__).resolve().parents[2] / "docs" / "cli.md").read_text(encoding="utf-8")
     for code in {code for _types, code in cli_module._EXIT_CODES} | {1, 2, 130}:
         assert f"| `{code}` |" in cli_doc
+
+
+def test_validate_docs_explain_source_root_environment_opt_in() -> None:
+    cli_doc = (Path(__file__).resolve().parents[2] / "docs" / "cli.md").read_text(encoding="utf-8")
+    validate_section = cli_doc.split("`validate` works with only a data root.", 1)[1].split(
+        "\nExamples:", 1
+    )[0]
+
+    assert "OSM_POLYGON_SOURCE_ROOT" in validate_section
+
+
+def test_source_root_option_docs_include_optional_validate_identity_check() -> None:
+    cli_doc = (Path(__file__).resolve().parents[2] / "docs" / "cli.md").read_text(encoding="utf-8")
+    source_root_option = cli_doc.split("- `--source-root PATH`:", 1)[1].split(
+        "- `--data-root PATH`:", 1
+    )[0]
+
+    assert "`validate`" in source_root_option
