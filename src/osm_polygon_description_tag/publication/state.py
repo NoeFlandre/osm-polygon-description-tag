@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import uuid
 from pathlib import Path
 from typing import cast
 
@@ -17,6 +15,7 @@ from osm_polygon_description_tag.publication.artifacts import (
     metadata_paths,
 )
 from osm_polygon_description_tag.publication.models import UploadPlan
+from osm_polygon_description_tag.runtime.atomic import atomic_write_bytes
 
 PUBLICATION_STATE_FILENAME = "publication-state.json"
 H3_MAP_ASSET_RELATIVE_PATH = H3_MAP_ARTIFACT.relative_path
@@ -33,24 +32,10 @@ class PublicationStateError(RuntimeError):
 
 
 def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     # pragma: no mutate start - None and False are equivalent for json.ensure_ascii
     body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     # pragma: no mutate end
-    temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        temp.write_text(body, encoding="utf-8")
-        with Path(temp).open("rb") as handle:
-            os.fsync(handle.fileno())
-        directory_fd = os.open(str(path.parent), os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-        Path(temp).replace(path)
-    finally:
-        if temp.exists():
-            temp.unlink()
+    atomic_write_bytes(path, body.encode("utf-8"))
 
 
 def read_publication_state(data_root: Path) -> dict[str, object]:

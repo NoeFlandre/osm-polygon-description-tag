@@ -15,8 +15,6 @@ plan identity and the same remote revision.
 
 from __future__ import annotations
 
-import os
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -39,6 +37,7 @@ from osm_polygon_description_tag.publication.verification import (
     HubVerifier,
     build_default_hub_verifier,
 )
+from osm_polygon_description_tag.runtime.atomic import atomic_write_bytes
 
 
 @dataclass(frozen=True)
@@ -351,15 +350,7 @@ def _sync_remote_card(
     current = target.read_text(encoding="utf-8") if target.is_file() else None  # pragma: no mutate
     if current == remote_readme:
         return
-    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        temporary.write_text(remote_readme, encoding="utf-8", newline="")  # pragma: no mutate
-        with temporary.open("rb") as handle:
-            os.fsync(handle.fileno())
-        Path(temporary).replace(target)
-    finally:
-        if temporary.exists():
-            temporary.unlink()
+    atomic_write_bytes(target, remote_readme.encode("utf-8"))
 
 
 __all__ = ["ReleaseReport", "release_metadata", "validate_published_inventory"]

@@ -738,23 +738,16 @@ def test_template_with_map_markers_requires_the_stats_marker() -> None:
         _template_with_map_markers("before", "assets/map.png")
 
 
-def test_atomic_write_template_uses_explicit_utf8_and_binary_fsync_open() -> None:
-    template = Mock()
-    temporary = Mock()
-    temporary.exists.return_value = False
-    template.with_name.return_value = temporary
-    handle = Mock()
-    handle.__enter__ = Mock(return_value=handle)
-    handle.__exit__ = Mock(return_value=None)
-    temporary.open.return_value = handle
+def test_atomic_write_template_writes_utf8_bytes_and_leaves_no_temp_file(
+    tmp_path: Path,
+) -> None:
+    template = tmp_path / "README.md"
+    template.write_text("old", encoding="utf-8")
 
-    with patch.object(card_module.os, "fsync") as fsync:
-        _atomic_write_template(template, "new text")
+    _atomic_write_template(template, "café\n")
 
-    temporary.write_text.assert_called_once_with("new text", encoding="utf-8")
-    temporary.open.assert_called_once_with("rb")
-    fsync.assert_called_once_with(handle.fileno())
-    temporary.replace.assert_called_once_with(template)
+    assert template.read_bytes() == "café\n".encode()
+    assert sorted(path.name for path in tmp_path.glob(".*")) == []
 
 
 # ---------------------------------------------------------------------------

@@ -5,9 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
 import re
-import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -46,6 +44,7 @@ from osm_polygon_description_tag.dataset.stats import (
     utc_now_iso,
 )
 from osm_polygon_description_tag.dataset.text import TEXT_CONTRACT_VERSION
+from osm_polygon_description_tag.runtime.atomic import atomic_write_bytes
 from osm_polygon_description_tag.runtime.resources import dataset_card_hero
 
 _H3_MAP_CACHE_SCHEMA_VERSION = 2
@@ -103,16 +102,8 @@ def _atomic_write_if_changed(path: Path, data: bytes) -> bool:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.is_file() and path.read_bytes() == data:
         return False
-    temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        temp.write_bytes(data)
-        with temp.open("rb") as handle:
-            os.fsync(handle.fileno())
-        Path(temp).replace(path)
-        return True
-    finally:
-        if temp.exists():
-            temp.unlink()
+    atomic_write_bytes(path, data)
+    return True
 
 
 def _write_if_changed(path: Path, text: str) -> bool:
