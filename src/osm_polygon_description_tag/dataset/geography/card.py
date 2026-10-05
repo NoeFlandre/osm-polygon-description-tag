@@ -190,7 +190,9 @@ def _template_with_map_markers(text: str, asset_relative_path: str) -> str:
 
 
 def _atomic_write_template(template_path: Path, new_text: str) -> None:
-    atomic_write_bytes(template_path, new_text.encode("utf-8"))
+    atomic_write_bytes(
+        template_path, new_text.encode("utf-8")
+    )  # pragma: no mutate - codec names are case-insensitive
 
 
 __all__ = [

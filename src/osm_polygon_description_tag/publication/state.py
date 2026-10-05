@@ -35,7 +35,9 @@ def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
     # pragma: no mutate start - None and False are equivalent for json.ensure_ascii
     body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     # pragma: no mutate end
-    atomic_write_bytes(path, body.encode("utf-8"))
+    atomic_write_bytes(
+        path, body.encode("utf-8")
+    )  # pragma: no mutate - codec names are case-insensitive
 
 
 def read_publication_state(data_root: Path) -> dict[str, object]:
