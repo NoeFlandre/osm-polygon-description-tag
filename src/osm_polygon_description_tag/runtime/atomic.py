@@ -34,8 +34,8 @@ def atomic_write_bytes(path: Path, content: bytes) -> None:
 
 
 def atomic_write_text(path: Path, text: str) -> None:
-    """Durably replace ``path`` with ``text`` encoded as UTF-8."""
-    atomic_write_via(path, lambda temp: temp.write_text(text, encoding="utf-8"))
+    """Durably replace ``path`` with ``text`` encoded as UTF-8, without newline translation."""
+    atomic_write_via(path, lambda temp: temp.write_text(text, encoding="utf-8", newline=""))
 
 
 def atomic_write_json(path: Path, payload: object) -> None:
