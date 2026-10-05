@@ -202,7 +202,7 @@ class LanguageDetector:
     coupling them to Lingua internals.
     """
 
-    __slots__ = ("_confidence_values", "_identity", "_mixed_provider", "resolve_language_policy")
+    __slots__ = ("_confidence_values", "_identity", "_mixed_provider", "_policy")
 
     def __init__(
         self,
@@ -221,7 +221,7 @@ class LanguageDetector:
             raise ValueError("model identity policy does not match detector policy")
         self._confidence_values = confidence_values
         self._mixed_provider = multiple_language_codes
-        self.resolve_language_policy = policy
+        self._policy = policy
         self._identity = resolved_identity
 
     @property
@@ -230,15 +230,15 @@ class LanguageDetector:
 
     @property
     def policy(self) -> LanguagePolicy:
-        return self.resolve_language_policy
+        return self._policy
 
     def __call__(self, text: str) -> LanguageResult:
-        initial = _initial_result(text, self.resolve_language_policy)
+        initial = _initial_result(text, self._policy)
         if initial is not None:
             return initial
         model_text = _model_input(text)
         ranked = _ranked_scores(self._confidence_values(model_text))
-        return _score_result(ranked, model_text, self.resolve_language_policy, self._mixed_provider)
+        return _score_result(ranked, model_text, self._policy, self._mixed_provider)
 
 
 class FallbackLanguageDetector:

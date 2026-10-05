@@ -453,3 +453,7 @@ def test_glotlid_refuses_unequal_length_predictions() -> None:
         _adapter_for((["__label__eng_Latn", "__label__fra_Latn"], [0.5]))("hello there")
 
     assert str(error.value) == "GlotLID predictions must be equal-length sequences"
+
+
+def test_language_detector_state_is_private_slots_only() -> None:
+    assert all(name.startswith("_") for name in LanguageDetector.__slots__)
