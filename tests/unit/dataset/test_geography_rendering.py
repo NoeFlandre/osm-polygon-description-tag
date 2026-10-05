@@ -45,10 +45,10 @@ from osm_polygon_description_tag.dataset.geography.rendering import (
     _COLORMAP_NAME,
     _DPI,
     _FIGSIZE,
-    _LAND_COLOR,
-    _LAND_EDGE,
     _METADATA_SOFTWARE,
     _NO_DATA_CAPTION,
+    LAND_COLOR,
+    LAND_EDGE,
 )
 
 
@@ -413,8 +413,8 @@ def test_render_density_map_draws_land_overlay_before_cells(
 
 def test_land_palette_matches_wikidata_only() -> None:
     """Keep the shared beige land / blue ocean palette used by wikidata-only."""
-    assert _LAND_COLOR == "#e8e0d0"
-    assert _LAND_EDGE == "#b8aa90"
+    assert LAND_COLOR == "#e8e0d0"
+    assert LAND_EDGE == "#b8aa90"
 
 
 def test_bundled_land_basemap_is_available_and_nonempty() -> None:
@@ -486,8 +486,8 @@ def test_draw_ring_passes_the_complete_land_patch_style() -> None:
     polygon.assert_called_once_with(
         [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)],
         closed=True,
-        facecolor=basemap_module._LAND_COLOR,
-        edgecolor=basemap_module._LAND_EDGE,
+        facecolor=basemap_module.LAND_COLOR,
+        edgecolor=basemap_module.LAND_EDGE,
         linewidth=0.2,
         zorder=1,
     )

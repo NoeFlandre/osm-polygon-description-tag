@@ -35,8 +35,8 @@ from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     ManifestError,
     OutputIdentity,
-    _manifest_path_for,
     is_resumable,
+    manifest_path_for,
     output_identity_for,
     read_manifest,
 )
@@ -61,7 +61,7 @@ than spelled at each writer: four copies of a literal are four chances
 for one of them to drift.
 """
 
-_DICTIONARY_COLUMNS = ["source_pbf", "osm_type", "geometry_type"]
+DICTIONARY_COLUMNS = ["source_pbf", "osm_type", "geometry_type"]
 _VALID_GEOMETRY_TYPES = {"Polygon", "MultiPolygon"}
 _VALIDATION_COLUMNS = [
     "source_pbf",
@@ -90,7 +90,7 @@ class _RecordStreamSummary:
     bbox: tuple[float, float, float, float] | None
 
 
-def _arrow_record(record: Mapping[str, object]) -> dict[str, object]:
+def arrow_record(record: Mapping[str, object]) -> dict[str, object]:
     """Convert transform-layer mappings to the Hub-compatible Arrow shape."""
     normalized = dict(record)
     for column in KEY_VALUE_COLUMNS:
@@ -126,7 +126,7 @@ def _stream_rewrite_with_metadata(
         target,
         schema_geo,
         compression=GEOPARQUET_COMPRESSION,
-        use_dictionary=_DICTIONARY_COLUMNS,
+        use_dictionary=DICTIONARY_COLUMNS,
     ) as writer:
         for batch in reader.iter_batches(batch_size=4096):
             writer.write_batch(batch)
@@ -167,7 +167,7 @@ def _stream_records(
     bounds: tuple[float, float, float, float] | None = None
     row_count = 0
     for record in records:
-        batch.append(_arrow_record(record))
+        batch.append(arrow_record(record))
         row_count += 1
         geometry_types.add(str(record["geometry_type"]))
         bounds = _merge_bounds(bounds, _record_bounds(record))
@@ -236,7 +236,7 @@ def _bounds_are_plain(array: pa.Array) -> bool:
 
 
 def _fast_batch_is_exact(batch: pa.RecordBatch) -> bool:
-    """Return whether casting ``batch`` equals the ``_arrow_record`` round trip."""
+    """Return whether casting ``batch`` equals the ``arrow_record`` round trip."""
     if batch.schema.names != SCHEMA.names or batch.column("geometry_type").null_count:
         return False
     return _columns_satisfy(batch, KEY_VALUE_COLUMNS, _pairs_are_canonical) and _columns_satisfy(
@@ -251,7 +251,7 @@ def _columns_satisfy(
 
 
 def _fast_batch(batch: pa.RecordBatch) -> pa.RecordBatch | None:
-    """Cast ``batch`` to SCHEMA when that equals the ``_arrow_record`` round trip."""
+    """Cast ``batch`` to SCHEMA when that equals the ``arrow_record`` round trip."""
     if not _fast_batch_is_exact(batch):
         return None
     try:
@@ -306,7 +306,7 @@ class _BatchAccumulator:
             self.geometry_types.add(str(record["geometry_type"]))
             self.bounds = _merge_bounds(self.bounds, _record_bounds(record))
         return pa.RecordBatch.from_pylist(
-            [_arrow_record(record) for record in records], schema=SCHEMA
+            [arrow_record(record) for record in records], schema=SCHEMA
         )
 
     def _pend(self, batch: pa.RecordBatch) -> None:
@@ -404,7 +404,7 @@ def _write_geoparquet_with(
             temp_data,
             SCHEMA,
             compression=GEOPARQUET_COMPRESSION,
-            use_dictionary=_DICTIONARY_COLUMNS,
+            use_dictionary=DICTIONARY_COLUMNS,
         ) as writer:
             summary = stream(writer)
 
@@ -935,7 +935,7 @@ def _validate_manifest_pair_record(
     parquet: Path, manifests_dir: Path, *, require_current_contract: bool = False
 ) -> _ValidatedManifestPair:
     _require_regular_file(parquet, "finalized artifact", "finalized artifact is not a regular file")
-    manifest_path = _manifest_path_for(parquet.name, manifests_dir.parent)
+    manifest_path = manifest_path_for(parquet.name, manifests_dir.parent)
     _require_regular_file(manifest_path, "manifest", "manifest is not a regular file")
     manifest = _read_paired_manifest(manifest_path)
     _validate_supported_manifest_version(manifest)

@@ -195,7 +195,7 @@ def _fake_exporter() -> object:
 
 def _monkeypatch_hub(monkeypatch: pytest.MonkeyPatch, hub: _FakeHubApi) -> None:
     monkeypatch.setattr(
-        "osm_polygon_description_tag.publication.verification._huggingface_hub.HfApi",
+        "osm_polygon_description_tag.publication.verification.lazy_huggingface_hub.HfApi",
         lambda *a, **kw: hub,
     )
 
@@ -219,7 +219,7 @@ def test_default_hub_verifier_factory_creates_hfapi(monkeypatch: pytest.MonkeyPa
         )
 
     monkeypatch.setattr(
-        "osm_polygon_description_tag.publication.verification._huggingface_hub.HfApi",
+        "osm_polygon_description_tag.publication.verification.lazy_huggingface_hub.HfApi",
         fake_hfapi,
     )
 
@@ -398,7 +398,7 @@ def test_cli_run_and_publish_invokes_default_verifier(
     import osm_polygon_description_tag.publication.upload as pub
     import osm_polygon_description_tag.publication.verification as orch
 
-    monkeypatch.setattr(orch._huggingface_hub, "HfApi", fake_hubapi)
+    monkeypatch.setattr(orch.lazy_huggingface_hub, "HfApi", fake_hubapi)
     monkeypatch.setattr(pub, "default_runner_with_retry", lambda command, **kw: None)
 
     # Plant a resumable local artifact so the orchestrator does NOT need
@@ -569,7 +569,7 @@ def test_default_verifier_fails_closed_on_empty_identity(
 
     import osm_polygon_description_tag.publication.verification as orch
 
-    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
+    monkeypatch.setattr(orch.lazy_huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
 
     from osm_polygon_description_tag.workflow.orchestrator import HubVerificationError
 
@@ -593,7 +593,7 @@ def test_default_verifier_fails_closed_on_repo_info_error(
 
     import osm_polygon_description_tag.publication.verification as orch
 
-    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
+    monkeypatch.setattr(orch.lazy_huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
 
     from osm_polygon_description_tag.workflow.orchestrator import HubVerificationError
 
@@ -620,7 +620,7 @@ def test_default_verifier_fails_closed_on_empty_revision(
 
     import osm_polygon_description_tag.publication.verification as orch
 
-    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
+    monkeypatch.setattr(orch.lazy_huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
 
     from osm_polygon_description_tag.workflow.orchestrator import HubVerificationError
 
@@ -657,7 +657,7 @@ def test_default_verifier_fails_closed_on_size_mismatch(
 
     import osm_polygon_description_tag.publication.verification as orch
 
-    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
+    monkeypatch.setattr(orch.lazy_huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
 
     from osm_polygon_description_tag.workflow.orchestrator import HubVerificationError
 
@@ -694,7 +694,7 @@ def test_default_verifier_fails_closed_on_lfs_sha_mismatch(
 
     import osm_polygon_description_tag.publication.verification as orch
 
-    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
+    monkeypatch.setattr(orch.lazy_huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
 
     from osm_polygon_description_tag.workflow.orchestrator import HubVerificationError
 
@@ -741,7 +741,7 @@ def test_default_verifier_fails_closed_on_download_error(
 
     import osm_polygon_description_tag.publication.verification as orch
 
-    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
+    monkeypatch.setattr(orch.lazy_huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
 
     from osm_polygon_description_tag.workflow.orchestrator import HubVerificationError
 
@@ -777,7 +777,7 @@ class _RecordingApi:
 def _install(monkeypatch: pytest.MonkeyPatch, api: object) -> None:
     import osm_polygon_description_tag.publication.verification as orch
 
-    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: api)
+    monkeypatch.setattr(orch.lazy_huggingface_hub, "HfApi", lambda *a, **kw: api)
 
 
 def test_read_file_requests_the_exact_path_at_the_exact_revision(
@@ -948,6 +948,6 @@ def test_default_hub_verifier_factory_uses_lazy_api(monkeypatch: pytest.MonkeyPa
         def repo_info(self, _repo_id: str, **_kwargs: object) -> SimpleNamespace:
             return SimpleNamespace(sha="revision")
 
-    monkeypatch.setattr(verification._huggingface_hub, "HfApi", _Api)
+    monkeypatch.setattr(verification.lazy_huggingface_hub, "HfApi", _Api)
     verifier = verification.default_hub_verifier_factory()
     assert verifier("owner/dataset", ()) == "revision"

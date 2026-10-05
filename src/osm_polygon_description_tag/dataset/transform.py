@@ -121,7 +121,7 @@ def _has_nonempty_description(tags: Mapping[str, object]) -> bool:
     return is_nonempty_text(tags.get("description")) or _has_nonempty_localized(tags, "description")
 
 
-def _early_rejection_reason(record: ExportRecord) -> str | None:
+def early_rejection_reason(record: ExportRecord) -> str | None:
     """Return a cheap pre-geometry rejection reason for the build hot path."""
     identity_reason = _identity_rejection_reason(record)
     if identity_reason is not None:

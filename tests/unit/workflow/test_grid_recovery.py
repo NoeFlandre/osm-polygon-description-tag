@@ -47,6 +47,13 @@ from osm_polygon_description_tag.workflow.grid_operator import (
     submission_lock,
     submit_job,
 )
+from osm_polygon_description_tag.workflow.grid_operator import bundle as grid_bundle
+from osm_polygon_description_tag.workflow.grid_operator import reconciliation as grid_reconciliation
+from osm_polygon_description_tag.workflow.grid_operator import results as grid_results
+from osm_polygon_description_tag.workflow.grid_operator import stage as grid_stage
+from osm_polygon_description_tag.workflow.grid_operator import state as grid_state
+from osm_polygon_description_tag.workflow.grid_operator import submission as grid_submission
+from osm_polygon_description_tag.workflow.grid_operator import verify as grid_verify
 from osm_polygon_description_tag.workflow.grid_policy import (
     PolicyDecision,
     PolicyEvidence,
@@ -54,6 +61,7 @@ from osm_polygon_description_tag.workflow.grid_policy import (
 )
 from osm_polygon_description_tag.workflow.grid_scheduler import CommandResult, JobState
 from tests.helpers.parquet import write_description_shard
+from tests.helpers.patching import patch_modules
 from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH, fake_splitter
 
 SHARD = "region.parquet"
@@ -217,7 +225,7 @@ def test_initialization_holds_the_submission_lock_before_the_worker_lock(
     _, run, snapshot = prepared
     order: list[str] = []
     original_submission = grid_operator.submission_lock
-    original_worker = grid_operator.exclusive_worker_lock
+    original_worker = grid_bundle.exclusive_worker_lock
 
     def traced_submission(target: Path) -> object:
         order.append("submission")
@@ -227,8 +235,28 @@ def test_initialization_holds_the_submission_lock_before_the_worker_lock(
         order.append("worker")
         return original_worker(target)
 
-    monkeypatch.setattr(grid_operator, "submission_lock", traced_submission)
-    monkeypatch.setattr(grid_operator, "exclusive_worker_lock", traced_worker)
+    patch_modules(
+        monkeypatch,
+        (
+            (grid_operator, "submission_lock"),
+            (grid_bundle, "submission_lock"),
+            (grid_stage, "submission_lock"),
+            (grid_verify, "submission_lock"),
+            (grid_submission, "submission_lock"),
+            (grid_reconciliation, "submission_lock"),
+            (grid_results, "submission_lock"),
+            (grid_state, "submission_lock"),
+        ),
+        traced_submission,
+    )
+    patch_modules(
+        monkeypatch,
+        (
+            (grid_bundle, "exclusive_worker_lock"),
+            (grid_verify, "exclusive_worker_lock"),
+        ),
+        traced_worker,
+    )
 
     prepare_job(run, snapshot, SHARD, batch_size=2, **REMOTE)
 

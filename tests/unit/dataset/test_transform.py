@@ -8,9 +8,9 @@ import osm_polygon_description_tag.dataset.transform as transform_module
 from osm_polygon_description_tag.dataset.transform import (
     RejectedFeature,
     _decode_polygon,
-    _early_rejection_reason,
     _optional_timestamp,
     descriptions_from_tags,
+    early_rejection_reason,
     geodesic_area_m2,
     transform_record,
 )
@@ -107,15 +107,15 @@ def test_early_rejection_reason_checks_localized_values_without_materializing_th
 
     record = _record(Polygon(), {"name": "without a description"})
 
-    assert _early_rejection_reason(record) == "no_nonempty_description"
+    assert early_rejection_reason(record) == "no_nonempty_description"
     localized = _record(Polygon(), {"description:en": "English"})
-    assert _early_rejection_reason(localized) is None
+    assert early_rejection_reason(localized) is None
 
 
 def test_early_rejection_reason_reports_invalid_identity_before_tags() -> None:
     record = _record(Polygon(), {}, osm_type="node")
 
-    assert _early_rejection_reason(record) == "unsupported_osm_type"
+    assert early_rejection_reason(record) == "unsupported_osm_type"
 
 
 def test_localized_items_filter_exact_nonempty_keys() -> None:

@@ -25,7 +25,6 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
     prepare_snapshot,
 )
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
-from osm_polygon_description_tag.workflow import grid_operator
 from osm_polygon_description_tag.workflow.grid_operator import (
     GridOperatorError,
     StagedFile,
@@ -36,6 +35,11 @@ from osm_polygon_description_tag.workflow.grid_operator import (
     prepare_portable_job,
     verify_prepared_bundle,
 )
+from osm_polygon_description_tag.workflow.grid_operator import results as grid_results
+from osm_polygon_description_tag.workflow.grid_operator import stage as grid_stage
+from osm_polygon_description_tag.workflow.grid_operator import state as grid_state
+from osm_polygon_description_tag.workflow.grid_operator import submission as grid_submission
+from osm_polygon_description_tag.workflow.grid_operator import verify as grid_verify
 from tests.conftest import make_record_dict
 from tests.helpers.messages import exactly
 from tests.helpers.project import write_project as _write_project
@@ -153,7 +157,7 @@ def test_a_payload_without_a_stage_manifest_is_not_reused(
 
 def test_staging_a_non_regular_input_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(GridOperatorError, match="must be a regular file"):
-        grid_operator._copy_regular_file(tmp_path, tmp_path / "destination")
+        grid_stage.copy_regular_file(tmp_path, tmp_path / "destination")
 
 
 def test_an_optional_project_readme_is_staged(tmp_path: Path) -> None:
@@ -201,7 +205,7 @@ def test_a_missing_project_source_directory_is_rejected(tmp_path: Path) -> None:
     (project / "uv.lock").write_text("version = 1\n", encoding="utf-8")
 
     with pytest.raises(GridOperatorError, match="project source directory is missing"):
-        grid_operator._project_files(project)
+        grid_stage._project_files(project)
 
 
 def test_a_symlink_inside_the_project_source_is_rejected(tmp_path: Path) -> None:
@@ -210,7 +214,7 @@ def test_a_symlink_inside_the_project_source_is_rejected(tmp_path: Path) -> None
     (project / "src" / "link.py").symlink_to(project / "src" / "module.py")
 
     with pytest.raises(GridOperatorError, match="project source contains a symlink"):
-        grid_operator._project_files(project)
+        grid_stage._project_files(project)
 
 
 def test_a_non_file_inside_the_project_source_is_rejected(tmp_path: Path) -> None:
@@ -219,7 +223,7 @@ def test_a_non_file_inside_the_project_source_is_rejected(tmp_path: Path) -> Non
     os.mkfifo(project / "src" / "channel")
 
     with pytest.raises(GridOperatorError, match="project source contains a non-file"):
-        grid_operator._project_files(project)
+        grid_stage._project_files(project)
 
 
 def test_staging_rejects_a_source_file_that_drifted_from_the_snapshot(
@@ -253,11 +257,11 @@ def test_staging_rejects_a_source_file_that_drifted_from_the_snapshot(
 
 def test_fsync_of_a_missing_directory_is_reported(tmp_path: Path) -> None:
     with pytest.raises(GridOperatorError, match="cannot fsync directory"):
-        grid_operator._fsync_directory(tmp_path / "missing")
+        grid_state._fsync_directory(tmp_path / "missing")
 
 
 def test_a_policy_verdict_with_an_unusable_capture_instant_is_not_fresh() -> None:
-    reason = grid_operator._policy_freshness_block(
+    reason = grid_submission._policy_freshness_block(
         _verdict(captured_at=datetime.min.replace(tzinfo=UTC)),
         datetime(2026, 9, 8, tzinfo=UTC),
     )
@@ -289,7 +293,7 @@ def test_a_symlinked_run_snapshot_is_rejected_when_copied(
     snapshot_path.symlink_to(outside)
 
     with pytest.raises(GridOperatorError, match="must be a regular file"):
-        grid_operator._copy_snapshot(run, tmp_path / "destination")
+        grid_stage.copy_snapshot(run, tmp_path / "destination")
 
 
 def test_a_symlinked_resume_checkpoint_is_refused_while_copying(
@@ -301,7 +305,7 @@ def test_a_symlinked_resume_checkpoint_is_refused_while_copying(
     state.checkpoint.symlink_to(tmp_path / "missing.json")
 
     with pytest.raises(GridOperatorError, match=exactly("resume checkpoint must not be a symlink")):
-        grid_operator._copy_resume_state(run, tmp_path / "destination", SHARD)
+        grid_stage._copy_resume_state(run, tmp_path / "destination", SHARD)
 
 
 def test_copying_absent_resume_state_stages_nothing(
@@ -310,7 +314,7 @@ def test_copying_absent_resume_state_stages_nothing(
     _, _, run, _ = inputs
     destination = tmp_path / "destination"
 
-    grid_operator._copy_resume_state(run, destination, SHARD)
+    grid_stage._copy_resume_state(run, destination, SHARD)
 
     assert not destination.exists()
 
@@ -376,7 +380,7 @@ def test_copying_a_shard_outside_the_snapshot_is_rejected(
     _, source, _, snapshot = inputs
 
     with pytest.raises(GridOperatorError, match="not in snapshot"):
-        grid_operator._copy_source_shard(snapshot, source, tmp_path / "out", "absent.parquet")
+        grid_stage._copy_source_shard(snapshot, source, tmp_path / "out", "absent.parquet")
 
 
 def test_resume_state_with_an_unexpected_artifact_is_rejected(
@@ -386,7 +390,7 @@ def test_resume_state_with_an_unexpected_artifact_is_rejected(
     (shard_paths(run, SHARD).root / "notes.txt").write_text("stray\n", encoding="utf-8")
 
     with pytest.raises(GridOperatorError, match="unexpected artifact"):
-        grid_operator._validate_resume_state(run, SHARD)
+        grid_stage.validate_resume_state(run, SHARD)
 
 
 def test_resume_state_with_a_non_directory_parts_entry_is_rejected(
@@ -398,7 +402,7 @@ def test_resume_state_with_a_non_directory_parts_entry_is_rejected(
     state.parts.write_text("not a directory\n", encoding="utf-8")
 
     with pytest.raises(GridOperatorError, match="resume state directory is invalid"):
-        grid_operator._validate_resume_state(run, SHARD)
+        grid_stage.validate_resume_state(run, SHARD)
 
 
 def test_resume_state_that_fails_collection_validation_is_rejected(
@@ -411,11 +415,11 @@ def test_resume_state_that_fails_collection_validation_is_rejected(
     with pytest.raises(
         GridOperatorError, match=exactly("resume state failed collection validation")
     ):
-        grid_operator._validate_resume_state(run, SHARD)
+        grid_stage.validate_resume_state(run, SHARD)
 
 
 def test_resume_files_of_an_absent_state_root_are_empty(tmp_path: Path) -> None:
-    assert grid_operator._resume_files(tmp_path / "missing") == ()
+    assert grid_stage._resume_files(tmp_path / "missing") == ()
 
 
 def test_resume_files_reject_a_symlink(tmp_path: Path) -> None:
@@ -424,7 +428,7 @@ def test_resume_files_reject_a_symlink(tmp_path: Path) -> None:
     (root / "link.json").symlink_to(tmp_path / "missing.json")
 
     with pytest.raises(GridOperatorError, match="resume state contains a symlink"):
-        grid_operator._resume_files(root)
+        grid_stage._resume_files(root)
 
 
 def test_resume_files_reject_a_non_file(tmp_path: Path) -> None:
@@ -433,7 +437,7 @@ def test_resume_files_reject_a_non_file(tmp_path: Path) -> None:
     os.mkfifo(root / "channel")
 
     with pytest.raises(GridOperatorError, match="resume state contains a non-file"):
-        grid_operator._resume_files(root)
+        grid_stage._resume_files(root)
 
 
 def test_a_malformed_stage_manifest_has_no_resume_fingerprint(tmp_path: Path) -> None:
@@ -441,7 +445,7 @@ def test_a_malformed_stage_manifest_has_no_resume_fingerprint(tmp_path: Path) ->
     payload_root.mkdir()
     (payload_root / "stage.json").write_text("[]", encoding="utf-8")
 
-    assert grid_operator._staged_resume_fingerprint(payload_root) is None
+    assert grid_stage._staged_resume_fingerprint(payload_root) is None
 
 
 def test_payload_files_reject_a_non_file(tmp_path: Path) -> None:
@@ -450,7 +454,7 @@ def test_payload_files_reject_a_non_file(tmp_path: Path) -> None:
     os.mkfifo(payload_root / "channel")
 
     with pytest.raises(GridOperatorError, match="portable payload contains a non-file"):
-        grid_operator._payload_files(payload_root)
+        grid_stage.payload_files(payload_root)
 
 
 def test_a_staged_file_reached_through_a_symlinked_directory_is_rejected(
@@ -463,7 +467,7 @@ def test_a_staged_file_reached_through_a_symlinked_directory_is_rejected(
     (root / "project").symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(GridOperatorError, match="contains a symlink"):
-        grid_operator._payload_file(root, "project/pyproject.toml")
+        grid_verify._payload_file(root, "project/pyproject.toml")
 
 
 def test_a_missing_staged_file_is_rejected(
@@ -473,7 +477,7 @@ def test_a_missing_staged_file_is_rejected(
     root = prepared.payload_root  # type: ignore[attr-defined]
 
     with pytest.raises(GridOperatorError, match="staged file is missing"):
-        grid_operator._payload_file(root, "project/absent.toml")
+        grid_verify._payload_file(root, "project/absent.toml")
 
 
 def test_a_payload_without_its_top_level_directories_is_rejected(
@@ -484,7 +488,7 @@ def test_a_payload_without_its_top_level_directories_is_rejected(
     shutil.rmtree(root / "source")
 
     with pytest.raises(GridOperatorError, match="portable payload directory is invalid"):
-        grid_operator._payload_directories(root)
+        grid_verify._payload_directories(root)
 
 
 def test_a_payload_without_project_source_code_is_rejected(
@@ -497,7 +501,7 @@ def test_a_payload_without_project_source_code_is_rejected(
     with pytest.raises(
         GridOperatorError, match=exactly("portable payload is missing project source code")
     ):
-        grid_operator._verify_payload_layout(root, root / "project", prepared.bundle)  # type: ignore[attr-defined]
+        grid_verify._verify_payload_layout(root, root / "project", prepared.bundle)  # type: ignore[attr-defined]
 
 
 def test_a_non_executable_payload_job_script_is_rejected(
@@ -508,7 +512,7 @@ def test_a_non_executable_payload_job_script_is_rejected(
     (root / "job.sh").chmod(0o400)
 
     with pytest.raises(GridOperatorError, match=exactly("portable job script is not executable")):
-        grid_operator._verify_payload_layout(root, root / "project", prepared.bundle)  # type: ignore[attr-defined]
+        grid_verify._verify_payload_layout(root, root / "project", prepared.bundle)  # type: ignore[attr-defined]
 
 
 def test_a_payload_with_an_unreadable_snapshot_is_rejected(
@@ -519,7 +523,7 @@ def test_a_payload_with_an_unreadable_snapshot_is_rejected(
     (root / "run" / SNAPSHOT_FILENAME).write_bytes(b"not JSON")
 
     with pytest.raises(GridOperatorError):
-        grid_operator._verify_payload_identity(
+        grid_verify._verify_payload_identity(
             root / "project",
             root / "source",
             root / "run",
@@ -541,7 +545,7 @@ def test_a_staged_snapshot_with_foreign_fingerprints_is_rejected(
     foreign = replace(bundle_for_shard(snapshot, SHARD), **{field: "c" * 64})
 
     with pytest.raises(GridOperatorError, match=exactly(message)):
-        grid_operator._validate_staged_snapshot(snapshot, foreign)
+        grid_verify._validate_staged_snapshot(snapshot, foreign)
 
 
 @pytest.mark.parametrize("target", ["src", "uv.lock"])
@@ -558,7 +562,7 @@ def test_a_staged_project_that_drifted_from_the_bundle_is_rejected(
         message = "staged lockfile does not match bundle"
 
     with pytest.raises(GridOperatorError, match=exactly(message)):
-        grid_operator._validate_staged_project(project_root, prepared.bundle)  # type: ignore[attr-defined]
+        grid_verify._validate_staged_project(project_root, prepared.bundle)  # type: ignore[attr-defined]
 
 
 def test_a_payload_with_more_than_one_input_shard_is_rejected(
@@ -571,7 +575,7 @@ def test_a_payload_with_more_than_one_input_shard_is_rejected(
     with pytest.raises(
         GridOperatorError, match=exactly("portable payload must contain exactly one input shard")
     ):
-        grid_operator._verify_one_staged_input(source_root, prepared.bundle)  # type: ignore[attr-defined]
+        grid_verify._verify_one_staged_input(source_root, prepared.bundle)  # type: ignore[attr-defined]
 
 
 def test_validating_absent_resume_state_reports_nothing(
@@ -579,7 +583,7 @@ def test_validating_absent_resume_state_reports_nothing(
 ) -> None:
     _, _, run, _ = inputs
 
-    assert grid_operator._validate_resume_state(run, SHARD) is None
+    assert grid_stage.validate_resume_state(run, SHARD) is None
 
 
 def test_retrieved_results_from_another_snapshot_are_rejected(
@@ -592,7 +596,7 @@ def test_retrieved_results_from_another_snapshot_are_rejected(
     with pytest.raises(
         GridOperatorError, match=exactly("retrieved results belong to a different snapshot")
     ):
-        grid_operator._require_matching_snapshots(run, other)
+        grid_verify._require_matching_snapshots(run, other)
 
 
 def test_an_unreadable_retrieved_snapshot_is_rejected(
@@ -604,7 +608,7 @@ def test_an_unreadable_retrieved_snapshot_is_rejected(
     (other / SNAPSHOT_FILENAME).write_bytes(b"not JSON")
 
     with pytest.raises(GridOperatorError):
-        grid_operator._require_matching_snapshots(run, other)
+        grid_verify._require_matching_snapshots(run, other)
 
 
 def test_a_non_directory_retrieved_run_is_rejected(tmp_path: Path) -> None:
@@ -612,12 +616,12 @@ def test_a_non_directory_retrieved_run_is_rejected(tmp_path: Path) -> None:
     path.write_text("file\n", encoding="utf-8")
 
     with pytest.raises(GridOperatorError, match="retrieved run directory is not a regular"):
-        grid_operator._require_regular_directory(path, "retrieved run directory")
+        grid_verify._require_regular_directory(path, "retrieved run directory")
 
 
 def test_an_unavailable_retrieved_shard_directory_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(GridOperatorError, match="retrieved shard directory is unavailable"):
-        grid_operator._reject_overlapping_paths(tmp_path / "missing", tmp_path / "local")
+        grid_verify._reject_overlapping_paths(tmp_path / "missing", tmp_path / "local")
 
 
 def test_a_symlinked_local_result_directory_is_rejected(tmp_path: Path) -> None:
@@ -630,25 +634,25 @@ def test_a_symlinked_local_result_directory_is_rejected(tmp_path: Path) -> None:
     paths = ShardPaths(root, parts, root / "receipts", root / "checkpoint.json")
 
     with pytest.raises(GridOperatorError, match="must not be a symlink"):
-        grid_operator._prepare_collection_directories(paths)
+        grid_verify._prepare_collection_directories(paths)
 
 
 def test_intents_of_a_run_without_a_jobs_directory_are_empty(tmp_path: Path) -> None:
-    assert list(grid_operator._iter_intents(tmp_path)) == []
+    assert list(grid_submission._iter_intents(tmp_path)) == []
 
 
 def test_a_jobs_path_that_is_not_a_directory_is_rejected(tmp_path: Path) -> None:
     (tmp_path / "jobs").write_text("not a directory\n", encoding="utf-8")
 
     with pytest.raises(GridOperatorError, match="jobs directory is not a regular directory"):
-        list(grid_operator._iter_intents(tmp_path))
+        list(grid_submission._iter_intents(tmp_path))
 
 
 def test_a_lock_path_that_cannot_be_opened_is_reported(tmp_path: Path) -> None:
     lock_path = tmp_path / "missing-directory" / "lock"
 
     with pytest.raises(GridOperatorError, match="cannot open submission lock"):
-        grid_operator._open_lock(lock_path)
+        grid_state._open_lock(lock_path)
 
 
 def test_an_unexpected_lock_error_is_reported(
@@ -665,13 +669,13 @@ def test_an_unexpected_lock_error_is_reported(
     monkeypatch.setattr(fcntl, "flock", refuse)
     try:
         with pytest.raises(GridOperatorError, match="cannot acquire submission lock"):
-            grid_operator._acquire_lock(handle, tmp_path)
+            grid_state._acquire_lock(handle, tmp_path)
     finally:
         handle.close()
 
 
 def test_a_naive_evaluation_instant_makes_freshness_unknown() -> None:
-    reason = grid_operator._policy_freshness_block(
+    reason = grid_submission._policy_freshness_block(
         _verdict(captured_at=datetime(2026, 9, 8, tzinfo=UTC)),
         # A naive evaluation instant is not comparable and must fail closed.
         datetime(2026, 9, 8),  # noqa: DTZ001 - naive on purpose
@@ -722,7 +726,7 @@ def test_collected_results_for_another_shard_are_rejected(
     with pytest.raises(
         GridOperatorError, match=exactly("collected results do not match the submitted bundle")
     ):
-        grid_operator._validate_ack_identity(report, selected, bundle)  # type: ignore[arg-type]
+        grid_results._validate_ack_identity(report, selected, bundle)  # type: ignore[arg-type]
 
 
 def test_a_shard_without_a_terminal_checkpoint_cannot_be_acknowledged() -> None:
@@ -741,7 +745,7 @@ def test_a_shard_without_a_terminal_checkpoint_cannot_be_acknowledged() -> None:
     with pytest.raises(
         GridOperatorError, match=exactly("collected results do not have a terminal checkpoint")
     ):
-        grid_operator._validate_ack_terminal(_shard_report(status="missing"), intent)  # type: ignore[arg-type]
+        grid_results._validate_ack_terminal(_shard_report(status="missing"), intent)  # type: ignore[arg-type]
 
 
 def test_complete_results_cannot_be_downgraded_to_paused(
@@ -768,7 +772,7 @@ def test_complete_results_cannot_be_downgraded_to_paused(
     with pytest.raises(
         GridOperatorError, match=exactly("complete results cannot be downgraded to paused results")
     ):
-        grid_operator._validate_acknowledgment(report, selected, intent, bundle)  # type: ignore[arg-type]
+        grid_results._validate_acknowledgment(report, selected, intent, bundle)  # type: ignore[arg-type]
 
 
 def test_the_run_wide_scan_skips_this_job_and_keeps_inspecting_the_rest(
@@ -803,7 +807,7 @@ def test_the_run_wide_scan_skips_this_job_and_keeps_inspecting_the_rest(
         encoding="utf-8",
     )
 
-    assert grid_operator._run_wide_intent_block(paths, bundle) is None
+    assert grid_submission._run_wide_intent_block(paths, bundle) is None
 
 
 def test_planning_rejects_a_bundle_that_is_not_the_prepared_one(
@@ -815,7 +819,7 @@ def test_planning_rejects_a_bundle_that_is_not_the_prepared_one(
     with pytest.raises(
         GridOperatorError, match=exactly("prepared bundle does not match the requested submission")
     ):
-        grid_operator._validate_prepared_submission(
+        grid_submission._validate_prepared_submission(
             paths, replace(bundle, source_sha256="c" * 64), 1800
         )
 
@@ -823,4 +827,4 @@ def test_planning_rejects_a_bundle_that_is_not_the_prepared_one(
 @pytest.mark.parametrize("walltime", [0, -1, True, 1.5, "1800"])
 def test_planning_rejects_a_walltime_that_is_not_a_positive_integer(walltime: object) -> None:
     with pytest.raises(GridOperatorError, match="must be a positive number of seconds"):
-        grid_operator._validate_submission_walltime(walltime)
+        grid_submission._validate_submission_walltime(walltime)

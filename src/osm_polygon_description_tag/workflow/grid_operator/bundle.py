@@ -42,11 +42,11 @@ from .models import (
     bundle_for_shard,
 )
 from .script import (
-    _glotlid_model_path_for_snapshot,
-    _validate_batch_size,
-    _validate_job_limits,
+    glotlid_model_path_for_snapshot,
     job_paths,
     render_job_script,
+    validate_batch_size,
+    validate_job_limits,
 )
 from .state import (
     fsync_directory,
@@ -81,10 +81,10 @@ def prepare_job(
     """
     bundle = bundle_for_shard(snapshot, shard)
     paths = job_paths(run_dir, bundle)
-    existing = _existing_bundle(paths)
+    existing = existing_bundle(paths)
     if existing is not None and existing != bundle:
         raise GridOperatorError("a different bundle is already prepared in this job directory")
-    remote_model_path = _glotlid_model_path_for_snapshot(snapshot, glotlid_model_path)
+    remote_model_path = glotlid_model_path_for_snapshot(snapshot, glotlid_model_path)
     script = render_job_script(
         bundle,
         remote_project_dir=remote_project_dir,
@@ -155,7 +155,7 @@ def initialize_shard_checkpoint(
     existing checkpoint is never rewritten; it is only checked against the
     bundle it must belong to.
     """
-    _validate_batch_size(batch_size)
+    validate_batch_size(batch_size)
     with _state_locks(run_dir, submission_locked=submission_locked):
         return _initialized_checkpoint(run_dir, bundle, batch_size)
 
@@ -163,9 +163,9 @@ def initialize_shard_checkpoint(
 def _initialized_checkpoint(run_dir: Path, bundle: JobBundle, batch_size: int) -> ShardCheckpoint:
     state = shard_paths(run_dir, bundle.shard)
     validate_resume_root(state)
-    existing = _shard_checkpoint(state)
+    existing = shard_checkpoint(state)
     if existing is not None:
-        _require_bound_checkpoint(existing, bundle)
+        require_bound_checkpoint(existing, bundle)
         return existing
     if resume_root_has_children(state):
         raise GridOperatorError("resume artifacts exist without a checkpoint")
@@ -189,7 +189,7 @@ def _initial_checkpoint(bundle: JobBundle, batch_size: int) -> ShardCheckpoint:
     )
 
 
-def _shard_checkpoint(state: ShardPaths) -> ShardCheckpoint | None:
+def shard_checkpoint(state: ShardPaths) -> ShardCheckpoint | None:
     """Read the shard checkpoint, failing closed on anything unusable."""
     if state.checkpoint.is_symlink():
         raise GridOperatorError("resume checkpoint must not be a symlink")
@@ -221,7 +221,7 @@ def _bundle_identity(bundle: JobBundle) -> tuple[str, str, str, int]:
     )
 
 
-def _require_bound_checkpoint(checkpoint: ShardCheckpoint, bundle: JobBundle) -> None:
+def require_bound_checkpoint(checkpoint: ShardCheckpoint, bundle: JobBundle) -> None:
     if _checkpoint_identity(checkpoint) != _bundle_identity(bundle):
         raise GridOperatorError("existing shard checkpoint is not bound to this job bundle")
 
@@ -305,7 +305,7 @@ def _verify_immutable_prepared_artifacts(
 
 def _verify_immutable_config(path: Path, expected: dict[str, object]) -> None:
     _require_immutable_file(path, "prepared job config is immutable and must be present")
-    if _read_json(path, "job config") != expected:
+    if read_json(path, "job config") != expected:
         raise GridOperatorError("prepared job config is immutable; restage with a new job bundle")
 
 
@@ -337,9 +337,9 @@ def _job_config_payload(
     }
 
 
-def _read_job_config(path: Path, bundle: JobBundle) -> dict[str, int]:
+def read_job_config(path: Path, bundle: JobBundle) -> dict[str, int]:
     reader = require_object(
-        _read_json(path, "job config"), error=GridOperatorError, label="job config"
+        read_json(path, "job config"), error=GridOperatorError, label="job config"
     )
     if reader.integer("job_config_schema_version") != JOB_CONFIG_SCHEMA_VERSION:
         raise GridOperatorError("unsupported job config schema version")
@@ -352,7 +352,7 @@ def _read_job_config(path: Path, bundle: JobBundle) -> dict[str, int]:
         "cores": reader.integer("cores"),
         "thread_limit": reader.integer("thread_limit"),
     }
-    _validate_job_limits(
+    validate_job_limits(
         values["processing_seconds"], values["batch_size"], values["walltime_seconds"]
     )
     if values["cores"] != REQUIRED_CORES:
@@ -362,7 +362,7 @@ def _read_job_config(path: Path, bundle: JobBundle) -> dict[str, int]:
     return values
 
 
-def _existing_bundle(paths: JobPaths) -> JobBundle | None:
+def existing_bundle(paths: JobPaths) -> JobBundle | None:
     if paths.bundle.is_symlink():
         raise GridOperatorError(f"prepared bundle must not be a symlink: {paths.bundle}")
     if not paths.bundle.is_file():
@@ -372,15 +372,15 @@ def _existing_bundle(paths: JobPaths) -> JobBundle | None:
 
 def read_bundle(path: Path) -> JobBundle:
     """Read and validate one prepared bundle."""
-    return JobBundle.from_payload(_read_json(path, "bundle"))
+    return JobBundle.from_payload(read_json(path, "bundle"))
 
 
 def read_intent(path: Path) -> SubmissionIntent:
     """Read and validate one durable submission intent."""
-    return SubmissionIntent.from_payload(_read_json(path, "intent"))
+    return SubmissionIntent.from_payload(read_json(path, "intent"))
 
 
-def _read_json(path: Path, label: str) -> object:
+def read_json(path: Path, label: str) -> object:
     try:
         return json.loads(path.read_text(encoding="utf-8"))  # pragma: no mutate - codec alias only
     except (OSError, UnicodeError, json.JSONDecodeError) as error:

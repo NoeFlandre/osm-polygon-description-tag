@@ -153,7 +153,7 @@ def _fail_closed_hf_subprocess_guard(
     monkeypatch.setattr(subprocess, "Popen", guarded_popen)
     monkeypatch.setattr("shutil.which", hermetic_which)
     monkeypatch.setattr(
-        "osm_polygon_description_tag.workflow.preflight._huggingface_hub.HfApi",
+        "osm_polygon_description_tag.workflow.preflight.lazy_huggingface_hub.HfApi",
         _HermeticHfApi,
         raising=False,
     )

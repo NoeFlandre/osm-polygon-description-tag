@@ -32,18 +32,18 @@ import pyarrow.parquet as pq
 from osm_polygon_description_tag.dataset.constants import DEFAULT_ARROW_BATCH_SIZE
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
-    _manifest_path_for,
+    manifest_path_for,
     output_identity_for,
     read_manifest,
     write_manifest,
 )
 from osm_polygon_description_tag.dataset.migration import (
-    _promote_migrated_parquet,
-    _require_migration_directories,
+    promote_migrated_parquet,
+    require_migration_directories,
 )
 from osm_polygon_description_tag.dataset.schema import SCHEMA, geo_metadata
 from osm_polygon_description_tag.dataset.storage import (
-    _DICTIONARY_COLUMNS,
+    DICTIONARY_COLUMNS,
     GEOPARQUET_COMPRESSION,
     StorageError,
     validate_geoparquet,
@@ -185,7 +185,7 @@ def _rewrite_parquet_text(
         temporary,
         schema,
         compression=GEOPARQUET_COMPRESSION,
-        use_dictionary=_DICTIONARY_COLUMNS,
+        use_dictionary=DICTIONARY_COLUMNS,
     ) as writer:
         writer.write_table(repaired.cast(schema))
     validate_geoparquet(temporary)
@@ -216,7 +216,7 @@ def _migrate_parquet_text(path: Path) -> int | None:
         with closing(pq.ParquetFile(path)) as reader:
             metadata = SCHEMA.with_metadata(reader.schema_arrow.metadata or {})
             dropped = _rewrite_parquet_text(reader, temporary, metadata)
-        _promote_migrated_parquet(temporary, path)
+        promote_migrated_parquet(temporary, path)
         return dropped
     except (OSError, pa.ArrowException, StorageError) as error:
         raise TextMigrationError(f"cannot migrate {path}: {error}") from error
@@ -265,14 +265,14 @@ def _heal_output_identity(manifest: Manifest, parquet: Path, manifest_path: Path
 
 
 def _artifact_pair(parquet: Path, data_root: Path) -> tuple[Path, Path]:
-    return parquet, _manifest_path_for(parquet.name, data_root)
+    return parquet, manifest_path_for(parquet.name, data_root)
 
 
 def _migration_artifact_pairs(data_root: Path) -> list[tuple[Path, Path]]:
     """Validate the migration roots and return their Parquet/manifest pairs."""
     data_dir = data_root / "data"
     manifests_dir = data_root / "manifests"
-    _require_migration_directories(data_dir, manifests_dir, data_root, error=TextMigrationError)
+    require_migration_directories(data_dir, manifests_dir, data_root, error=TextMigrationError)
     # pragma: no mutate start - children share a parent, so name and path order agree
     artifacts = sorted(data_dir.glob("*.parquet"), key=lambda path: path.name)
     # pragma: no mutate end

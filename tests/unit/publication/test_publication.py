@@ -16,8 +16,6 @@ from osm_polygon_description_tag.publication import (
 )
 from osm_polygon_description_tag.publication.planning import (
     _build_item,
-    _collect_data_items,
-    _collect_manifest_items,
     _collect_required_metadata_items,
     _read_manifest_for_publication,
     _require_assets_directory_for_plan,
@@ -39,6 +37,8 @@ from osm_polygon_description_tag.publication.planning import (
     _validate_uploader_cache,
     build_metadata_only_upload_plan,
     build_per_pbf_upload_plan,
+    collect_data_items,
+    collect_manifest_items,
     file_sha256_bytes,
 )
 from tests.helpers.messages import exactly
@@ -149,10 +149,10 @@ def test_collection_helpers_preserve_allowlist_boundaries(
 
     _validate_top_level_entries(data_root)
 
-    assert [item.relative_path for item in _collect_data_items(data_root)] == [
+    assert [item.relative_path for item in collect_data_items(data_root)] == [
         "data/a-latest.parquet"
     ]
-    assert [item.relative_path for item in _collect_manifest_items(data_root)] == [
+    assert [item.relative_path for item in collect_manifest_items(data_root)] == [
         "manifests/a-latest.manifest.json"
     ]
 
@@ -173,11 +173,11 @@ def test_collect_data_items_forwards_the_text_validation_mode(
     parquet = data_root / "data" / "a-latest.parquet"
     manifest = data_root / "manifests" / "a-latest.manifest.json"
 
-    _collect_data_items(data_root)
+    collect_data_items(data_root)
     assert calls == [((manifest, parquet), {})]
 
     calls.clear()
-    _collect_data_items(data_root, require_successful_text=False)
+    collect_data_items(data_root, require_successful_text=False)
     assert calls == [
         ((manifest, parquet), {"require_successful_text": False}),
     ]
@@ -431,7 +431,7 @@ def test_collect_data_items_rejects_case_drift_in_data_and_manifest_paths(
     monkeypatch.setattr(Path, "is_file", case_sensitive_is_file)
     monkeypatch.setattr(Path, "read_text", case_sensitive_read_text)
 
-    assert [item.relative_path for item in _collect_data_items(data_root)] == [
+    assert [item.relative_path for item in collect_data_items(data_root)] == [
         "data/a-latest.parquet"
     ]
 
@@ -469,7 +469,7 @@ def test_collect_manifest_items_does_not_scan_case_variant_directory(
 
     monkeypatch.setattr(Path, "is_dir", case_sensitive_is_dir)
 
-    assert [item.relative_path for item in _collect_manifest_items(data_root)] == [
+    assert [item.relative_path for item in collect_manifest_items(data_root)] == [
         "manifests/a-latest.manifest.json"
     ]
 

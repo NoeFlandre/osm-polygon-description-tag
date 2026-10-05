@@ -10,13 +10,14 @@ from osm_polygon_description_tag.dataset.languages.checkpoint import (
     shard_paths,
 )
 from osm_polygon_description_tag.workflow import grid_operator as operator
+from osm_polygon_description_tag.workflow.grid_operator import models as grid_models
 from osm_polygon_description_tag.workflow.grid_scheduler import CommandResult, SchedulerError
 from tests.unit.workflow.test_grid_operator import SHARD, _verdict
 
 
 def _intent(**changes: object) -> dict[str, object]:
     return {
-        "intent_schema_version": operator.INTENT_SCHEMA_VERSION,
+        "intent_schema_version": grid_models.INTENT_SCHEMA_VERSION,
         "bundle_id": "a" * 64,
         "shard": SHARD,
         "job_name": "lang-aaaaaaaaaaaaaaaa",

@@ -43,7 +43,7 @@ from osm_polygon_description_tag.publication.state import (
     _H3_MAP_SHA256_FIELD,
     _H3_MAP_SIZE_FIELD,
     H3_MAP_ASSET_RELATIVE_PATH,
-    _metadata_state_matches,
+    metadata_state_matches,
 )
 from osm_polygon_description_tag.runtime.config import Paths
 from osm_polygon_description_tag.runtime.resources import project_code_revision
@@ -251,9 +251,9 @@ def test_metadata_state_matches_requires_unchanged_map(tmp_path: Path) -> None:
     paths, _source_root, _data_root = _setup_two_sources(tmp_path)
     _plant_metadata(paths)
     plan = build_metadata_only_upload_plan(paths.data_root)
-    from osm_polygon_description_tag.publication.state import _write_metadata_state
+    from osm_polygon_description_tag.publication.state import write_metadata_state
 
-    _write_metadata_state(
+    write_metadata_state(
         paths.data_root,
         identity_sha256=plan.identity_sha256,
         readme_sha256=file_sha256(paths.data_root / "README.md"),
@@ -275,11 +275,11 @@ def test_metadata_state_matches_requires_unchanged_map(tmp_path: Path) -> None:
         verified_revision="rev",
         completed_at="2026-01-01T00:00:00+00:00",
     )
-    assert _metadata_state_matches(paths.data_root, plan) is True
+    assert metadata_state_matches(paths.data_root, plan) is True
 
     # Mutate the map.
     (paths.data_root / "assets" / "description_polygon_density.png").write_bytes(MAP_BYTES_B)
-    assert _metadata_state_matches(paths.data_root, plan) is False
+    assert metadata_state_matches(paths.data_root, plan) is False
 
 
 def test_metadata_state_matches_requires_unchanged_area_histogram(tmp_path: Path) -> None:
@@ -287,9 +287,9 @@ def test_metadata_state_matches_requires_unchanged_area_histogram(tmp_path: Path
     paths, _source_root, _data_root = _setup_two_sources(tmp_path)
     _plant_metadata(paths)
     plan = build_metadata_only_upload_plan(paths.data_root)
-    from osm_polygon_description_tag.publication.state import _write_metadata_state
+    from osm_polygon_description_tag.publication.state import write_metadata_state
 
-    _write_metadata_state(
+    write_metadata_state(
         paths.data_root,
         identity_sha256=plan.identity_sha256,
         readme_sha256=file_sha256(paths.data_root / "README.md"),
@@ -311,20 +311,20 @@ def test_metadata_state_matches_requires_unchanged_area_histogram(tmp_path: Path
         verified_revision="rev",
         completed_at="2026-01-01T00:00:00+00:00",
     )
-    assert _metadata_state_matches(paths.data_root, plan) is True
+    assert metadata_state_matches(paths.data_root, plan) is True
 
     # Mutate the histogram.
     (paths.data_root / "assets" / "area_distribution.png").write_bytes(MAP_BYTES_B)
-    assert _metadata_state_matches(paths.data_root, plan) is False
+    assert metadata_state_matches(paths.data_root, plan) is False
 
 
 def test_state_records_map_sha_and_size_fields(tmp_path: Path) -> None:
     paths, _source_root, _data_root = _setup_two_sources(tmp_path)
     _plant_metadata(paths)
     plan = build_metadata_only_upload_plan(paths.data_root)
-    from osm_polygon_description_tag.publication.state import _write_metadata_state
+    from osm_polygon_description_tag.publication.state import write_metadata_state
 
-    _write_metadata_state(
+    write_metadata_state(
         paths.data_root,
         identity_sha256=plan.identity_sha256,
         readme_sha256=file_sha256(paths.data_root / "README.md"),

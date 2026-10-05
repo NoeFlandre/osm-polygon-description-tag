@@ -106,7 +106,7 @@ def _install_external_boundaries(
     monkeypatch.setattr(orch, "default_hub_verifier_factory", verifier_factory)
     monkeypatch.setattr(orch, "_default_clock", lambda: "2026-07-28T00:00:00+00:00")
     monkeypatch.setattr(
-        preflight_module._huggingface_hub, "HfApi", lambda *a, **kw: _make_hf_stub()
+        preflight_module.lazy_huggingface_hub, "HfApi", lambda *a, **kw: _make_hf_stub()
     )
     return log
 

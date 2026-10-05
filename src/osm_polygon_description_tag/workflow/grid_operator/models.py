@@ -45,9 +45,9 @@ STAGE_RUN_DIRNAME: Final = "run"
 
 QUARANTINE_DIRNAME: Final = "quarantine"
 
-_FINGERPRINT_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
+FINGERPRINT_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 
-_THREAD_LIMIT_VARIABLES: Final = (
+THREAD_LIMIT_VARIABLES: Final = (
     "OMP_NUM_THREADS",
     "OPENBLAS_NUM_THREADS",
     "MKL_NUM_THREADS",
@@ -74,12 +74,12 @@ class JobBundle:
     input_row_count: int
 
     def __post_init__(self) -> None:
-        _validate_fingerprint(self.snapshot_id, "snapshot id")
-        _validate_fingerprint(self.model_config_fingerprint, "model configuration fingerprint")
-        _validate_fingerprint(self.code_fingerprint, "code fingerprint")
-        _validate_fingerprint(self.lock_fingerprint, "lock fingerprint")
-        _validate_relative_parquet(self.shard, "shard")
-        _validate_fingerprint(self.source_sha256, "source sha256")
+        validate_fingerprint(self.snapshot_id, "snapshot id")
+        validate_fingerprint(self.model_config_fingerprint, "model configuration fingerprint")
+        validate_fingerprint(self.code_fingerprint, "code fingerprint")
+        validate_fingerprint(self.lock_fingerprint, "lock fingerprint")
+        validate_relative_parquet(self.shard, "shard")
+        validate_fingerprint(self.source_sha256, "source sha256")
         _validate_non_negative_int(self.source_size_bytes, "source size")
         _validate_non_negative_int(self.input_row_count, "input row count")
 
@@ -140,8 +140,8 @@ def bundle_for_shard(snapshot: SnapshotManifest, shard: str) -> JobBundle:
     )
 
 
-def _validate_fingerprint(value: object, label: str) -> None:
-    if not isinstance(value, str) or _FINGERPRINT_PATTERN.fullmatch(value) is None:
+def validate_fingerprint(value: object, label: str) -> None:
+    if not isinstance(value, str) or FINGERPRINT_PATTERN.fullmatch(value) is None:
         raise GridOperatorError(f"{label} must be a lowercase SHA-256 hex fingerprint")
 
 
@@ -150,14 +150,14 @@ def _validate_non_negative_int(value: object, label: str) -> None:
         raise GridOperatorError(f"{label} must be a non-negative integer")
 
 
-def _validate_relative_parquet(value: object, label: str) -> str:
+def validate_relative_parquet(value: object, label: str) -> str:
     normalized = relative_posix_path(value, error=GridOperatorError, label=label)
     if Path(normalized).suffix != ".parquet":
         raise GridOperatorError(f"{label} must be a Parquet path")
     return normalized
 
 
-def _validate_stage_relative_file(value: object) -> str:
+def validate_stage_relative_file(value: object) -> str:
     return relative_posix_path(value, error=GridOperatorError, label="staged file path")
 
 
@@ -376,9 +376,9 @@ class StagedFile:
     sha256: str
 
     def __post_init__(self) -> None:
-        _validate_stage_relative_file(self.relative_path)
+        validate_stage_relative_file(self.relative_path)
         _validate_non_negative_int(self.size_bytes, "staged file size")
-        _validate_fingerprint(self.sha256, "staged file sha256")
+        validate_fingerprint(self.sha256, "staged file sha256")
 
     def to_payload(self) -> dict[str, object]:
         return {

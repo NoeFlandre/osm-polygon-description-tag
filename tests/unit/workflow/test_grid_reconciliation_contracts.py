@@ -21,7 +21,13 @@ from osm_polygon_description_tag.workflow.grid_operator import (
     JobState,
     SubmissionIntent,
 )
+from osm_polygon_description_tag.workflow.grid_operator import bundle as grid_bundle
+from osm_polygon_description_tag.workflow.grid_operator import stage as grid_stage
+from osm_polygon_description_tag.workflow.grid_operator import state as grid_state
+from osm_polygon_description_tag.workflow.grid_operator import submission as grid_submission
+from osm_polygon_description_tag.workflow.grid_operator import verify as grid_verify
 from osm_polygon_description_tag.workflow.grid_scheduler import CommandResult
+from tests.helpers.patching import patch_modules
 from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH
 from tests.unit.workflow.test_grid_operator import REMOTE, SHARD
 
@@ -51,7 +57,7 @@ def test_another_shards_unresolved_job_blocks_this_one_and_names_it(
     other = replace(other, shard=second_bundle.shard)
     second_paths.intent.write_text(json.dumps(other.to_payload()), encoding="utf-8")
 
-    reason = operator._run_wide_intent_block(first_paths, first_bundle)
+    reason = grid_submission._run_wide_intent_block(first_paths, first_bundle)
 
     assert reason == (
         f"another shard has an active or ambiguous submission "
@@ -75,7 +81,7 @@ def test_a_skipped_intent_does_not_stop_the_run_wide_scan(
     )
     second_paths.intent.write_text(json.dumps(other.to_payload()), encoding="utf-8")
 
-    reason = operator._run_wide_intent_block(first_paths, first_bundle)
+    reason = grid_submission._run_wide_intent_block(first_paths, first_bundle)
 
     assert reason == (
         f"another shard has an active or ambiguous submission "
@@ -91,7 +97,7 @@ def test_this_shards_own_intent_does_not_block_itself(
     own = _intent(bundle.bundle_id, job_id=11, outcome="submitted")  # type: ignore[attr-defined]
     paths.intent.write_text(json.dumps(own.to_payload()), encoding="utf-8")  # type: ignore[attr-defined]
 
-    assert operator._run_wide_intent_block(paths, bundle) is None  # type: ignore[arg-type]
+    assert grid_submission._run_wide_intent_block(paths, bundle) is None  # type: ignore[arg-type]
 
 
 def test_an_unprepared_shard_checkpoint_blocks_submission_with_its_exact_reason(
@@ -99,10 +105,10 @@ def test_an_unprepared_shard_checkpoint_blocks_submission_with_its_exact_reason(
 ) -> None:
     """Submitting without an initial checkpoint would run a job that resumes nothing."""
     run, bundle, paths = job
-    state = operator.shard_paths(run, SHARD)
+    state = grid_bundle.shard_paths(run, SHARD)
     state.checkpoint.unlink()
 
-    assert operator._initial_checkpoint_block(paths, bundle) == (  # type: ignore[arg-type]
+    assert grid_submission._initial_checkpoint_block(paths, bundle) == (  # type: ignore[arg-type]
         "no initial shard checkpoint exists; prepare this job again before submitting"
     )
 
@@ -201,7 +207,16 @@ def test_a_failed_materialisation_reports_its_own_cause_not_its_cleanup(
     def fail_after_rename(_path: Path) -> None:
         raise OSError("the volume went away")
 
-    monkeypatch.setattr(operator, "_fsync_directory", fail_after_rename)
+    patch_modules(
+        monkeypatch,
+        (
+            (grid_bundle, "fsync_directory"),
+            (grid_stage, "fsync_directory"),
+            (grid_state, "fsync_directory"),
+            (grid_state, "_fsync_directory"),
+        ),
+        fail_after_rename,
+    )
 
     with pytest.raises(OSError, match="the volume went away"):
         operator.prepare_portable_job(
@@ -219,12 +234,12 @@ def test_a_retrieved_checkpoint_that_rebinds_the_history_is_refused_exactly(
     job: tuple[Path, object, object],
 ) -> None:
     run, bundle, _ = job
-    state = operator.shard_paths(run, SHARD)
-    previous = operator.read_checkpoint(state.checkpoint)
+    state = grid_bundle.shard_paths(run, SHARD)
+    previous = grid_bundle.read_checkpoint(state.checkpoint)
     proposed = replace(previous, snapshot_id="f" * 64)
 
     with pytest.raises(GridOperatorError) as caught:
-        operator._require_checkpoint_extension(previous, proposed)
+        grid_verify._require_checkpoint_extension(previous, proposed)
 
     assert str(caught.value) == "retrieved checkpoint changes the committed history binding"
 
@@ -233,12 +248,12 @@ def test_a_committed_history_whose_rows_disagree_is_refused_exactly(
     job: tuple[Path, object, object],
 ) -> None:
     run, _, _ = job
-    state = operator.shard_paths(run, SHARD)
+    state = grid_bundle.shard_paths(run, SHARD)
     previous = replace(
-        operator.read_checkpoint(state.checkpoint), annotation_count=3, completed_parts=()
+        grid_bundle.read_checkpoint(state.checkpoint), annotation_count=3, completed_parts=()
     )
 
     with pytest.raises(GridOperatorError) as caught:
-        operator._require_matching_committed_history(state, state, previous)
+        grid_verify._require_matching_committed_history(state, state, previous)
 
     assert str(caught.value) == "local annotation count differs from committed history"

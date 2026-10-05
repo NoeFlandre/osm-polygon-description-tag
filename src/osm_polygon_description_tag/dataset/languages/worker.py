@@ -167,7 +167,7 @@ class _ResumeState:
     checkpoint: ShardCheckpoint | None
 
 
-def _validate_batch_size(batch_size: int) -> int:
+def validate_batch_size(batch_size: int) -> int:
     if type(batch_size) is not int or batch_size < 1:
         raise ValueError("batch_size must be a positive integer")
     if batch_size > MAX_BATCH_SIZE:
@@ -502,7 +502,7 @@ def process_shard(
     outcome when the budget is exhausted, leaving a checkpoint that a later
     invocation resumes from exactly.
     """
-    _validate_batch_size(batch_size)
+    validate_batch_size(batch_size)
     expected = snapshot.source_file(shard)
     source_path = verify_source_file(snapshot, source_dir, shard).relative_path
     paths = shard_paths(run_dir, shard)

@@ -6,8 +6,8 @@ from osm_polygon_description_tag.dataset.manifest import (
     MANIFEST_SCHEMA_VERSION,
     Manifest,
     ManifestError,
-    _manifest_path_for,
     file_sha256,
+    manifest_path_for,
     output_identity_for,
     read_manifest,
 )
@@ -26,7 +26,7 @@ from osm_polygon_description_tag.publication.models import (
     UploadItem,
     UploadPlan,
 )
-from osm_polygon_description_tag.publication.upload import _build_command
+from osm_polygon_description_tag.publication.upload import build_command
 
 ALLOWED_TOP_LEVEL = {
     "README.md",
@@ -300,7 +300,7 @@ def _validate_data_entry(path: Path) -> UploadItem:
     return _build_item(path, f"data/{path.name}")
 
 
-def _collect_data_items(
+def collect_data_items(
     data_root: Path,
     *,
     require_successful_text: bool = True,
@@ -312,10 +312,10 @@ def _collect_data_items(
     for path in sorted(data_dir.iterdir(), key=lambda entry: entry.name):  # pragma: no mutate
         items.append(_validate_data_entry(path))
         if require_successful_text:
-            _validate_manifest(_manifest_path_for(path.name, data_root), path)
+            _validate_manifest(manifest_path_for(path.name, data_root), path)
         else:
             _validate_manifest(
-                _manifest_path_for(path.name, data_root),
+                manifest_path_for(path.name, data_root),
                 path,
                 require_successful_text=False,
             )
@@ -334,7 +334,7 @@ def _sorted_manifest_entries(manifests_dir: Path) -> list[Path]:
     return sorted(manifests_dir.iterdir(), key=lambda entry: entry.name)  # pragma: no mutate
 
 
-def _collect_manifest_items(data_root: Path) -> list[UploadItem]:
+def collect_manifest_items(data_root: Path) -> list[UploadItem]:
     manifests_dir = data_root / "manifests"
     if not manifests_dir.is_dir():
         return []
@@ -347,8 +347,8 @@ def _collect_allowlisted_files(data_root: Path) -> tuple[UploadItem, ...]:
     items = _collect_required_metadata_items(data_root)
     assets_dir = _require_assets_directory_for_plan(data_root)
     items.extend(_validate_assets_directory(assets_dir))
-    items.extend(_collect_data_items(data_root))
-    items.extend(_collect_manifest_items(data_root))
+    items.extend(collect_data_items(data_root))
+    items.extend(collect_manifest_items(data_root))
     return tuple(sorted(items, key=lambda item: item.relative_path))
 
 
@@ -407,7 +407,7 @@ def build_per_pbf_upload_plan(data_root: Path, source_name: str) -> UploadPlan:
     output_path = data_root / "data" / f"{stem}.parquet"
     required = (
         output_path,
-        _manifest_path_for(output_path.name, data_root),
+        manifest_path_for(output_path.name, data_root),
         *_required_document_paths(data_root),
     )
     for path in required:
@@ -455,10 +455,10 @@ def per_pbf_command(data_root: Path, source_name: str) -> list[str]:
     must not diverge on the upload contents.
     """
     plan = build_per_pbf_upload_plan(data_root, source_name)
-    return _build_command(plan)
+    return build_command(plan)
 
 
 def metadata_only_command(data_root: Path) -> list[str]:
     """Build the canonical metadata-only ``hf upload-large-folder`` command."""
     plan = build_metadata_only_upload_plan(data_root)
-    return _build_command(plan)
+    return build_command(plan)

@@ -165,7 +165,7 @@ def test_default_preflight_rejects_empty_hf_identity(
         def auth_check(self, *_a: object, **_kw: object) -> None:
             return None
 
-    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
+    monkeypatch.setattr(orch.lazy_huggingface_hub, "HfApi", lambda *a, **kw: _Bad())
 
     with pytest.raises(PreflightError, match="identity"):
         default_preflight(
@@ -212,7 +212,7 @@ def test_default_preflight_rejects_missing_sha(
         def auth_check(self, *_a: object, **_kw: object) -> None:
             return None
 
-    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Empty())
+    monkeypatch.setattr(orch.lazy_huggingface_hub, "HfApi", lambda *a, **kw: _Empty())
 
     with pytest.raises(PreflightError, match="SHA"):
         default_preflight(
@@ -250,7 +250,7 @@ def test_default_preflight_rejects_hf_api_failure(
         def whoami(self) -> object:
             raise RuntimeError("hub is down")
 
-    monkeypatch.setattr(orch._huggingface_hub, "HfApi", lambda *a, **kw: _Fail())
+    monkeypatch.setattr(orch.lazy_huggingface_hub, "HfApi", lambda *a, **kw: _Fail())
 
     with pytest.raises(PreflightError, match="Hub authentication"):
         default_preflight(
@@ -263,13 +263,13 @@ def test_default_preflight_rejects_hf_api_failure(
 
 def test_atomic_state_write_raises_orchestrator_error(tmp_path: Path) -> None:
     """State writer raises OrchestratorError on invalid schema_version."""
-    from osm_polygon_description_tag.workflow.orchestrator import _write_publication_state
+    from osm_polygon_description_tag.workflow.orchestrator import write_publication_state
 
     paths = _setup_paths(tmp_path)
     state_path = paths.data_root / PUBLICATION_STATE_FILENAME
     state_path.write_text(json.dumps({"schema_version": 999}), encoding="utf-8")
     with pytest.raises(OrchestratorError):
-        _write_publication_state(
+        write_publication_state(
             paths.data_root,
             source_name="a.osm.pbf",
             source_sha256="00" * 32,

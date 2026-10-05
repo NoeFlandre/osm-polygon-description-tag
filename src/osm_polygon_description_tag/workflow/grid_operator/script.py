@@ -17,10 +17,10 @@ from osm_polygon_description_tag.workflow.grid_policy import (
 )
 
 from .models import (
-    _THREAD_LIMIT_VARIABLES,
     BUNDLE_FILENAME,
     INTENT_FILENAME,
     JOB_SCRIPT_FILENAME,
+    THREAD_LIMIT_VARIABLES,
     GridOperatorError,
     JobBundle,
     JobPaths,
@@ -55,13 +55,13 @@ def _validated_script_inputs(
         (remote_source_dir, "remote source directory"),
         (remote_run_dir, "remote run directory"),
     ):
-        _validate_remote_path(path, label)
+        validate_remote_path(path, label)
     bundle_dir = remote_bundle_dir or str(Path(remote_project_dir).parent)
-    _validate_remote_path(bundle_dir, "remote bundle directory")
-    _validate_job_limits(processing_seconds, batch_size, walltime_seconds)
-    _validate_remote_path(sat_model_path, "remote SaT model path")
+    validate_remote_path(bundle_dir, "remote bundle directory")
+    validate_job_limits(processing_seconds, batch_size, walltime_seconds)
+    validate_remote_path(sat_model_path, "remote SaT model path")
     if glotlid_model_path is not None:
-        _validate_remote_path(glotlid_model_path, "remote GlotLID model path")
+        validate_remote_path(glotlid_model_path, "remote GlotLID model path")
     return bundle_dir
 
 
@@ -94,7 +94,7 @@ def render_job_script(
         sat_model_path,
         glotlid_model_path,
     )
-    exports = "\n".join(f"export {name}=1" for name in _THREAD_LIMIT_VARIABLES)
+    exports = "\n".join(f"export {name}=1" for name in THREAD_LIMIT_VARIABLES)
     quoted_project = shlex.quote(remote_project_dir)
     quoted_source = shlex.quote(remote_source_dir)
     quoted_run = shlex.quote(remote_run_dir)
@@ -130,7 +130,7 @@ export MPLCONFIGDIR="$job_tmp_root/matplotlib"
 export PYTHONPYCACHEPREFIX="$job_tmp_root/pycache"
 export PYTHONDONTWRITEBYTECODE=1
 
-for variable in {" ".join(_THREAD_LIMIT_VARIABLES)}; do
+for variable in {" ".join(THREAD_LIMIT_VARIABLES)}; do
   if [[ "${{!variable}}" != "1" ]]; then
     echo "thread limit $variable is not 1" >&2
     exit 64
@@ -191,7 +191,7 @@ _SHELL_METACHARACTERS: Final = (
 )
 
 
-def _validate_remote_path(value: str, label: str) -> None:
+def validate_remote_path(value: str, label: str) -> None:
     _require_absolute(value, label)
     if any(character in value for character in _SHELL_METACHARACTERS):
         raise GridOperatorError(f"{label} must not contain shell metacharacters")
@@ -201,11 +201,11 @@ def _validate_remote_path(value: str, label: str) -> None:
         raise GridOperatorError(f"{label} must not contain traversal components")
 
 
-def _validate_job_limits(
+def validate_job_limits(
     processing_seconds: object, batch_size: object, walltime_seconds: object
 ) -> None:
     processing = _validate_processing_seconds(processing_seconds)
-    _validate_batch_size(batch_size)
+    validate_batch_size(batch_size)
     walltime = _validate_walltime_seconds(walltime_seconds)
     if processing >= walltime:
         raise GridOperatorError("processing budget must be less than walltime")
@@ -219,7 +219,7 @@ def _validate_processing_seconds(value: object) -> int:
     return value
 
 
-def _validate_batch_size(value: object) -> int:
+def validate_batch_size(value: object) -> int:
     if type(value) is not int or value < 1:
         raise GridOperatorError("batch size must be a positive integer")
     return value
@@ -238,7 +238,7 @@ def _require_absolute(value: str, label: str) -> None:
         raise GridOperatorError(f"{label} must be an absolute path")
 
 
-def _glotlid_model_path_for_snapshot(
+def glotlid_model_path_for_snapshot(
     snapshot: SnapshotManifest,
     glotlid_model_path: str | None,
 ) -> str | None:

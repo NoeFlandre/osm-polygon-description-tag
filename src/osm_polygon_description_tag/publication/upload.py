@@ -50,7 +50,7 @@ def _verify_item_identity(plan: UploadPlan, relative_path: str, size: int, check
         raise PublicationError(f"checksum drift for {path}")
 
 
-def _build_command(plan: UploadPlan) -> list[str]:
+def build_command(plan: UploadPlan) -> list[str]:
     """Build an ``hf upload-large-folder`` command from the plan's exact items.
 
     ``--include`` flags are derived strictly from ``plan.files`` (in
@@ -391,7 +391,7 @@ def execute_upload(
     """
     _require_confirmation(plan, confirmation)
     _verify_identity(plan)
-    command = _build_command(plan)
+    command = build_command(plan)
     try:
         _dispatch_upload(plan, command, runner, timeout, retry_observer, parent_revision)
     except subprocess.CalledProcessError as error:

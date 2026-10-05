@@ -368,7 +368,7 @@ def test_uploader_cache_survives_across_runs(
         def auth_check(self, *_a: object, **_kw: object) -> None:
             return None
 
-    monkeypatch.setattr(preflight_module._huggingface_hub, "HfApi", lambda *_a, **_kw: _Stub())
+    monkeypatch.setattr(preflight_module.lazy_huggingface_hub, "HfApi", lambda *_a, **_kw: _Stub())
 
     exit_code = cli_run(
         [

@@ -30,8 +30,8 @@ from osm_polygon_description_tag.dataset.canonical_rows import (
 from osm_polygon_description_tag.dataset.constants import DEFAULT_ARROW_BATCH_SIZE
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
-    _manifest_path_for,
     file_sha256,
+    manifest_path_for,
     output_identity_for,
     read_manifest,
     write_manifest,
@@ -334,7 +334,7 @@ def _complete_result(
 
 def _read_manifests(data_root: Path, parquets: Sequence[Path]) -> dict[str, Manifest]:
     return {
-        parquet.name: read_manifest(_manifest_path_for(parquet.name, data_root))
+        parquet.name: read_manifest(manifest_path_for(parquet.name, data_root))
         for parquet in parquets
     }
 
@@ -398,7 +398,7 @@ def _stage_source(
     if dropped <= 0:
         return new_rows, None
     staged_parquet = stage_root / "data" / parquet.name
-    staged_manifest = _manifest_path_for(parquet.name, stage_root)
+    staged_manifest = manifest_path_for(parquet.name, stage_root)
     write_geoparquet_batches(
         _batches_for_source(connection, manifest.source.name),
         staged_parquet,

@@ -37,8 +37,8 @@ from osm_polygon_description_tag.dataset.duckdb_runtime import (
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     ManifestError,
-    _manifest_path_for,
     file_sha256,
+    manifest_path_for,
     output_identity_for,
     read_manifest,
 )
@@ -242,7 +242,7 @@ def _matching_parquets(data_dir: Path, manifests_dir: Path) -> list[Path]:
 def _validate_artifact(parquet: Path, manifests_dir: Path) -> _ValidatedArtifact:
     stem = parquet.name.removesuffix(".parquet")
     try:
-        manifest = read_manifest(_manifest_path_for(parquet.name, manifests_dir.parent))
+        manifest = read_manifest(manifest_path_for(parquet.name, manifests_dir.parent))
     except ManifestError as error:
         raise ReportingError(f"cannot read manifest for {stem}: {error}") from error
     actual_output = output_identity_for(parquet)

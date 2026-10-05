@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag import language_cli
+from osm_polygon_description_tag import language_workflow
 from osm_polygon_description_tag.cli import run
 from osm_polygon_description_tag.dataset.languages.checkpoint import (
     exclusive_worker_lock,
@@ -87,21 +87,21 @@ def test_run_constructs_the_language_scope_frozen_in_the_snapshot(
 ) -> None:
     scope = ("eng", "fra")
     run_dir = tmp_path / "scoped-run"
-    language_cli.prepare_snapshot(
+    language_workflow.prepare_snapshot(
         source,
         run_dir,
-        code_fingerprint=language_cli.fingerprint_project_source(project),
-        lock_fingerprint=language_cli.fingerprint_lockfile(project),
+        code_fingerprint=language_workflow.fingerprint_project_source(project),
+        lock_fingerprint=language_workflow.fingerprint_lockfile(project),
         model_identity=language_model_identity(LanguagePolicy(), language_scope=scope),
     )
     observed = []
-    build = language_cli.build_lingua_detector
+    build = language_workflow.build_lingua_detector
 
     def scoped_builder(policy: LanguagePolicy, *, language_codes=None):
         observed.append(language_codes)
         return build(policy, language_codes=language_codes)
 
-    monkeypatch.setattr(language_cli, "build_lingua_detector", scoped_builder)
+    monkeypatch.setattr(language_workflow, "build_lingua_detector", scoped_builder)
 
     assert (
         run(
@@ -137,8 +137,12 @@ def test_run_refuses_a_detector_with_a_different_configuration(
         _confidence_values,
         identity=language_model_identity(LanguagePolicy(), language_scope=("eng",)),
     )
-    monkeypatch.setattr(language_cli, "build_lingua_detector", lambda *args, **kwargs: detector)
-    monkeypatch.setattr(language_cli, "build_language_detector", lambda *args, **kwargs: detector)
+    monkeypatch.setattr(
+        language_workflow, "build_lingua_detector", lambda *args, **kwargs: detector
+    )
+    monkeypatch.setattr(
+        language_workflow, "build_language_detector", lambda *args, **kwargs: detector
+    )
 
     code = run(
         [

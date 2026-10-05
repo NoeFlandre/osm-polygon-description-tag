@@ -167,7 +167,7 @@ def _patch_external_boundaries(
         def auth_check(self, *_a: object, **_kw: object) -> None:
             return None
 
-    monkeypatch.setattr(preflight_module._huggingface_hub, "HfApi", lambda *_a, **_kw: _Stub())
+    monkeypatch.setattr(preflight_module.lazy_huggingface_hub, "HfApi", lambda *_a, **_kw: _Stub())
     monkeypatch.setattr(pub, "default_runner_with_retry", counting_runner)
     monkeypatch.setattr(orch, "default_hub_verifier_factory", patching_verifier_factory)
     monkeypatch.setattr(orch, "_default_clock", lambda: _CLOCK)

@@ -23,7 +23,7 @@ from osm_polygon_description_tag.workflow.grid_scheduler import (
 )
 
 
-def _execute_transport(argv: Sequence[str], runner: CommandRunner | None) -> CommandResult:
+def execute_transport(argv: Sequence[str], runner: CommandRunner | None) -> CommandResult:
     """Run one explicit transport argv only after its caller opened ``--apply``."""
     command_runner = runner or grid_command_runner
     try:
@@ -42,7 +42,7 @@ def _raise_transport_failure(result: CommandResult) -> None:
         raise GridOperatorError(f"transport command exited {result.returncode}: {detail}")
 
 
-def _transport_payload(
+def transport_payload(
     argv: Sequence[str], result: CommandResult | None
 ) -> dict[str, object] | None:
     if result is None:
@@ -56,7 +56,7 @@ def _transport_payload(
     }
 
 
-def _utc_now() -> datetime:
+def utc_now() -> datetime:
     """Return the current instant.
 
     This is the one clock the Grid handlers read, so a test can freeze it and
@@ -65,11 +65,11 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def _capture_policy(
+def capture_policy(
     site: str, *, runner: CommandRunner
 ) -> tuple[str | None, str | None, int | None, datetime]:
     """Capture all policy inputs and count only active account-wide jobs."""
-    captured_at = _utc_now()
+    captured_at = utc_now()
     usage_output, quota_output, account_job_output = gather_policy_evidence(site, runner=runner)
     if account_job_output is None:
         account_job_count = None
@@ -83,22 +83,22 @@ def _capture_policy(
     return usage_output, quota_output, account_job_count, captured_at
 
 
-def _portable_remote_paths(remote_bundle_dir: str) -> dict[str, str]:
+def portable_remote_paths(remote_bundle_dir: str) -> dict[str, str]:
     """Expose the exact remote paths required to reuse a staged job script."""
     base = remote_bundle_dir.rstrip("/") or "/"
     return {
         "remote_bundle_dir": base,
-        "remote_project_dir": _remote_child(base, "project"),
-        "remote_run_dir": _remote_child(base, "run"),
-        "remote_source_dir": _remote_child(base, "source"),
+        "remote_project_dir": remote_child(base, "project"),
+        "remote_run_dir": remote_child(base, "run"),
+        "remote_source_dir": remote_child(base, "source"),
     }
 
 
-def _remote_child(base: str, name: str) -> str:
+def remote_child(base: str, name: str) -> str:
     return f"/{name}" if base == "/" else f"{base}/{name}"
 
 
-def _seed_retrieval_snapshot(local_run_dir: Path, retrieved_run_dir: Path) -> None:
+def seed_retrieval_snapshot(local_run_dir: Path, retrieved_run_dir: Path) -> None:
     """Give a shard-only retrieval the immutable snapshot needed for import."""
     source = _retrieval_snapshot_source(local_run_dir)
     _prepare_retrieval_directory(retrieved_run_dir)

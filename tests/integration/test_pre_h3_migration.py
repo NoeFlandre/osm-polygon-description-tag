@@ -213,7 +213,7 @@ def _install_external_boundaries(monkeypatch: pytest.MonkeyPatch) -> dict:
     monkeypatch.setattr(extraction_module.subprocess, "run", preflight_runner)
     monkeypatch.setattr(resources_module.subprocess, "run", preflight_runner)
     monkeypatch.setattr(preflight_module.subprocess, "run", preflight_runner)
-    monkeypatch.setattr(preflight_module._huggingface_hub, "HfApi", lambda *a, **k: _Stub())
+    monkeypatch.setattr(preflight_module.lazy_huggingface_hub, "HfApi", lambda *a, **k: _Stub())
     monkeypatch.setattr(preflight_module.shutil, "which", lambda executable: executable)
     monkeypatch.setattr(pub, "default_runner_with_retry", runner_wrapper)
     monkeypatch.setattr(orch, "default_hub_verifier_factory", lambda: verifier)

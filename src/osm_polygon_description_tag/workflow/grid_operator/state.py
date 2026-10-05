@@ -88,9 +88,9 @@ def validate_resume_root(state: ShardPaths) -> None:
 
 
 def resume_checkpoint_is_present(state: ShardPaths) -> bool:
-    from .bundle import _shard_checkpoint
+    from .bundle import shard_checkpoint
 
-    if _shard_checkpoint(state) is not None:
+    if shard_checkpoint(state) is not None:
         return True
     if resume_root_has_children(state):
         raise GridOperatorError("resume artifacts exist without a checkpoint")

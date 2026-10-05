@@ -11,7 +11,7 @@ from osm_polygon_description_tag.dataset.languages.checkpoint import ShardStatus
 from osm_polygon_description_tag.dataset.languages.validation import RunReport, ShardReport
 from osm_polygon_description_tag.workflow.grid_scheduler import JobState
 
-from .bundle import _existing_bundle, read_intent
+from .bundle import existing_bundle, read_intent
 from .models import GridOperatorError, JobBundle, JobPaths, SubmissionIntent
 from .script import job_paths
 from .state import submission_lock
@@ -86,7 +86,7 @@ def _acknowledgment_shard(report: RunReport) -> ShardReport:
 
 def _bound_submission(paths: JobPaths) -> tuple[SubmissionIntent, JobBundle]:
     intent = read_intent(paths.intent)
-    bundle = _existing_bundle(paths)
+    bundle = existing_bundle(paths)
     if bundle is None:
         raise GridOperatorError("submission intent is not bound to the prepared bundle")
     if intent.bundle_id != bundle.bundle_id or intent.shard != bundle.shard:

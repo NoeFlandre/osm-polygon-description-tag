@@ -66,13 +66,13 @@ from osm_polygon_description_tag.publication.state import (
     PublicationStateError as PublicationStateError,
 )
 from osm_polygon_description_tag.publication.state import (
-    _write_publication_state as _state_write_publication_state,
-)
-from osm_polygon_description_tag.publication.state import (
     cast_dict as _state_cast_dict,
 )
 from osm_polygon_description_tag.publication.state import (
     read_publication_state as _state_read_publication_state,
+)
+from osm_polygon_description_tag.publication.state import (
+    write_publication_state as _state_write_publication_state,
 )
 from osm_polygon_description_tag.publication.upload import execute_upload
 from osm_polygon_description_tag.publication.verification import (
@@ -98,7 +98,7 @@ from osm_polygon_description_tag.workflow.source_runner import (
     STATUS_REUSED,
     OrchestratorError,
     SourceOutcome,
-    _call_publication_state,
+    call_publication_state,
     read_publication_state,
 )
 from osm_polygon_description_tag.workflow.source_runner import (
@@ -116,8 +116,8 @@ INTERRUPT_EXIT_CODE = 130
 STATUS_FAILED = "failed"
 
 
-def _write_publication_state(*args: Any, **kwargs: Any) -> dict[str, object]:
-    return _call_publication_state(_state_write_publication_state, *args, **kwargs)
+def write_publication_state(*args: Any, **kwargs: Any) -> dict[str, object]:
+    return call_publication_state(_state_write_publication_state, *args, **kwargs)
 
 
 @dataclass
@@ -348,7 +348,7 @@ def _publish_source_if_needed(
         raise
     output_identity = output_identity_for(output_path)
     plan_identity = build_per_pbf_upload_plan(paths.data_root, source.name).identity_sha256
-    _write_publication_state(
+    write_publication_state(
         paths.data_root,
         source_name=source.name,
         source_sha256=source_identity_for(source.path).sha256,

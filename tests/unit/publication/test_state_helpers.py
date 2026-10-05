@@ -64,7 +64,7 @@ def test_write_publication_state_writes_complete_source_record(
         state, "_atomic_write_json", lambda path, payload: writes.append((path, payload))
     )
 
-    result = state._write_publication_state(
+    result = state.write_publication_state(
         tmp_path,
         source_name="new.osm.pbf",
         source_sha256="source-sha",
@@ -103,7 +103,7 @@ def test_write_publication_state_creates_missing_published_section(
     monkeypatch.setattr(state, "read_publication_state", lambda _root: initial)
     monkeypatch.setattr(state, "_atomic_write_json", lambda *_args: None)
 
-    result = state._write_publication_state(
+    result = state.write_publication_state(
         tmp_path,
         source_name="new.osm.pbf",
         source_sha256="s",
@@ -136,7 +136,7 @@ def test_write_publication_state_rejects_unsupported_schema_exactly(
         PublicationStateError,
         match=r"^unsupported publication state schema: 2$",
     ):
-        state._write_publication_state(
+        state.write_publication_state(
             tmp_path,
             source_name="new.osm.pbf",
             source_sha256="s",
@@ -191,7 +191,7 @@ def test_metadata_state_matches_rejects_missing_or_wrong_identity(
     plan = SimpleNamespace(identity_sha256="expected")
     monkeypatch.setattr(state, "read_publication_state", lambda _root: state_payload)
 
-    assert state._metadata_state_matches(tmp_path, plan) is False
+    assert state.metadata_state_matches(tmp_path, plan) is False
 
 
 def test_metadata_state_matches_rejects_missing_files(
@@ -206,7 +206,7 @@ def test_metadata_state_matches_rejects_missing_files(
     )
     monkeypatch.setattr(state, "_metadata_files_exist", lambda _paths: False)
 
-    assert state._metadata_state_matches(tmp_path, plan) is False
+    assert state.metadata_state_matches(tmp_path, plan) is False
 
 
 def test_metadata_state_matches_passes_metadata_dict_to_identity_checker(
@@ -225,7 +225,7 @@ def test_metadata_state_matches_passes_metadata_dict_to_identity_checker(
 
     monkeypatch.setattr(state, "_metadata_identity_matches", identity_matches)
 
-    assert state._metadata_state_matches(tmp_path, plan) is True
+    assert state.metadata_state_matches(tmp_path, plan) is True
     assert seen == [metadata]
 
 
@@ -240,7 +240,7 @@ def test_write_metadata_state_writes_required_and_optional_fields(
         state, "_atomic_write_json", lambda path, payload: writes.append((path, payload))
     )
 
-    result = state._write_metadata_state(
+    result = state.write_metadata_state(
         tmp_path,
         identity_sha256="identity",
         readme_sha256="readme",

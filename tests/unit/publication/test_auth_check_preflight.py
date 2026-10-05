@@ -67,7 +67,7 @@ def _patch_hf(monkeypatch: pytest.MonkeyPatch, hub: _RecordingHubApi) -> None:
     def factory(*_a: object, **_kw: object) -> _RecordingHubApi:
         return hub
 
-    monkeypatch.setattr(orch._huggingface_hub, "HfApi", factory)
+    monkeypatch.setattr(orch.lazy_huggingface_hub, "HfApi", factory)
 
 
 def _patch_osmium(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:

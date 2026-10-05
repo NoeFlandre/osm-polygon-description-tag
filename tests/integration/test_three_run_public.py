@@ -46,7 +46,7 @@ def _patch_external_boundaries(
     monkeypatch.setattr(orch, "default_hub_verifier_factory", verifier_factory)
     # Patch HfApi used by the default preflight to avoid real network calls.
     if hf_api_factory is not None:
-        monkeypatch.setattr(preflight_module._huggingface_hub, "HfApi", hf_api_factory)
+        monkeypatch.setattr(preflight_module.lazy_huggingface_hub, "HfApi", hf_api_factory)
     if clock is not None:
         monkeypatch.setattr(orch, "_default_clock", clock)
 

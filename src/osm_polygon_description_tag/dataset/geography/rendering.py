@@ -20,8 +20,8 @@ from osm_polygon_description_tag.dataset.geography.atomic import (
     atomic_save_png as _atomic_save_png,
 )
 from osm_polygon_description_tag.dataset.geography.basemap import (
-    _LAND_COLOR,
-    _LAND_EDGE,
+    LAND_COLOR,
+    LAND_EDGE,
     draw_landmasses,
     load_land_basemap,
 )
@@ -273,11 +273,11 @@ def _draw_empty_colorbar(fig: Any, ax: Any, cmap: mcolors.Colormap) -> None:
 
 
 __all__ = [
+    "LAND_COLOR",
+    "LAND_EDGE",
     "_COLORMAP_NAME",
     "_DPI",
     "_FIGSIZE",
-    "_LAND_COLOR",
-    "_LAND_EDGE",
     "_METADATA_SOFTWARE",
     "_NO_DATA_CAPTION",
     "RenderResult",

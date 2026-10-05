@@ -28,9 +28,9 @@ from osm_polygon_description_tag.publication.models import (
     UploadPlan,
 )
 from osm_polygon_description_tag.publication.planning import (
-    _collect_data_items,
-    _collect_manifest_items,
     build_metadata_only_upload_plan,
+    collect_data_items,
+    collect_manifest_items,
 )
 from osm_polygon_description_tag.publication.upload import execute_upload
 from osm_polygon_description_tag.publication.verification import (
@@ -133,13 +133,13 @@ def _published_inventory(
     # nothing about the directory being absent.
     _require_real_directory(manifests_dir, "published manifest directory missing")
     data_items = _require_nonempty_inventory(
-        _collect_data_items(
+        collect_data_items(
             data_root,
             require_successful_text=require_successful_text,
         ),
         data_dir,
     )
-    manifest_items = _collect_manifest_items(data_root)
+    manifest_items = collect_manifest_items(data_root)
     return tuple(sorted((*data_items, *manifest_items), key=lambda item: item.relative_path))
 
 

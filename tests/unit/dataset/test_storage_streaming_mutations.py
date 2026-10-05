@@ -35,7 +35,7 @@ def _record(osm_id: int, geometry: Polygon | MultiPolygon) -> dict[str, object]:
 
 def _batch(records: list[dict[str, object]]) -> pa.RecordBatch:
     return pa.RecordBatch.from_pylist(
-        [storage._arrow_record(record) for record in records], schema=SCHEMA
+        [storage.arrow_record(record) for record in records], schema=SCHEMA
     )
 
 

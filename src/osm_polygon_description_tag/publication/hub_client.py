@@ -4,7 +4,7 @@
 not pull in a network-authenticated dependency at import time. Every module
 that talks to the Hub resolves ``HfApi`` and ``CommitOperationAdd`` through
 the helpers here, at call time, so a test that overrides an attribute on
-:data:`_huggingface_hub` is honoured everywhere.
+:data:`lazy_huggingface_hub` is honoured everywhere.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Any, Final
 DATASET_REPO_TYPE: Final = "dataset"
 
 
-class _HuggingFaceHub:
+class HuggingFaceHub:
     """Lazy wrapper around the huggingface_hub package.
 
     Importing huggingface_hub at module load time would couple the project
@@ -22,7 +22,7 @@ class _HuggingFaceHub:
     The wrapper defers the import until a Hub client is actually needed.
 
     Tests may override attributes on this instance (for example,
-    ``_huggingface_hub.HfApi = lambda ...``); those overrides take
+    ``lazy_huggingface_hub.HfApi = lambda ...``); those overrides take
     precedence over the lazy lookup.
     """
 
@@ -40,18 +40,18 @@ class _HuggingFaceHub:
         return getattr(self._resolve_module(), name)
 
 
-_huggingface_hub = _HuggingFaceHub()
+lazy_huggingface_hub = HuggingFaceHub()
 
 
 def new_hf_api() -> Any:
     """Instantiate ``HfApi``, resolved at call time so overrides are honoured."""
-    api_class: Any = _huggingface_hub.HfApi
+    api_class: Any = lazy_huggingface_hub.HfApi
     return api_class()
 
 
 def commit_operation_add(path_in_repo: str, content: object) -> Any:
     """Build one ``CommitOperationAdd`` for ``path_in_repo``."""
-    operation_class: Any = _huggingface_hub.CommitOperationAdd
+    operation_class: Any = lazy_huggingface_hub.CommitOperationAdd
     return operation_class(path_in_repo=path_in_repo, path_or_fileobj=content)
 
 

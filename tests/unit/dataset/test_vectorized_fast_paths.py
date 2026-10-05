@@ -43,7 +43,7 @@ def _records(count: int, *, zero_x: bool = False) -> list[dict[str, object]]:
 
 def _arrow_batch(records: list[dict[str, object]]) -> pa.RecordBatch:
     return pa.RecordBatch.from_pylist(
-        [storage._arrow_record(record) for record in records], schema=SCHEMA
+        [storage.arrow_record(record) for record in records], schema=SCHEMA
     )
 
 
@@ -76,7 +76,7 @@ def test_write_geoparquet_batches_is_byte_identical_to_row_writing(
 
 
 def test_write_geoparquet_batches_matches_rows_for_non_canonical_pairs(tmp_path: Path) -> None:
-    record = storage._arrow_record(_records(1)[0])
+    record = storage.arrow_record(_records(1)[0])
     record["tags"] = [{"key": "z", "value": "1"}, {"key": "a", "value": None}]
     batch = pa.RecordBatch.from_pylist([record], schema=SCHEMA)
     rows_target = tmp_path / "rows.parquet"

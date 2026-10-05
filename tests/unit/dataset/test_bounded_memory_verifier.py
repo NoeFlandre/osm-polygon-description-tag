@@ -97,7 +97,7 @@ def _patch_hub(monkeypatch: pytest.MonkeyPatch, hub: _FakeHubApi) -> None:
     def factory(*a: object, **kw: object) -> _FakeHubApi:
         return hub
 
-    monkeypatch.setattr(orch._huggingface_hub, "HfApi", factory)
+    monkeypatch.setattr(orch.lazy_huggingface_hub, "HfApi", factory)
 
 
 def test_verifier_uses_streaming_hash_when_read_bytes_raises(

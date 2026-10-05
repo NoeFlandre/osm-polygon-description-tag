@@ -19,6 +19,10 @@ from osm_polygon_description_tag.workflow.grid_operator import (
     GridOperatorError,
     prepare_portable_job,
 )
+from osm_polygon_description_tag.workflow.grid_operator import models as grid_models
+from osm_polygon_description_tag.workflow.grid_operator import reconciliation as grid_reconciliation
+from osm_polygon_description_tag.workflow.grid_operator import stage as grid_stage
+from osm_polygon_description_tag.workflow.grid_operator import verify as grid_verify
 from osm_polygon_description_tag.workflow.grid_scheduler import CommandResult, SchedulerError
 from tests.helpers.messages import exactly
 from tests.helpers.sentences import REMOTE_SAT_MODEL_PATH
@@ -93,7 +97,7 @@ def test_an_unavailable_scheduler_command_is_unknown_evidence_not_approval() -> 
     def refuse(_argv: tuple[str, ...], _timeout: float) -> CommandResult:
         raise SchedulerError("scheduler executable is not available: quota")
 
-    assert operator._captured(("quota", "-p", "-w"), refuse, 1.0) is None  # type: ignore[arg-type]
+    assert grid_reconciliation._captured(("quota", "-p", "-w"), refuse, 1.0) is None  # type: ignore[arg-type]
 
 
 def test_collection_validates_only_the_shard_it_was_asked_about(
@@ -107,7 +111,7 @@ def test_collection_validates_only_the_shard_it_was_asked_about(
         seen.append((run_dir, shards))
         return SimpleNamespace()
 
-    monkeypatch.setattr(operator, "validate_run", fake_validate_run)
+    monkeypatch.setattr(grid_reconciliation, "validate_run", fake_validate_run)
 
     operator.collect_results(run, SHARD)
 
@@ -126,7 +130,7 @@ def test_a_payload_is_materialised_inside_the_job_directory(
         seen.append(kwargs)
         return real_temporary_directory(*args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(operator.tempfile, "TemporaryDirectory", recording_temporary_directory)
+    monkeypatch.setattr(grid_stage.tempfile, "TemporaryDirectory", recording_temporary_directory)
 
     prepared_job = prepare_portable_job(
         run,
@@ -166,10 +170,10 @@ def test_a_staged_payload_is_verified_against_the_bundle_it_was_staged_for(
         source_size_bytes=foreign.source_size_bytes,
         input_row_count=foreign.input_row_count,
     )
-    fingerprint = operator._staged_resume_fingerprint(prepared_job.payload_root)
+    fingerprint = grid_stage._staged_resume_fingerprint(prepared_job.payload_root)
 
     with pytest.raises(GridOperatorError) as caught:
-        operator._existing_payload_for_resume(
+        grid_stage._existing_payload_for_resume(
             prepared_job.payload_root,
             foreign,
             fingerprint,  # type: ignore[arg-type]
@@ -238,13 +242,13 @@ def test_the_payload_root_is_selected_for_the_bundle_being_staged(
     """Selecting without the bundle would reuse another shard's staged payload."""
     project, source, run, snapshot = request.getfixturevalue("portable_prepared")
     seen: list[object] = []
-    real = operator._existing_payload_for_resume
+    real = grid_stage._existing_payload_for_resume
 
     def recording(payload_root: Path, bundle: object, fingerprint: str) -> object:
         seen.append(bundle)
         return real(payload_root, bundle, fingerprint)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(operator, "_existing_payload_for_resume", recording)
+    monkeypatch.setattr(grid_stage, "_existing_payload_for_resume", recording)
 
     prepared_job = prepare_portable_job(
         run,
@@ -266,13 +270,13 @@ def test_a_prepared_view_describes_the_job_and_bundle_that_were_staged(
     """The view is what the caller transfers, so it must name this job's own paths."""
     project, source, run, snapshot = request.getfixturevalue("portable_prepared")
     seen: list[object] = []
-    real = operator._prepared_view
+    real = grid_stage._prepared_view
 
     def recording(paths: object, bundle: object, payload_root: Path) -> object:
         seen.append((paths, bundle))
         return real(paths, bundle, payload_root)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(operator, "_prepared_view", recording)
+    monkeypatch.setattr(grid_stage, "_prepared_view", recording)
 
     prepare_portable_job(
         run,
@@ -321,13 +325,13 @@ def test_a_staged_payload_whose_snapshot_is_unreadable_reports_the_readers_words
         remote_bundle_dir=_REMOTE_BUNDLE,
         sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
-    run_root = prepared_job.payload_root / operator.STAGE_RUN_DIRNAME
-    (run_root / operator.SNAPSHOT_FILENAME).write_text("{not json", encoding="utf-8")
+    run_root = prepared_job.payload_root / grid_models.STAGE_RUN_DIRNAME
+    (run_root / grid_stage.SNAPSHOT_FILENAME).write_text("{not json", encoding="utf-8")
 
     with pytest.raises(GridOperatorError) as caught:
-        operator._verify_payload_identity(
-            prepared_job.payload_root / operator.STAGE_PROJECT_DIRNAME,
-            prepared_job.payload_root / operator.STAGE_SOURCE_DIRNAME,
+        grid_verify._verify_payload_identity(
+            prepared_job.payload_root / grid_models.STAGE_PROJECT_DIRNAME,
+            prepared_job.payload_root / grid_models.STAGE_SOURCE_DIRNAME,
             run_root,
             prepared_job.bundle,
         )
@@ -404,7 +408,7 @@ def test_a_retrieved_directory_nested_in_the_local_one_is_refused_either_way(
         GridOperatorError,
         match=exactly("retrieved and local shard directories must be distinct"),
     ):
-        operator._reject_overlapping_paths(source, destination)
+        grid_verify._reject_overlapping_paths(source, destination)
 
 
 def test_two_separate_shard_directories_are_accepted(tmp_path: Path) -> None:
@@ -414,7 +418,7 @@ def test_two_separate_shard_directories_are_accepted(tmp_path: Path) -> None:
     source.mkdir()
     destination.mkdir()
 
-    assert operator._reject_overlapping_paths(source, destination) is None
+    assert grid_verify._reject_overlapping_paths(source, destination) is None
 
 
 def test_restaging_an_unchanged_payload_reports_this_jobs_own_paths(
@@ -432,13 +436,13 @@ def test_restaging_an_unchanged_payload_reports_this_jobs_own_paths(
         sat_model_path=REMOTE_SAT_MODEL_PATH,
     )
     seen: list[object] = []
-    real = operator._prepared_view
+    real = grid_stage._prepared_view
 
     def recording(paths: object, bundle: object, payload_root: Path) -> object:
         seen.append((paths, bundle))
         return real(paths, bundle, payload_root)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(operator, "_prepared_view", recording)
+    monkeypatch.setattr(grid_stage, "_prepared_view", recording)
 
     second = prepare_portable_job(
         run,

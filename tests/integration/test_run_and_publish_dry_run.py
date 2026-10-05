@@ -143,11 +143,11 @@ def test_run_and_publish_safe_upload_retry_after_interrupt(
 
     exporter = _fake_exporter_factory({"a": 1})
 
-    # First upload: succeeds but we patch _write_publication_state to silently
+    # First upload: succeeds but we patch write_publication_state to silently
     # fail (simulate crash after remote commit but before local checkpoint).
     from osm_polygon_description_tag.workflow import orchestrator
 
-    real_write = orchestrator._write_publication_state
+    real_write = orchestrator.write_publication_state
 
     crashed = False
 
@@ -158,7 +158,7 @@ def test_run_and_publish_safe_upload_retry_after_interrupt(
             raise RuntimeError("simulated crash after remote commit")
         return real_write(*args, **kwargs)
 
-    monkeypatch.setattr(orchestrator, "_write_publication_state", flaky_write)
+    monkeypatch.setattr(orchestrator, "write_publication_state", flaky_write)
 
     def upload_succeeds(command: list[str]) -> str:
         return "r-a"
@@ -179,7 +179,7 @@ def test_run_and_publish_safe_upload_retry_after_interrupt(
     assert "a.osm.pbf" not in state["published"]
 
     # Restart: now the original write succeeds, so state records the upload.
-    monkeypatch.setattr(orchestrator, "_write_publication_state", real_write)
+    monkeypatch.setattr(orchestrator, "write_publication_state", real_write)
     report = run_and_publish(
         paths=paths,
         confirm_repo="NoeFlandre/osm-polygon-description-tag",

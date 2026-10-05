@@ -8,7 +8,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from osm_polygon_description_tag import language_cli
+from osm_polygon_description_tag import (
+    grid_workflow,
+    language_cli,
+    language_workflow,
+    publication_workflow,
+)
 from osm_polygon_description_tag.dataset.languages.detector import LanguageDetector
 from osm_polygon_description_tag.dataset.languages.models import (
     CASCADE_DETECTOR_NAME,
@@ -18,13 +23,16 @@ from osm_polygon_description_tag.dataset.languages.models import (
     language_model_identity,
 )
 from tests.helpers.messages import exactly
+from tests.helpers.patching import patch_modules
 from tests.helpers.sentences import fake_splitter
 
 
 @pytest.fixture(autouse=True)
 def _fake_sentence_splitter(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the CLI tests about wiring; the real adapter has its own tests."""
-    monkeypatch.setattr(language_cli, "build_sat_splitter", lambda *, model_dir: fake_splitter())
+    monkeypatch.setattr(
+        language_workflow, "build_sat_splitter", lambda *, model_dir: fake_splitter()
+    )
 
 
 def _payload(capsys: pytest.CaptureFixture[str]) -> dict[str, object]:
@@ -48,7 +56,14 @@ def test_prepare_command_selects_the_named_v1_policy(
     ) -> None:
         received["policy"] = policy
 
-    monkeypatch.setattr(language_cli, "handle_prepare", fake_handle_prepare)
+    patch_modules(
+        monkeypatch,
+        (
+            (language_cli, "handle_prepare"),
+            (language_workflow, "handle_prepare"),
+        ),
+        fake_handle_prepare,
+    )
 
     language_cli.prepare_command(
         Path("/source"),
@@ -62,7 +77,7 @@ def test_prepare_command_selects_the_named_v1_policy(
 
 def test_prepare_policy_rejects_an_unknown_named_policy() -> None:
     with pytest.raises(ValueError, match=exactly("policy_version must be 'v1'")):
-        language_cli._policy(None, policy_version="v2")
+        language_cli.resolve_language_policy(None, policy_version="v2")
 
 
 def test_handle_prepare_emits_complete_snapshot_metadata(
@@ -105,9 +120,9 @@ def test_handle_prepare_emits_complete_snapshot_metadata(
         )
         return snapshot
 
-    monkeypatch.setattr(language_cli, "fingerprint_project_source", lambda _: "code-hash")
-    monkeypatch.setattr(language_cli, "fingerprint_lockfile", lambda _: "lock-hash")
-    monkeypatch.setattr(language_cli, "prepare_snapshot", fake_prepare_snapshot)
+    monkeypatch.setattr(language_workflow, "fingerprint_project_source", lambda _: "code-hash")
+    monkeypatch.setattr(language_workflow, "fingerprint_lockfile", lambda _: "lock-hash")
+    monkeypatch.setattr(language_workflow, "prepare_snapshot", fake_prepare_snapshot)
 
     result = language_cli.handle_prepare(source_root, run_dir, project_root, policy)
 
@@ -199,12 +214,21 @@ def test_handle_run_forwards_operator_configuration_and_emits_counts(
         }
         return outcome
 
-    monkeypatch.setattr(language_cli, "read_snapshot", lambda _: snapshot)
-    monkeypatch.setattr(language_cli, "verify_project_identity", lambda *_: None, raising=False)
-    monkeypatch.setattr(language_cli, "build_lingua_detector", fake_build)
-    monkeypatch.setattr(language_cli, "ProcessingBudget", FakeBudget)
-    monkeypatch.setattr(language_cli, "exclusive_worker_lock", lambda _: nullcontext())
-    monkeypatch.setattr(language_cli, "process_shard", fake_process)
+    patch_modules(
+        monkeypatch,
+        (
+            (language_workflow, "read_snapshot"),
+            (grid_workflow, "read_snapshot"),
+        ),
+        lambda _: snapshot,
+    )
+    monkeypatch.setattr(
+        language_workflow, "verify_project_identity", lambda *_: None, raising=False
+    )
+    monkeypatch.setattr(language_workflow, "build_lingua_detector", fake_build)
+    monkeypatch.setattr(language_workflow, "ProcessingBudget", FakeBudget)
+    monkeypatch.setattr(language_workflow, "exclusive_worker_lock", lambda _: nullcontext())
+    monkeypatch.setattr(language_workflow, "process_shard", fake_process)
     sat_splitter = fake_splitter()
     sat_dirs: list[object] = []
 
@@ -212,7 +236,7 @@ def test_handle_run_forwards_operator_configuration_and_emits_counts(
         sat_dirs.append(model_dir)
         return sat_splitter
 
-    monkeypatch.setattr(language_cli, "build_sat_splitter", fake_build_splitter)
+    monkeypatch.setattr(language_workflow, "build_sat_splitter", fake_build_splitter)
 
     language_cli.handle_run(
         source_root, run_dir, shard, 3, 12.5, sat_model_path=Path("/models/sat.bin")
@@ -271,7 +295,7 @@ def test_handle_validate_forwards_shard_filter_and_emits_report_metadata(
         received.update(run_dir=received_run_dir, shards=shards)
         return FakeReport()
 
-    monkeypatch.setattr(language_cli, "validate_run", fake_validate)
+    monkeypatch.setattr(language_workflow, "validate_run", fake_validate)
 
     language_cli.handle_validate(run_dir, shard)
 
@@ -320,9 +344,13 @@ def test_handle_export_writes_nested_card_and_emits_export_metadata(
         received["card_export"] = received_export
         return "## résumé — 日本語\n"
 
-    monkeypatch.setattr(language_cli, "export_language_annotations", fake_export_annotations)
-    monkeypatch.setattr(language_cli, "render_language_card_section", fake_render)
-    monkeypatch.setattr(language_cli, "language_config_yaml", lambda: "config: language-v1\n")
+    monkeypatch.setattr(
+        publication_workflow, "export_language_annotations", fake_export_annotations
+    )
+    monkeypatch.setattr(publication_workflow, "render_language_card_section", fake_render)
+    monkeypatch.setattr(
+        publication_workflow, "language_config_yaml", lambda: "config: language-v1\n"
+    )
 
     language_cli.handle_export(run_dir, export_dir, card_section)
 
@@ -369,9 +397,11 @@ def test_handle_export_writes_card_section_with_explicit_utf8(
             return "ascii"
         return real_text_encoding(encoding, stacklevel)
 
-    monkeypatch.setattr(language_cli, "export_language_annotations", lambda *_: FakeExport())
-    monkeypatch.setattr(language_cli, "render_language_card_section", lambda _: "café\n")
-    monkeypatch.setattr(language_cli, "language_config_yaml", lambda: "")
+    monkeypatch.setattr(
+        publication_workflow, "export_language_annotations", lambda *_: FakeExport()
+    )
+    monkeypatch.setattr(publication_workflow, "render_language_card_section", lambda _: "café\n")
+    monkeypatch.setattr(publication_workflow, "language_config_yaml", lambda: "")
     monkeypatch.setattr(io, "text_encoding", locale_encoding_is_ascii)
 
     language_cli.handle_export(run_dir, export_dir, card_section)
@@ -449,10 +479,10 @@ def test_handle_publish_forwards_baseline_and_emits_plan_metadata(
         }
         return outcome
 
-    monkeypatch.setattr(language_cli, "read_language_export", fake_read)
-    monkeypatch.setattr(language_cli, "build_language_upload_plan", fake_plan)
-    monkeypatch.setattr(language_cli, "build_language_hub", lambda: hub)
-    monkeypatch.setattr(language_cli, "publish_language_export", fake_publish)
+    monkeypatch.setattr(publication_workflow, "read_language_export", fake_read)
+    monkeypatch.setattr(publication_workflow, "build_language_upload_plan", fake_plan)
+    monkeypatch.setattr(publication_workflow, "build_language_hub", lambda: hub)
+    monkeypatch.setattr(publication_workflow, "publish_language_export", fake_publish)
 
     language_cli.handle_publish(export_dir, repo, repo, None, False)
 
@@ -500,16 +530,16 @@ def test_handle_publish_rejects_apply_without_an_exact_baseline_error(
         calls.append("publish")
         raise AssertionError("publishing must not start before baseline validation")
 
-    monkeypatch.setattr(language_cli, "read_language_export", lambda _: export)
+    monkeypatch.setattr(publication_workflow, "read_language_export", lambda _: export)
     monkeypatch.setattr(
-        language_cli,
+        publication_workflow,
         "build_language_upload_plan",
         lambda received_export, received_repo, *, confirm_repo: plan,
     )
-    monkeypatch.setattr(language_cli, "build_language_hub", FakeHub)
-    monkeypatch.setattr(language_cli, "publish_language_export", fake_publish)
+    monkeypatch.setattr(publication_workflow, "build_language_hub", FakeHub)
+    monkeypatch.setattr(publication_workflow, "publish_language_export", fake_publish)
 
-    with pytest.raises(language_cli.LanguagePublicationError) as error:
+    with pytest.raises(publication_workflow.LanguagePublicationError) as error:
         language_cli.handle_publish(export_dir, repo, repo, None, True)
 
     assert str(error.value) == (
@@ -554,9 +584,9 @@ def test_handle_prepare_defaults_to_the_cascade_identity(
         )
         return snapshot
 
-    monkeypatch.setattr(language_cli, "fingerprint_project_source", lambda _: "code-hash")
-    monkeypatch.setattr(language_cli, "fingerprint_lockfile", lambda _: "lock-hash")
-    monkeypatch.setattr(language_cli, "prepare_snapshot", fake_prepare_snapshot)
+    monkeypatch.setattr(language_workflow, "fingerprint_project_source", lambda _: "code-hash")
+    monkeypatch.setattr(language_workflow, "fingerprint_lockfile", lambda _: "lock-hash")
+    monkeypatch.setattr(language_workflow, "prepare_snapshot", fake_prepare_snapshot)
 
     assert language_cli.handle_prepare(source_root, run_dir, project_root, policy) is snapshot
     assert received["model_identity"] == identity
@@ -606,12 +636,21 @@ def test_handle_run_uses_the_cascade_builder_and_forwards_the_glotlid_path(
     def fake_process(*args: object, **kwargs: object) -> object:
         return outcome
 
-    monkeypatch.setattr(language_cli, "read_snapshot", lambda _: snapshot)
-    monkeypatch.setattr(language_cli, "verify_project_identity", lambda *_: None)
-    monkeypatch.setattr(language_cli, "build_language_detector", fake_build)
-    monkeypatch.setattr(language_cli, "exclusive_worker_lock", lambda _: nullcontext())
-    monkeypatch.setattr(language_cli, "process_shard", fake_process)
-    monkeypatch.setattr(language_cli, "build_sat_splitter", lambda *, model_dir: fake_splitter())
+    patch_modules(
+        monkeypatch,
+        (
+            (language_workflow, "read_snapshot"),
+            (grid_workflow, "read_snapshot"),
+        ),
+        lambda _: snapshot,
+    )
+    monkeypatch.setattr(language_workflow, "verify_project_identity", lambda *_: None)
+    monkeypatch.setattr(language_workflow, "build_language_detector", fake_build)
+    monkeypatch.setattr(language_workflow, "exclusive_worker_lock", lambda _: nullcontext())
+    monkeypatch.setattr(language_workflow, "process_shard", fake_process)
+    monkeypatch.setattr(
+        language_workflow, "build_sat_splitter", lambda *, model_dir: fake_splitter()
+    )
 
     model_path = Path("/models/model_v3.bin")
     language_cli.handle_run(

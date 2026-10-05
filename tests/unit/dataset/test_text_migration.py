@@ -545,7 +545,7 @@ def test_a_migrated_artifact_keeps_the_pinned_codec_and_dictionary_columns(
     written file rather than from the call.
     """
     from osm_polygon_description_tag.dataset.storage import (
-        _DICTIONARY_COLUMNS,
+        DICTIONARY_COLUMNS,
         GEOPARQUET_COMPRESSION,
     )
 
@@ -558,7 +558,7 @@ def test_a_migrated_artifact_keeps_the_pinned_codec_and_dictionary_columns(
     names = [metadata.schema.column(i).name for i in range(metadata.num_columns)]
     for index, name in enumerate(names):
         assert group.column(index).compression == GEOPARQUET_COMPRESSION.upper(), name
-    for name in _DICTIONARY_COLUMNS:
+    for name in DICTIONARY_COLUMNS:
         encodings = group.column(names.index(name)).encodings
         assert "RLE_DICTIONARY" in encodings, f"{name} lost dictionary encoding"
     # The list is a restriction, not a hint: dropping it makes Arrow dictionary

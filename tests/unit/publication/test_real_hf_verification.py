@@ -136,7 +136,7 @@ def patched_hf(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     def _factory(*args: Any, **kwargs: Any) -> _FakeHubApi:
         return state["api"]
 
-    monkeypatch.setattr(orch._huggingface_hub, "HfApi", _factory)
+    monkeypatch.setattr(orch.lazy_huggingface_hub, "HfApi", _factory)
     return state
 
 

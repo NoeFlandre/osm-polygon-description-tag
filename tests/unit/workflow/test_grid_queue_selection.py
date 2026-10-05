@@ -15,6 +15,8 @@ from pathlib import Path
 import pytest
 
 from osm_polygon_description_tag.workflow import grid_operator
+from osm_polygon_description_tag.workflow.grid_operator import bundle as grid_bundle
+from osm_polygon_description_tag.workflow.grid_operator import models as grid_models
 from osm_polygon_description_tag.workflow.grid_policy import PolicyDecision, PolicyVerdict
 from osm_polygon_description_tag.workflow.grid_scheduler import SchedulerError
 
@@ -26,12 +28,12 @@ def _allowed(tmp_path: Path, bundle: grid_operator.JobBundle) -> grid_operator.J
     paths.root.mkdir(parents=True)
     paths.script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
     paths.bundle.write_text(
-        grid_operator.canonical_json_bytes(bundle.to_payload()).decode("utf-8"),
+        grid_models.canonical_json_bytes(bundle.to_payload()).decode("utf-8"),
         encoding="utf-8",
     )
     (paths.root / grid_operator.JOB_CONFIG_FILENAME).write_text(
-        grid_operator.canonical_json_bytes(
-            grid_operator._job_config_payload(
+        grid_models.canonical_json_bytes(
+            grid_bundle._job_config_payload(
                 bundle, processing_seconds=1200, batch_size=512, walltime_seconds=1800
             )
         ).decode("utf-8"),
