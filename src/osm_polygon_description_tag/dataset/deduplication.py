@@ -95,7 +95,7 @@ def _read_state(path: Path) -> dict[str, Any] | None:
 
 
 def _write_state(path: Path, payload: Mapping[str, object]) -> None:
-    # pragma: no mutate start - None/False are equivalent for ensure_ascii; UTF-8 codec names are case-insensitive
+    # pragma: no mutate start - equivalent ensure_ascii and codec-name mutants
     body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     atomic_write_bytes(path, body.encode("utf-8"))
     # pragma: no mutate end
