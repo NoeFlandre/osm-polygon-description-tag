@@ -224,6 +224,12 @@ def test_split_antimeridian_crossing_polygon_is_split() -> None:
         assert len(ring) >= 3
 
 
+def test_split_antimeridian_uses_westward_tie_for_exact_half_world_step() -> None:
+    points = [(-1.0, 0.0), (0.0, 0.0), (180.0, 0.0)]
+
+    assert split_antimeridian(points) == [[(-1.0, 0.0), (0.0, 0.0), (-180.0, 0.0)]]
+
+
 def test_h3_antimeridian_internal_helpers_pin_boundary_and_unwrap_rules() -> None:
     from osm_polygon_description_tag.dataset.geography.h3_policy import (
         _clip_longitude,
@@ -264,9 +270,17 @@ def test_antimeridian_helpers_pin_boundary_direction_and_slab_math() -> None:
 
     assert _unwrap_points([(0.0, 0.0), (180.0, 1.0)]) == [
         (0.0, 0.0),
-        (180.0, 1.0),
+        (-180.0, 1.0),
     ]
     assert _unwrap_points([(0.0, 0.0), (-180.0, 1.0)]) == [
+        (0.0, 0.0),
+        (-180.0, 1.0),
+    ]
+    assert _unwrap_points([(-10.0, 0.0), (170.0, 1.0)]) == [
+        (-10.0, 0.0),
+        (-190.0, 1.0),
+    ]
+    assert _unwrap_points([(0.0, 0.0), (540.0, 1.0)]) == [
         (0.0, 0.0),
         (-180.0, 1.0),
     ]

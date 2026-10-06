@@ -148,14 +148,16 @@ def _crosses_antimeridian(points: Sequence[tuple[float, float]]) -> bool:
 
 
 def _unwrap_points(points: Sequence[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Unwrap successive longitudes, choosing west for an exact 180° tie."""
     unwrapped = [points[0]]
     for raw_lon, lat in points[1:]:
         lon = raw_lon
         previous_lon = unwrapped[-1][0]
         delta = lon - previous_lon
-        if delta > 180.0:  # pragma: no mutate - the boundary computes zero turns
-            whole_turns, remainder = divmod(delta - 180.0, 360.0)
-            turns = int(whole_turns) + (remainder != 0.0)
+        if delta >= 180.0:
+            whole_turns, _ = divmod(delta - 180.0, 360.0)
+            # Pick the westward representation for an exact half-world tie.
+            turns = int(whole_turns) + 1
             lon = lon - 360.0 * turns
         elif delta < -180.0:  # pragma: no mutate - the boundary computes zero turns
             whole_turns, remainder = divmod(-180.0 - delta, 360.0)
