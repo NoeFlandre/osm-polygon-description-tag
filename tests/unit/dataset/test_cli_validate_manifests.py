@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from osm_polygon_description_tag import cli
+from osm_polygon_description_tag.cli_requests import PathOptions
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     manifest_path_for,
@@ -72,7 +73,7 @@ def test_validate_rejects_empty_existing_artifact_directories(tmp_path: Path) ->
     (tmp_path / "manifests").mkdir()
 
     with pytest.raises(StorageError, match="no finalized data artifacts") as exc_info:
-        cli.handle_validate(SimpleNamespace(data_root=tmp_path))
+        cli.handle_validate(PathOptions(source_root=None, data_root=tmp_path, osmium="osmium"))
 
     assert str(tmp_path / "data") in str(exc_info.value)
 
@@ -93,7 +94,7 @@ def test_validate_rejects_unpaired_artifacts(
         (data_dir / "a.parquet").unlink()
 
     with pytest.raises(StorageError, match="artifact/manifest mismatch"):
-        cli.handle_validate(SimpleNamespace(data_root=tmp_path))
+        cli.handle_validate(PathOptions(source_root=None, data_root=tmp_path, osmium="osmium"))
 
 
 def test_validate_rejects_a_corrupt_manifest(
@@ -108,7 +109,7 @@ def test_validate_rejects_a_corrupt_manifest(
     (manifests_dir / "a.manifest.json").write_text("{", encoding="utf-8")
 
     with pytest.raises(StorageError, match="corrupt manifest JSON"):
-        cli.handle_validate(SimpleNamespace(data_root=tmp_path))
+        cli.handle_validate(PathOptions(source_root=None, data_root=tmp_path, osmium="osmium"))
 
 
 def test_validate_reports_structurally_invalid_manifest_without_traceback(
@@ -162,7 +163,7 @@ def test_validate_rejects_a_parquet_that_no_longer_matches_its_manifest(
     parquet.write_bytes(b"changed bytes at the same path")
 
     with pytest.raises(StorageError, match="stale output identity for a.parquet"):
-        cli.handle_validate(SimpleNamespace(data_root=tmp_path))
+        cli.handle_validate(PathOptions(source_root=None, data_root=tmp_path, osmium="osmium"))
 
 
 def test_validate_rechecks_output_identity_after_geoparquet_validation(
@@ -185,7 +186,7 @@ def test_validate_rechecks_output_identity_after_geoparquet_validation(
     monkeypatch.setattr(cli, "validate_geoparquet", replace_after_validation)
 
     with pytest.raises(StorageError, match="stale output identity for a.parquet"):
-        cli.handle_validate(SimpleNamespace(data_root=data_root))
+        cli.handle_validate(PathOptions(source_root=None, data_root=data_root, osmium="osmium"))
 
 
 def test_validate_preserves_context_when_rereading_output_identity_fails(
@@ -206,7 +207,7 @@ def test_validate_preserves_context_when_rereading_output_identity_fails(
     monkeypatch.setattr(cli, "output_identity_for", fail_identity)
 
     with pytest.raises(StorageError) as error:
-        cli.handle_validate(SimpleNamespace(data_root=data_root))
+        cli.handle_validate(PathOptions(source_root=None, data_root=data_root, osmium="osmium"))
 
     assert str(error.value) == f"cannot read finalized artifact {parquet}: disk error"
 
@@ -228,7 +229,9 @@ def test_validate_does_not_reread_manifest_after_pair_validation(
 
     monkeypatch.setattr(cli, "read_manifest", read_replacement, raising=False)
 
-    assert cli.handle_validate(SimpleNamespace(data_root=tmp_path)) == 0
+    assert (
+        cli.handle_validate(PathOptions(source_root=None, data_root=tmp_path, osmium="osmium")) == 0
+    )
     assert reread_paths == []
 
 
@@ -745,7 +748,7 @@ def test_validate_requires_artifact_and_manifest_results_to_have_equal_lengths(
     monkeypatch.setattr(cli, "output_identity_for", lambda _path: output_identity)
 
     with pytest.raises(ValueError, match=r"zip\(\) argument 2 is shorter than argument 1"):
-        cli.handle_validate(SimpleNamespace(data_root=tmp_path))
+        cli.handle_validate(PathOptions(source_root=None, data_root=tmp_path, osmium="osmium"))
 
 
 def test_validate_accepts_a_partial_set_with_matching_manifests(
@@ -761,6 +764,8 @@ def test_validate_accepts_a_partial_set_with_matching_manifests(
         cli, "validate_geoparquet", lambda path, **_kwargs: 2 if path == parquet else 0
     )
 
-    assert cli.handle_validate(SimpleNamespace(data_root=tmp_path)) == 0
+    assert (
+        cli.handle_validate(PathOptions(source_root=None, data_root=tmp_path, osmium="osmium")) == 0
+    )
 
     assert json.loads(capsys.readouterr().out) == {"files": 1, "rows": 2}

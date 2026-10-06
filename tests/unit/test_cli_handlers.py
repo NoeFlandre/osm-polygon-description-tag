@@ -9,6 +9,7 @@ silent change of behaviour with nothing to show for it.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -17,6 +18,7 @@ import pytest
 from click import Command, Context
 
 from osm_polygon_description_tag import cli
+from osm_polygon_description_tag.cli_requests import BuildOneRequest, PathOptions
 from osm_polygon_description_tag.runtime import presentation
 from osm_polygon_description_tag.runtime.click_compat import ClickException, UsageError
 
@@ -117,6 +119,24 @@ def test_release_stats_defaults_to_planning_when_apply_is_not_requested(
     capsys.readouterr()
 
 
+def _path_options(tmp_path: Path) -> PathOptions:
+    source_root = tmp_path / "raw"
+    data_root = tmp_path / "generated"
+    source_root.mkdir(exist_ok=True)
+    data_root.mkdir(exist_ok=True)
+    return PathOptions(source_root=source_root, data_root=data_root, osmium="fake-osmium")
+
+
+def _build_one_request(tmp_path: Path, basename: str) -> BuildOneRequest:
+    options = _path_options(tmp_path)
+    return BuildOneRequest(
+        source_root=options.source_root,
+        data_root=options.data_root,
+        osmium=options.osmium,
+        basename=basename,
+    )
+
+
 def _cli_args(tmp_path: Path, **values: object) -> SimpleNamespace:
     source_root = tmp_path / "raw"
     data_root = tmp_path / "generated"
@@ -133,7 +153,7 @@ def _cli_args(tmp_path: Path, **values: object) -> SimpleNamespace:
 def test_cli_migration_handler_reports_migrated_files(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    args = _cli_args(tmp_path)
+    args = _path_options(tmp_path)
     monkeypatch.setattr(
         cli,
         "migrate_dataset_schema",
@@ -411,7 +431,7 @@ def test_cli_trackio_handler_reports_snapshot(
 def test_cli_inspect_handler_reports_discovered_sources(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    args = _cli_args(tmp_path)
+    args = _path_options(tmp_path)
     source = SimpleNamespace(
         name="region.osm.pbf",
         output_name="region.parquet",
@@ -447,7 +467,7 @@ def test_cli_inspect_handler_reports_discovered_sources(
 def test_cli_build_all_handler_reports_each_result(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    args = _cli_args(tmp_path)
+    args = _path_options(tmp_path)
     result = SimpleNamespace(source_name="region.osm.pbf", status="built", included_rows=4)
     paths = SimpleNamespace(source_root=args.source_root)
     monkeypatch.setattr(
@@ -476,7 +496,7 @@ def test_cli_build_all_handler_reports_each_result(
 def test_cli_build_one_reports_every_result_field(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    args = _cli_args(tmp_path, basename="region.osm.pbf")
+    args = _build_one_request(tmp_path, "region.osm.pbf")
     source = SimpleNamespace(name=args.basename)
     result = SimpleNamespace(
         source_name=args.basename,
@@ -523,8 +543,7 @@ def test_cli_build_one_reports_every_result_field(
 def test_cli_validate_sorts_and_accumulates_every_parquet(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    args = _cli_args(tmp_path)
-    args.source_root = None
+    args = replace(_path_options(tmp_path), source_root=None)
     data_dir = args.data_root / "data"
     data_dir.mkdir()
     first = data_dir / "a.parquet"
@@ -572,7 +591,7 @@ def test_cli_validate_sorts_and_accumulates_every_parquet(
 
 
 def test_cli_validate_reports_a_missing_data_directory(tmp_path: Path) -> None:
-    args = _cli_args(tmp_path)
+    args = _path_options(tmp_path)
 
     with pytest.raises(ValueError, match="missing data directory"):
         cli.handle_validate(args)
@@ -581,7 +600,7 @@ def test_cli_validate_reports_a_missing_data_directory(tmp_path: Path) -> None:
 def test_cli_card_passes_template_and_uses_empty_suffix_default(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    args = _cli_args(tmp_path)
+    args = _path_options(tmp_path)
     template = tmp_path / "template.md"
     captured: list[tuple[Path, Path]] = []
 
@@ -605,7 +624,7 @@ def test_cli_card_passes_template_and_uses_empty_suffix_default(
 def test_cli_build_one_rejects_an_unknown_source(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    args = _cli_args(tmp_path, basename="missing.osm.pbf")
+    args = _build_one_request(tmp_path, "missing.osm.pbf")
     paths = SimpleNamespace(source_root=args.source_root)
     monkeypatch.setattr(
         cli, "_build_paths_and_executor", lambda _value: (paths, lambda _source: None)
@@ -642,7 +661,7 @@ def test_cli_publish_handler_executes_the_confirmed_plan(
 def test_cli_card_reports_stats_fields(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    args = _cli_args(tmp_path)
+    args = _path_options(tmp_path)
     stats = {"output_files": 2, "rows": 7, "name_suffixes": {"fr": 3}}
     monkeypatch.setattr(
         cli,
@@ -690,7 +709,7 @@ def test_cli_publish_plan_reports_each_file(
 def test_cli_build_paths_executor_resolves_and_forwards_arguments(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    args = _cli_args(tmp_path)
+    args = _path_options(tmp_path)
     config = tmp_path / "osmium-export.json"
     built: list[tuple[object, object, str]] = []
     monkeypatch.setattr(cli, "osmium_export_config", lambda: config)
