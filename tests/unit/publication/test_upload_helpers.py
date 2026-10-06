@@ -223,6 +223,23 @@ def test_stderr_pipe_read_errors_are_treated_as_end_of_stream(
     assert upload._try_read_stderr_chunk(123) == b""
 
 
+def test_stderr_reader_uses_original_descriptor_after_stop_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    descriptors: list[int | None] = []
+
+    def read_chunk(descriptor: int | None) -> bytes | None:
+        descriptors.append(descriptor)
+        return None if len(descriptors) == 1 else b""
+
+    stop_reader = threading.Event()
+    monkeypatch.setattr(upload, "_try_read_stderr_chunk", read_chunk)
+    monkeypatch.setattr(stop_reader, "wait", lambda _timeout: True)
+
+    assert upload._read_stderr_chunk(17, stop_reader) == b""
+    assert descriptors == [17, 17]
+
+
 def test_stderr_forwarding_writes_raw_bytes_when_a_binary_buffer_exists(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
