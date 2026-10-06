@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from osm_polygon_description_tag import cli
+from osm_polygon_description_tag.cli_requests import PathOptions
 from osm_polygon_description_tag.dataset.manifest import source_identity_for
 from osm_polygon_description_tag.dataset.storage import StorageError
 
@@ -119,7 +120,9 @@ def test_validate_passes_the_artifact_path_and_manifest_source_to_storage(
 
     monkeypatch.setattr(cli, "validate_geoparquet", validate)
 
-    exit_code = cli.handle_validate(SimpleNamespace(data_root=tmp_path))
+    exit_code = cli.handle_validate(
+        PathOptions(source_root=None, data_root=tmp_path, osmium="osmium")
+    )
 
     assert exit_code == 0
     assert calls == [(parquet, {"expected_source_pbf": "region.osm.pbf"})]
@@ -152,7 +155,7 @@ def test_validate_reports_when_manifest_source_name_does_not_map_to_artifact(
     monkeypatch.setattr(cli, "validate_geoparquet", lambda *_args, **_kwargs: 1)
 
     with pytest.raises(StorageError) as error:
-        cli.handle_validate(SimpleNamespace(data_root=tmp_path))
+        cli.handle_validate(PathOptions(source_root=None, data_root=tmp_path, osmium="osmium"))
 
     assert str(error.value) == (
         "manifest source identity mismatch for region.parquet: "

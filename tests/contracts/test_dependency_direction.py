@@ -21,6 +21,7 @@ CANONICAL_DEPENDENCIES = {
 }
 CONSOLE_MODULES = ("cli", "language_cli")
 CONSOLE_SUPPORT_MODULES = {
+    "cli_requests",
     "grid_transport",
     "grid_workflow",
     "language_workflow",

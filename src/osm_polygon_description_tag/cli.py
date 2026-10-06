@@ -13,11 +13,12 @@ from collections.abc import Callable, Sequence
 from importlib.metadata import version as package_version
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Annotated, Any
+from typing import Annotated, Any, Protocol
 
 import typer
 from typer import rich_utils
 
+from osm_polygon_description_tag.cli_requests import BuildOneRequest, PathOptions
 from osm_polygon_description_tag.dataset.docs import generate_dataset_docs
 from osm_polygon_description_tag.dataset.languages.detector import LanguageDetectionError
 from osm_polygon_description_tag.dataset.manifest import (
@@ -142,11 +143,21 @@ def _global_options(
     _verbosity.stderr_level = "DEBUG" if verbose else "WARNING" if quiet else "INFO"
 
 
-def _resolve_paths(args: SimpleNamespace) -> Paths:
+class _DataRootOption(Protocol):
+    @property
+    def data_root(self) -> Path | None: ...
+
+
+class _RootOptions(_DataRootOption, Protocol):
+    @property
+    def source_root(self) -> Path | None: ...
+
+
+def _resolve_paths(args: _RootOptions) -> Paths:
     return Paths.resolve(args.source_root, args.data_root)
 
 
-def _data_root(args: SimpleNamespace) -> Path:
+def _data_root(args: _DataRootOption) -> Path:
     """Data-only commands need no source root."""
     return resolve_data_root(args.data_root)
 
@@ -155,14 +166,14 @@ class _Interrupted(Exception):  # noqa: N818 - a control-flow signal, not an err
     """Carry Ctrl-C through Typer without its default exit-code conversion."""
 
 
-def _invoke(handler: Callable[[SimpleNamespace], int], args: SimpleNamespace) -> None:
+def _invoke[RequestT](handler: Callable[[RequestT], int], args: RequestT) -> None:
     try:
         handler(args)
     except KeyboardInterrupt as error:
         raise _Interrupted from error
 
 
-def handle_inspect(args: SimpleNamespace) -> int:
+def handle_inspect(args: PathOptions) -> int:
     paths = _resolve_paths(args)
     sources = discover_sources(paths.source_root)
     print_json(
@@ -187,7 +198,7 @@ def handle_inspect(args: SimpleNamespace) -> int:
 
 
 def _build_paths_and_executor(
-    args: SimpleNamespace,
+    args: PathOptions,
 ) -> tuple[Paths, Callable[[Any], BuildResult]]:
     paths = _resolve_paths(args)
 
@@ -202,7 +213,7 @@ def _build_paths_and_executor(
     return paths, executor
 
 
-def handle_build_one(args: SimpleNamespace) -> int:
+def handle_build_one(args: BuildOneRequest) -> int:
     paths, executor = _build_paths_and_executor(args)
     sources = discover_sources(paths.source_root)
     match = next((source for source in sources if source.name == args.basename), None)
@@ -224,7 +235,7 @@ def handle_build_one(args: SimpleNamespace) -> int:
     return 0
 
 
-def handle_build_all(args: SimpleNamespace) -> int:
+def handle_build_all(args: PathOptions) -> int:
     paths, executor = _build_paths_and_executor(args)
     sources = discover_sources(paths.source_root)
     results: list[BuildResult] = build_all(sources, build=executor)
@@ -244,7 +255,7 @@ def handle_build_all(args: SimpleNamespace) -> int:
     return 0
 
 
-def handle_validate(args: SimpleNamespace) -> int:
+def handle_validate(args: PathOptions) -> int:
     data_root = _data_root(args)
     source_root = _validation_source_root(args, data_root)
     data_dir = data_root / "data"
@@ -316,8 +327,8 @@ def _validate_manifest_counts(parquet: Path, manifest: Manifest) -> None:
         raise StorageError(f"manifest counts are inconsistent for {parquet.name}")
 
 
-def _validation_source_root(args: SimpleNamespace, data_root: Path) -> Path | None:
-    source_root = getattr(args, "source_root", None)
+def _validation_source_root(args: PathOptions, data_root: Path) -> Path | None:
+    source_root = args.source_root
     if source_root is None and not os.environ.get(SOURCE_ROOT_ENV, "").strip():
         return None
     return Paths.resolve(source_root, data_root).source_root
@@ -348,7 +359,7 @@ def _read_source_identity(source_path: Path) -> SourceIdentity:
         raise StorageError(f"cannot read source file {source_path}: {error}") from error
 
 
-def handle_card(args: SimpleNamespace) -> int:
+def handle_card(args: PathOptions) -> int:
     data_root = _data_root(args)
     stats = generate_dataset_docs(data_root, dataset_card_template())
     print_json(
@@ -361,7 +372,7 @@ def handle_card(args: SimpleNamespace) -> int:
     return 0
 
 
-def handle_migrate_schema(args: SimpleNamespace) -> int:
+def handle_migrate_schema(args: PathOptions) -> int:
     """Upgrade existing legacy map Parquets without reading raw PBFs."""
     data_root = _data_root(args)
     migrated = migrate_dataset_schema(data_root)
@@ -473,7 +484,7 @@ def inspect_command(
 ) -> None:
     _invoke(
         handle_inspect,
-        SimpleNamespace(source_root=source_root, data_root=data_root, osmium=osmium),
+        PathOptions(source_root=source_root, data_root=data_root, osmium=osmium),
     )
 
 
@@ -486,7 +497,7 @@ def build_one_command(
 ) -> None:
     _invoke(
         handle_build_one,
-        SimpleNamespace(
+        BuildOneRequest(
             source_root=source_root,
             data_root=data_root,
             osmium=osmium,
@@ -508,7 +519,7 @@ def build_all_command(
 ) -> None:
     _invoke(
         handle_build_all,
-        SimpleNamespace(source_root=source_root, data_root=data_root, osmium=osmium),
+        PathOptions(source_root=source_root, data_root=data_root, osmium=osmium),
     )
 
 
@@ -520,7 +531,7 @@ def validate_command(
 ) -> None:
     _invoke(
         handle_validate,
-        SimpleNamespace(source_root=source_root, data_root=data_root, osmium=osmium),
+        PathOptions(source_root=source_root, data_root=data_root, osmium=osmium),
     )
 
 
@@ -532,7 +543,7 @@ def generate_card_command(
 ) -> None:
     _invoke(
         handle_card,
-        SimpleNamespace(source_root=source_root, data_root=data_root, osmium=osmium),
+        PathOptions(source_root=source_root, data_root=data_root, osmium=osmium),
     )
 
 
@@ -547,7 +558,7 @@ def migrate_schema_command(
 ) -> None:
     _invoke(
         handle_migrate_schema,
-        SimpleNamespace(source_root=source_root, data_root=data_root, osmium=osmium),
+        PathOptions(source_root=source_root, data_root=data_root, osmium=osmium),
     )
 
 
