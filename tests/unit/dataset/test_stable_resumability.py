@@ -154,7 +154,6 @@ def test_full_run_no_rebuild_on_doc_only_commit(
     generate_dataset_docs(
         paths.data_root,
         dataset_card_template(),
-        clock=lambda: "2026-07-27T00:00:00+00:00",
     )
     # ``generate_dataset_docs`` already wrote the README, stats.json,
     # and assets/description_polygon_density.png atomically. The

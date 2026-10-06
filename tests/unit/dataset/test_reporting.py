@@ -38,10 +38,6 @@ def _repository_file(relative_path: str) -> Path:
 _TEMPLATE_PATH = _repository_file("docs/dataset-card-template.md")
 
 
-def _frozen_clock() -> str:
-    return "2026-07-27T00:00:00+00:00"
-
-
 def test_reporting_phases_validate_and_summarize_artifacts_in_filename_order(
     tmp_path: Path,
 ) -> None:
@@ -113,7 +109,7 @@ def test_collect_stats_aggregates_from_validated_artifacts(tmp_path: Path) -> No
     source_root.mkdir()
     write_reporting_fixture(data_root, source_root)
 
-    stats = collect_stats(data_root, clock=_frozen_clock)
+    stats = collect_stats(data_root)
 
     assert stats["output_files"] == 2
     assert stats["rows"] == 3
@@ -183,7 +179,7 @@ def test_statistics_media_and_card_use_one_canonical_row_per_osm_identity(
         {"region-a": [old_duplicate], "region-b": [canonical_duplicate, other]},
     )
 
-    stats = collect_stats(data_root, clock=_frozen_clock)
+    stats = collect_stats(data_root)
     h3_counts = aggregate_h3_density(data_root)
     area_counts = aggregate_area_histogram(data_root)
     generated = generate_dataset_docs(data_root, _TEMPLATE_PATH)
@@ -396,7 +392,7 @@ def test_collect_stats_rejects_missing_manifest(tmp_path: Path) -> None:
     (data_root / "data" / "lonely.parquet").write_bytes(b"x")
 
     with pytest.raises(ValueError, match="mismatch|missing"):
-        collect_stats(data_root, clock=_frozen_clock)
+        collect_stats(data_root)
 
 
 def test_collect_stats_rejects_stale_output(tmp_path: Path) -> None:
@@ -408,7 +404,7 @@ def test_collect_stats_rejects_stale_output(tmp_path: Path) -> None:
     (data_root / "data" / "region-a.parquet").write_bytes(b"mutated")
 
     with pytest.raises(ValueError, match="stale"):
-        collect_stats(data_root, clock=_frozen_clock)
+        collect_stats(data_root)
 
 
 def test_collect_stats_rejects_final_artifact_without_successful_text(
@@ -434,7 +430,7 @@ def test_collect_stats_rejects_final_artifact_without_successful_text(
     ):
         write_finalized_dataset(data_root, source_root, {"invalid": [invalid]})
 
-    stats = collect_stats(data_root, clock=_frozen_clock)
+    stats = collect_stats(data_root)
 
     assert stats["regional_rows"] == 1
     assert stats["regional_rows_with_successful_nonempty_text"] == 0
@@ -451,7 +447,7 @@ def test_generate_dataset_docs_installs_hero_image(tmp_path: Path) -> None:
     write_reporting_fixture(data_root, source_root)
     template_path = _TEMPLATE_PATH
 
-    generate_dataset_docs(data_root, template_path, clock=_frozen_clock)
+    generate_dataset_docs(data_root, template_path)
 
     hero = data_root / "assets" / "dataset-card-hero.png"
     assert hero.read_bytes() == _repository_file("assets/dataset-card-hero.png").read_bytes()
@@ -462,7 +458,7 @@ def test_generate_dataset_docs_installs_hero_image(tmp_path: Path) -> None:
 
     # Re-running with identical inputs leaves the hero byte-identical and
     # preserves its on-disk mtime.
-    generate_dataset_docs(data_root, template_path, clock=_frozen_clock)
+    generate_dataset_docs(data_root, template_path)
     assert hero.read_bytes() == _repository_file("assets/dataset-card-hero.png").read_bytes()
     assert hero.stat().st_mtime_ns == first_mtime
 
@@ -474,7 +470,7 @@ def test_generate_dataset_docs_writes_stats_and_card(tmp_path: Path) -> None:
     write_reporting_fixture(data_root, source_root)
     template_path = _TEMPLATE_PATH
 
-    generate_dataset_docs(data_root, template_path, clock=_frozen_clock)
+    generate_dataset_docs(data_root, template_path)
 
     stats_json = (data_root / "stats.json").read_text(encoding="utf-8")
     stats = json.loads(stats_json)
@@ -539,4 +535,12 @@ def test_a_feature_spatial_row_disagreement_names_both_counts(
         stats_module.ReportingError,
         match=exactly("feature/spatial row count mismatch: 3 != 99"),
     ):
-        collect_stats(data_root, clock=_frozen_clock)
+        collect_stats(data_root)
+
+
+def test_reporting_facade_still_exports_the_runtime_clock() -> None:
+    from osm_polygon_description_tag.dataset import reporting
+    from osm_polygon_description_tag.runtime.time import utc_now_iso
+
+    assert reporting.utc_now_iso is utc_now_iso
+    assert "utc_now_iso" in reporting.__all__

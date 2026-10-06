@@ -236,9 +236,7 @@ def test_generation_installs_map_block_with_correct_relative_path(
         lambda counts, output_path: None,
     )
 
-    generate_dataset_docs(
-        data_root, dataset_card_template(), clock=lambda: "2026-01-01T00:00:00+00:00"
-    )
+    generate_dataset_docs(data_root, dataset_card_template())
     readme = (data_root / "README.md").read_text(encoding="utf-8")
     assert readme.count(H3_MAP_START_MARKER) == 1
     assert readme.count(H3_MAP_END_MARKER) == 1
@@ -272,9 +270,7 @@ def test_generation_aggregates_h3_once_and_reuses_counts(
     monkeypatch.setattr(reporting, "aggregate_h3_density", fake_aggregate)
     monkeypatch.setattr(reporting, "render_density_map", fake_render)
 
-    reporting.generate_dataset_docs(
-        data_root, dataset_card_template(), clock=lambda: "2026-01-01T00:00:00+00:00"
-    )
+    reporting.generate_dataset_docs(data_root, dataset_card_template())
 
     assert calls == [data_root]
     assert captured["counts"] == {"85280003fffffff": 2}

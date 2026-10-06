@@ -15,7 +15,6 @@ time, so it does not retain the dataset's WKB in Python.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
@@ -993,9 +992,12 @@ def _build_stats_payload(
 def collect_stats(
     data_root: Path,
     *,
-    clock: Callable[[], str] = utc_now_iso,  # noqa: ARG001 - kept for callers; stats carry no timestamp
+    clock: object = None,  # noqa: ARG001 - deprecated and ignored; stats carry no timestamp
 ) -> dict[str, Any]:
-    """Aggregate factual statistics from validated artifacts and matching manifests."""
+    """Aggregate factual statistics from validated artifacts and matching manifests.
+
+    ``clock`` is accepted for backward compatibility only; it is deprecated and ignored.
+    """
     artifacts = _find_validated_artifacts(data_root)
 
     connection = _new_connection(data_root)

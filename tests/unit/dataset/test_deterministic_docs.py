@@ -79,11 +79,11 @@ def test_generation_is_byte_stable_across_clocks(tmp_path: Path) -> None:
     _populate_dataset(data_root, source_root)
     template = dataset_card_template()
 
-    generate_dataset_docs(data_root, template, clock=lambda: "2026-01-01T00:00:00+00:00")
+    generate_dataset_docs(data_root, template)
     readme_a = (data_root / "README.md").read_text(encoding="utf-8")
     stats_a = (data_root / "stats.json").read_text(encoding="utf-8")
 
-    generate_dataset_docs(data_root, template, clock=lambda: "2099-12-31T23:59:59+00:00")
+    generate_dataset_docs(data_root, template)
     readme_b = (data_root / "README.md").read_text(encoding="utf-8")
     stats_b = (data_root / "stats.json").read_text(encoding="utf-8")
 

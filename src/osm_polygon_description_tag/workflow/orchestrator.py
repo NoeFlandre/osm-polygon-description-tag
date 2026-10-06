@@ -508,7 +508,7 @@ def _run_and_publish(
         logger=logger,
         osmium_executable=osmium_executable,
     )
-    _finalize_local_dataset(paths, sources, clock=clock, logger=logger)
+    _finalize_local_dataset(paths, sources, logger=logger)
     _publish_sources(
         paths,
         sources,
@@ -672,7 +672,6 @@ def _finalize_local_dataset(
     paths: Paths,
     sources: list[Source],
     *,
-    clock: Callable[[], str],
     logger: RunLogger,
 ) -> None:
     _verify_final_completeness(paths, sources)
@@ -687,7 +686,7 @@ def _finalize_local_dataset(
         status=dedup_result.status,
     )
     _verify_final_completeness(paths, sources)
-    _refresh_dataset_docs_for_metadata(paths, clock=clock, logger=logger)
+    _refresh_dataset_docs_for_metadata(paths, logger=logger)
 
 
 def _publish_sources(
@@ -782,13 +781,11 @@ def _publish_final_metadata(
 def _refresh_dataset_docs_for_metadata(
     paths: Paths,
     *,
-    clock: Callable[[], str],
     logger: RunLogger,
 ) -> None:
     """Compatibility wrapper for the canonical finalization module."""
     finalization.refresh_dataset_docs(
         paths,
-        clock=clock,
         logger=logger,
         docs_generator=generate_dataset_docs,
     )

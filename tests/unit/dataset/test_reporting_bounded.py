@@ -18,10 +18,6 @@ from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from tests.conftest import make_record_dict
 
 
-def _frozen_clock() -> str:
-    return "2026-07-27T00:00:00+00:00"
-
-
 def _build_pair(
     data_root: Path,
     source_root: Path,
@@ -78,7 +74,7 @@ def test_collect_stats_handles_many_rows_with_bounded_memory(tmp_path: Path) -> 
     ]
     _build_pair(data_root, source_root, "big", records, {})
 
-    stats = collect_stats(data_root, clock=_frozen_clock)
+    stats = collect_stats(data_root)
     assert stats["rows"] == 500
     assert stats["area_m2_min_m2"] is not None
     assert stats["area_m2_max_m2"] is not None
@@ -104,7 +100,7 @@ def test_collect_stats_uses_quantile_cont_for_area(tmp_path: Path) -> None:
     ]
     _build_pair(data_root, source_root, "q", records, {})
 
-    stats = collect_stats(data_root, clock=_frozen_clock)
+    stats = collect_stats(data_root)
     assert stats["area_m2_median_m2"] is not None
     # The areas should all be ~12309334800 m² (1 degree at the equator).
     assert abs(stats["area_m2_min_m2"] - 12309334800.0) < 1.0e7
@@ -117,7 +113,18 @@ def test_collect_stats_returns_none_for_empty_dataset(tmp_path: Path) -> None:
     (data_root / "data").mkdir(parents=True)
     (data_root / "manifests").mkdir(parents=True)
 
-    stats = collect_stats(data_root, clock=_frozen_clock)
+    stats = collect_stats(data_root)
     assert stats["rows"] == 0
     assert stats["area_m2_min_m2"] is None
     assert stats["area_m2_max_m2"] is None
+
+
+def test_collect_stats_still_accepts_and_ignores_the_deprecated_clock(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    (data_root / "data").mkdir(parents=True)
+    (data_root / "manifests").mkdir(parents=True)
+
+    def clock() -> str:
+        raise AssertionError("the deprecated clock must never be called")
+
+    assert collect_stats(data_root, clock=clock) == collect_stats(data_root)

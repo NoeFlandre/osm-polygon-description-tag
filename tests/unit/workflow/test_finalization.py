@@ -63,7 +63,7 @@ def _logger(tmp_path: Path) -> RunLogger:
 def test_refresh_docs_skips_when_no_parquet_exists(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     logger = _logger(tmp_path)
-    refresh_dataset_docs(paths, clock=lambda: "now", logger=logger)
+    refresh_dataset_docs(paths, logger=logger)
     logger.close()
 
 
@@ -74,10 +74,10 @@ def test_refresh_docs_emits_event_after_generation(tmp_path: Path) -> None:
     logger = _logger(tmp_path)
     calls: list[Path] = []
 
-    def generator(data_root: Path, _template: Path, *, clock: object) -> None:
+    def generator(data_root: Path, _template: Path) -> None:
         calls.append(data_root)
 
-    refresh_dataset_docs(paths, clock=lambda: "now", logger=logger, docs_generator=generator)
+    refresh_dataset_docs(paths, logger=logger, docs_generator=generator)
     logger.close()
     assert calls == [paths.data_root]
 
@@ -92,7 +92,7 @@ def test_refresh_docs_wraps_generation_errors(tmp_path: Path) -> None:
         raise RuntimeError("broken docs")
 
     with pytest.raises(OrchestratorError, match="dataset card refresh failed"):
-        refresh_dataset_docs(paths, clock=lambda: "now", logger=logger, docs_generator=generator)
+        refresh_dataset_docs(paths, logger=logger, docs_generator=generator)
     logger.close()
 
 
@@ -276,7 +276,7 @@ def _source(tmp_path: Path, name: str = "region.osm.pbf") -> Source:
     )
 
 
-def test_refresh_docs_forwards_template_clock_and_event_paths(
+def test_refresh_docs_forwards_template_and_event_paths(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     paths = _paths(tmp_path)
@@ -285,11 +285,8 @@ def test_refresh_docs_forwards_template_clock_and_event_paths(
     (data_dir / "region.parquet").write_bytes(b"placeholder")
     template = tmp_path / "template.md"
 
-    def clock() -> str:
-        return "now"
-
     logger = _EventLogger()
-    generator_calls: list[tuple[Path, Path, object]] = []
+    generator_calls: list[tuple[Path, Path]] = []
 
     monkeypatch.setattr(finalization_module, "dataset_card_template", lambda: template)
     real_is_dir = Path.is_dir
@@ -301,12 +298,12 @@ def test_refresh_docs_forwards_template_clock_and_event_paths(
 
     monkeypatch.setattr(Path, "is_dir", is_dir)
 
-    def generator(data_root: Path, actual_template: Path, *, clock: object) -> None:
-        generator_calls.append((data_root, actual_template, clock))
+    def generator(data_root: Path, actual_template: Path) -> None:
+        generator_calls.append((data_root, actual_template))
 
-    refresh_dataset_docs(paths, clock=clock, logger=logger, docs_generator=generator)
+    refresh_dataset_docs(paths, logger=logger, docs_generator=generator)
 
-    assert generator_calls == [(paths.data_root, template, clock)]
+    assert generator_calls == [(paths.data_root, template)]
     assert logger.events == [
         (
             "dataset_docs_refreshed",
@@ -331,7 +328,7 @@ def test_refresh_docs_returns_when_data_directory_has_no_parquet(
         lambda: pytest.fail("template must not be loaded"),
     )
 
-    refresh_dataset_docs(paths, clock=lambda: "now", logger=_EventLogger())
+    refresh_dataset_docs(paths, logger=_EventLogger())
 
 
 def test_upload_final_metadata_forwards_every_stage_argument(

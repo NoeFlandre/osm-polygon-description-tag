@@ -58,7 +58,6 @@ from osm_polygon_description_tag.dataset.manifest import (
 )
 from osm_polygon_description_tag.dataset.storage import StorageError, write_geoparquet
 from tests.conftest import make_record_dict
-from tests.helpers.dataset import frozen_clock as _frozen_clock
 from tests.helpers.dataset import write_reporting_fixture as _populate_dataset
 
 
@@ -749,7 +748,7 @@ def test_generate_dataset_docs_writes_area_histogram_png(tmp_path: Path) -> None
     _populate_dataset(data_root, source_root)
     template_path = Path("docs/dataset-card-template.md")
 
-    stats = generate_dataset_docs(data_root, template_path, clock=_frozen_clock)
+    stats = generate_dataset_docs(data_root, template_path)
 
     histogram_path = data_root / "assets" / "area_distribution.png"
     assert histogram_path.is_file()
@@ -770,13 +769,13 @@ def test_generate_dataset_docs_reuses_histogram_when_unchanged(tmp_path: Path) -
     _populate_dataset(data_root, source_root)
     template_path = Path("docs/dataset-card-template.md")
 
-    generate_dataset_docs(data_root, template_path, clock=_frozen_clock)
+    generate_dataset_docs(data_root, template_path)
     histogram_path = data_root / "assets" / "area_distribution.png"
     mtime = histogram_path.stat().st_mtime_ns
     size = histogram_path.stat().st_size
     time.sleep(0.05)
 
-    generate_dataset_docs(data_root, template_path, clock=_frozen_clock)
+    generate_dataset_docs(data_root, template_path)
 
     assert histogram_path.stat().st_mtime_ns == mtime
     assert histogram_path.stat().st_size == size
@@ -792,7 +791,7 @@ def test_generate_dataset_docs_recomputes_when_render_version_changes(
     _populate_dataset(data_root, source_root)
     template_path = Path("docs/dataset-card-template.md")
 
-    generate_dataset_docs(data_root, template_path, clock=_frozen_clock)
+    generate_dataset_docs(data_root, template_path)
     stats_path = data_root / "stats.json"
     stats = json.loads(stats_path.read_text(encoding="utf-8"))
     stats["area_histogram_render_version"] = AREA_HISTOGRAM_RENDER_VERSION - 1
@@ -803,7 +802,7 @@ def test_generate_dataset_docs_recomputes_when_render_version_changes(
         "osm_polygon_description_tag.dataset.docs.render_area_histogram",
         lambda counts, target: calls.append(target),
     )
-    generate_dataset_docs(data_root, template_path, clock=_frozen_clock)
+    generate_dataset_docs(data_root, template_path)
 
     assert calls == [data_root / "assets" / "area_distribution.png"]
 
@@ -840,14 +839,14 @@ def test_generate_dataset_docs_recomputes_histogram_when_parquet_changes(
     monkeypatch.setattr(reporting, "render_area_histogram", fake_render)
     monkeypatch.setattr(reporting, "_area_histogram_input_sha256", fake_histogram_input_sha256)
 
-    generate_dataset_docs(data_root, template_path, clock=_frozen_clock)
+    generate_dataset_docs(data_root, template_path)
     histogram_path = data_root / "assets" / "area_distribution.png"
     first_bytes = histogram_path.read_bytes()
     assert first_bytes == b"hist-1"
 
     # Simulate finalized Parquet bytes changing: the next identity differs
     # from the cached identity, so the PNG must be regenerated.
-    generate_dataset_docs(data_root, template_path, clock=_frozen_clock)
+    generate_dataset_docs(data_root, template_path)
 
     assert aggregate_calls == [data_root, data_root]
     assert len(render_calls) == 2
@@ -862,7 +861,7 @@ def test_area_histogram_input_sha256_in_reporting_reflects_stats(tmp_path: Path)
     _populate_dataset(data_root, source_root)
     template_path = Path("docs/dataset-card-template.md")
 
-    stats = generate_dataset_docs(data_root, template_path, clock=_frozen_clock)
+    stats = generate_dataset_docs(data_root, template_path)
     expected = area_histogram_input_sha256(
         {entry["parquet"]: entry["output_sha256"] for entry in stats["files"]}
     )

@@ -41,10 +41,6 @@ def _make_record(
     return transform_record(record, source_pbf)
 
 
-def _frozen_clock() -> str:
-    return "2026-07-27T00:00:00+00:00"
-
-
 def test_stats_map_and_area_use_the_same_global_text_population(tmp_path: Path) -> None:
     """Regional overlap rows count once, using the deterministic winning geometry."""
     old_geometry = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
@@ -79,7 +75,7 @@ def test_stats_map_and_area_use_the_same_global_text_population(tmp_path: Path) 
         rejections={"region-a": {"no_nonempty_description": 3}},
     )
 
-    stats = collect_stats(data_root, clock=_frozen_clock)
+    stats = collect_stats(data_root)
     h3_counts = aggregate_h3_density(data_root)
     area_counts = aggregate_area_histogram(data_root)
 
