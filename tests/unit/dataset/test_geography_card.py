@@ -20,6 +20,7 @@ import pytest
 from shapely.geometry import Polygon
 
 import osm_polygon_description_tag.dataset.geography.card as card_module
+from osm_polygon_description_tag.dataset.docs import generate_dataset_docs
 from osm_polygon_description_tag.dataset.geography import (
     H3_MAP_ASSET_RELATIVE_PATH,
     H3_MAP_DESCRIPTION,
@@ -35,7 +36,6 @@ from osm_polygon_description_tag.dataset.geography.card import (
     _validate_marker_counts,
     write_map_block_marker_to_template,
 )
-from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
 from osm_polygon_description_tag.runtime.resources import dataset_card_template
 from osm_polygon_description_tag.workflow.orchestrator import build_metadata_only_upload_plan
 from tests.conftest import make_record_dict
@@ -230,7 +230,7 @@ def test_generation_installs_map_block_with_correct_relative_path(
         lambda: _stub_map_block(),
         raising=False,
     )
-    # Patch the dataset.reporting module to also use a stub for the PNG.
+    # Patch the dataset.docs module to also use a stub for the PNG.
     monkeypatch.setattr(
         "osm_polygon_description_tag.dataset.docs.render_density_map",
         lambda counts, output_path: None,

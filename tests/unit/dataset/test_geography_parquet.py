@@ -763,6 +763,7 @@ def test_generate_dataset_docs_uses_validate_finalized_artifacts(tmp_path: Path)
     """``generate_dataset_docs`` must use the shared validation primitive."""
     from shapely.geometry import Polygon
 
+    from osm_polygon_description_tag.dataset.docs import generate_dataset_docs
     from osm_polygon_description_tag.dataset.manifest import (
         Manifest,
         RunCounts,
@@ -770,7 +771,6 @@ def test_generate_dataset_docs_uses_validate_finalized_artifacts(tmp_path: Path)
         source_identity_for,
         write_manifest,
     )
-    from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
     from osm_polygon_description_tag.dataset.storage import (
         StorageError,
         write_geoparquet,
@@ -820,7 +820,7 @@ def test_generate_dataset_docs_uses_validate_finalized_artifacts(tmp_path: Path)
     )
     # The reporting layer wraps the shared validation primitive and
     # translates the failure into a ReportingError.
-    from osm_polygon_description_tag.dataset.reporting import ReportingError
+    from osm_polygon_description_tag.dataset.stats import ReportingError
 
     with pytest.raises((StorageError, ReportingError), match="(invalid|schema|manifest)"):
         generate_dataset_docs(

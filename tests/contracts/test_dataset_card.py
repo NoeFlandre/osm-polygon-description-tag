@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 from shapely.geometry import Polygon
 
+from osm_polygon_description_tag.dataset.docs import generate_dataset_docs
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     RunCounts,
@@ -10,7 +11,6 @@ from osm_polygon_description_tag.dataset.manifest import (
     source_identity_for,
     write_manifest,
 )
-from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from tests.conftest import make_record_dict
 

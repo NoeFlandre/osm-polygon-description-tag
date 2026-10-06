@@ -6,11 +6,11 @@ import pytest
 from shapely.geometry import MultiPolygon, Polygon
 
 from osm_polygon_description_tag.dataset.canonical_rows import select_canonical_row
+from osm_polygon_description_tag.dataset.docs import generate_dataset_docs
 from osm_polygon_description_tag.dataset.geography import (
     aggregate_area_histogram,
     aggregate_h3_density,
 )
-from osm_polygon_description_tag.dataset.reporting import collect_stats, generate_dataset_docs
 from osm_polygon_description_tag.dataset.stats import (
     _collect_feature_summary,
     _collect_manifest_summary,
@@ -20,6 +20,7 @@ from osm_polygon_description_tag.dataset.stats import (
     _ingest_features,
     _new_connection,
     _validate_artifact,
+    collect_stats,
 )
 from osm_polygon_description_tag.dataset.unique_rows import iter_unique_parquet_batches
 from tests.conftest import make_record_dict
@@ -536,11 +537,3 @@ def test_a_feature_spatial_row_disagreement_names_both_counts(
         match=exactly("feature/spatial row count mismatch: 3 != 99"),
     ):
         collect_stats(data_root)
-
-
-def test_reporting_facade_still_exports_the_runtime_clock() -> None:
-    from osm_polygon_description_tag.dataset import reporting
-    from osm_polygon_description_tag.runtime.time import utc_now_iso
-
-    assert reporting.utc_now_iso is utc_now_iso
-    assert "utc_now_iso" in reporting.__all__

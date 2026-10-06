@@ -383,7 +383,7 @@ def test_run_three_is_pure_no_op(
     # Plant the canonical card that ``generate_dataset_docs`` would
     # produce so the metadata identity remains stable after the
     # orchestrator's refresh step.
-    from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
+    from osm_polygon_description_tag.dataset.docs import generate_dataset_docs
     from osm_polygon_description_tag.runtime.resources import dataset_card_template
 
     generate_dataset_docs(
