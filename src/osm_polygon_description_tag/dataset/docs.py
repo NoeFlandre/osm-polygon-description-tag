@@ -627,9 +627,13 @@ def generate_dataset_docs(
     data_root: Path,
     template_path: Path,
     *,
+    clock: object = None,  # noqa: ARG001 - deprecated and ignored; output carries no timestamp
     preserve_existing: bool = False,
 ) -> dict[str, Any]:
-    """Write deterministic stats, README, and derived media artifacts."""
+    """Write deterministic stats, README, and derived media artifacts.
+
+    ``clock`` is accepted for backward compatibility only; it is deprecated and ignored.
+    """
     stats = collect_stats(data_root)
     previous_stats = _read_json_object(data_root / "stats.json")
     map_input_sha256, occupied_cells = _ensure_h3_map(data_root, stats, previous_stats)

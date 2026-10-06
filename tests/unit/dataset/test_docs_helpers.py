@@ -746,3 +746,24 @@ def test_malformed_marker_refusals_state_their_whole_message() -> None:
             f"{docs_module._STATS_START_MARKER}\n{docs_module._STATS_START_MARKER}\n"
             f"{docs_module._STATS_END_MARKER}\n{docs_module._STATS_END_MARKER}\n"
         )
+
+
+def test_generate_dataset_docs_still_accepts_and_ignores_the_deprecated_clock(
+    tmp_path: Path,
+) -> None:
+    template = tmp_path / "template.md"
+
+    def clock() -> str:
+        raise AssertionError("the deprecated clock must never be called")
+
+    with (
+        patch.object(docs_module, "collect_stats", return_value={"rows": 1}) as collect,
+        patch.object(docs_module, "_read_json_object", return_value={}),
+        patch.object(docs_module, "_ensure_h3_map", return_value=("h3", 1)),
+        patch.object(docs_module, "_ensure_area_histogram", return_value=("area", 1)),
+        patch.object(docs_module, "_write_dataset_hero"),
+        patch.object(docs_module, "_write_dataset_docs"),
+    ):
+        docs_module.generate_dataset_docs(tmp_path, template, clock=clock)
+
+    collect.assert_called_once_with(tmp_path)
