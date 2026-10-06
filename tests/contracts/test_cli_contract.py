@@ -462,10 +462,9 @@ def test_inspect_handler_prints_json_summary(
         export_config=Path("config/osmium-export.json"),
     )
 
-    exit_code = handle_inspect(args)
+    handle_inspect(args)
     captured = capsys.readouterr()
 
-    assert exit_code == 0
     payload = json.loads(captured.out)
     assert payload["source_count"] == 1
     assert payload["sources"][0]["name"] == "a.osm.pbf"
@@ -507,10 +506,9 @@ def test_validate_handler_sums_rows(
         export_config=Path("config/osmium-export.json"),
     )
 
-    exit_code = handle_validate(args)
+    handle_validate(args)
     payload = json.loads(capsys.readouterr().out)
 
-    assert exit_code == 0
     assert payload["files"] == 1
     assert payload["rows"] == 1
 
@@ -536,10 +534,9 @@ def test_publish_plan_handler_reports_identity(
         export_config=Path("config/osmium-export.json"),
     )
 
-    exit_code = handle_publish_plan(args)
+    handle_publish_plan(args)
     payload = json.loads(capsys.readouterr().out)
 
-    assert exit_code == 0
     assert payload["repo_id"] == "NoeFlandre/osm-polygon-description-tag"
     assert len(payload["identity_sha256"]) == 64
     assert any(item["relative_path"] == "README.md" for item in payload["files"])
@@ -576,10 +573,9 @@ def test_handle_build_one_invokes_pipeline(
         export_config=Path("config/osmium-export.json"),
     )
 
-    exit_code = cli.handle_build_one(args)
+    cli.handle_build_one(args)
     payload = json.loads(capsys.readouterr().out)
 
-    assert exit_code == 0
     assert payload["source_name"] == "region.osm.pbf"
     assert payload["status"] == "built"
 
@@ -616,10 +612,9 @@ def test_handle_publish_invokes_execute_upload(
         osmium="osmium",
     )
 
-    exit_code = cli.handle_publish(args)
+    cli.handle_publish(args)
     payload = json.loads(capsys.readouterr().out)
 
-    assert exit_code == 0
     assert captured == [["NoeFlandre/osm-polygon-description-tag", "abc"]]
     assert payload["repo_id"] == "NoeFlandre/osm-polygon-description-tag"
 
@@ -663,10 +658,9 @@ def test_handle_run_and_publish_invokes_orchestrator(
         osmium="osmium",
     )
 
-    exit_code = cli.handle_run_and_publish(args)
+    cli.handle_run_and_publish(args)
     payload = json.loads(capsys.readouterr().out)
 
-    assert exit_code == 0
     assert payload["final_remote_revision"] == "rev-1"
     assert captured["osmium_executable"] == "osmium"
 

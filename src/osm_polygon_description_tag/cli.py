@@ -166,14 +166,14 @@ class _Interrupted(Exception):  # noqa: N818 - a control-flow signal, not an err
     """Carry Ctrl-C through Typer without its default exit-code conversion."""
 
 
-def _invoke[RequestT](handler: Callable[[RequestT], int], args: RequestT) -> None:
+def _invoke[RequestT](handler: Callable[[RequestT], None], args: RequestT) -> None:
     try:
         handler(args)
     except KeyboardInterrupt as error:
         raise _Interrupted from error
 
 
-def handle_inspect(args: PathOptions) -> int:
+def handle_inspect(args: PathOptions) -> None:
     paths = _resolve_paths(args)
     sources = discover_sources(paths.source_root)
     print_json(
@@ -194,7 +194,6 @@ def handle_inspect(args: PathOptions) -> int:
             ],
         }
     )
-    return 0
 
 
 def _build_paths_and_executor(
@@ -213,7 +212,7 @@ def _build_paths_and_executor(
     return paths, executor
 
 
-def handle_build_one(args: BuildOneRequest) -> int:
+def handle_build_one(args: BuildOneRequest) -> None:
     paths, executor = _build_paths_and_executor(args)
     sources = discover_sources(paths.source_root)
     match = next((source for source in sources if source.name == args.basename), None)
@@ -232,10 +231,9 @@ def handle_build_one(args: BuildOneRequest) -> int:
             "manifest_path": str(result.manifest_path),
         }
     )
-    return 0
 
 
-def handle_build_all(args: PathOptions) -> int:
+def handle_build_all(args: PathOptions) -> None:
     paths, executor = _build_paths_and_executor(args)
     sources = discover_sources(paths.source_root)
     results: list[BuildResult] = build_all(sources, build=executor)
@@ -252,10 +250,9 @@ def handle_build_all(args: PathOptions) -> int:
             ],
         }
     )
-    return 0
 
 
-def handle_validate(args: PathOptions) -> int:
+def handle_validate(args: PathOptions) -> None:
     data_root = _data_root(args)
     source_root = _validation_source_root(args, data_root)
     data_dir = data_root / "data"
@@ -264,7 +261,6 @@ def handle_validate(args: PathOptions) -> int:
     parquets, manifest_records = _validation_artifacts(data_root, data_dir)
     rows_total = _validate_artifact_pairs(parquets, manifest_records, source_root)
     print_json({"files": len(parquets), "rows": rows_total})
-    return 0
 
 
 def _validation_artifacts(
@@ -359,7 +355,7 @@ def _read_source_identity(source_path: Path) -> SourceIdentity:
         raise StorageError(f"cannot read source file {source_path}: {error}") from error
 
 
-def handle_card(args: PathOptions) -> int:
+def handle_card(args: PathOptions) -> None:
     data_root = _data_root(args)
     stats = generate_dataset_docs(data_root, dataset_card_template())
     print_json(
@@ -369,26 +365,23 @@ def handle_card(args: PathOptions) -> int:
             "name_suffixes": stats.get("name_suffixes", {}),
         }
     )
-    return 0
 
 
-def handle_migrate_schema(args: PathOptions) -> int:
+def handle_migrate_schema(args: PathOptions) -> None:
     """Upgrade existing legacy map Parquets without reading raw PBFs."""
     data_root = _data_root(args)
     migrated = migrate_dataset_schema(data_root)
     print_json({"data_root": str(data_root), "migrated_files": migrated})
-    return 0
 
 
-def handle_migrate_text(args: SimpleNamespace) -> int:
+def handle_migrate_text(args: SimpleNamespace) -> None:
     """Repair legacy untrimmed description text without reading raw PBFs."""
     data_root = _data_root(args)
     migrated = migrate_dataset_text(data_root, max_workers=args.max_workers)
     print_json({"data_root": str(data_root), "migrated_files": migrated})
-    return 0
 
 
-def handle_publish_plan(args: SimpleNamespace) -> int:
+def handle_publish_plan(args: SimpleNamespace) -> None:
     data_root = _data_root(args)
     plan = create_upload_plan(data_root)
     print_json(
@@ -400,18 +393,16 @@ def handle_publish_plan(args: SimpleNamespace) -> int:
             ],
         }
     )
-    return 0
 
 
-def handle_publish(args: SimpleNamespace) -> int:
+def handle_publish(args: SimpleNamespace) -> None:
     data_root = _data_root(args)
     plan = create_upload_plan(data_root)
     execute_upload(plan, confirmation=args.plan)
     print_json({"repo_id": plan.repo_id, "identity_sha256": plan.identity_sha256})
-    return 0
 
 
-def handle_release_stats(args: SimpleNamespace) -> int:
+def handle_release_stats(args: SimpleNamespace) -> None:
     """Compute, validate, and publish only the dataset card and stats report."""
     data_root = _data_root(args)
     report = release_metadata(
@@ -421,10 +412,9 @@ def handle_release_stats(args: SimpleNamespace) -> int:
         apply=args.apply,
     )
     print_json(report.to_payload())
-    return 0
 
 
-def handle_run_and_publish(args: SimpleNamespace) -> int:
+def handle_run_and_publish(args: SimpleNamespace) -> None:
     paths = _resolve_paths(args)
     tracker = TrackioRecorder(data_root=paths.data_root)
     presenter = getattr(args, "presenter", None)
@@ -461,10 +451,9 @@ def handle_run_and_publish(args: SimpleNamespace) -> int:
         if logger is not None:
             logger.close()
     print_json(report.to_payload())
-    return 0
 
 
-def handle_trackio_snapshot(args: SimpleNamespace) -> int:
+def handle_trackio_snapshot(args: SimpleNamespace) -> None:
     data_root = _data_root(args)
     report = publish_snapshot(
         data_root,
@@ -473,7 +462,6 @@ def handle_trackio_snapshot(args: SimpleNamespace) -> int:
         run_name=args.run_name,
     )
     print_json(report.to_payload())
-    return 0
 
 
 @app.command("inspect", help="Read-only discovery")
