@@ -351,9 +351,6 @@ def test_finalize_local_dataset_validates_deduplicates_and_refreshes_docs(
     sources = [source]
     logger = _Logger()
 
-    def clock() -> str:
-        return "now"
-
     calls: list[tuple[str, object, object]] = []
 
     def verify(data_paths: Paths, passed_sources: list[Source]) -> None:
@@ -369,20 +366,20 @@ def test_finalize_local_dataset_validates_deduplicates_and_refreshes_docs(
             status="changed",
         )
 
-    def refresh(data_paths: Paths, *, clock: object, logger: object) -> None:
-        calls.append(("refresh", data_paths, (clock, logger)))
+    def refresh(data_paths: Paths, *, logger: object) -> None:
+        calls.append(("refresh", data_paths, logger))
 
     monkeypatch.setattr(orchestrator, "_verify_final_completeness", verify)
     monkeypatch.setattr(orchestrator, "deduplicate_dataset", deduplicate)
     monkeypatch.setattr(orchestrator, "_refresh_dataset_docs_for_metadata", refresh)
 
-    orchestrator._finalize_local_dataset(paths, sources, clock=clock, logger=logger)
+    orchestrator._finalize_local_dataset(paths, sources, logger=logger)
 
     assert calls == [
         ("verify", paths, sources),
         ("deduplicate", paths.data_root, None),
         ("verify", paths, sources),
-        ("refresh", paths, (clock, logger)),
+        ("refresh", paths, logger),
     ]
     assert logger.events == [
         (

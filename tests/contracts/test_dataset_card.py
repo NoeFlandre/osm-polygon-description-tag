@@ -105,7 +105,7 @@ def test_generation_preserves_handwritten_sections(
         lambda counts, output_path: None,
     )
 
-    generate_dataset_docs(data_root, TEMPLATE, clock=lambda: "2026-07-27T00:00:00+00:00")
+    generate_dataset_docs(data_root, TEMPLATE)
 
     readme = (data_root / "README.md").read_text(encoding="utf-8")
     template = TEMPLATE.read_text(encoding="utf-8")
@@ -146,7 +146,7 @@ def test_generated_block_contains_only_backed_numbers(
         lambda counts, output_path: None,
     )
 
-    stats = generate_dataset_docs(data_root, TEMPLATE, clock=lambda: "2026-07-27T00:00:00+00:00")
+    stats = generate_dataset_docs(data_root, TEMPLATE)
 
     readme = (data_root / "README.md").read_text(encoding="utf-8")
     start = readme.index("<!-- GENERATED:STATS:START -->")

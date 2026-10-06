@@ -539,11 +539,10 @@ def test_write_dataset_docs_requires_both_h3_markers_before_installing_map(
     install_map.assert_not_called()
 
 
-def test_generate_dataset_docs_forwards_clock_and_orchestrates_all_outputs(
+def test_generate_dataset_docs_orchestrates_all_outputs(
     tmp_path: Path,
 ) -> None:
     template = tmp_path / "template.md"
-    clock = Mock()
     stats = {"rows": 5}
     previous = {"old": True}
 
@@ -559,9 +558,9 @@ def test_generate_dataset_docs_forwards_clock_and_orchestrates_all_outputs(
         patch.object(docs_module, "_write_dataset_hero") as write_hero,
         patch.object(docs_module, "_write_dataset_docs") as write_docs,
     ):
-        result = docs_module.generate_dataset_docs(tmp_path, template, clock=clock)
+        result = docs_module.generate_dataset_docs(tmp_path, template)
 
-    collect.assert_called_once_with(tmp_path, clock=clock)
+    collect.assert_called_once_with(tmp_path)
     read_cache.assert_called_once_with(tmp_path / "stats.json")
     ensure_h3.assert_called_once_with(tmp_path, stats, previous)
     ensure_area.assert_called_once_with(tmp_path, stats, previous)

@@ -22,11 +22,6 @@ from osm_polygon_description_tag.runtime.resources import project_code_revision
 from tests.conftest import make_record_dict
 
 
-def frozen_clock() -> str:
-    """Return the stable timestamp used by deterministic artifact tests."""
-    return "2026-07-27T00:00:00+00:00"
-
-
 def two_deduplication_records() -> list[dict[str, object]]:
     """Return the two ordered source rows used by deduplication contracts."""
     return [

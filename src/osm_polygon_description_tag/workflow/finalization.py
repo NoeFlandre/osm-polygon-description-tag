@@ -121,7 +121,6 @@ def write_metadata_state(
 def refresh_dataset_docs(
     paths: Paths,
     *,
-    clock: Callable[[], str],
     logger: RunLogger,
     docs_generator: Callable[..., object] = generate_dataset_docs,
 ) -> None:
@@ -130,7 +129,7 @@ def refresh_dataset_docs(
     if not data_dir.is_dir() or not list(data_dir.glob("*.parquet")):
         return
     try:
-        docs_generator(paths.data_root, dataset_card_template(), clock=clock)
+        docs_generator(paths.data_root, dataset_card_template())
     except Exception as error:
         raise OrchestratorError(f"dataset card refresh failed: {error}") from error
     logger.event(

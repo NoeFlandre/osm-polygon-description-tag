@@ -367,13 +367,12 @@ def test_orchestrator_compatibility_wrappers_forward_all_metadata_arguments(
 
     monkeypatch.setattr(orchestrator.finalization, "refresh_dataset_docs", refresh)
     monkeypatch.setattr(orchestrator.finalization, "verify_final_completeness", verify)
-    orchestrator._refresh_dataset_docs_for_metadata(paths, clock=clock, logger=logger)
+    orchestrator._refresh_dataset_docs_for_metadata(paths, logger=logger)
     orchestrator._verify_final_completeness(paths, [source])
 
     assert captured["refresh"] == (
         (paths,),
         {
-            "clock": clock,
             "logger": logger,
             "docs_generator": orchestrator.generate_dataset_docs,
         },

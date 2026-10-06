@@ -6,7 +6,7 @@ import hashlib
 import json
 import math
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +41,6 @@ from osm_polygon_description_tag.dataset.stats import (
     TEXT_REJECTION_REASONS,
     ReportingError,
     collect_stats,
-    utc_now_iso,
 )
 from osm_polygon_description_tag.dataset.text import TEXT_CONTRACT_VERSION
 from osm_polygon_description_tag.runtime.atomic import atomic_write_bytes
@@ -628,11 +627,10 @@ def generate_dataset_docs(
     data_root: Path,
     template_path: Path,
     *,
-    clock: Callable[[], str] = utc_now_iso,
     preserve_existing: bool = False,
 ) -> dict[str, Any]:
     """Write deterministic stats, README, and derived media artifacts."""
-    stats = collect_stats(data_root, clock=clock)
+    stats = collect_stats(data_root)
     previous_stats = _read_json_object(data_root / "stats.json")
     map_input_sha256, occupied_cells = _ensure_h3_map(data_root, stats, previous_stats)
     stats["h3_map_input_sha256"] = map_input_sha256

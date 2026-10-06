@@ -536,7 +536,7 @@ def test_run_and_publish_executes_stages_in_order_and_finishes_tracker(  # noqa:
     )
     assert captured["finalize_local_dataset"] == (
         (paths, [source]),
-        {"clock": clock, "logger": logger},
+        {"logger": logger},
     )
     assert captured["publish_sources"] == (
         (

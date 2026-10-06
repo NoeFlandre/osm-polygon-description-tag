@@ -826,7 +826,6 @@ def test_generate_dataset_docs_uses_validate_finalized_artifacts(tmp_path: Path)
         generate_dataset_docs(
             data_root,
             dataset_card_template(),
-            clock=lambda: "2026-07-30T00:02:00+00:00",
         )
 
 
