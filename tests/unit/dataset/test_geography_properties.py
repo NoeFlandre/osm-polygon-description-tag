@@ -69,6 +69,11 @@ def _unwrapped_extent(points: list[tuple[float, float]]) -> float:
     return max(longitudes) - min(longitudes)
 
 
+def _same_geographic_position(first: tuple[float, float], second: tuple[float, float]) -> bool:
+    longitude_delta = (first[0] - second[0] + 180.0) % 360.0 - 180.0
+    return abs(longitude_delta) <= 1e-9 and abs(first[1] - second[1]) <= 1e-9
+
+
 @given(_RING_POINTS)
 def test_clipped_rings_stay_inside_the_world_and_no_edge_spans_half_of_it(
     points: list[tuple[float, float]],
@@ -100,10 +105,34 @@ def test_a_wide_ring_can_keep_a_world_spanning_closing_edge() -> None:
 
 
 @given(_RING_POINTS)
-def test_clipping_preserves_or_adds_ring_vertices(points: list[tuple[float, float]]) -> None:
+def test_clipping_preserves_distinct_input_locations(points: list[tuple[float, float]]) -> None:
     rings = split_antimeridian(points)
+    clipped_points = [point for ring in rings for point in ring]
 
-    assert sum(map(len, rings)) >= len(points)
+    # Redundant input coordinates can be normalized during clipping. Preserve
+    # each distinct geographic position, including the equivalent ±180° edge.
+    assert all(
+        any(_same_geographic_position(point, clipped) for clipped in clipped_points)
+        for point in set(points)
+    )
+
+
+def test_degenerate_duplicate_ring_keeps_its_distinct_positions_near_180() -> None:
+    points = [
+        (179.99999999999997, 0.0),
+        (179.99999999999997, 0.0),
+        (179.99999999999997, 0.0),
+        (-1.0, 0.0),
+    ]
+    rings = split_antimeridian(points)
+    clipped_points = [point for ring in rings for point in ring]
+
+    assert len(set(points)) == 2
+    assert all(latitude == 0.0 for _longitude, latitude in clipped_points)
+    assert all(
+        any(_same_geographic_position(point, clipped) for clipped in clipped_points)
+        for point in set(points)
+    )
 
 
 @given(st.lists(st.floats(min_value=0, max_value=1e12, allow_nan=False), min_size=1, max_size=40))
