@@ -295,16 +295,21 @@ def test_complete_state_requires_status_policy_and_exact_outputs(
         (datetime(2026, 1, 1, tzinfo=UTC), 1767225600.0),
         ("2026-01-01T01:00:00+01:00", 1767225600.0),
         ("2026-01-01T00:00:00", 1767225600.0),
-        ("not-a-timestamp", 0.0),
-        ("", 0.0),
-        (None, 0.0),
-        (42, 0.0),
+        ("", float("-inf")),
+        (None, float("-inf")),
     ],
 )
-def test_timestamp_rank_normalizes_supported_and_invalid_values(
+def test_timestamp_rank_normalizes_supported_values_and_nulls(
     value: object, expected: float
 ) -> None:
     assert _timestamp_rank(value) == expected
+
+
+@pytest.mark.parametrize("value", ["not-a-timestamp", 42])
+def test_timestamp_rank_rejects_non_null_invalid_values(value: object) -> None:
+    with pytest.raises(ValueError) as error:
+        _timestamp_rank(value)
+    assert str(error.value) == "timestamp must be null or a valid ISO-8601 value"
 
 
 def test_parse_timestamp_returns_utc_aware_values_or_none() -> None:

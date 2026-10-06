@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
@@ -15,9 +16,11 @@ from osm_polygon_description_tag.dataset.text import (
     successful_description_text_sql,
 )
 
-CANONICAL_ROW_POLICY_VERSION = 4
+CANONICAL_ROW_POLICY_VERSION = 5
 _POLICY_TEXT = (
-    "key=(osm_type,osm_id);winner=max(version);then=max(timestamp);"
+    "key=(osm_type,osm_id);text_filter=before_rank;"
+    "winner=max(version NULLS LAST);then=max(timestamp NULLS LAST);"
+    "timestamp=ISO8601_UTC;naive_timestamp=UTC;blank_timestamp=NULL;invalid_timestamp=reject;"
     "then=min(source_pbf);then=min(payload_sha256_json_fingerprint_canonical_wkb)"
 )
 CANONICAL_ROW_POLICY_SHA256 = hashlib.sha256(_POLICY_TEXT.encode("utf-8")).hexdigest()
@@ -49,10 +52,16 @@ def _parse_timestamp(value: object) -> datetime | None:
         return None
 
 
+def _is_missing_timestamp(value: object) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
 def _timestamp_rank(value: object) -> float:
     parsed = _parse_timestamp(value)
     if parsed is None:
-        return 0.0
+        if _is_missing_timestamp(value):
+            return -math.inf
+        raise ValueError("timestamp must be null or a valid ISO-8601 value")
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC).timestamp()
@@ -95,6 +104,45 @@ def _row_fingerprint(row: Mapping[str, object]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _rank_rows(
+    rows: Sequence[Mapping[str, object]],
+) -> tuple[tuple[Mapping[str, object], float], ...]:
+    return tuple((row, _timestamp_rank(row.get("timestamp"))) for row in rows)
+
+
+def _eligible_ranked_rows(
+    rows: Sequence[tuple[Mapping[str, object], float]],
+    *,
+    require_successful_text: bool,
+) -> tuple[tuple[Mapping[str, object], float], ...]:
+    return tuple(
+        (row, timestamp_rank)
+        for row, timestamp_rank in rows
+        if not require_successful_text or description_row_has_successful_text(row)
+    )
+
+
+def _canonical_row_order(
+    candidate: tuple[Mapping[str, object], float],
+) -> tuple[bool, int, float, str, str]:
+    row, timestamp_rank = candidate
+    return (
+        row.get("version") is None,
+        -_version(row.get("version")),
+        -timestamp_rank,
+        str(row.get("source_pbf", "")),
+        _row_fingerprint(row),
+    )
+
+
+def _best_ranked_row(
+    candidates: Sequence[tuple[Mapping[str, object], float]],
+) -> Mapping[str, object]:
+    if not candidates:
+        raise ValueError("cannot select a canonical row from an empty group")
+    return min(candidates, key=_canonical_row_order)[0]
+
+
 def select_canonical_row(
     rows: Sequence[Mapping[str, object]],
     *,
@@ -102,25 +150,17 @@ def select_canonical_row(
 ) -> Mapping[str, object]:
     """Select the stable canonical row for one OSM identity group.
 
-    Text-aware callers filter before ranking, matching the SQL view's
-    ``require_successful_text`` behavior.
+    Timestamps accept datetimes or ISO-8601 strings. Naive values are UTC;
+    null and blank values rank last; invalid nonblank values raise ``ValueError``.
+    Text-aware selection filters rows before ranking. Remaining ties sort by
+    source name and then the canonical payload fingerprint.
     """
-    candidates = (
-        tuple(row for row in rows if description_row_has_successful_text(row))
-        if require_successful_text
-        else rows
+    ranked_rows = _rank_rows(rows)
+    candidates = _eligible_ranked_rows(
+        ranked_rows,
+        require_successful_text=require_successful_text,
     )
-    if not candidates:
-        raise ValueError("cannot select a canonical row from an empty group")
-    return min(
-        candidates,
-        key=lambda row: (
-            -_version(row.get("version")),
-            -_timestamp_rank(row.get("timestamp")),
-            str(row.get("source_pbf", "")),
-            _row_fingerprint(row),
-        ),
-    )
+    return _best_ranked_row(candidates)
 
 
 def _sql_fingerprint_value(column: str, *, key_value_columns_are_maps: bool) -> str:
