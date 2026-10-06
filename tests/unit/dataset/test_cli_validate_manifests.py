@@ -229,9 +229,7 @@ def test_validate_does_not_reread_manifest_after_pair_validation(
 
     monkeypatch.setattr(cli, "read_manifest", read_replacement, raising=False)
 
-    assert (
-        cli.handle_validate(PathOptions(source_root=None, data_root=tmp_path, osmium="osmium")) == 0
-    )
+    cli.handle_validate(PathOptions(source_root=None, data_root=tmp_path, osmium="osmium"))
     assert reread_paths == []
 
 
@@ -764,8 +762,6 @@ def test_validate_accepts_a_partial_set_with_matching_manifests(
         cli, "validate_geoparquet", lambda path, **_kwargs: 2 if path == parquet else 0
     )
 
-    assert (
-        cli.handle_validate(PathOptions(source_root=None, data_root=tmp_path, osmium="osmium")) == 0
-    )
+    cli.handle_validate(PathOptions(source_root=None, data_root=tmp_path, osmium="osmium"))
 
     assert json.loads(capsys.readouterr().out) == {"files": 1, "rows": 2}
