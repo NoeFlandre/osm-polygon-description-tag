@@ -511,7 +511,12 @@ def deduplicate_dataset(
     stage_token = uuid.uuid4().hex
     stage_dir = Path(".work") / "dedup" / stage_token
     stage_root = data_root / stage_dir
-    changed, output_rows = _stage_changes(context, stage_root)
+    try:
+        changed, output_rows = _stage_changes(context, stage_root)
+    except BaseException:
+        # No state references this directory yet, so nothing can resume it.
+        shutil.rmtree(stage_root, ignore_errors=True)
+        raise
     state_payload = _state_payload(context, changed, output_rows)
     return _finish_deduplication(
         context,

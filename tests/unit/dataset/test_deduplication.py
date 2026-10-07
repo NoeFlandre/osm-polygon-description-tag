@@ -390,6 +390,52 @@ def test_deduplicate_dataset_resumes_after_promotion_interrupt(tmp_path: Path) -
     assert resumed.output_rows == 1
 
 
+@pytest.mark.parametrize("error_type", [RuntimeError, KeyboardInterrupt])
+@pytest.mark.parametrize("creates_stage_dir", [True, False])
+def test_deduplicate_dataset_removes_stage_dir_when_staging_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    error_type: type[BaseException],
+    creates_stage_dir: bool,
+) -> None:
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    (data_root / "data").mkdir(parents=True)
+    (data_root / "manifests").mkdir()
+    source_root.mkdir()
+    first = make_record_dict(
+        Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+        {"description": "one"},
+        osm_id=1,
+        source_pbf="a.osm.pbf",
+    )
+    duplicate = dict(first, source_pbf="b.osm.pbf", version=2)
+    _write_source(data_root, source_root, "a", [first])
+    _write_source(data_root, source_root, "b", [duplicate])
+
+    real_stage_changes = dedup_module._stage_changes
+
+    def failing_stage_changes(context: object, stage_root: Path) -> object:
+        if creates_stage_dir:
+            (stage_root / "data").mkdir(parents=True)
+            (stage_root / "data" / "partial.parquet").write_bytes(b"partial")
+        raise error_type("staging failed")
+
+    monkeypatch.setattr(dedup_module, "_stage_changes", failing_stage_changes)
+    with pytest.raises(error_type, match="staging failed"):
+        deduplicate_dataset(data_root)
+    monkeypatch.setattr(dedup_module, "_stage_changes", real_stage_changes)
+
+    dedup_root = data_root / ".work" / "dedup"
+    leftovers = list(dedup_root.iterdir()) if dedup_root.exists() else []
+    assert leftovers == []
+    assert not (data_root / dedup_module._STATE_RELATIVE_PATH).exists()
+
+    result = deduplicate_dataset(data_root)
+    assert result.status == "deduplicated"
+    assert result.output_rows == 1
+
+
 def test_deduplicate_dataset_refuses_staged_resume_after_input_drift(tmp_path: Path) -> None:
     data_root = tmp_path / "generated"
     source_root = tmp_path / "raw"
