@@ -509,3 +509,61 @@ def test_the_default_stderr_level_is_info(tmp_path: Path) -> None:
 def test_an_unknown_stderr_level_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(KeyError):
         logging_module.RunLogger(data_root=tmp_path, run_id="run", stderr_level="LOUD")
+
+
+def _logged_events(tmp_path: Path) -> list[str]:
+    active = tmp_path / "logs" / logging_module.RunLogger.ACTIVE_NAME
+    return [json.loads(line)["event"] for line in active.read_text().splitlines()]
+
+
+def test_event_after_close_is_written_to_the_active_log_not_buffered(tmp_path: Path) -> None:
+    logger = logging_module.RunLogger(
+        data_root=tmp_path,
+        run_id="late-run",
+        clock=lambda: "2026-10-07T00:00:00+00:00",
+        stderr=StringIO(),
+    )
+    logger.event("before_close")
+    logger.close()
+
+    logger.event("after_close")
+    logger.close()
+
+    assert _logged_events(tmp_path) == ["before_close", "after_close"]
+    assert list(logger.drain()) == []
+
+
+@pytest.mark.parametrize(
+    "failing_step",
+    [
+        pytest.param(("link", "os"), id="hard-link-fails"),
+        pytest.param(("_shift_backups", "module"), id="backup-shift-fails"),
+    ],
+)
+def test_events_after_a_failed_rotation_are_written_not_buffered(
+    tmp_path: Path, failing_step: tuple[str, str]
+) -> None:
+    name, owner = failing_step
+    target = logging_module.os if owner == "os" else logging_module
+    logger = logging_module.RunLogger(
+        data_root=tmp_path,
+        run_id="rotate-run",
+        clock=lambda: "2026-10-07T00:00:00+00:00",
+        stderr=StringIO(),
+    )
+    logger.configure_rotation(max_bytes=1, backups=2)
+
+    with (
+        patch.object(target, name, side_effect=OSError("rotation failed")),
+        pytest.raises(OSError, match=r"^rotation failed$"),
+    ):
+        logger.event("triggers_rotation")
+
+    # Rotation no longer fails; the logger must keep persisting, not buffering.
+    logger.configure_rotation(max_bytes=10_000_000, backups=2)
+    logger.event("after_failure_one")
+    logger.event("after_failure_two")
+    logger.close()
+
+    assert _logged_events(tmp_path)[-2:] == ["after_failure_one", "after_failure_two"]
+    assert list(logger.drain()) == []
