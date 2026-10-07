@@ -233,9 +233,5 @@ run any Grid'5000 job, OAR command, SSH session, production run, or Hub upload.
 ## Output and exit codes
 
 A successful command writes one JSON report to stdout. The human diagnostics
-and the interactive progress use stderr. The exit codes are:
-
-- `0`: successful operation, including a safe no-op;
-- `1`: operational failure;
-- `2`: invalid command or option usage;
-- `130`: one graceful Ctrl-C interruption.
+and the interactive progress use stderr. For the exit codes, see the
+[exit code table](#exit-codes) above.
