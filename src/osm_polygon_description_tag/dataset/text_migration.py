@@ -225,43 +225,53 @@ def _migrate_parquet_text(path: Path) -> int | None:
             temporary.unlink()
 
 
-def _migrate_one_artifact(parquet: Path, manifest_path: Path) -> int:
-    dropped = _migrate_parquet_text(parquet)
-    manifest = read_manifest(manifest_path)
-    if dropped is None:
-        return _heal_output_identity(manifest, parquet, manifest_path)
+def _repaired_manifest(manifest: Manifest, parquet: Path, dropped: int) -> Manifest:
+    """Return the manifest describing the repaired Parquet after ``dropped`` rows."""
     counts = manifest.counts
     rejections = dict(counts.rejections)
     if dropped:
         rejections[REJECTION_REASON] = rejections.get(REJECTION_REASON, 0) + dropped
-    write_manifest(
-        replace(
-            manifest,
-            output=output_identity_for(parquet),
-            counts=replace(
-                counts,
-                included_rows=counts.included_rows - dropped,
-                rejections=rejections,
-            ),
+    return replace(
+        manifest,
+        output=output_identity_for(parquet),
+        counts=replace(
+            counts,
+            included_rows=counts.included_rows - dropped,
+            rejections=rejections,
         ),
-        manifest_path,
     )
+
+
+def _migrate_one_artifact(parquet: Path, manifest_path: Path) -> int:
+    dropped = _migrate_parquet_text(parquet)
+    manifest = read_manifest(manifest_path)
+    if dropped is None:
+        return _heal_interrupted_repair(manifest, parquet, manifest_path)
+    write_manifest(_repaired_manifest(manifest, parquet, dropped), manifest_path)
     return 1
 
 
-def _heal_output_identity(manifest: Manifest, parquet: Path, manifest_path: Path) -> int:
-    """Refresh a manifest left stale by an interrupted earlier run.
+def _heal_interrupted_repair(manifest: Manifest, parquet: Path, manifest_path: Path) -> int:
+    """Bring a manifest left behind by an interrupted earlier run up to date.
 
     A crash between promoting a Parquet and writing its manifest leaves the
-    repaired artifact on disk under the previous identity. The text is already
-    canonical by then, so no rewrite is needed and the counts are already
-    correct; only the recorded identity has to catch up.
+    repaired artifact on disk while the manifest still describes the
+    pre-repair file: the old output identity and the old ``included_rows``.
+    The text is already canonical by then, so the rows the interrupted run
+    dropped are the gap between the recorded count and the Parquet's rows.
+    That gap is recorded under the same reason a live repair uses.
     """
     identity = output_identity_for(parquet)
     if manifest.output == identity:
         return 0
-    write_manifest(replace(manifest, output=identity), manifest_path)
+    dropped = max(0, manifest.counts.included_rows - _row_count(parquet))
+    write_manifest(_repaired_manifest(manifest, parquet, dropped), manifest_path)
     return 1
+
+
+def _row_count(path: Path) -> int:
+    with closing(pq.ParquetFile(path)) as reader:
+        return reader.metadata.num_rows
 
 
 def _artifact_pair(parquet: Path, data_root: Path) -> tuple[Path, Path]:

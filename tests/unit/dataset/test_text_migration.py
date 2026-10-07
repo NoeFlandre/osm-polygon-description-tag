@@ -498,6 +498,28 @@ def test_a_stale_manifest_from_an_interrupted_run_is_healed(tmp_path: Path) -> N
     assert migrate_dataset_text(data_root) == 0
 
 
+def test_resume_after_a_crash_that_dropped_rows_records_the_drop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The interrupted run's dropped rows must reach the manifest on resume."""
+    data_root, parquet, manifest_path = _prepare(tmp_path, [_row(1, "   "), _row(2, "Kept")])
+    real_write_manifest = text_migration.write_manifest
+
+    def crash(*_args: object, **_kwargs: object) -> None:
+        raise OSError("crash")
+
+    monkeypatch.setattr(text_migration, "write_manifest", crash)
+    with pytest.raises(OSError):
+        migrate_dataset_text(data_root)
+    monkeypatch.setattr(text_migration, "write_manifest", real_write_manifest)
+
+    assert migrate_dataset_text(data_root) == 1
+    counts = read_manifest(manifest_path).counts
+    assert counts.included_rows == pq.ParquetFile(parquet).metadata.num_rows == 1
+    assert counts.rejections == {text_migration.REJECTION_REASON: 1}
+    assert migrate_dataset_text(data_root) == 0
+
+
 def test_the_migration_probe_reads_only_the_text_columns_in_bounded_batches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
