@@ -31,7 +31,7 @@ from osm_polygon_description_tag.runtime import (
 ```
 
 The package exports `Paths`, `UnsafePathError`, `RunLogger`, `TerminalPresenter`,
-`configure_rotation`, the packaged resource locators, project checkout locators, and
+the packaged resource locators, project checkout locators, and
 `cleanup_stale_owned_temps`.
 
 ## Allowed dependencies

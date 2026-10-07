@@ -16,10 +16,10 @@ existing guarantee that no PBF or generated artifact is touched.
 
 The JSONL log is rotated at a fixed size (10 MiB by default) with five
 backups. Rotation is synchronous and atomic: the active file is fsynced,
-a new owned empty active file is created, the previous file is
-hard-linked into a same-directory staging slot, the backup chain is
-shifted with :func:`os.replace`, the active path is swapped to the new
-empty file, and the directory is fsynced. Interruption can leave a
+the previous file is hard-linked into a same-directory staging slot and the
+active path is unlinked, the backup chain is shifted with
+:func:`os.replace`, the staged file takes the first backup slot, and a new
+owned empty active file is created and the directory is fsynced. Interruption can leave a
 staging file or a gap in backup numbering, but never a partial or
 truncated archive.
 """
@@ -157,7 +157,7 @@ def _shift_backups(backup_chain: list[Path]) -> None:
         src = backup_chain[index - 1]
         dst = backup_chain[index]
         if src.exists() and src.is_file():
-            Path(src).replace(dst)
+            src.replace(dst)
 
 
 def _create_active_log(subdir: Path, active_name: str) -> Path:
@@ -246,6 +246,7 @@ class RunLogger:
             self._append_persistent(event.raw)
 
     def drain(self) -> Iterable[dict[str, object]]:
+        """Yield and discard buffered records; a test seam with no production caller."""
         with self._lock:
             buffered = list(self._buffered)
             self._buffered.clear()
@@ -307,14 +308,14 @@ class RunLogger:
         active = subdir / self.ACTIVE_NAME
         _validate_active_log(active)
         self._path = active
-        self._handle = Path(active).open("ab", buffering=0)  # noqa: SIM115
+        self._handle = active.open("ab", buffering=0)
 
     def _append_persistent(self, raw: str) -> None:
         with self._lock:
             self._raw_write(raw)
 
     def append_raw(self, raw: str) -> None:
-        """Append a pre-built raw line; reserved for tests and rotation."""
+        """Append a pre-built raw line; a test seam with no production caller."""
         with self._lock:
             if self._handle is None:
                 raise ValueError("logger is not opened for persistent writes")
@@ -335,6 +336,7 @@ class RunLogger:
             self._rotate_locked()
 
     def maybe_rotate(self) -> None:
+        """Rotate now if the active file is full; a test seam with no production caller."""
         with self._lock:
             if self._handle is None or self._path is None:
                 return
@@ -363,11 +365,11 @@ class RunLogger:
         self._path.unlink()
         _shift_backups(backup_chain)
         if backup_chain:
-            Path(staging).replace(backup_chain[0])
+            staging.replace(backup_chain[0])
         else:
             staging.unlink()
         new_active = _create_active_log(subdir, self.ACTIVE_NAME)
-        self._handle = Path(new_active).open("ab", buffering=0)  # noqa: SIM115
+        self._handle = new_active.open("ab", buffering=0)
         self._path = new_active
 
     def flush(self) -> None:
@@ -384,12 +386,4 @@ class RunLogger:
                 self._close_handle()
 
 
-def configure_rotation(logger: RunLogger, *, max_bytes: int, backups: int) -> None:
-    """Public rotation configuration helper used by tests and CLI wiring."""
-    logger.configure_rotation(max_bytes=max_bytes, backups=backups)
-
-
-__all__ = [
-    "RunLogger",
-    "configure_rotation",
-]
+__all__ = ["RunLogger"]
