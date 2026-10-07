@@ -18,6 +18,8 @@ defined once, in `pyproject.toml`. `CITATION.cff` must have the same version.
 
 ### Fixed
 
+- `build-one` exits with code 3 when the requested source is not discovered.
+  `validate` exits with code 4 when its data directory is missing (#135).
 - Resolve exact 180° longitude ties consistently during antimeridian clipping (#113).
 - Canonical selection puts null versions and timestamps last, matching DuckDB, and rejects malformed nonempty timestamps.
 - The uploader retries on timeout messages in stderr. It keeps live output and a bounded error tail (#105).
