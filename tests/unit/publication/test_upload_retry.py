@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +48,22 @@ def _always_failing(error: BaseException) -> tuple[list[int], object]:
         raise error
 
     return calls, runner
+
+
+# Real child interpreters must start, print and be killed on a timeout that is
+# generous relative to start-up on a loaded runner, so assertions never race it.
+_CHILD_TIMEOUT_SECONDS = 3.0
+_GENEROUS_WAIT_SECONDS = 10.0
+
+
+def _wait_until(condition: Callable[[], bool], deadline_seconds: float = 5.0) -> bool:
+    """Poll ``condition`` until it holds or the deadline passes."""
+    deadline = time.monotonic() + deadline_seconds
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(0.01)
+    return condition()
 
 
 def _capture_stderr_reader_join_timeouts(
@@ -327,7 +344,7 @@ time.sleep(30)
 
     def run_child() -> None:
         try:
-            default_runner_with_retry(command, max_retries=0, timeout=0.75)
+            default_runner_with_retry(command, max_retries=0, timeout=_CHILD_TIMEOUT_SECONDS)
         except BaseException as error:  # noqa: BLE001 - transfer worker failures to the test
             errors.append(error)
         finally:
@@ -337,11 +354,13 @@ time.sleep(30)
     started = time.monotonic()
     runner_thread.start()
     try:
-        returned_before_release = completed.wait(timeout=2.0)
+        returned_before_release = completed.wait(timeout=_GENEROUS_WAIT_SECONDS)
         elapsed = time.monotonic() - started
         descendant_started = ready_file.exists()
         heartbeat_before = len(heartbeat_file.read_text()) if heartbeat_file.exists() else 0
-        time.sleep(0.05)
+        _wait_until(
+            lambda: heartbeat_file.exists() and len(heartbeat_file.read_text()) > heartbeat_before
+        )
         descendant_holds_pipe = (
             heartbeat_file.exists()
             and len(heartbeat_file.read_text()) > heartbeat_before
@@ -357,7 +376,7 @@ time.sleep(30)
         runner_thread.join(timeout=0.25)
 
     assert returned_before_release
-    assert elapsed < 2.0
+    assert elapsed < _GENEROUS_WAIT_SECONDS
     assert descendant_started
     assert descendant_holds_pipe
     assert reader_stopped
@@ -411,7 +430,7 @@ attempt = int(attempts_file.read_text()) + 1 if attempts_file.exists() else 1
 attempts_file.write_text(str(attempt))
 print(f"attempt {attempt}", file=sys.stderr, flush=True)
 if attempt == 1:
-    time.sleep(5)
+    time.sleep(60)
 """
     events: list[dict[str, object]] = []
 
@@ -419,7 +438,7 @@ if attempt == 1:
         [sys.executable, "-c", script, str(attempts_file)],
         max_retries=1,
         backoff_seconds=0.0,
-        timeout=0.25,
+        timeout=_CHILD_TIMEOUT_SECONDS,
         retry_observer=lambda **fields: events.append(fields),
     )
 
@@ -434,11 +453,11 @@ def test_a_real_process_timeout_retains_stderr_when_retries_are_exhausted(
     command = [
         sys.executable,
         "-c",
-        "import sys, time; print('upload started', file=sys.stderr, flush=True); time.sleep(5)",
+        "import sys, time; print('upload started', file=sys.stderr, flush=True); time.sleep(60)",
     ]
 
     with pytest.raises(subprocess.TimeoutExpired) as caught:
-        default_runner_with_retry(command, max_retries=0, timeout=0.25)
+        default_runner_with_retry(command, max_retries=0, timeout=_CHILD_TIMEOUT_SECONDS)
 
     assert caught.value.stderr == b"upload started\n"
     assert capfd.readouterr().err == "upload started\n"

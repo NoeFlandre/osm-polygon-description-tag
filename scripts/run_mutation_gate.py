@@ -24,7 +24,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from scripts.check_mutation_score import STATUS_BY_EXIT_CODE, iter_mutant_exit_codes
 from scripts.mutation_scratch import (
@@ -39,6 +39,9 @@ DEFAULT_MAX_CHILDREN = 8
 DEFAULT_FAST_TESTS_PER_FUNCTION = 1
 DEFAULT_MUTATION_BATCH_SIZE: int | None = None
 _ESCALATION_FACTOR = 8
+MUTANTS_DIR = Path("mutants")
+STATS_PATH = MUTANTS_DIR / "mutmut-stats.json"
+RECORDED_PATH = MUTANTS_DIR / "mutmut-recorded-tests.json"
 
 
 # mutmut only records which tests reach mutated code, and its forced-fail probe
@@ -56,9 +59,17 @@ class GateScope:
     changed_lines: Mapping[str, tuple[int, ...]] | None
 
 
+class MutmutRunner(Protocol):
+    """The slice of mutmut's ``PytestRunner`` this gate drives."""
+
+    _pytest_add_cli_args_test_selection: list[str]
+
+    def run_tests(self, *, mutant_name: str | None, tests: Iterable[str]) -> int: ...
+
+
 @dataclass(frozen=True)
 class MutationRun:
-    runner: Any
+    runner: MutmutRunner
     mutmut: Any
     mutmut_main: Any
     durations: Mapping[str, float]
@@ -150,7 +161,7 @@ def _configure_mutmut(
         config.pytest_add_cli_args_test_selection = list(test_selection)
     if changed_lines is not None:
         mutmut._covered_lines = {
-            str((Path("mutants") / path).absolute()): set(lines)
+            str((MUTANTS_DIR / path).absolute()): set(lines)
             for path, lines in changed_lines.items()
         }
 
@@ -329,14 +340,6 @@ def mutated_function_names(mutants_root: Path) -> set[str]:
     }
 
 
-def _stats_path() -> Path:
-    return Path("mutants") / "mutmut-stats.json"
-
-
-def _recorded_path() -> Path:
-    return Path("mutants") / "mutmut-recorded-tests.json"
-
-
 def coverage_selection(coverage_file: Path) -> dict[str, tuple[str, ...]]:
     """Return exact per-function associations from per-test coverage contexts.
 
@@ -384,12 +387,12 @@ def recorded_associations(stats: Mapping[str, Any], path: Path) -> dict[str, tup
 
 
 def _read_stats() -> dict[str, Any]:
-    return json.loads(_stats_path().read_text(encoding="utf-8"))
+    return json.loads(STATS_PATH.read_text(encoding="utf-8"))
 
 
 def _write_stats(stats: Mapping[str, Any]) -> None:
     write_json_report(
-        _stats_path(),
+        STATS_PATH,
         dict(stats),
         indent=4,
         sort_keys=False,
@@ -412,7 +415,7 @@ def _prepare_mutmut(
     only_mutate: Sequence[str] = (),
     test_selection: Sequence[str] = (),
     changed_lines: Mapping[str, Sequence[int]] | None = None,
-) -> Any:
+) -> MutmutRunner:
     """Generate/load the mutmut cache and collect the current test map."""
 
     import mutmut
@@ -429,7 +432,7 @@ def _prepare_mutmut(
         test_selection=test_selection,
         changed_lines=changed_lines,
     )
-    Path("mutants").mkdir(exist_ok=True)
+    MUTANTS_DIR.mkdir(exist_ok=True)
     mutmut_main.copy_src_dir()
     mutmut_main.copy_also_copy_files()
     mutmut_main.setup_source_paths()
@@ -455,7 +458,7 @@ def _probe_selection(test_selection: Sequence[str]) -> list[str]:
     return list(test_selection) if test_selection else list(SMOKE_TEST_SELECTION)
 
 
-def _verify_mutmut_can_fail(runner: Any, test_selection: Sequence[str] = ()) -> None:
+def _verify_mutmut_can_fail(runner: MutmutRunner, test_selection: Sequence[str] = ()) -> None:
     """Run mutmut's failure probe against tests that reach the mutated code."""
 
     import mutmut.__main__ as mutmut_main
@@ -463,7 +466,7 @@ def _verify_mutmut_can_fail(runner: Any, test_selection: Sequence[str] = ()) -> 
     original_selection = runner._pytest_add_cli_args_test_selection
     runner._pytest_add_cli_args_test_selection = _probe_selection(test_selection)
     try:
-        mutmut_main.run_forced_fail_test(runner)
+        mutmut_main.run_forced_fail_test(cast(Any, runner))
     finally:
         runner._pytest_add_cli_args_test_selection = original_selection
 
@@ -517,7 +520,7 @@ def _prepare_mutation_run(
     _verify_mutmut_can_fail(runner, test_selection)
     stats = _read_stats()
     durations = stats["duration_by_test"]
-    associations = complete_associations(recorded_associations(stats, _recorded_path()), durations)
+    associations = complete_associations(recorded_associations(stats, RECORDED_PATH), durations)
     associations = _scope_associations(associations, changed_lines)
     associations = _prefer_coverage_associations(associations, coverage_file)
     return MutationRun(runner, mutmut, mutmut_main, durations, associations)
@@ -529,7 +532,7 @@ def _scope_associations(
 ) -> Mapping[str, Sequence[str]]:
     if changed_lines is None:
         return associations
-    selected_functions = mutated_function_names(Path("mutants"))
+    selected_functions = mutated_function_names(MUTANTS_DIR)
     if not selected_functions:
         return associations
     return {
@@ -632,7 +635,7 @@ def _run_escalation_stages(
         for max_tests in escalation_stages(fast_tests_per_function):
             selection = _association_stage(run, max_tests)
             _write_stats(_replace_associations(_read_stats(), selection))
-            remaining = unresolved_mutants(Path("mutants"))
+            remaining = unresolved_mutants(MUTANTS_DIR)
             if not remaining:
                 break
             _run_mutant_batches(
@@ -776,20 +779,20 @@ def _validate_runner_options(args: argparse.Namespace) -> None:
         raise SystemExit("--mutation-batch-size must be positive")
 
 
-def _read_scope_lines(path: Path, description: str) -> tuple[str, ...]:
+def _read_text_or_exit(path: Path, description: str) -> str:
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        return path.read_text(encoding="utf-8")
     except OSError as error:
         raise SystemExit(f"cannot read {description}: {error}") from error
+
+
+def _read_scope_lines(path: Path, description: str) -> tuple[str, ...]:
+    lines = _read_text_or_exit(path, description).splitlines()
     return tuple(dict.fromkeys(line.strip() for line in lines if line.strip()))
 
 
 def _read_changed_scope(path: Path) -> dict[str, tuple[int, ...]]:
-    try:
-        diff = path.read_text(encoding="utf-8")
-    except OSError as error:
-        raise SystemExit(f"cannot read changed lines file: {error}") from error
-    changed_lines = parse_changed_lines(diff)
+    changed_lines = parse_changed_lines(_read_text_or_exit(path, "changed lines file"))
     if not changed_lines:
         raise SystemExit("changed lines file contains no Python source changes")
     return with_probe_canary(changed_lines)

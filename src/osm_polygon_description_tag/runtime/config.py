@@ -10,7 +10,7 @@ DATA_ROOT_ENV = "OSM_POLYGON_DATA_ROOT"
 
 
 class MissingPathError(ValueError):
-    """Raised when a root is given neither as a CLI option nor in the environment."""
+    """Raised when a required root is unconfigured or a source cannot be found."""
 
 
 class UnsafePathError(ValueError):
