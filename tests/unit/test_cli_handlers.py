@@ -593,7 +593,7 @@ def test_cli_validate_sorts_and_accumulates_every_parquet(
 def test_cli_validate_reports_a_missing_data_directory(tmp_path: Path) -> None:
     args = _path_options(tmp_path)
 
-    with pytest.raises(ValueError, match="missing data directory"):
+    with pytest.raises(cli.StorageError, match="missing data directory"):
         cli.handle_validate(args)
 
 
@@ -631,7 +631,7 @@ def test_cli_build_one_rejects_an_unknown_source(
     )
     monkeypatch.setattr(cli, "discover_sources", lambda _root: [])
 
-    with pytest.raises(ValueError, match="source not discovered: missing.osm.pbf"):
+    with pytest.raises(cli.MissingPathError, match="source not discovered: missing.osm.pbf"):
         cli.handle_build_one(args)
 
 

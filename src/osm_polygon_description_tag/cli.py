@@ -217,7 +217,7 @@ def handle_build_one(args: BuildOneRequest) -> None:
     sources = discover_sources(paths.source_root)
     match = next((source for source in sources if source.name == args.basename), None)
     if match is None:
-        raise ValueError(f"source not discovered: {args.basename}")
+        raise MissingPathError(f"source not discovered: {args.basename}")
     result = executor(match)
     print_json(
         {
@@ -257,7 +257,7 @@ def handle_validate(args: PathOptions) -> None:
     source_root = _validation_source_root(args, data_root)
     data_dir = data_root / "data"
     if not data_dir.is_dir():
-        raise ValueError(f"missing data directory: {data_dir}")
+        raise StorageError(f"missing data directory: {data_dir}")
     parquets, manifest_records = _validation_artifacts(data_root, data_dir)
     rows_total = _validate_artifact_pairs(parquets, manifest_records, source_root)
     print_json({"files": len(parquets), "rows": rows_total})

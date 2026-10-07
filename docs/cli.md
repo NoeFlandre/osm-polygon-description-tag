@@ -31,8 +31,8 @@ does not change.
 | `0` | Success. |
 | `1` | Any other failure (I/O, osmium export, orchestration, migration). |
 | `2` | Usage error: unknown command or option, bad value. |
-| `3` | Environment or configuration: the preflight failed, or a root is missing or unsafe. |
-| `4` | Validation failed: manifest, storage, or statistics checks. |
+| `3` | Environment or configuration: the preflight failed, a root is missing or unsafe, or the requested source was not discovered. |
+| `4` | Validation failed: manifest, storage, or statistics checks, including a missing data directory. |
 | `5` | Publication failed: upload plan mismatch, upload, or Hub verification. |
 | `130` | Interrupted with Ctrl-C. |
 
@@ -233,9 +233,5 @@ run any Grid'5000 job, OAR command, SSH session, production run, or Hub upload.
 ## Output and exit codes
 
 A successful command writes one JSON report to stdout. The human diagnostics
-and the interactive progress use stderr. The exit codes are:
-
-- `0`: successful operation, including a safe no-op;
-- `1`: operational failure;
-- `2`: invalid command or option usage;
-- `130`: one graceful Ctrl-C interruption.
+and the interactive progress use stderr. See [Exit codes](#exit-codes) for
+the failure categories. A safe no-op exits with code `0`.
