@@ -18,6 +18,7 @@ defined once, in `pyproject.toml`. `CITATION.cff` must have the same version.
 
 ### Fixed
 
+- A failed or interrupted deduplication removes its staging directory under `.work/dedup/`. It no longer leaves a full copy of the rewritten Parquets on the data volume (#152).
 - The run log keeps events written after the log is closed or after a failed rotation. It no longer holds them in memory where they are never flushed (#159).
 - `build-one` exits with code 3 when the requested source is not discovered.
   `validate` exits with code 4 when its data directory is missing (#135).
