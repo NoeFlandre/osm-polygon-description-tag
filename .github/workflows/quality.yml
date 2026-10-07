@@ -271,14 +271,16 @@ jobs:
             "${{ github.event.pull_request.base.sha }}" \
             "${{ github.event.pull_request.head.sha }}" \
             -- 'src/**/*.py' 'scripts/**/*.py' > "$RUNNER_TEMP/mutation-scope.txt"
-          # A pull request that touches no Python source has nothing to mutate,
-          # so the gate is skipped rather than failed.
-          if [ -s "$RUNNER_TEMP/mutation-scope.txt" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No Python source changed; the mutation gate has nothing to mutate."
-          fi
+          # A pull request whose Python changes add or modify no lines (no Python
+          # source, or deletions only) has nothing to mutate, so the gate is skipped
+          # rather than failed. The gate's own parser decides this, so the two
+          # cannot disagree. Any other output fails this step instead of skipping.
+          changed="$(uv run python -m scripts.run_mutation_gate --check-changed-scope "$RUNNER_TEMP/mutation-scope.txt")"
+          case "$changed" in
+            true|false) ;;
+            *) echo "Unexpected scope check output: '$changed'" >&2; exit 1 ;;
+          esac
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
 
       - name: Run changed-source mutation gate
         if: steps.scope.outputs.changed == 'true'
