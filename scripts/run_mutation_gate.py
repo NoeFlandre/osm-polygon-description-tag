@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -753,6 +754,15 @@ def _parse_args_from(argv: Sequence[str] | None) -> argparse.Namespace:
         metavar="FILE",
         help="zero-context git diff whose added/modified source lines are mutated",
     )
+    parser.add_argument(
+        "--check-changed-scope",
+        type=Path,
+        metavar="FILE",
+        help=(
+            "print true if the zero-context diff in FILE adds or modifies Python source "
+            "lines, false otherwise; runs no gate"
+        ),
+    )
     tests = parser.add_mutually_exclusive_group()
     tests.add_argument(
         "--test-selection",
@@ -798,6 +808,18 @@ def _read_changed_scope(path: Path) -> dict[str, tuple[int, ...]]:
     return with_probe_canary(changed_lines)
 
 
+def _has_changed_source(path: Path) -> bool:
+    """Whether a zero-context diff adds or modifies Python source lines to mutate.
+
+    A deletion-only or non-Python diff has nothing to mutate; the caller skips the
+    gate for it. The reason goes to stderr so stdout carries only the answer.
+    """
+    if parse_changed_lines(_read_text_or_exit(path, "changed lines file")):
+        return True
+    print("No added or modified Python source lines; nothing to mutate.", file=sys.stderr)
+    return False
+
+
 def _scope_from_args(args: argparse.Namespace) -> GateScope:
     only_mutate = tuple(args.only_mutate)
     if args.only_mutate_file is not None:
@@ -814,6 +836,9 @@ def _scope_from_args(args: argparse.Namespace) -> GateScope:
 
 def main() -> None:
     args = _parse_args()
+    if args.check_changed_scope is not None:
+        print("true" if _has_changed_source(args.check_changed_scope) else "false")
+        return
     _validate_runner_options(args)
     scope = _scope_from_args(args)
     run_gate(

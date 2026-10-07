@@ -107,6 +107,119 @@ index 1111111..2222222 100644
     }
 
 
+DELETION_ONLY_DIFF = """diff --git a/src/example.py b/src/example.py
+index 1111111..2222222 100644
+--- a/src/example.py
++++ b/src/example.py
+@@ -3,2 +2,0 @@ def existing():
+-old_one
+-old_two
+@@ -10 +7,0 @@
+-gone
+"""
+
+
+MIXED_DIFF = """diff --git a/src/example.py b/src/example.py
+index 1111111..2222222 100644
+--- a/src/example.py
++++ b/src/example.py
+@@ -3,2 +2,0 @@ def existing():
+-old_one
+-old_two
+@@ -10,0 +8,2 @@
++new_one
++new_two
+"""
+
+
+def test_mutation_scope_keeps_added_lines_of_a_mixed_diff_and_skips_deletions() -> None:
+    assert parse_changed_lines(MIXED_DIFF) == {"src/example.py": (8, 9)}
+
+
+def _run_scope_check(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], scope_file: Path
+) -> tuple[str, str]:
+    """Run the scope check and return its (stdout, stderr); it must never run the gate."""
+    monkeypatch.setattr(
+        run_mutation_gate,
+        "run_gate",
+        lambda **_kwargs: pytest.fail("the scope check must not run the gate"),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run_mutation_gate", "--check-changed-scope", str(scope_file)],
+    )
+
+    run_mutation_gate.main()
+
+    captured = capsys.readouterr()
+    return captured.out, captured.err
+
+
+def test_scope_check_passes_a_deletion_only_diff_as_nothing_to_mutate(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    scope_file = tmp_path / "mutation-scope.diff"
+    scope_file.write_text(DELETION_ONLY_DIFF, encoding="utf-8")
+
+    stdout, stderr = _run_scope_check(monkeypatch, capsys, scope_file)
+
+    assert stdout == "false\n"
+    assert "nothing to mutate" in stderr
+
+
+def test_scope_check_passes_an_empty_diff_as_nothing_to_mutate(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    scope_file = tmp_path / "mutation-scope.diff"
+    scope_file.write_text("", encoding="utf-8")
+
+    stdout, _stderr = _run_scope_check(monkeypatch, capsys, scope_file)
+
+    assert stdout == "false\n"
+
+
+def test_scope_check_sends_a_mixed_diff_to_the_gate(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    scope_file = tmp_path / "mutation-scope.diff"
+    scope_file.write_text(MIXED_DIFF, encoding="utf-8")
+
+    stdout, _stderr = _run_scope_check(monkeypatch, capsys, scope_file)
+
+    assert stdout == "true\n"
+
+
+def test_direct_gate_run_still_rejects_a_deletion_only_diff(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    scope_file = tmp_path / "mutation-scope.diff"
+    scope_file.write_text(DELETION_ONLY_DIFF, encoding="utf-8")
+    monkeypatch.setattr(
+        run_mutation_gate,
+        "run_gate",
+        lambda **_kwargs: pytest.fail("a deletion-only diff must not reach the gate"),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run_mutation_gate", "--changed-lines-file", str(scope_file)],
+    )
+
+    with pytest.raises(SystemExit, match="contains no Python source changes"):
+        run_mutation_gate.main()
+
+
+def test_the_scope_step_asks_the_gate_parser_before_running_the_gate() -> None:
+    """A non-empty diff is not a reason to run the gate; the parser decides."""
+    workflow = (PROJECT_ROOT / ".github" / "workflows" / "quality.yml").read_text(encoding="utf-8")
+
+    assert "--check-changed-scope" in workflow
+    assert '[ -s "$RUNNER_TEMP/mutation-scope.txt" ]' not in workflow
+    assert "steps.scope.outputs.changed == 'true'" in workflow
+
+
 def test_mutated_function_names_are_read_from_generated_metadata(tmp_path: Path) -> None:
     metadata_path = tmp_path / "mutants" / "src" / "example.py.meta"
     metadata_path.parent.mkdir(parents=True)
