@@ -510,9 +510,12 @@ def test_run_logger_close_is_idempotent_and_safe(tmp_path: Path, logger_factory)
     )
     logger.close()
     logger.close()
-    # After close, events are buffered again.
+    # After close, events are persisted, never buffered where nothing flushes them.
     logger.event("after_close", level="INFO")
-    assert list(logger.drain())  # buffered because handle is closed
+    assert list(logger.drain()) == []
+    logger.close()
+    log = (data_root / "logs" / RunLogger.ACTIVE_NAME).read_text(encoding="utf-8")
+    assert '"event": "after_close"' in log
 
 
 def test_human_formatter_has_stable_header_and_insertion_order(tmp_path: Path) -> None:

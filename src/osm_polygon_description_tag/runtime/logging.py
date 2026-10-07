@@ -275,10 +275,14 @@ class RunLogger:
             self._write_stderr(self._format_human(record))
         buffered = _BufferedEvent(record, raw)
         with self._lock:
-            if self._buffer_preflight or self._handle is None:
+            if self._buffer_preflight:
                 self._buffered.append(buffered)
                 return
-        self._append_persistent(raw)
+            if self._handle is None:
+                # After close() or a failed rotation, reopen the active file
+                # instead of buffering: nothing flushes the buffer later.
+                self._open_persistent()
+            self._raw_write(raw)
 
     def _write_stderr(self, line: str) -> None:
         try:
@@ -381,6 +385,7 @@ class RunLogger:
                 os.fsync(self._handle.fileno())
 
     def close(self) -> None:
+        """Close the active handle. A later event reopens the file in append mode."""
         with self._lock:
             if self._handle is not None:
                 self._close_handle()
