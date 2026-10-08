@@ -413,8 +413,8 @@ def _write_geoparquet_with(
 
         validated_rows = validator(temp_final)
         fsync_file(temp_final)
-        _fsync_dir(target.parent)
         Path(temp_final).replace(target)
+        _fsync_dir(target.parent)
         return validated_rows
     finally:
         for temp in (temp_data, temp_final):
