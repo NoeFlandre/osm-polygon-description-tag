@@ -492,7 +492,7 @@ def test_write_dataset_docs_renders_stats_map_and_canonical_json(
         ) as render_stats,
         patch.object(docs_module, "_render_h3_map_block", return_value="map body") as render_map,
         patch.object(docs_module, "install_map_block", return_value="mapped readme") as install_map,
-        patch.object(docs_module, "_write_if_changed") as write_if_changed,
+        patch.object(docs_module, "_atomic_write_if_changed") as write_if_changed,
         patch.object(docs_module.json, "dumps", wraps=json.dumps) as dumps,
     ):
         docs_module._write_dataset_docs(tmp_path, template, stats)
@@ -503,8 +503,8 @@ def test_write_dataset_docs_renders_stats_map_and_canonical_json(
     assert install_map.call_args.args[0].count(docs_module.H3_MAP_START_MARKER) == 1
     install_map.assert_called_once_with(install_map.call_args.args[0], "map body")
     assert write_if_changed.call_args_list == [
-        call(tmp_path / "stats.json", stats_json),
-        call(tmp_path / "README.md", "mapped readme"),
+        call(tmp_path / "stats.json", stats_json.encode("utf-8")),
+        call(tmp_path / "README.md", b"mapped readme"),
     ]
 
 
@@ -533,7 +533,7 @@ def test_write_dataset_docs_requires_both_h3_markers_before_installing_map(
     with (
         patch.object(docs_module, "_render_stats_block", return_value="stats"),
         patch.object(docs_module, "install_map_block") as install_map,
-        patch.object(docs_module, "_write_if_changed"),
+        patch.object(docs_module, "_atomic_write_if_changed"),
     ):
         docs_module._write_dataset_docs(tmp_path, template, stats)
 
