@@ -221,8 +221,7 @@ def _migrate_parquet_text(path: Path) -> int | None:
     except (OSError, pa.ArrowException, StorageError) as error:
         raise TextMigrationError(f"cannot migrate {path}: {error}") from error
     finally:
-        if temporary.exists():
-            temporary.unlink()
+        temporary.unlink(missing_ok=True)
 
 
 def _migrate_one_artifact(parquet: Path, manifest_path: Path) -> int:

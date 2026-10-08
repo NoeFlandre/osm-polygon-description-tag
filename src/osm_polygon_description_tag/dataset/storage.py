@@ -14,7 +14,6 @@ from __future__ import annotations
 import contextlib
 import json
 import math
-import os
 import sqlite3
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -52,6 +51,7 @@ from osm_polygon_description_tag.dataset.text import (
     is_trimmed_nonempty_text,
 )
 from osm_polygon_description_tag.runtime.atomic import fsync_dir as _fsync_dir
+from osm_polygon_description_tag.runtime.atomic import fsync_file
 
 GEOPARQUET_COMPRESSION: Final = "zstd"
 """Codec every GeoParquet artifact is written with.
@@ -100,11 +100,6 @@ def arrow_record(record: Mapping[str, object]) -> dict[str, object]:
 
 def _owned_temp(target: Path) -> Path:
     return target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
-
-
-def _fsync_path(path: Path) -> None:
-    with Path(path).open("rb") as handle:  # pragma: no mutate - mode does not affect fsync
-        os.fsync(handle.fileno())
 
 
 def _stream_rewrite_with_metadata(
@@ -417,14 +412,13 @@ def _write_geoparquet_with(
         )
 
         validated_rows = validator(temp_final)
-        _fsync_path(temp_final)
-        _fsync_dir(target.parent)
+        fsync_file(temp_final)
         Path(temp_final).replace(target)
+        _fsync_dir(target.parent)
         return validated_rows
     finally:
         for temp in (temp_data, temp_final):
-            if temp.exists():
-                temp.unlink()
+            temp.unlink(missing_ok=True)
 
 
 def _check_schema(file_schema: pa.Schema) -> None:
