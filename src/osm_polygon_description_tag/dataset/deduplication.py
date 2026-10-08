@@ -54,6 +54,7 @@ _row_fingerprint = _canonical_rows._row_fingerprint
 _timestamp_rank = _canonical_rows._timestamp_rank
 _version = _canonical_rows._version
 _STATE_RELATIVE_PATH = Path(".work") / "dedup-state.json"
+_STAGE_RELATIVE_ROOT = Path(".work") / "dedup"
 _BATCH_SIZE = DEFAULT_ARROW_BATCH_SIZE
 
 
@@ -547,6 +548,28 @@ def _finish_deduplication(
     return _skipped_result(context.input_rows, output_rows)
 
 
+def _referenced_stage_name(state: Mapping[str, Any] | None) -> str | None:
+    if state is None or state.get("status") != "staged":
+        return None
+    stage_dir = state.get("stage_dir")
+    return None if stage_dir is None else Path(str(stage_dir)).name
+
+
+def _sweep_orphan_stage_entries(data_root: Path, state: Mapping[str, Any] | None) -> None:
+    """Remove staging entries that no state references, such as after a hard kill.
+
+    The caller has already read the state, so an unreadable state never reaches
+    this point and nothing is removed without knowing what the state names.
+    """
+    stage_root = data_root / _STAGE_RELATIVE_ROOT
+    if not stage_root.is_dir():
+        return
+    referenced = _referenced_stage_name(state)
+    for entry in list(stage_root.iterdir()):
+        if entry.name != referenced:
+            _remove_path(entry)
+
+
 def deduplicate_dataset(
     data_root: Path,
     *,
@@ -555,6 +578,7 @@ def deduplicate_dataset(
     """Deduplicate all finalized per-PBF Parquets with atomic resumption."""
     state_path = data_root / _STATE_RELATIVE_PATH
     state = _read_state(state_path)
+    _sweep_orphan_stage_entries(data_root, state)
     if state is not None and state.get("status") == "staged":
         return _resume_staged(data_root, state_path, state, promotion_hook=promotion_hook)
     context, result = _prepare_context(data_root, state_path, state)
@@ -563,7 +587,7 @@ def deduplicate_dataset(
     if context is None:
         raise DeduplicationError("deduplication context was not created")
     stage_token = uuid.uuid4().hex
-    stage_dir = Path(".work") / "dedup" / stage_token
+    stage_dir = _STAGE_RELATIVE_ROOT / stage_token
     stage_root = data_root / stage_dir
     changed, output_rows = _stage_changes_or_discard(context, stage_root)
     state_payload = _state_payload(context, changed, output_rows)
