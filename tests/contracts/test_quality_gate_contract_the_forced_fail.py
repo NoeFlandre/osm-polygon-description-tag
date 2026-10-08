@@ -5,6 +5,7 @@ import os
 import sys
 from collections import defaultdict
 from pathlib import Path
+from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
@@ -23,18 +24,33 @@ from scripts.run_mutation_gate import (
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_the_forced_fail_probe_follows_the_runs_test_selection() -> None:
+def test_the_forced_fail_probe_follows_the_runs_test_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A narrowed run must probe with tests that reach the code it mutates.
 
     The probe proves the harness can still observe a failure. A fixed smoke
     file cannot fail for a scope it never imports, which surfaces as
     ``Unable to force test failures`` and looks like a broken harness rather
-    than an out-of-scope probe.
+    than an out-of-scope probe. The probe runs with the selection in effect
+    when mutmut forces the failure, and the runner's own selection is restored.
     """
+    import mutmut.__main__ as mutmut_main
+
+    probed: list[list[str]] = []
+    monkeypatch.setattr(
+        mutmut_main,
+        "run_forced_fail_test",
+        lambda runner: probed.append(list(runner._pytest_add_cli_args_test_selection)),
+    )
+    runner = SimpleNamespace(_pytest_add_cli_args_test_selection=["tests/unit/original.py"])
     selection = ["tests/unit/dataset/languages/test_detector.py"]
 
-    assert run_mutation_gate._probe_selection(selection) == selection
-    assert run_mutation_gate._probe_selection(()) == run_mutation_gate.SMOKE_TEST_SELECTION
+    run_mutation_gate._verify_mutmut_can_fail(runner, selection)
+    run_mutation_gate._verify_mutmut_can_fail(runner, ())
+
+    assert probed == [selection, list(run_mutation_gate.SMOKE_TEST_SELECTION)]
+    assert runner._pytest_add_cli_args_test_selection == ["tests/unit/original.py"]
 
 
 def test_the_whole_repository_probe_runs_tests_that_exist_and_reach_the_canary() -> None:
