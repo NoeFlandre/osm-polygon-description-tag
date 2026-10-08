@@ -35,11 +35,13 @@ def test_ensure_logger_constructs_owned_logger_from_explicit_paths(
     )
     assert owns_logger is True
 
-    logger.approve_preflight()
+    log_file = paths.data_root / "logs" / "run-and-publish.jsonl"
     logger.event("probe")
+    assert not log_file.exists() or log_file.read_text(encoding="utf-8") == ""
+
+    logger.approve_preflight()
     logger.close()
 
-    log_file = paths.data_root / "logs" / "run-and-publish.jsonl"
     records = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines()]
     assert records == [{"ts": "now", "level": "INFO", "event": "probe", "run_id": logger.run_id}]
     assert not (tmp_path / "ignored-data-root").exists()
