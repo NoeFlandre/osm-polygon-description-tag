@@ -91,9 +91,7 @@ def assign_h3_cell(
     """
     validate_coordinate(lat, lon)
     normalized = _normalize_resolution(resolution)
-    # pragma: no mutate start - validation above rejects either missing coordinate
-    assert lat is not None and lon is not None
-    # pragma: no mutate end
+    assert lat is not None and lon is not None  # pragma: no mutate - validated above
     try:
         return str(h3.latlng_to_cell(float(lat), float(lon), normalized))
     except (ValueError, h3.H3ValueError) as error:
@@ -180,9 +178,7 @@ def _slab_index(longitude: float) -> int:
 def _clip_slab(points: Sequence[tuple[float, float]], slab: int) -> list[tuple[float, float]]:
     left = -180.0 + 360.0 * slab
     right = 180.0 + 360.0 * slab
-    # pragma: no mutate start - None has the same falsey meaning for this bool
-    keep_greater = False
-    # pragma: no mutate end
+    keep_greater = False  # pragma: no mutate - None is falsey here
     clipped = _clip_longitude(points, left, keep_greater=True)
     # pragma: no mutate start - None has the same falsey meaning for this bool
     return _clip_longitude(

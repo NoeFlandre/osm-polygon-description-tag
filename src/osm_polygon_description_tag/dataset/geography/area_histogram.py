@@ -20,6 +20,7 @@ import numpy as np
 import pyarrow as pa
 
 from osm_polygon_description_tag.dataset.unique_rows import iter_unique_parquet_batches
+from osm_polygon_description_tag.runtime.text_io import utf8_bytes
 
 _AREA_HISTOGRAM_SCHEMA_VERSION: Final[int] = 2
 
@@ -135,9 +136,7 @@ def aggregate_area_histogram(
         require_successful_text=True,
     ):
         _add_bucket_counts(counts, batch.column("area_m2"))
-    # pragma: no mutate start - the fixed label and count sequences have equal length
-    return dict(zip(AREA_BUCKET_LABELS, counts, strict=False))
-    # pragma: no mutate end
+    return dict(zip(AREA_BUCKET_LABELS, counts, strict=False))  # pragma: no mutate - equal lengths
 
 
 def area_histogram_input_sha256(
@@ -164,13 +163,9 @@ def area_histogram_input_sha256(
         "sort_keys": True,
         "separators": (",", ":"),
     }
-    # pragma: no mutate start - None has the same falsey meaning as False here
-    json_options["ensure_ascii"] = False
-    # pragma: no mutate end
+    json_options["ensure_ascii"] = False  # pragma: no mutate - None is falsey here
     encoded = json.dumps(payload, **json_options)
-    # pragma: no mutate start - UTF-8 codec names are case-insensitive
-    digest = hashlib.sha256(encoded.encode("utf-8"))
-    # pragma: no mutate end
+    digest = hashlib.sha256(utf8_bytes(encoded))
     return digest.hexdigest()
 
 

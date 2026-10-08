@@ -26,6 +26,7 @@ from osm_polygon_description_tag.dataset.languages.checkpoint import (
 )
 from osm_polygon_description_tag.dataset.languages.payloads import require_object
 from osm_polygon_description_tag.dataset.languages.snapshot import SnapshotManifest
+from osm_polygon_description_tag.runtime.text_io import read_text_utf8, utf8_bytes
 from osm_polygon_description_tag.workflow.grid_policy import (
     MAX_PROCESSING_SECONDS,
     MAX_WALLTIME_SECONDS,
@@ -103,7 +104,7 @@ def prepare_job(
         batch_size=batch_size,
         walltime_seconds=walltime_seconds,
     )
-    script_bytes = script.encode("utf-8")  # pragma: no mutate - codec alias only
+    script_bytes = utf8_bytes(script)
     if existing is None:
         _write_prepared_artifacts(paths, bundle, config, script_bytes)
     else:
@@ -382,6 +383,6 @@ def read_intent(path: Path) -> SubmissionIntent:
 
 def read_json(path: Path, label: str) -> object:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))  # pragma: no mutate - codec alias only
+        return json.loads(read_text_utf8(path))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise GridOperatorError(f"cannot read {label} {path}: {error}") from error

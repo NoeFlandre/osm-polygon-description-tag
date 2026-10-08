@@ -51,8 +51,8 @@ def _predictions(result: tuple[object, object]) -> tuple[tuple[object, object], 
     if isinstance(labels, str) or isinstance(scores, str):
         raise GlotLIDLabelError("GlotLID predictions must be sequences")
     try:
-        typed_labels = cast(Iterable[object], labels)  # pragma: no mutate - static cast
-        typed_scores = cast(Iterable[object], scores)  # pragma: no mutate - static cast
+        typed_labels = cast(Iterable[object], labels)
+        typed_scores = cast(Iterable[object], scores)
         pairs = tuple(zip(typed_labels, typed_scores, strict=True))
     except (TypeError, ValueError) as error:
         raise GlotLIDLabelError("GlotLID predictions must be equal-length sequences") from error
@@ -159,7 +159,7 @@ def _load_fasttext_model(path: Path) -> _Predictor:
         model = loader(str(path))
     except (OSError, RuntimeError, ValueError) as error:
         raise LanguageDetectionError("could not load the pinned GlotLID v3 model") from error
-    return cast(_Predictor, model)  # pragma: no mutate - static cast
+    return cast(_Predictor, model)
 
 
 def build_glotlid_detector(

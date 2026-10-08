@@ -191,6 +191,13 @@ also_copy = [
     "scripts/",
     "tests/",
 ]
+# cast() returns its value unchanged, so mutating its type argument is
+# equivalent. mutmut skips each expression that starts on a line matching this
+# pattern, so the value argument of those calls is skipped too, although
+# replacing it is not equivalent. Statement-level mutants (for example
+# ``x = None`` for ``x = cast(...)``) are not skipped. Keep the pattern to
+# cast() calls; do not widen it to other calls.
+do_not_mutate_patterns = ['\bcast\(']
 # A timeout is an unresolved verdict for this gate, not a kill, so the limit has
 # to sit far above the slowest honest run.  The limit is wall clock
 # ``(estimated_test_time + timeout_constant) * timeout_multiplier``, and the

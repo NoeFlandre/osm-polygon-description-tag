@@ -38,6 +38,7 @@ from osm_polygon_description_tag.publication.verification import (
     build_default_hub_verifier,
 )
 from osm_polygon_description_tag.runtime.atomic import atomic_write_text
+from osm_polygon_description_tag.runtime.text_io import read_text_utf8
 
 
 @dataclass(frozen=True)
@@ -347,7 +348,7 @@ def _sync_remote_card(
     if remote_readme is None:
         return
     target = data_root / "README.md"
-    current = target.read_text(encoding="utf-8") if target.is_file() else None  # pragma: no mutate
+    current = read_text_utf8(target) if target.is_file() else None
     if current == remote_readme:
         return
     atomic_write_text(target, remote_readme)

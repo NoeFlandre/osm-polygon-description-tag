@@ -103,7 +103,7 @@ def _owned_temp(target: Path) -> Path:
 
 
 def _fsync_path(path: Path) -> None:
-    with Path(path).open("rb") as handle:  # pragma: no mutate - mode does not affect fsync
+    with Path(path).open("rb") as handle:
         os.fsync(handle.fileno())
 
 
@@ -133,14 +133,12 @@ def _stream_rewrite_with_metadata(
 
 
 def _record_bounds(record: Mapping[str, object]) -> tuple[float, float, float, float]:
-    # pragma: no mutate start - static narrowing only
     return (
         float(cast(float, record["bbox_min_x"])),
         float(cast(float, record["bbox_min_y"])),
         float(cast(float, record["bbox_max_x"])),
         float(cast(float, record["bbox_max_y"])),
     )
-    # pragma: no mutate end
 
 
 def _merge_bounds(
@@ -218,9 +216,7 @@ def _keys_strictly_increase(array: pa.ListArray, keys: pa.Array) -> bool:
     if size < 1:
         return True
     # Object arrays compare as Python strings, exactly as ``sorted`` does.
-    # pragma: no mutate start - None and False both request the same non-zero-copy conversion
-    key_values = keys.to_numpy(zero_copy_only=False)
-    # pragma: no mutate end
+    key_values = keys.to_numpy(zero_copy_only=False)  # pragma: no mutate - None is non-zero-copy
     increasing = key_values[:-1] < key_values[1:]
     offsets = array.offsets.to_numpy()
     ends = offsets[1:] - offsets[0]
@@ -795,7 +791,7 @@ def _validate_metadata_extent(
 
 def _validate_metadata_bbox(state: _ValidationState, meta_bbox: object) -> None:
     actual_bbox = [state.min_x, state.min_y, state.max_x, state.max_y]
-    expected_bbox = cast(list[float], meta_bbox)  # pragma: no mutate - static narrowing only
+    expected_bbox = cast(list[float], meta_bbox)
     for actual, expected in zip(actual_bbox, expected_bbox, strict=True):
         if abs(actual - expected) > 1e-9:
             raise StorageError(f"bbox mismatch: actual {actual_bbox} != metadata {expected_bbox}")

@@ -270,7 +270,7 @@ def _account_job_record(raw_job_id: str, raw_record: object) -> tuple[int, dict[
     job_id = _parse_account_job_id(raw_job_id)
     if not isinstance(raw_record, dict):
         raise SchedulerError("account-wide oarstat job record must be a JSON object")
-    record = cast(dict[str, object], raw_record)  # pragma: no mutate - static cast
+    record = cast(dict[str, object], raw_record)
     _validate_record_job_id(record, job_id)
     return job_id, record
 

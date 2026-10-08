@@ -150,8 +150,8 @@ def _historical_job_count(payload: Mapping[str, object]) -> tuple[int | None, tu
         return 0, ()
     # The shape gate above already proved a legacy total is a non-negative int,
     # so re-checking it here would be unreachable rather than defensive.
-    total_jobs = cast(int, total)  # pragma: no mutate - static narrowing
-    jobs = cast(list[object], payload["jobs"])  # pragma: no mutate - static narrowing
+    total_jobs = cast(int, total)
+    jobs = cast(list[object], payload["jobs"])
     if len(jobs) != total_jobs:
         return None, ("usage policy total_jobs does not match jobs",)
     return total_jobs, ()

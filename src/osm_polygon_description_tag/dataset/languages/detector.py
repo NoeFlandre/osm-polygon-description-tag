@@ -303,7 +303,7 @@ def _confidence_item(item: object) -> tuple[object, object]:
 
 def _confidence_items(values: object) -> Iterable[object]:
     try:
-        typed_values = cast(Iterable[object], values)  # pragma: no mutate - static narrowing
+        typed_values = cast(Iterable[object], values)
         return iter(typed_values)
     except TypeError as error:
         raise LanguageDetectionError("Lingua confidence values must be iterable") from error

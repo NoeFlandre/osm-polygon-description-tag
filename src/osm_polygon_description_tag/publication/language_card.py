@@ -96,7 +96,7 @@ def _require_mapping_front_matter(
 ) -> tuple[Mapping[object, object], MappingNode]:
     if not isinstance(payload, Mapping) or not isinstance(root, MappingNode):
         raise _card_error("front matter must be a mapping")
-    return cast(Mapping[object, object], payload), root  # pragma: no mutate - static cast
+    return cast(Mapping[object, object], payload), root
 
 
 def _parse_config_entries(
@@ -106,7 +106,7 @@ def _parse_config_entries(
     configs = payload.get("configs")
     if not isinstance(configs, list) or not configs:
         raise _card_error("must contain a non-empty configs list")
-    narrowed = cast(list[object], configs)  # pragma: no mutate - static cast
+    narrowed = cast(list[object], configs)
     entries = _config_entries(narrowed)
     return config_node, entries
 
@@ -144,7 +144,7 @@ def _config_entry(entry: object, names: set[str]) -> dict[str, object]:
     if name in names:
         raise _card_error(f"contains duplicate configuration {name!r}")
     names.add(name)
-    return dict(cast(Mapping[str, object], entry))  # pragma: no mutate - static cast
+    return dict(cast(Mapping[str, object], entry))
 
 
 def _language_config(export: LanguageExport) -> dict[str, object]:
@@ -176,8 +176,8 @@ def _insert_config(
     config: Mapping[str, object],
     newline: str,
 ) -> str:
-    start_mark = cast(Any, config_node.start_mark)  # pragma: no mutate - static cast
-    end_mark = cast(Any, config_node.end_mark)  # pragma: no mutate - static cast
+    start_mark = cast(Any, config_node.start_mark)
+    end_mark = cast(Any, config_node.end_mark)
     if config_node.flow_style:
         return _install_flow_config(front_matter, end_mark.index - 1, config)
     return _install_block_config(

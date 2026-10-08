@@ -90,13 +90,9 @@ def render_map_block() -> str:
 def normalize_map_prose(text: str) -> str:
     """Update only known legacy map prose to the current contract wording."""
     newline = _newline_for(text)
-    # pragma: no mutate start - this fixed prose contains no sentinel text
-    canonical = H3_MAP_DESCRIPTION.replace("\n", newline)
-    # pragma: no mutate end
+    canonical = H3_MAP_DESCRIPTION.replace("\n", newline)  # pragma: no mutate - no sentinel text
     for legacy in _LEGACY_MAP_DESCRIPTIONS:
-        # pragma: no mutate start - the fixed legacy paragraphs contain no sentinel text
-        legacy_with_newline = legacy.replace("\n", newline)
-        # pragma: no mutate end
+        legacy_with_newline = legacy.replace("\n", newline)  # pragma: no mutate - no sentinel text
         if legacy_with_newline in text:
             return text.replace(legacy_with_newline, canonical, 1)
     return text

@@ -33,6 +33,7 @@ from osm_polygon_description_tag.publication.language import (
 from osm_polygon_description_tag.publication.language_card import install_language_card
 from osm_polygon_description_tag.publication.language_upload import RemoteFile
 from osm_polygon_description_tag.publication.models import UploadPlan
+from osm_polygon_description_tag.runtime.text_io import decode_utf8, utf8_bytes
 from osm_polygon_description_tag.runtime.units import MIB
 
 REPO_TYPE: Final = "dataset"
@@ -109,7 +110,7 @@ class HuggingFaceLanguageHub:
             self._operation(item.relative_path, root / item.relative_path)
             for item in sorted(plan.files, key=lambda item: item.relative_path)
         ]
-        readme_bytes = updated.encode("utf-8")  # pragma: no mutate - codec alias only
+        readme_bytes = utf8_bytes(updated)
         operations.append(self._operation(README_PATH, readme_bytes))
         try:
             create_dataset_commit(
@@ -257,7 +258,7 @@ def _readme_text(local: str) -> str:
     path = Path(local)
     if not path.is_file():
         raise OSError("downloaded README is not a regular file")
-    return path.read_bytes().decode("utf-8")  # pragma: no mutate - codec alias only
+    return decode_utf8(path.read_bytes())
 
 
 @dataclass(frozen=True, slots=True)
@@ -335,9 +336,9 @@ def _viewer_lists(payload: object) -> tuple[list[object], list[object], list[obj
         raise LanguagePublicationError(
             "Dataset Viewer returned malformed splits, pending, or failed data"
         )
-    typed_splits = cast(list[object], raw_splits)  # pragma: no mutate - static cast
-    typed_pending = cast(list[object], pending)  # pragma: no mutate - static cast
-    typed_failed = cast(list[object], failed)  # pragma: no mutate - static cast
+    typed_splits = cast(list[object], raw_splits)
+    typed_pending = cast(list[object], pending)
+    typed_failed = cast(list[object], failed)
     return (typed_splits, typed_pending, typed_failed)
 
 
@@ -351,9 +352,9 @@ def _parse_viewer_split(item: object) -> DatasetViewerSplit:
         raise LanguagePublicationError(
             "Dataset Viewer returned a malformed split without dataset/config/split"
         )
-    dataset_value = cast(str, dataset)  # pragma: no mutate - static cast
-    config_value = cast(str, config)  # pragma: no mutate - static cast
-    split_value = cast(str, split)  # pragma: no mutate - static cast
+    dataset_value = cast(str, dataset)
+    config_value = cast(str, config)
+    split_value = cast(str, split)
     return DatasetViewerSplit(dataset_value, config_value, split_value)
 
 

@@ -18,6 +18,7 @@ from osm_polygon_description_tag.publication.language_upload import (
     publish_language_export,
 )
 from osm_polygon_description_tag.runtime.presentation import print_json
+from osm_polygon_description_tag.runtime.text_io import write_text_utf8
 
 
 def handle_export(run_dir: Path, export_dir: Path, card_section: Path | None) -> None:
@@ -26,7 +27,7 @@ def handle_export(run_dir: Path, export_dir: Path, card_section: Path | None) ->
     if card_section is not None:
         card_section.parent.mkdir(parents=True, exist_ok=True)
         section = render_language_card_section(export)
-        card_section.write_text(section, encoding="utf-8")  # pragma: no mutate - codec alias only
+        write_text_utf8(card_section, section)
     print_json(
         {
             "export_dir": str(export_dir),

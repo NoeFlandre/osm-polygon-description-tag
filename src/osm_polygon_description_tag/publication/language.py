@@ -55,6 +55,7 @@ from osm_polygon_description_tag.dataset.sentences.languages import SAT_SUPPORTE
 from osm_polygon_description_tag.dataset.sentences.models import SentenceSplitStatus
 from osm_polygon_description_tag.publication.models import PublicationError, UploadItem, UploadPlan
 from osm_polygon_description_tag.publication.planning import file_sha256_bytes
+from osm_polygon_description_tag.runtime.text_io import read_text_utf8
 
 LANGUAGE_CONFIG_NAME: Final = "language-v1"
 LANGUAGE_REMOTE_PREFIX: Final = "language-v1"
@@ -323,7 +324,7 @@ def _export_seal(export: LanguageExport) -> dict[str, object]:
 def _validate_export_seal(export: LanguageExport) -> None:
     path = export.export_root / LANGUAGE_MANIFEST_PATH
     try:
-        text = path.read_text(encoding="utf-8")  # pragma: no mutate - codec alias only
+        text = read_text_utf8(path)
         recorded = json.loads(text)
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise LanguagePublicationError(f"cannot read completed export manifest: {error}") from error
@@ -370,7 +371,7 @@ def read_language_export(export_root: Path) -> LanguageExport:
     """Rebuild a previously written export description from its stats file."""
     path = export_root / LANGUAGE_STATS_PATH
     try:
-        text = path.read_text(encoding="utf-8")  # pragma: no mutate - codec alias only
+        text = read_text_utf8(path)
         payload = json.loads(text)
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise LanguagePublicationError(f"cannot read language export {path}: {error}") from error

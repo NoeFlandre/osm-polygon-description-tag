@@ -14,6 +14,7 @@ from typing import IO, cast
 
 import orjson
 
+from osm_polygon_description_tag.runtime.text_io import decode_utf8
 from osm_polygon_description_tag.runtime.units import KIB
 
 # ---------------------------------------------------------------------------
@@ -109,14 +110,10 @@ def _copy_unescape(data: bytes) -> bytes:
         mapped = _copy_escape_at(data, i)
         if mapped is not None:
             out.append(mapped)
-            # pragma: no mutate start - index updates preserve forward progress
-            i += 2
-            # pragma: no mutate end
+            i += 2  # pragma: no mutate - index updates preserve forward progress
             continue
         out.append(byte)
-        # pragma: no mutate start - index updates preserve forward progress
-        i += 1
-        # pragma: no mutate end
+        i += 1  # pragma: no mutate - index updates preserve forward progress
     return bytes(out)
 
 
@@ -125,21 +122,15 @@ def _nullable_int(field: bytes) -> int | None:
         return None
     if b"\\" not in field and field.isascii():
         return int(field)
-    # pragma: no mutate start - UTF-8 codec names are case-insensitive
-    return int(_copy_unescape(field).decode("utf-8"))
-    # pragma: no mutate end
+    return int(decode_utf8(_copy_unescape(field)))
 
 
 def _nullable_str(field: bytes) -> str | None:
     if field == b"\\N":
         return None
     if b"\\" not in field:
-        # pragma: no mutate start - UTF-8 codec names are case-insensitive
-        return field.decode("utf-8")
-        # pragma: no mutate end
-    # pragma: no mutate start - UTF-8 codec names are case-insensitive
-    return _copy_unescape(field).decode("utf-8")
-    # pragma: no mutate end
+        return decode_utf8(field)
+    return decode_utf8(_copy_unescape(field))
 
 
 def _load_tags(payload: bytes) -> object:
@@ -153,10 +144,8 @@ def _parse_tag_payload(field: bytes) -> object:
     if field == b"\\N":
         return {}
     try:
-        # pragma: no mutate start - UTF-8 codec names are case-insensitive
         payload = field if b"\\" not in field else _copy_unescape(field)
         return _load_tags(payload)
-        # pragma: no mutate end
     except json.JSONDecodeError as error:
         raise ValueError(f"invalid tags JSON: {error}") from error
 
@@ -172,13 +161,9 @@ def _stringify_tags(parsed: Mapping[object, object]) -> dict[str, str]:
 def _normalize_tags(parsed: object) -> dict[str, str]:
     if not isinstance(parsed, dict):
         raise ValueError("tags JSON must be an object")
-    # pragma: no mutate start - cast affects static typing only
     mapping = cast(Mapping[object, object], parsed)
-    # pragma: no mutate end
     if _tags_are_all_strings(mapping):
-        # pragma: no mutate start - cast affects static typing only
         return cast(dict[str, str], parsed)
-        # pragma: no mutate end
     return _stringify_tags(mapping)
 
 
@@ -187,9 +172,7 @@ def _parse_tags(field: bytes) -> dict[str, str]:
 
 
 def _parse_unescaped_integer(field: bytes) -> int:
-    # pragma: no mutate start - UTF-8 codec names are case-insensitive
-    return int(field) if field.isascii() else int(field.decode("utf-8"))
-    # pragma: no mutate end
+    return int(field) if field.isascii() else int(decode_utf8(field))
 
 
 def _parse_unescaped_optional_integer(field: bytes) -> int | None:
@@ -201,17 +184,13 @@ def _parse_unescaped_optional_integer(field: bytes) -> int | None:
 def _parse_unescaped_text(field: bytes) -> str | None:
     if field == b"\\N":
         return None
-    # pragma: no mutate start - UTF-8 codec names are case-insensitive
-    return field.decode("utf-8")
-    # pragma: no mutate end
+    return decode_utf8(field)
 
 
 def _parse_unescaped_record(fields: list[bytes]) -> ExportRecord:
     geometry, osm_type, osm_id, version, changeset, timestamp, tags = fields
-    # pragma: no mutate start - codec names are case-insensitive
-    geometry_text = geometry.decode("ascii")
-    osm_type_text = osm_type.decode("utf-8")
-    # pragma: no mutate end
+    geometry_text = geometry.decode("ascii")  # pragma: no mutate - codec names are case-insensitive
+    osm_type_text = decode_utf8(osm_type)
     return ExportRecord(
         geometry_text,
         osm_type_text,
@@ -231,9 +210,9 @@ def _parse_escaped_record(fields: list[bytes]) -> ExportRecord:
     geometry, osm_type, osm_id, version, changeset, timestamp, tags = fields
     # pragma: no mutate start - codec names are case-insensitive
     geometry_text = _decode_copy_text(geometry, "ascii")
-    osm_type_text = _decode_copy_text(osm_type, "utf-8")
-    identifier = int(_decode_copy_text(osm_id, "utf-8"))
     # pragma: no mutate end
+    osm_type_text = decode_utf8(_copy_unescape(osm_type))
+    identifier = int(decode_utf8(_copy_unescape(osm_id)))
     return ExportRecord(
         geometry_ewkb_hex=geometry_text,
         osm_type=osm_type_text,
@@ -287,22 +266,16 @@ def _drain_stderr(stream: IO[bytes], buffer: bytearray, cap: int) -> None:
         while True:
             chunk = stream.read(_STDERR_READ_CHUNK_BYTES)
             if not chunk:
-                # pragma: no mutate start - return and break both execute finally close
-                break
-                # pragma: no mutate end
+                break  # pragma: no mutate - return and break both execute finally close
             remaining = cap - len(buffer)
-            # pragma: no mutate start - slicing at zero appends no bytes
-            if remaining > 0:
+            if remaining > 0:  # pragma: no mutate - slicing at zero appends no bytes
                 buffer.extend(chunk[:remaining])
-            # pragma: no mutate end
     finally:
         stream.close()
 
 
 def _decode_stderr(buffer: bytes) -> str:
-    # pragma: no mutate start - codec names are case-insensitive
-    return buffer.decode("utf-8", errors="replace").strip()
-    # pragma: no mutate end
+    return decode_utf8(buffer, errors="replace").strip()
 
 
 def stream_export(
@@ -391,6 +364,4 @@ def osmium_version(executable: str = "osmium", *, timeout: float = 10.0) -> str:
         raise OsmiumExportError(f"osmium executable not found: {executable}") from error
     lines = completed.stdout.splitlines()
     first = lines[0] if lines else b""
-    # pragma: no mutate start - codec names are case-insensitive
-    return first.decode("utf-8", errors="replace").strip()
-    # pragma: no mutate end
+    return decode_utf8(first, errors="replace").strip()

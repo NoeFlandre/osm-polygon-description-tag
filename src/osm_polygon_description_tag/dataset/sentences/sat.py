@@ -149,17 +149,17 @@ def _load_sat_model(model_dir: Path) -> _Segmenter:
         )
     except (OSError, RuntimeError, ValueError) as error:
         raise SentenceSplitterError(f"could not load the pinned {SPLITTER_NAME} model") from error
-    return cast(_Segmenter, model)  # pragma: no mutate - static cast
+    return cast(_Segmenter, model)
 
 
 def _segments(raw: object) -> tuple[str, ...]:
     if isinstance(raw, str) or not isinstance(raw, Iterable):
         raise SentenceSplitterError("SaT segments must be a sequence")
-    typed = cast(Iterable[object], raw)  # pragma: no mutate - static cast
+    typed = cast(Iterable[object], raw)
     segments = tuple(typed)
     if any(not isinstance(segment, str) for segment in segments):
         raise SentenceSplitterError("SaT segments must be strings")
-    return cast(tuple[str, ...], segments)  # pragma: no mutate - static cast
+    return cast(tuple[str, ...], segments)
 
 
 class _SaTAdapter:

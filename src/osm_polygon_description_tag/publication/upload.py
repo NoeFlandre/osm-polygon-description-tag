@@ -98,9 +98,7 @@ class _CompletedProcessWithStderr(Protocol):
 
 def _contains_timeout(completed: object) -> bool:
     try:
-        stderr = cast(
-            _CompletedProcessWithStderr, completed
-        ).stderr  # pragma: no mutate - static narrowing only
+        stderr = cast(_CompletedProcessWithStderr, completed).stderr
     except AttributeError:
         return False
     if not stderr:
@@ -201,7 +199,7 @@ def _run_subprocess(command: list[str], timeout: float | None) -> None:
         shell=False,
         stderr=subprocess.PIPE,
     ) as process:
-        stderr_pipe = cast(BinaryIO, process.stderr)  # pragma: no mutate - static narrowing only
+        stderr_pipe = cast(BinaryIO, process.stderr)
         reader = threading.Thread(
             target=_drain_stderr,
             args=(stderr_pipe, retained_stderr, stop_reader),

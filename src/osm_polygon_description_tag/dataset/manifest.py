@@ -21,6 +21,7 @@ from osm_polygon_description_tag.runtime.resources import (
     osmium_export_config,
     project_code_revision,
 )
+from osm_polygon_description_tag.runtime.text_io import read_text_utf8, utf8_bytes
 
 MANIFEST_SCHEMA_VERSION = 2
 TRANSFORM_ALGORITHM_VERSION = 3
@@ -102,7 +103,7 @@ def _parse_rejection_counts(raw: Any) -> dict[str, int]:
         raise ManifestError(
             "invalid manifest counts.rejections: expected non-negative integer values"
         )
-    return cast(dict[str, int], raw)  # pragma: no mutate - type-only cast
+    return cast(dict[str, int], raw)
 
 
 def _rejection_counts_have_expected_types(raw: dict[Any, Any]) -> bool:
@@ -121,7 +122,7 @@ def _parse_nonnegative_version(raw: Any, field: str) -> int:
 def _identity_mapping(raw: Any, identity_name: str) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ManifestError(f"invalid manifest {identity_name}: expected an object")
-    return cast(dict[str, Any], raw)  # pragma: no mutate - cast is type-only
+    return cast(dict[str, Any], raw)
 
 
 def _parse_file_name(raw: Any, identity_name: str) -> str:
@@ -191,7 +192,7 @@ def _parse_dependency_versions(raw: Any) -> dict[str, str]:
         type(name) is not str or type(version) is not str for name, version in raw.items()
     ):
         raise ManifestError("invalid manifest dependency_versions: expected string keys and values")
-    return cast(dict[str, str], raw)  # pragma: no mutate - cast is type-only
+    return cast(dict[str, str], raw)
 
 
 @dataclass(frozen=True)
@@ -290,7 +291,7 @@ def current_area_policy_sha256() -> str:
     hasher.update(config_path.read_bytes())
     hasher.update(b"\n")
     for line in _AREA_POLICY_SOURCE:
-        hasher.update(line.encode("utf-8"))  # pragma: no mutate - codec names are equivalent
+        hasher.update(utf8_bytes(line))
         hasher.update(b"\n")
     return hasher.hexdigest()
 
@@ -363,9 +364,7 @@ def current_output_algorithm_revision() -> str:
 
 def write_manifest(manifest: Manifest, path: Path) -> None:
     """Atomically write ``manifest`` to ``path`` as canonical UTF-8 JSON."""
-    # pragma: no mutate start - codec names are equivalent
-    encoded = manifest.to_json().encode("utf-8")
-    # pragma: no mutate end
+    encoded = utf8_bytes(manifest.to_json())
     atomic_write_bytes(path, encoded)
 
 
@@ -376,7 +375,7 @@ def read_manifest(path: Path) -> Manifest:
 
 def _read_manifest_payload(path: Path) -> dict[str, Any]:
     try:
-        text = path.read_text(encoding="utf-8")  # pragma: no mutate - codec names are equivalent
+        text = read_text_utf8(path)
     except OSError as error:
         raise ManifestError(f"cannot read manifest {path}: {error}") from error
     except UnicodeError as error:
@@ -387,7 +386,7 @@ def _read_manifest_payload(path: Path) -> dict[str, Any]:
         raise ManifestError(f"corrupt manifest JSON {path}: {error}") from error
     if not isinstance(payload, dict):
         raise ManifestError(f"invalid manifest structure {path}: expected a JSON object")
-    return cast(dict[str, Any], payload)  # pragma: no mutate - cast is type-only
+    return cast(dict[str, Any], payload)
 
 
 def _manifest_from_payload(payload: dict[str, Any], path: Path) -> Manifest:

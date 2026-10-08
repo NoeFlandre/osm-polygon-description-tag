@@ -325,10 +325,10 @@ def _row_sentences(row: Mapping[str, object], index: int) -> list[str]:
     sentences = row.get("sentences")
     if not isinstance(sentences, list):
         raise AnnotationError(f"annotation row {index} has invalid sentences")
-    typed = cast(list[object], sentences)  # pragma: no mutate - static narrowing
+    typed = cast(list[object], sentences)
     if any(not isinstance(sentence, str) for sentence in typed):
         raise AnnotationError(f"annotation row {index} has invalid sentences")
-    return cast(list[str], typed)  # pragma: no mutate - static narrowing
+    return cast(list[str], typed)
 
 
 def _require_matching_sentence_count(
@@ -359,11 +359,11 @@ def _require_split_reason(row: Mapping[str, object], index: int) -> None:
 
 def _entry_from_annotation_row(row: Mapping[str, object], index: int) -> DescriptionEntry:
     try:
-        source_pbf = cast(str, row["source_pbf"])  # pragma: no mutate - static cast
-        osm_type = cast(str, row["osm_type"])  # pragma: no mutate - static cast
-        osm_id = cast(int, row["osm_id"])  # pragma: no mutate - static cast
-        tag_key = cast(str, row["tag_key"])  # pragma: no mutate - static cast
-        original_text = cast(str, row["original_text"])  # pragma: no mutate - static cast
+        source_pbf = cast(str, row["source_pbf"])
+        osm_type = cast(str, row["osm_type"])
+        osm_id = cast(int, row["osm_id"])
+        tag_key = cast(str, row["tag_key"])
+        original_text = cast(str, row["original_text"])
         return DescriptionEntry(source_pbf, osm_type, osm_id, tag_key, original_text)
     except (TypeError, ValueError) as error:
         raise AnnotationError(
@@ -373,14 +373,12 @@ def _entry_from_annotation_row(row: Mapping[str, object], index: int) -> Descrip
 
 def _result_from_annotation_row(row: Mapping[str, object], index: int) -> LanguageResult:
     try:
-        language_code = cast(str | None, row["language_code"])  # pragma: no mutate - static cast
-        top_score = cast(int | float | None, row["top_score"])  # pragma: no mutate - static cast
-        runner_up_score = cast(
-            int | float | None, row["runner_up_score"]
-        )  # pragma: no mutate - static cast
-        margin = cast(int | float | None, row["margin"])  # pragma: no mutate - static cast
-        status = cast(LanguageStatus, row["status"])  # pragma: no mutate - static cast
-        reason = cast(str, row["reason"])  # pragma: no mutate - static cast
+        language_code = cast(str | None, row["language_code"])
+        top_score = cast(int | float | None, row["top_score"])
+        runner_up_score = cast(int | float | None, row["runner_up_score"])
+        margin = cast(int | float | None, row["margin"])
+        status = cast(LanguageStatus, row["status"])
+        reason = cast(str, row["reason"])
         return LanguageResult(language_code, top_score, runner_up_score, margin, status, reason)
     except (TypeError, ValueError) as error:
         raise AnnotationError(

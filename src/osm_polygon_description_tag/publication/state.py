@@ -16,6 +16,7 @@ from osm_polygon_description_tag.publication.artifacts import (
 )
 from osm_polygon_description_tag.publication.models import UploadPlan
 from osm_polygon_description_tag.runtime.atomic import atomic_write_text
+from osm_polygon_description_tag.runtime.text_io import read_text_utf8
 
 PUBLICATION_STATE_FILENAME = "publication-state.json"
 H3_MAP_ASSET_RELATIVE_PATH = H3_MAP_ARTIFACT.relative_path
@@ -42,9 +43,7 @@ def read_publication_state(data_root: Path) -> dict[str, object]:
     state_path = data_root / PUBLICATION_STATE_FILENAME
     if not state_path.is_file():
         return {"schema_version": 1, "published": {}}
-    # pragma: no mutate start - publication state is always UTF-8 JSON
-    state_text = state_path.read_text(encoding="utf-8")
-    # pragma: no mutate end
+    state_text = read_text_utf8(state_path)
     return cast_dict(json.loads(state_text))
 
 
@@ -85,7 +84,7 @@ def metadata_state_matches(data_root: Path, metadata_plan: UploadPlan) -> bool:
     paths = _metadata_paths(data_root)
     if not _metadata_files_exist(paths):
         return False
-    typed_metadata = cast(dict[str, object], metadata)  # pragma: no mutate - static narrowing only
+    typed_metadata = cast(dict[str, object], metadata)
     return _metadata_identity_matches(typed_metadata, paths)
 
 
@@ -167,6 +166,4 @@ def _add_optional_metadata_fields(
 def cast_dict(value: object) -> dict[str, object]:
     if not isinstance(value, dict):
         raise PublicationStateError(f"expected dict, got {type(value).__name__}")
-    # pragma: no mutate start - cast is static-only; the runtime value is unchanged
     return cast(dict[str, object], value)
-    # pragma: no mutate end

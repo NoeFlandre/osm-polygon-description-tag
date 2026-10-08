@@ -94,7 +94,7 @@ def _validated_key_value(key: object, value: object) -> tuple[str, str | None]:
 def _pair_from_item(item: object) -> tuple[str, str | None]:
     item = _as_python(item)
     if isinstance(item, Mapping):
-        typed_item = cast(Mapping[object, object], item)  # pragma: no mutate - static narrowing
+        typed_item = cast(Mapping[object, object], item)
         key, value = _mapping_pair(typed_item)
     else:
         key, value = _sequence_pair(item)
