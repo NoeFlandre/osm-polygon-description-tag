@@ -10,6 +10,7 @@ import pytest
 
 from osm_polygon_description_tag.dataset.geography import atomic
 from osm_polygon_description_tag.dataset.geography.atomic import atomic_save_png
+from osm_polygon_description_tag.runtime.atomic import atomic_write_via
 
 
 class _FakeFigure:
@@ -38,11 +39,22 @@ def test_both_geography_renderers_use_the_shared_writer() -> None:
     assert map_atomic_save_png is atomic_save_png
 
 
+def test_atomic_save_png_is_routed_through_the_shared_atomic_writer(tmp_path: Path) -> None:
+    output = tmp_path / "nested" / "image.png"
+
+    with patch.object(atomic, "atomic_write_via", wraps=atomic_write_via) as shared_writer:
+        atomic_save_png(_FakeFigure(), output)
+
+    shared_writer.assert_called_once()
+    assert shared_writer.call_args.args[0] == output
+    assert output.read_bytes() == b"fake-png"
+
+
 def test_atomic_save_png_preserves_identical_output_mtime(tmp_path: Path) -> None:
     output = tmp_path / "image.png"
     figure = _FakeFigure()
 
-    with patch.object(atomic.os, "replace", wraps=atomic.os.replace) as replace_mock:
+    with patch.object(os, "replace", wraps=os.replace) as replace_mock:
         atomic_save_png(figure, output)
         first_mtime = output.stat().st_mtime_ns
 
@@ -74,18 +86,16 @@ def test_atomic_save_png_uses_nested_parent_and_exact_writer_options(tmp_path: P
     figure = _RecordingFigure()
 
     with (
-        patch.object(atomic.tempfile, "mkstemp", wraps=atomic.tempfile.mkstemp) as mkstemp,
-        patch.object(atomic.os, "open", wraps=atomic.os.open) as open_mock,
+        patch.object(os, "open", wraps=os.open) as open_mock,
         patch.object(Path, "open", autospec=True, side_effect=Path.open) as open_mock_builtin,
     ):
         atomic_save_png(figure, output)
 
     assert output.read_bytes() == b"fake-png"
-    assert mkstemp.call_args.kwargs == {
-        "prefix": ".image.png.",
-        "suffix": ".tmp",
-        "dir": str(output.parent),
-    }
+    temp_path = Path(figure.calls[0][0])
+    assert temp_path.parent == output.parent
+    assert temp_path.name.startswith(".image.png.")
+    assert temp_path.name.endswith(".tmp")
     assert figure.calls == [
         (
             figure.calls[0][0],
@@ -107,6 +117,7 @@ def test_atomic_save_png_keeps_original_error_when_temp_file_was_removed(tmp_pat
 
     class RemovesTempThenFails:
         def savefig(self, path: str, **_: object) -> None:
+            Path(path).write_bytes(b"partial")
             Path(path).unlink()
             raise RuntimeError("render failed")
 

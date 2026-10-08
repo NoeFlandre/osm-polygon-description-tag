@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import errno
 import fcntl
-import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TextIO
 
 from osm_polygon_description_tag.dataset.languages.checkpoint import ShardPaths
+from osm_polygon_description_tag.runtime.atomic import fsync_dir
 
 from .models import GRID_SUBMISSION_LOCK_FILENAME, QUARANTINE_DIRNAME, GridOperatorError
 
@@ -66,11 +66,7 @@ def _acquire_lock(handle: TextIO, run_dir: Path) -> None:
 def fsync_directory(path: Path) -> None:
     """Flush a directory entry after atomically replacing owned state."""
     try:
-        descriptor = os.open(path, os.O_RDONLY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+        fsync_dir(path)
     except OSError as error:
         raise GridOperatorError(f"cannot fsync directory {path}: {error}") from error
 
