@@ -13,7 +13,7 @@ from collections.abc import Callable, Sequence
 from importlib.metadata import version as package_version
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Annotated, Any, Protocol
+from typing import Annotated, Protocol
 
 import typer
 from typer import rich_utils
@@ -44,7 +44,7 @@ from osm_polygon_description_tag.observability.trackio import (
     TrackioRecorder,
     publish_snapshot,
 )
-from osm_polygon_description_tag.osm.discovery import discover_sources
+from osm_polygon_description_tag.osm.discovery import Source, discover_sources
 from osm_polygon_description_tag.osm.extraction import OsmiumExportError
 from osm_polygon_description_tag.publication import (
     PublicationError,
@@ -198,10 +198,10 @@ def handle_inspect(args: PathOptions) -> None:
 
 def _build_paths_and_executor(
     args: PathOptions,
-) -> tuple[Paths, Callable[[Any], BuildResult]]:
+) -> tuple[Paths, Callable[[Source], BuildResult]]:
     paths = _resolve_paths(args)
 
-    def executor(source: Any) -> BuildResult:
+    def executor(source: Source) -> BuildResult:
         return build_one(
             source,
             paths,
@@ -753,8 +753,8 @@ def _show_click_error(error: ClickException) -> None:
         usage = error.ctx.get_usage()
         if usage.startswith("Usage:"):
             usage = "usage:" + usage.removeprefix("Usage:")
-        print(usage, file=sys.stderr)  # noqa: T201 - usage errors go to stderr
-        print(f"error: {error.format_message()}", file=sys.stderr)  # noqa: T201 - as above
+        typer.echo(usage, err=True)
+        typer.echo(f"error: {error.format_message()}", err=True)
         return
     error.show(file=sys.stderr)
 
