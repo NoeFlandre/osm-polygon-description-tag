@@ -9,7 +9,7 @@ import pytest
 
 from osm_polygon_description_tag import cli
 from osm_polygon_description_tag.cli_requests import PathOptions
-from osm_polygon_description_tag.dataset import validation
+from osm_polygon_description_tag.dataset import storage, validation
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     manifest_path_for,
@@ -219,19 +219,19 @@ def test_validate_does_not_reread_manifest_after_pair_validation(
     monkeypatch.setattr(validation, "validate_geoparquet", lambda _path, **_kwargs: 1)
     _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
     manifest_path = tmp_path / "manifests" / "a.manifest.json"
-    replacement_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    replacement_payload["output"]["sha256"] = "f" * 64
-    replacement = Manifest.from_payload(replacement_payload)
-    reread_paths: list[Path] = []
+    real_read_manifest = storage.read_manifest
+    read_paths: list[Path] = []
 
-    def read_replacement(path: Path) -> Manifest:
-        reread_paths.append(path)
-        return replacement
+    def record_read(path: Path) -> Manifest:
+        read_paths.append(path)
+        return real_read_manifest(path)
 
-    monkeypatch.setattr(cli, "read_manifest", read_replacement, raising=False)
+    # The validation path reads manifests through storage.read_manifest, so the
+    # spy must replace that module global (raising=True makes a wrong target fail).
+    monkeypatch.setattr(storage, "read_manifest", record_read)
 
     cli.handle_validate(PathOptions(source_root=None, data_root=tmp_path, osmium="osmium"))
-    assert reread_paths == []
+    assert read_paths == [manifest_path]
 
 
 def test_validate_rejects_a_manifest_source_name_that_disagrees_with_parquet(
