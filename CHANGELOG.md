@@ -18,7 +18,7 @@ defined once, in `pyproject.toml`. `CITATION.cff` must have the same version.
 
 ### Fixed
 
-- A deduplication that fails before it records its staged state removes the staging directory under `.work/dedup/`, so no full copy of the rewritten Parquets stays on the data volume. A hard kill can still leave one. The next run removes each entry there that the state file does not name (#152).
+- A deduplication that fails before it records its staged state removes the staging directory under `.work/dedup/`, so no full copy of the rewritten Parquets stays on the data volume. A hard kill can still leave one. The next run removes each entry there that the state file does not name. An entry it cannot remove stays in place, and the run still completes (#152).
 - The run log keeps events written after the log is closed or after a failed rotation. It no longer holds them in memory where they are never flushed (#159).
 - `build-one` exits with code 3 when the requested source is not discovered.
   `validate` exits with code 4 when its data directory is missing (#135).
