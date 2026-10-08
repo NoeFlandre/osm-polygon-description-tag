@@ -132,12 +132,14 @@ that it targets is not generated again.
 ### Calls to `cast()` are excluded by configuration
 
 `do_not_mutate_patterns` in the `[tool.mutmut]` table skips every expression on
-a line that calls `cast(`. Mutating the type argument of `cast()` is equivalent,
-so no pragma is needed for it. Mutating the value argument is not equivalent,
-and that mutant is hidden as well. Do not add a pragma for a `cast()` call, and
-do not widen the pattern to other calls.
-`tests/contracts/test_no_mutate_pragma_ratchet.py` enforces both rules and caps
-the number of `pragma: no mutate` lines in `src/`.
+a line that calls a bare `cast(`, such as `cast(int, value)`. Mutating the type
+argument of `cast()` is equivalent, so no pragma is needed for it. Mutating the
+value argument is not equivalent, and that mutant is hidden as well. Method
+calls such as pyarrow's `table.cast(schema)` are not matched, so their mutants
+stay in the gate. Do not add a pragma for a `cast()` call, and do not widen the
+pattern to other calls. `tests/contracts/test_mutmut_cast_exclusion.py` and
+`tests/contracts/test_no_mutate_pragma_ratchet.py` enforce these rules, and the
+ratchet caps the number of `pragma: no mutate` lines in `src/`.
 
 ### A timeout is an unresolved verdict, not a kill
 
