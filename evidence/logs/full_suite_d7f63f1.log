@@ -1,0 +1,200 @@
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+........................................................................ [  1%]
+.....................................................s.................. [  3%]
+........................................................................ [  5%]
+........................................................................ [  6%]
+........................................................................ [  8%]
+........................................................................ [ 10%]
+........................................................................ [ 12%]
+........................................................................ [ 13%]
+........................................................................ [ 15%]
+........................................................................ [ 17%]
+........................................................................ [ 19%]
+........................................................................ [ 20%]
+........................................................................ [ 22%]
+........................................................................ [ 24%]
+........................................................................ [ 25%]
+........................................................................ [ 27%]
+........................................................................ [ 29%]
+........................................................................ [ 31%]
+........................................................................ [ 32%]
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 46%]
+........................................................................ [ 48%]
+........................................................................ [ 50%]
+........................................................................ [ 51%]
+........................................................................ [ 53%]
+....................................................ssss................ [ 55%]
+........................................................................ [ 57%]
+........................................................................ [ 58%]
+........................................................................ [ 60%]
+........................................................................ [ 62%]
+........................................................................ [ 64%]
+........................................................................ [ 65%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 72%]
+........................................................................ [ 74%]
+........................................................................ [ 76%]
+........................................................................ [ 77%]
+........................................................................ [ 79%]
+........................................................................ [ 81%]
+........................................................................ [ 83%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 88%]
+........................................................................ [ 90%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+........................................................................ [ 98%]
+...................................................                      [100%]
+=============================== warnings summary ===============================
+tests/unit/dataset/test_text_migration.py::test_concurrent_and_sequential_runs_agree
+tests/unit/dataset/test_text_migration.py::test_concurrent_and_sequential_runs_agree
+tests/unit/dataset/test_text_migration.py::test_concurrent_and_sequential_runs_agree
+tests/unit/dataset/test_text_migration.py::test_concurrent_and_sequential_runs_agree
+  /usr/lib/python3.13/multiprocessing/popen_fork.py:73: DeprecationWarning: This process (pid=11661) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================================ tests coverage ================================
+_______________ coverage: platform linux, python 3.13.16-final-0 _______________
+
+Name                                                                       Stmts   Miss Branch BrPart  Cover   Missing
+----------------------------------------------------------------------------------------------------------------------
+scripts/check_installed_package.py                                            53      3     22      3    92%   91, 93, 100
+scripts/check_mutation_score.py                                               81      2     20      2    96%   83, 159
+scripts/check_sat_capabilities.py                                             41      1     12      1    96%   79
+scripts/coverage_associations.py                                              76      1     22      1    98%   31
+scripts/crap_reports.py                                                       85      1     20      1    98%   84
+scripts/mutation_scratch.py                                                   90      5     26      5    91%   28, 30, 52, 107->109, 125-126
+scripts/quality_metrics.py                                                    67      3     18      2    94%   58, 108-109
+scripts/report_io.py                                                          12      0      0      0   100%
+scripts/run_mutation_gate.py                                                 323     28     70     12    90%   111->113, 161->163, 163->exit, 211, 229, 250, 352, 391, 395, 422-444, 551, 555, 590, 641, 658, 795-796, 856
+scripts/show_mutant.py                                                        91      2     32      4    95%   68->72, 70->72, 73, 173
+src/osm_polygon_description_tag/__init__.py                                    3      0      0      0   100%
+src/osm_polygon_description_tag/cli.py                                       287      3     42      2    98%   566, 592, 670, 754->756, 785->787
+src/osm_polygon_description_tag/cli_requests.py                               12      0      0      0   100%
+src/osm_polygon_description_tag/dataset/__init__.py                           11      0      2      0   100%
+src/osm_polygon_description_tag/dataset/canonical_rows.py                    107      0     32      0   100%
+src/osm_polygon_description_tag/dataset/constants.py                           6      0      0      0   100%
+src/osm_polygon_description_tag/dataset/deduplication.py                     223      0     50      0   100%
+src/osm_polygon_description_tag/dataset/docs.py                              280      0     74      0   100%
+src/osm_polygon_description_tag/dataset/duckdb_runtime.py                      9      0      0      0   100%
+src/osm_polygon_description_tag/dataset/geography/__init__.py                  8      0      0      0   100%
+src/osm_polygon_description_tag/dataset/geography/aggregation.py              10      0      2      0   100%
+src/osm_polygon_description_tag/dataset/geography/area_histogram.py           46      0     12      0   100%
+src/osm_polygon_description_tag/dataset/geography/area_rendering.py           88      0      8      0   100%
+src/osm_polygon_description_tag/dataset/geography/atomic.py                   27      0      2      0   100%
+src/osm_polygon_description_tag/dataset/geography/basemap.py                  59      2     22      0    98%   59-60
+src/osm_polygon_description_tag/dataset/geography/card.py                     77      0     20      0   100%
+src/osm_polygon_description_tag/dataset/geography/h3_policy.py               130      2     40      3    97%   139->137, 204, 213
+src/osm_polygon_description_tag/dataset/geography/labels.py                   10      0      4      0   100%
+src/osm_polygon_description_tag/dataset/geography/mpl.py                      10      0      0      0   100%
+src/osm_polygon_description_tag/dataset/geography/parquet_inputs.py          125      1     34      1    99%   62
+src/osm_polygon_description_tag/dataset/geography/rendering.py               118      0     14      1    99%   220->exit
+src/osm_polygon_description_tag/dataset/languages/__init__.py                 11      0      2      0   100%
+src/osm_polygon_description_tag/dataset/languages/annotations.py             148      0     36      0   100%
+src/osm_polygon_description_tag/dataset/languages/atomic.py                    3      0      0      0   100%
+src/osm_polygon_description_tag/dataset/languages/checkpoint.py              269      0     66      0   100%
+src/osm_polygon_description_tag/dataset/languages/detector.py                264      0     96      0   100%
+src/osm_polygon_description_tag/dataset/languages/glotlid.py                 107      0     24      0   100%
+src/osm_polygon_description_tag/dataset/languages/models.py                  200      1     62      1    99%   235
+src/osm_polygon_description_tag/dataset/languages/paths.py                    19      0      8      0   100%
+src/osm_polygon_description_tag/dataset/languages/payloads.py                 54      0     18      0   100%
+src/osm_polygon_description_tag/dataset/languages/records.py                 118      0     44      0   100%
+src/osm_polygon_description_tag/dataset/languages/snapshot.py                348      0    118      0   100%
+src/osm_polygon_description_tag/dataset/languages/validation.py              163      0     40      0   100%
+src/osm_polygon_description_tag/dataset/languages/worker.py                  239      0     66      0   100%
+src/osm_polygon_description_tag/dataset/manifest.py                          205      0     46      0   100%
+src/osm_polygon_description_tag/dataset/migration.py                          68      0     14      0   100%
+src/osm_polygon_description_tag/dataset/numeric.py                             8      0      0      0   100%
+src/osm_polygon_description_tag/dataset/reporting.py                           3      0      0      0   100%
+src/osm_polygon_description_tag/dataset/schema.py                             40      0     16      0   100%
+src/osm_polygon_description_tag/dataset/sentences/__init__.py                  0      0      0      0   100%
+src/osm_polygon_description_tag/dataset/sentences/languages.py                27      0      8      0   100%
+src/osm_polygon_description_tag/dataset/sentences/models.py                   39      0     10      0   100%
+src/osm_polygon_description_tag/dataset/sentences/sat.py                      95      0     24      0   100%
+src/osm_polygon_description_tag/dataset/sentences/sat_capabilities.py         13      0      2      0   100%
+src/osm_polygon_description_tag/dataset/sentences/splitter.py                 19      0      4      0   100%
+src/osm_polygon_description_tag/dataset/stats.py                             429      0     90      0   100%
+src/osm_polygon_description_tag/dataset/storage.py                           494      0    156      0   100%
+src/osm_polygon_description_tag/dataset/text.py                               54      0     18      0   100%
+src/osm_polygon_description_tag/dataset/text_migration.py                    137      0     30      0   100%
+src/osm_polygon_description_tag/dataset/transform.py                         102      0     28      1    99%   104->101
+src/osm_polygon_description_tag/dataset/unique_rows.py                        94      1     26      1    98%   189
+src/osm_polygon_description_tag/grid_transport.py                             69      0     16      0   100%
+src/osm_polygon_description_tag/grid_workflow.py                             118      0     34      1    99%   341->346
+src/osm_polygon_description_tag/language_cli.py                               77      0      2      0   100%
+src/osm_polygon_description_tag/language_workflow.py                          53      0     12      0   100%
+src/osm_polygon_description_tag/observability/__init__.py                      2      0      0      0   100%
+src/osm_polygon_description_tag/observability/trackio.py                     248      4     42      3    98%   329->327, 424, 435-436, 515
+src/osm_polygon_description_tag/osm/__init__.py                                3      0      0      0   100%
+src/osm_polygon_description_tag/osm/discovery.py                              32      0     10      0   100%
+src/osm_polygon_description_tag/osm/extraction.py                            183      0     44      0   100%
+src/osm_polygon_description_tag/publication/__init__.py                        5      0      0      0   100%
+src/osm_polygon_description_tag/publication/artifacts.py                      24      0      0      0   100%
+src/osm_polygon_description_tag/publication/hub_client.py                     23      0      2      0   100%
+src/osm_polygon_description_tag/publication/language.py                      232      0     40      0   100%
+src/osm_polygon_description_tag/publication/language_card.py                 201      0     66      0   100%
+src/osm_polygon_description_tag/publication/language_hub.py                  221      0     52      0   100%
+src/osm_polygon_description_tag/publication/language_upload.py               152      0     40      0   100%
+src/osm_polygon_description_tag/publication/models.py                         27      0      0      0   100%
+src/osm_polygon_description_tag/publication/planning.py                      206      2     86      2    99%   310, 340
+src/osm_polygon_description_tag/publication/release.py                       136      1     34      1    99%   352
+src/osm_polygon_description_tag/publication/state.py                          70      0     12      0   100%
+src/osm_polygon_description_tag/publication/upload.py                        209      1     56      1    99%   290
+src/osm_polygon_description_tag/publication/verification.py                  154      1     32      0    99%   381
+src/osm_polygon_description_tag/publication_workflow.py                       22      0      4      0   100%
+src/osm_polygon_description_tag/runtime/__init__.py                            7      0      0      0   100%
+src/osm_polygon_description_tag/runtime/atomic.py                             29      0      0      0   100%
+src/osm_polygon_description_tag/runtime/cleanup.py                            57      0     24      0   100%
+src/osm_polygon_description_tag/runtime/click_compat.py                        3      0      0      0   100%
+src/osm_polygon_description_tag/runtime/config.py                             38      1     10      1    96%   56
+src/osm_polygon_description_tag/runtime/logging.py                           231      4     64      1    98%   221, 291-292, 309
+src/osm_polygon_description_tag/runtime/presentation.py                       48      1     14      2    95%   48->exit, 63
+src/osm_polygon_description_tag/runtime/resources.py                          49      4     12      0    93%   77-78, 94-95
+src/osm_polygon_description_tag/runtime/serialization.py                      10      0      0      0   100%
+src/osm_polygon_description_tag/runtime/time.py                                4      0      0      0   100%
+src/osm_polygon_description_tag/runtime/units.py                               5      0      0      0   100%
+src/osm_polygon_description_tag/runtime/validation.py                         10      0      4      0   100%
+src/osm_polygon_description_tag/workflow/__init__.py                           4      0      0      0   100%
+src/osm_polygon_description_tag/workflow/artifacts.py                          7      0      0      0   100%
+src/osm_polygon_description_tag/workflow/build.py                            119      0     24      0   100%
+src/osm_polygon_description_tag/workflow/finalization.py                     147      0     42      3    98%   277->exit, 317->319, 320->322
+src/osm_polygon_description_tag/workflow/grid_driver.py                      218      0     40      0   100%
+src/osm_polygon_description_tag/workflow/grid_operator/__init__.py            11      0      0      0   100%
+src/osm_polygon_description_tag/workflow/grid_operator/bundle.py             162      0     50      0   100%
+src/osm_polygon_description_tag/workflow/grid_operator/models.py             207      0     36      0   100%
+src/osm_polygon_description_tag/workflow/grid_operator/reconciliation.py     111      0     36      0   100%
+src/osm_polygon_description_tag/workflow/grid_operator/results.py             78      1     30      1    98%   39
+src/osm_polygon_description_tag/workflow/grid_operator/script.py              80      0     30      0   100%
+src/osm_polygon_description_tag/workflow/grid_operator/stage.py              237      0     88      0   100%
+src/osm_polygon_description_tag/workflow/grid_operator/state.py               78      0     26      0   100%
+src/osm_polygon_description_tag/workflow/grid_operator/submission.py         176      0     70      0   100%
+src/osm_polygon_description_tag/workflow/grid_operator/verify.py             255      0     88      0   100%
+src/osm_polygon_description_tag/workflow/grid_policy.py                      244      0     98      0   100%
+src/osm_polygon_description_tag/workflow/grid_scheduler.py                   234      0     80      0   100%
+src/osm_polygon_description_tag/workflow/orchestrator.py                     242      0     52      0   100%
+src/osm_polygon_description_tag/workflow/preflight.py                         83      0     18      0   100%
+src/osm_polygon_description_tag/workflow/source_runner.py                     99      0     20      0   100%
+----------------------------------------------------------------------------------------------------------------------
+TOTAL                                                                      12085     76   3192     57    99%
+Required test coverage of 90.0% reached. Total coverage: 99.13%
+=========================== short test summary info ============================
+SKIPPED [1] tests/contracts/test_docker.py:144: set RUN_DOCKER_SMOKE=1 to run the Docker smoke test
+SKIPPED [1] tests/unit/osm/test_real_osmium_coverage.py:129: osmium binary not installed
+SKIPPED [1] tests/unit/osm/test_real_osmium_coverage.py:156: osmium binary not installed
+SKIPPED [1] tests/unit/osm/test_real_osmium_coverage.py:216: osmium binary not installed
+SKIPPED [1] tests/unit/osm/test_real_osmium_coverage.py:234: osmium binary not installed
+4150 passed, 5 skipped, 4 warnings in 455.10s (0:07:35)
+exit=0 runtime_s=458

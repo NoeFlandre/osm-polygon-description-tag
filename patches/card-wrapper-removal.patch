@@ -1,0 +1,64 @@
+diff --git a/src/osm_polygon_description_tag/dataset/geography/card.py b/src/osm_polygon_description_tag/dataset/geography/card.py
+index 43e1a88..74d4f39 100644
+--- a/src/osm_polygon_description_tag/dataset/geography/card.py
++++ b/src/osm_polygon_description_tag/dataset/geography/card.py
+@@ -161,7 +161,7 @@ def write_map_block_marker_to_template(
+     if start_count == 1 and end_count == 1:
+         return
+     new_text = _template_with_map_markers(text, asset_relative_path)
+-    _atomic_write_template(template_path, new_text)
++    atomic_write_text(template_path, new_text)
+ 
+ 
+ def _validate_marker_counts(start_count: int, end_count: int) -> None:
+@@ -189,10 +189,6 @@ def _template_with_map_markers(text: str, asset_relative_path: str) -> str:
+     return text[: stats_match.start()] + block + text[stats_match.start() :]
+ 
+ 
+-def _atomic_write_template(template_path: Path, new_text: str) -> None:
+-    atomic_write_text(template_path, new_text)
+-
+-
+ __all__ = [
+     "H3_MAP_ASSET_RELATIVE_PATH",
+     "H3_MAP_DESCRIPTION",
+diff --git a/tests/unit/dataset/test_geography_card.py b/tests/unit/dataset/test_geography_card.py
+index aed1436..bbf641a 100644
+--- a/tests/unit/dataset/test_geography_card.py
++++ b/tests/unit/dataset/test_geography_card.py
+@@ -30,7 +30,6 @@ from osm_polygon_description_tag.dataset.geography import (
+     render_map_block,
+ )
+ from osm_polygon_description_tag.dataset.geography.card import (
+-    _atomic_write_template,
+     _template_with_map_markers,
+     _validate_marker_counts,
+     write_map_block_marker_to_template,
+@@ -708,7 +707,7 @@ def test_write_map_block_marker_requires_both_markers_before_noop() -> None:
+ 
+     with (
+         patch.object(card_module, "_template_with_map_markers", return_value="new") as build,
+-        patch.object(card_module, "_atomic_write_template") as write,
++        patch.object(card_module, "atomic_write_text") as write,
+     ):
+         write_map_block_marker_to_template(template, asset_relative_path="asset.png")
+ 
+@@ -734,18 +733,6 @@ def test_template_with_map_markers_requires_the_stats_marker() -> None:
+         _template_with_map_markers("before", "assets/map.png")
+ 
+ 
+-def test_atomic_write_template_writes_utf8_bytes_and_leaves_no_temp_file(
+-    tmp_path: Path,
+-) -> None:
+-    template = tmp_path / "README.md"
+-    template.write_text("old", encoding="utf-8")
+-
+-    _atomic_write_template(template, "café\n")
+-
+-    assert template.read_bytes() == "café\n".encode()
+-    assert sorted(path.name for path in tmp_path.glob(".*")) == []
+-
+-
+ # ---------------------------------------------------------------------------
+ # Map cache identity: reuse when stable, recompute when finalized data changes
+ # ---------------------------------------------------------------------------

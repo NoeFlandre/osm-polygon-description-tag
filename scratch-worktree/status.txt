@@ -1,0 +1,7 @@
+d7f63f1 test(docs): pin full README bytes and add writer UTF-8 check
+ (detached HEAD; base for the modified files)
+ M src/osm_polygon_description_tag/dataset/geography/card.py
+ M tests/unit/dataset/test_geography_card.py
+ src/osm_polygon_description_tag/dataset/geography/card.py |  6 +-----
+ tests/unit/dataset/test_geography_card.py                 | 15 +--------------
+ 2 files changed, 2 insertions(+), 19 deletions(-)

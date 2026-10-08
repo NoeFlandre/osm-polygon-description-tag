@@ -1,0 +1,10 @@
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+s.......s......ssss..........                                            [100%]
+=========================== short test summary info ============================
+SKIPPED [2] tests/helpers/osmium.py:16: osmium executable is required for the synthetic end-to-end test
+SKIPPED [1] tests/integration/test_public_cli_lifecycle.py:124: osmium binary not installed
+SKIPPED [1] tests/integration/test_public_cli_lifecycle.py:159: osmium binary not installed
+SKIPPED [1] tests/integration/test_public_cli_lifecycle.py:274: osmium binary not installed
+SKIPPED [1] tests/integration/test_public_cli_lifecycle.py:480: osmium binary not installed
+23 passed, 6 skipped in 29.99s
+exit=0 runtime_s=32

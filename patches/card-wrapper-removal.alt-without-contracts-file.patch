@@ -1,0 +1,60 @@
+diff --git a/src/osm_polygon_description_tag/dataset/geography/card.py b/src/osm_polygon_description_tag/dataset/geography/card.py
+index 43e1a88..74d4f39 100644
+--- a/src/osm_polygon_description_tag/dataset/geography/card.py
++++ b/src/osm_polygon_description_tag/dataset/geography/card.py
+@@ -161,7 +161,7 @@ def write_map_block_marker_to_template(
+     if start_count == 1 and end_count == 1:
+         return
+     new_text = _template_with_map_markers(text, asset_relative_path)
+-    _atomic_write_template(template_path, new_text)
++    atomic_write_text(template_path, new_text)
+ 
+ 
+ def _validate_marker_counts(start_count: int, end_count: int) -> None:
+@@ -189,10 +189,6 @@ def _template_with_map_markers(text: str, asset_relative_path: str) -> str:
+     return text[: stats_match.start()] + block + text[stats_match.start() :]
+ 
+ 
+-def _atomic_write_template(template_path: Path, new_text: str) -> None:
+-    atomic_write_text(template_path, new_text)
+-
+-
+ __all__ = [
+     "H3_MAP_ASSET_RELATIVE_PATH",
+     "H3_MAP_DESCRIPTION",
+diff --git a/tests/unit/dataset/test_geography_card.py b/tests/unit/dataset/test_geography_card.py
+index aed1436..f7010ae 100644
+--- a/tests/unit/dataset/test_geography_card.py
++++ b/tests/unit/dataset/test_geography_card.py
+@@ -30,12 +30,12 @@ from osm_polygon_description_tag.dataset.geography import (
+     render_map_block,
+ )
+ from osm_polygon_description_tag.dataset.geography.card import (
+-    _atomic_write_template,
+     _template_with_map_markers,
+     _validate_marker_counts,
+     write_map_block_marker_to_template,
+ )
+ from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
++from osm_polygon_description_tag.runtime.atomic import atomic_write_text
+ from osm_polygon_description_tag.runtime.resources import dataset_card_template
+ from osm_polygon_description_tag.workflow.orchestrator import build_metadata_only_upload_plan
+ from tests.conftest import make_record_dict
+@@ -708,7 +708,7 @@ def test_write_map_block_marker_requires_both_markers_before_noop() -> None:
+ 
+     with (
+         patch.object(card_module, "_template_with_map_markers", return_value="new") as build,
+-        patch.object(card_module, "_atomic_write_template") as write,
++        patch.object(card_module, "atomic_write_text") as write,
+     ):
+         write_map_block_marker_to_template(template, asset_relative_path="asset.png")
+ 
+@@ -740,7 +740,7 @@ def test_atomic_write_template_writes_utf8_bytes_and_leaves_no_temp_file(
+     template = tmp_path / "README.md"
+     template.write_text("old", encoding="utf-8")
+ 
+-    _atomic_write_template(template, "café\n")
++    atomic_write_text(template, "café\n")
+ 
+     assert template.read_bytes() == "café\n".encode()
+     assert sorted(path.name for path in tmp_path.glob(".*")) == []

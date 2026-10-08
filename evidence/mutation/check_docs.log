@@ -1,0 +1,3 @@
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+mutation score: 100.00% (924/924); minimum 100.00%
+check_exit=0

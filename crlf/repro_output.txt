@@ -1,0 +1,11 @@
+A before bytes: b'---\r\ntitle: caf\xc3\xa9\r\n---\r\n\r\nIntro text.\r\n\r\n<!-- GENERATED:STATS:START -->\r\nstats\r\n<!-- GENERATED:STATS:END -->\r\n'
+A before counts: CRLF=9 bare_LF=0 CR=9
+A after bytes: b'---\ntitle: caf\xc3\xa9\n---\n\nIntro text.\n\n<!-- GENERATED:H3_MAP:START -->\n![H3 density of canonical globally unique `(osm_type, osm_id)` polygons with successfully extracted trimmed non-empty description text](assets/description_polygon_density.png)\n<!-- GENERATED:H3_MAP:END -->\n<!-- GENERATED:STATS:START -->\nstats\n<!-- GENERATED:STATS:END -->\n'
+A after counts: CRLF=0 bare_LF=12 CR=0
+A CR survives: False
+B template before counts: CRLF=9 bare_LF=0 CR=9
+B _card_source returns CR: False | published: False
+B encoded for write has CR: False
+C README before counts: CRLF=9 bare_LF=0 CR=9
+C _card_source returns CR: False | published: True
+C encoded for write has CR: False
