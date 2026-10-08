@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -450,6 +451,149 @@ def test_deduplicate_dataset_removes_stage_dir_when_staging_fails(
     assert leftovers == []
     assert not (data_root / dedup_module._STATE_RELATIVE_PATH).exists()
 
+    result = deduplicate_dataset(data_root)
+    assert result.status == "deduplicated"
+    assert result.output_rows == 1
+
+
+def _overlapping_dataset(tmp_path: Path) -> Path:
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    (data_root / "data").mkdir(parents=True)
+    (data_root / "manifests").mkdir()
+    source_root.mkdir()
+    first = make_record_dict(
+        Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+        {"description": "one"},
+        osm_id=1,
+        source_pbf="a.osm.pbf",
+    )
+    duplicate = dict(first, source_pbf="b.osm.pbf", version=2)
+    _write_source(data_root, source_root, "a", [first])
+    _write_source(data_root, source_root, "b", [duplicate])
+    return data_root
+
+
+def _fail_state_write(
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+    *,
+    persist_first: bool,
+    error: BaseException,
+) -> None:
+    """Raise ``error`` when a state with ``status`` is written, optionally after persisting it."""
+    real_write_state = dedup_module._write_state
+
+    def failing_write_state(path: Path, payload: Mapping[str, object]) -> None:
+        if payload.get("status") != status:
+            real_write_state(path, payload)
+            return
+        if persist_first:
+            real_write_state(path, payload)
+        raise error
+
+    monkeypatch.setattr(dedup_module, "_write_state", failing_write_state)
+
+
+def _interrupt_first_promotion(count: int) -> None:
+    if count == 1:
+        raise KeyboardInterrupt
+
+
+@pytest.mark.parametrize("persist_first", [False, True])
+def test_deduplicate_dataset_removes_stage_dir_when_staged_state_is_not_recorded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    persist_first: bool,
+) -> None:
+    data_root = _overlapping_dataset(tmp_path)
+    _fail_state_write(
+        monkeypatch,
+        "staged",
+        persist_first=persist_first,
+        error=OSError("no space left on device"),
+    )
+
+    with pytest.raises(OSError, match="no space left on device"):
+        deduplicate_dataset(data_root)
+    monkeypatch.undo()
+
+    stage_root = data_root / ".work" / "dedup"
+    leftovers = list(stage_root.iterdir()) if stage_root.exists() else []
+    # A recorded state names its directory, so the next run must resume it.
+    assert (data_root / dedup_module._STATE_RELATIVE_PATH).exists() is persist_first
+    assert len(leftovers) == (1 if persist_first else 0)
+    result = deduplicate_dataset(data_root)
+    assert result.status == "deduplicated"
+    assert result.output_rows == 1
+
+
+def test_deduplicate_dataset_resumes_when_crash_precedes_completion_record(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = _overlapping_dataset(tmp_path)
+    _fail_state_write(monkeypatch, "complete", persist_first=False, error=KeyboardInterrupt())
+
+    with pytest.raises(KeyboardInterrupt):
+        deduplicate_dataset(data_root)
+    monkeypatch.undo()
+
+    state_path = data_root / dedup_module._STATE_RELATIVE_PATH
+    assert json.loads(state_path.read_text(encoding="utf-8"))["status"] == "staged"
+    result = deduplicate_dataset(data_root)
+    assert result.status == "deduplicated"
+    assert result.output_rows == 1
+
+
+def test_deduplicate_dataset_completes_when_crash_follows_completion_record(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = _overlapping_dataset(tmp_path)
+    _fail_state_write(monkeypatch, "complete", persist_first=True, error=KeyboardInterrupt())
+
+    with pytest.raises(KeyboardInterrupt):
+        deduplicate_dataset(data_root)
+    monkeypatch.undo()
+
+    result = deduplicate_dataset(data_root)
+    assert result.status == "skipped"
+    assert result.output_rows == 1
+    assert list((data_root / ".work" / "dedup").iterdir()) == []
+
+
+def test_deduplicate_dataset_removes_orphan_stage_entries_from_earlier_runs(
+    tmp_path: Path,
+) -> None:
+    data_root = _overlapping_dataset(tmp_path)
+    assert deduplicate_dataset(data_root).status == "deduplicated"
+    stage_root = data_root / ".work" / "dedup"
+    orphan_dir = stage_root / "0123abcd"
+    (orphan_dir / "data").mkdir(parents=True)
+    (orphan_dir / "data" / "a.parquet").write_bytes(b"orphan")
+    (stage_root / "stray.tmp").write_bytes(b"stray")
+
+    result = deduplicate_dataset(data_root)
+
+    assert result.status == "skipped"
+    assert list(stage_root.iterdir()) == []
+
+
+def test_deduplicate_dataset_keeps_the_staged_dir_named_by_the_state(tmp_path: Path) -> None:
+    data_root = _overlapping_dataset(tmp_path)
+    with pytest.raises(KeyboardInterrupt):
+        deduplicate_dataset(data_root, promotion_hook=_interrupt_first_promotion)
+    state_path = data_root / dedup_module._STATE_RELATIVE_PATH
+    staged_dir = data_root / json.loads(state_path.read_text(encoding="utf-8"))["stage_dir"]
+    orphan_dir = data_root / ".work" / "dedup" / "0123abcd"
+    orphan_dir.mkdir()
+
+    with pytest.raises(KeyboardInterrupt):
+        deduplicate_dataset(data_root, promotion_hook=_interrupt_first_promotion)
+
+    assert staged_dir.is_dir()
+    assert not orphan_dir.exists()
     result = deduplicate_dataset(data_root)
     assert result.status == "deduplicated"
     assert result.output_rows == 1
