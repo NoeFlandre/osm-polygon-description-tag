@@ -428,6 +428,8 @@ def _run_parented_metadata_commit(plan: UploadPlan, parent_revision: str) -> Non
             commit_message="Update deterministic dataset statistics",
             parent_commit=parent_revision,
         )
+    # Broad on purpose: the commit can fail in the client, the transport or the parent-revision
+    # guard. Every failure is reported, and the cause is chained.
     except Exception as error:
         raise PublicationError(
             f"metadata commit failed or remote revision changed: {error}"

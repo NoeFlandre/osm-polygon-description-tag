@@ -49,7 +49,6 @@ from osm_polygon_description_tag.dataset.unique_rows import (
     iter_unique_parquet_batches,
     unique_rows_sql,
 )
-from osm_polygon_description_tag.runtime.time import utc_now_iso
 
 STATS_SCHEMA_VERSION = 9
 _QUANTILE_PROBABILITIES = [0.25, 0.5, 0.75]
@@ -989,15 +988,8 @@ def _build_stats_payload(
     }
 
 
-def collect_stats(
-    data_root: Path,
-    *,
-    clock: object = None,  # noqa: ARG001 - deprecated and ignored; stats carry no timestamp
-) -> dict[str, Any]:
-    """Aggregate factual statistics from validated artifacts and matching manifests.
-
-    ``clock`` is accepted for backward compatibility only; it is deprecated and ignored.
-    """
+def collect_stats(data_root: Path) -> dict[str, Any]:
+    """Aggregate factual statistics from validated artifacts and matching manifests."""
     artifacts = _find_validated_artifacts(data_root)
 
     connection = _new_connection(data_root)
@@ -1036,5 +1028,4 @@ __all__ = [
     "TEXT_REJECTION_REASONS",
     "ReportingError",
     "collect_stats",
-    "utc_now_iso",
 ]

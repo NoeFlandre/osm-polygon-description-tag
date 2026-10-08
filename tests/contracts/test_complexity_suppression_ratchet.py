@@ -9,7 +9,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 COMPLEXITY_RULES = frozenset({"C901", "PLR0912", "PLR0913", "PLR0915"})
 BASELINE_CONFIG_SUPPRESSIONS = frozenset(
     {
-        ("tests/**", "PLR0913"),
         ("src/osm_polygon_description_tag/dataset/languages/worker.py", "PLR0913"),
         ("src/osm_polygon_description_tag/grid_workflow.py", "PLR0913"),
         ("src/osm_polygon_description_tag/language_cli.py", "PLR0913"),
@@ -44,7 +43,7 @@ def test_file_level_complexity_suppressions_are_tracked_and_only_decrease() -> N
         config_line = next(
             line for line in lines if line.lstrip().startswith(f'"{path}"') and f'"{rule}"' in line
         )
-        assert "TODO(#62)" in config_line
+        assert "TODO(#141)" in config_line
 
 
 def test_inline_complexity_noqa_suppressions_are_tracked_and_only_decrease() -> None:

@@ -693,17 +693,38 @@ def test_every_option_of_every_command_has_help_text() -> None:
     assert missing == []
 
 
-def test_verbosity_is_reset_after_each_invocation(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_verbosity_is_reset_after_each_invocation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     import osm_polygon_description_tag.cli as cli_module
 
-    seen: list[str] = []
-    monkeypatch.setattr(
-        cli_module, "handle_validate", lambda _args: seen.append(cli_module._verbosity.stderr_level)
-    )
+    def fake_run_and_publish(**kwargs: object) -> SimpleNamespace:
+        logger = kwargs["logger"]
+        logger.event("source_skipped", level="WARNING", source="region.osm.pbf")
+        logger.event("run_summary", source_count=1)
+        return SimpleNamespace(to_payload=lambda: {"source_count": 1})
 
-    assert run(["-q", "validate"]) == 0
-    assert seen == ["WARNING"]
-    assert cli_module._verbosity.stderr_level == "INFO"
+    monkeypatch.setattr(cli_module, "run_and_publish", fake_run_and_publish)
+    (tmp_path / "raw").mkdir()
+    argv = [
+        "run-and-publish",
+        "--confirm-repo",
+        "NoeFlandre/osm-polygon-description-tag",
+        "--source-root",
+        str(tmp_path / "raw"),
+        "--data-root",
+        str(tmp_path / "generated"),
+    ]
+
+    assert run(["-q", *argv]) == 0
+    quiet_err = capsys.readouterr().err
+    assert "source_skipped" in quiet_err
+    assert "run_summary" not in quiet_err
+
+    assert run(argv) == 0
+    default_err = capsys.readouterr().err
+    assert "source_skipped" in default_err
+    assert "run_summary" in default_err
 
 
 def _exit_code_cases() -> list[tuple[type[Exception], int]]:
