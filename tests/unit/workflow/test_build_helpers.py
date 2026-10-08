@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
@@ -197,13 +196,6 @@ def test_transform_stream_clamps_zero_interval_and_observes_exact_boundary() -> 
         ):
             pass
     assert boundary_callback.call_args_list == [call(2, 2), call(4, 4)]
-
-
-def test_transform_stream_keeps_public_default_progress_interval() -> None:
-    assert (
-        inspect.signature(build_module._transform_stream).parameters["progress_interval"].default
-        == 100_000
-    )
 
 
 def test_transform_stream_default_interval_reports_at_100000_emissions() -> None:
@@ -573,11 +565,3 @@ def test_build_one_omitted_defaults_reach_fresh_builder(tmp_path: Path) -> None:
     assert captured["batch_size"] == 1024
     assert captured["progress_interval"] == 100_000
     assert captured["progress_callback"] is None
-
-
-def test_build_one_public_default_parameters_are_stable() -> None:
-    parameters = inspect.signature(build_module.build_one).parameters
-    assert parameters["executable"].default == "osmium"
-    assert parameters["batch_size"].default == 1024
-    assert parameters["progress_interval"].default == 100_000
-    assert parameters["progress_callback"].default is None
