@@ -1,6 +1,7 @@
 """Legacy Arrow-map migration tests."""
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -404,11 +405,9 @@ def test_promote_migrated_parquet_fsyncs_a_binary_handle_before_replace(
         return Handle()
 
     monkeypatch.setattr(Path, "open", fake_open)
+    monkeypatch.setattr(os, "fsync", lambda descriptor: observed.setdefault("fsync", descriptor))
     monkeypatch.setattr(
-        migration.os, "fsync", lambda descriptor: observed.setdefault("fsync", descriptor)
-    )
-    monkeypatch.setattr(
-        migration.os,
+        os,
         "replace",
         lambda source, destination: observed.setdefault("replace", (source, destination)),
     )

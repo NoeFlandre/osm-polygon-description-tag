@@ -20,6 +20,7 @@ import pytest
 from shapely.geometry import Polygon
 
 import osm_polygon_description_tag.dataset.geography.card as card_module
+from osm_polygon_description_tag.dataset.docs import generate_dataset_docs
 from osm_polygon_description_tag.dataset.geography import (
     H3_MAP_ASSET_RELATIVE_PATH,
     H3_MAP_DESCRIPTION,
@@ -30,12 +31,10 @@ from osm_polygon_description_tag.dataset.geography import (
     render_map_block,
 )
 from osm_polygon_description_tag.dataset.geography.card import (
-    _atomic_write_template,
     _template_with_map_markers,
     _validate_marker_counts,
     write_map_block_marker_to_template,
 )
-from osm_polygon_description_tag.dataset.reporting import generate_dataset_docs
 from osm_polygon_description_tag.runtime.resources import dataset_card_template
 from osm_polygon_description_tag.workflow.orchestrator import build_metadata_only_upload_plan
 from tests.conftest import make_record_dict
@@ -230,7 +229,7 @@ def test_generation_installs_map_block_with_correct_relative_path(
         lambda: _stub_map_block(),
         raising=False,
     )
-    # Patch the dataset.reporting module to also use a stub for the PNG.
+    # Patch the dataset.docs module to also use a stub for the PNG.
     monkeypatch.setattr(
         "osm_polygon_description_tag.dataset.docs.render_density_map",
         lambda counts, output_path: None,
@@ -708,7 +707,7 @@ def test_write_map_block_marker_requires_both_markers_before_noop() -> None:
 
     with (
         patch.object(card_module, "_template_with_map_markers", return_value="new") as build,
-        patch.object(card_module, "_atomic_write_template") as write,
+        patch.object(card_module, "atomic_write_text") as write,
     ):
         write_map_block_marker_to_template(template, asset_relative_path="asset.png")
 
@@ -734,15 +733,26 @@ def test_template_with_map_markers_requires_the_stats_marker() -> None:
         _template_with_map_markers("before", "assets/map.png")
 
 
-def test_atomic_write_template_writes_utf8_bytes_and_leaves_no_temp_file(
+def test_write_map_block_marker_writes_utf8_bytes_and_leaves_no_temp_file(
     tmp_path: Path,
 ) -> None:
     template = tmp_path / "README.md"
-    template.write_text("old", encoding="utf-8")
+    template.write_text(
+        "café\n<!-- GENERATED:STATS:START -->\nx\n<!-- GENERATED:STATS:END -->\n",
+        encoding="utf-8",
+    )
 
-    _atomic_write_template(template, "café\n")
+    write_map_block_marker_to_template(template)
 
-    assert template.read_bytes() == "café\n".encode()
+    block = (
+        f"{H3_MAP_START_MARKER}\n"
+        f"![{H3_MAP_TITLE}]({H3_MAP_ASSET_RELATIVE_PATH})\n"
+        f"{H3_MAP_END_MARKER}\n"
+    )
+    expected = (
+        "café\n" + block + "<!-- GENERATED:STATS:START -->\nx\n<!-- GENERATED:STATS:END -->\n"
+    )
+    assert template.read_bytes() == expected.encode("utf-8")
     assert sorted(path.name for path in tmp_path.glob(".*")) == []
 
 

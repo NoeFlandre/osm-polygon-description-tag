@@ -14,7 +14,7 @@ from osm_polygon_description_tag.dataset.manifest import (
     source_identity_for,
     write_manifest,
 )
-from osm_polygon_description_tag.dataset.reporting import collect_stats
+from osm_polygon_description_tag.dataset.stats import collect_stats
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from tests.conftest import make_record_dict
 

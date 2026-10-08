@@ -7,10 +7,11 @@ import pytest
 from osm_polygon_description_tag import dataset as dataset_package
 from osm_polygon_description_tag import publication as legacy_publication
 from osm_polygon_description_tag.dataset import deduplication as dataset_deduplication
+from osm_polygon_description_tag.dataset import docs as dataset_docs
 from osm_polygon_description_tag.dataset import manifest as dataset_manifest
 from osm_polygon_description_tag.dataset import migration as dataset_migration
-from osm_polygon_description_tag.dataset import reporting as dataset_reporting
 from osm_polygon_description_tag.dataset import schema as dataset_schema
+from osm_polygon_description_tag.dataset import stats as dataset_stats
 from osm_polygon_description_tag.dataset import storage as dataset_storage
 from osm_polygon_description_tag.dataset import text_migration as dataset_text_migration
 from osm_polygon_description_tag.dataset import transform as dataset_transform
@@ -50,10 +51,18 @@ def test_dataset_package_exports_exact_stable_module_api() -> None:
         dataset_migration,
         dataset_text_migration,
         dataset_deduplication,
-        dataset_reporting,
+        dataset_stats,
+        dataset_docs,
     )
     intended_package_exports = set().union(*(module.__all__ for module in canonical_modules))
-    intended_package_exports -= {"GEOD", "utc_now_iso"}
+    intended_package_exports -= {
+        "GEOD",
+        "utc_now_iso",
+        # Public in stats/docs but never part of the package-level API.
+        "STATS_SCHEMA_VERSION",
+        "TEXT_REJECTION_REASONS",
+        "card_has_stats_block",
+    }
     assert set(dataset_package.__all__) == intended_package_exports
     for name in dataset_package.__all__:
         defining_module = next(module for module in canonical_modules if name in module.__all__)

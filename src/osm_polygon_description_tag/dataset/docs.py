@@ -104,11 +104,6 @@ def _atomic_write_if_changed(path: Path, data: bytes) -> bool:
     return True
 
 
-def _write_if_changed(path: Path, text: str) -> bool:
-    """Atomically write UTF-8 text only when the destination bytes differ."""
-    return _atomic_write_if_changed(path, utf8_bytes(text))
-
-
 def _fmt_int(value: int) -> str:
     return f"{value:,}"
 
@@ -610,8 +605,10 @@ def _write_dataset_docs(
         raise ReportingError(f"template missing GENERATED:STATS markers: {template_path}")
     readme = _update_stats_block(source, stats, stats_sha256)
     readme = _update_map_block(readme, _render_h3_map_block())
-    _write_if_changed(data_root / "stats.json", stats_json)
-    _write_if_changed(data_root / "README.md", readme)
+    stats_bytes = utf8_bytes(stats_json)
+    readme_bytes = utf8_bytes(readme)
+    _atomic_write_if_changed(data_root / "stats.json", stats_bytes)
+    _atomic_write_if_changed(data_root / "README.md", readme_bytes)
 
 
 def generate_dataset_docs(

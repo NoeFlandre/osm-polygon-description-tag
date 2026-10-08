@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-import os
-import tempfile
 from pathlib import Path
 from typing import Any, Final
 
+from osm_polygon_description_tag.runtime.atomic import atomic_write_via
+
 PNG_METADATA_SOFTWARE: Final[str] = "osm-polygon-description-tag"
+
+
+class _IdenticalOutputError(Exception):
+    """Raised inside the producer when the render matches the existing file."""
 
 
 def atomic_save_png(fig: Any, output_path: Path) -> None:
@@ -17,35 +21,21 @@ def atomic_save_png(fig: Any, output_path: Path) -> None:
     replacement, and removed on every code path. Byte-identical output keeps
     the existing file so deterministic reruns preserve its mtime and inode.
     """
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(
-        prefix=f".{output_path.name}.",
-        suffix=".tmp",
-        dir=str(output_path.parent),
-    )
-    os.close(fd)
-    tmp_path = Path(tmp_name)
-    try:
+
+    def render(temp_path: Path) -> None:
         fig.savefig(
-            str(tmp_path),
+            str(temp_path),
             format="png",
             facecolor="white",
             metadata={"Software": PNG_METADATA_SOFTWARE},
         )
-        with tmp_path.open("rb") as handle:
-            os.fsync(handle.fileno())
-        if output_path.exists() and output_path.read_bytes() == tmp_path.read_bytes():
-            tmp_path.unlink()
-            return
-        tmp_path.replace(output_path)
-        directory_fd = os.open(str(output_path.parent), os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
+        if output_path.exists() and output_path.read_bytes() == temp_path.read_bytes():
+            raise _IdenticalOutputError
+
+    try:
+        atomic_write_via(output_path, render)
+    except _IdenticalOutputError:
+        return
 
 
 __all__ = ["PNG_METADATA_SOFTWARE", "atomic_save_png"]

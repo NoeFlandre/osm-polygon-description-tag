@@ -1,6 +1,7 @@
 """Behavioral coverage for the bounded GeoParquet validation helpers."""
 
 import json
+import os
 from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
@@ -815,17 +816,13 @@ def test_fsync_dir_uses_the_owned_directory_and_closes_the_fd(
         opened.append((path, flags))
         return 17
 
-    monkeypatch.setattr(
-        storage.os,
-        "open",
-        open_directory,
-    )
-    monkeypatch.setattr(storage.os, "fsync", lambda fd: synced.append(fd))
-    monkeypatch.setattr(storage.os, "close", lambda fd: closed.append(fd))
+    monkeypatch.setattr(os, "open", open_directory)
+    monkeypatch.setattr(os, "fsync", lambda fd: synced.append(fd))
+    monkeypatch.setattr(os, "close", lambda fd: closed.append(fd))
 
     _fsync_dir(tmp_path)
 
-    assert opened == [(str(tmp_path), storage.os.O_RDONLY)]
+    assert opened == [(str(tmp_path), os.O_RDONLY)]
     assert synced == [17]
     assert closed == [17]
 
@@ -848,10 +845,14 @@ def test_write_geoparquet_uses_contract_writer_options_and_default_batch_size(
         patch.object(storage.pq, "ParquetWriter", return_value=writer) as writer_factory,
         patch.object(storage, "_stream_records", return_value=summary) as stream,
         patch.object(storage, "_stream_rewrite_with_metadata") as rewrite,
-        patch.object(storage, "_fsync_path") as fsync_path,
+        patch.object(storage, "fsync_file") as fsync_file,
         patch.object(storage, "_fsync_dir") as fsync_dir,
-        patch.object(storage.os, "replace") as replace,
+        patch.object(os, "replace") as replace,
     ):
+        ordered = Mock()
+        ordered.attach_mock(fsync_file, "fsync_file")
+        ordered.attach_mock(replace, "replace")
+        ordered.attach_mock(fsync_dir, "fsync_dir")
         assert write_geoparquet(records, target, validator=validator) == 7
 
     writer_factory.assert_called_once_with(
@@ -868,9 +869,16 @@ def test_write_geoparquet_uses_contract_writer_options_and_default_batch_size(
         bbox=[],
     )
     validator.assert_called_once_with(temp_final)
-    fsync_path.assert_called_once_with(temp_final)
+    fsync_file.assert_called_once_with(temp_final)
     fsync_dir.assert_called_once_with(tmp_path)
     replace.assert_called_once_with(temp_final, target)
+    # The directory entry only becomes durable after the rename, so the
+    # directory fsync must come last.
+    assert ordered.mock_calls == [
+        call.fsync_file(temp_final),
+        call.replace(temp_final, target),
+        call.fsync_dir(tmp_path),
+    ]
 
 
 def test_stream_rewrite_passes_exact_metadata_writer_options(
