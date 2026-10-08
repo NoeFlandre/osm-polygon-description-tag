@@ -28,6 +28,7 @@ from osm_polygon_description_tag.dataset.canonical_rows import (
     select_canonical_row,
 )
 from osm_polygon_description_tag.dataset.constants import DEFAULT_ARROW_BATCH_SIZE
+from osm_polygon_description_tag.dataset.duckdb_runtime import open_data_connection
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     file_sha256,
@@ -433,7 +434,7 @@ def _stage_changes(
 ) -> tuple[list[dict[str, Any]], int]:
     changed: list[dict[str, Any]] = []
     output_rows = 0
-    connection = duckdb.connect()
+    connection = open_data_connection(context.data_root)
     try:
         _canonical_relation(connection, context.parquets)
         _assert_known_sources(connection, context.manifests)
