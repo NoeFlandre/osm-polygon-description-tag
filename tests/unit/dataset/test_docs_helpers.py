@@ -7,8 +7,12 @@ from pathlib import Path
 from unittest.mock import Mock, call, patch
 
 import pytest
+from shapely.geometry import Polygon
 
 import osm_polygon_description_tag.dataset.docs as docs_module
+from osm_polygon_description_tag.runtime.resources import dataset_card_template
+from tests.conftest import make_record_dict
+from tests.helpers.dataset import write_finalized_dataset
 from tests.helpers.messages import exactly
 
 
@@ -754,3 +758,79 @@ def test_generate_dataset_docs_has_no_clock_parameter() -> None:
 
     assert "clock" not in parameters
     assert list(parameters) == ["data_root", "template_path", "preserve_existing"]
+
+
+def _finalized_data_root(tmp_path: Path) -> Path:
+    data_root = tmp_path / "generated"
+    write_finalized_dataset(
+        data_root,
+        tmp_path / "raw",
+        {
+            "alpha": [
+                make_record_dict(
+                    Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+                    {"name": "Alpha", "description": "First"},
+                    osm_id=1,
+                    source_pbf="alpha.osm.pbf",
+                )
+            ]
+        },
+    )
+    return data_root
+
+
+def test_card_source_reads_the_published_card_only_when_preserving(tmp_path: Path) -> None:
+    template = tmp_path / "template.md"
+    template.write_text("template\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("published\n", encoding="utf-8")
+
+    assert docs_module._card_source(tmp_path, template, preserve_existing=True) == (
+        "published\n",
+        True,
+    )
+    assert docs_module._card_source(tmp_path, template, preserve_existing=False) == (
+        "template\n",
+        False,
+    )
+
+
+def test_card_source_falls_back_to_the_template_when_no_published_card_exists(
+    tmp_path: Path,
+) -> None:
+    template = tmp_path / "template.md"
+    template.write_text("template\n", encoding="utf-8")
+
+    assert docs_module._card_source(tmp_path, template, preserve_existing=True) == (
+        "template\n",
+        False,
+    )
+
+
+def test_generate_dataset_docs_preserve_existing_inserts_stats_into_published_card(
+    tmp_path: Path,
+) -> None:
+    data_root = _finalized_data_root(tmp_path)
+    (data_root / "README.md").write_text(
+        "---\nlicense: mit\n---\n\nPublished prose that must survive.\n", encoding="utf-8"
+    )
+
+    docs_module.generate_dataset_docs(data_root, dataset_card_template(), preserve_existing=True)
+
+    readme = (data_root / "README.md").read_text(encoding="utf-8")
+    assert readme.startswith("---\nlicense: mit\n---\n")
+    assert "Published prose that must survive." in readme
+    assert docs_module._STATS_START_MARKER in readme
+
+
+def test_generate_dataset_docs_refuses_a_template_without_stats_markers(
+    tmp_path: Path,
+) -> None:
+    data_root = _finalized_data_root(tmp_path)
+    template = tmp_path / "template.md"
+    template.write_text("# Card without markers\n", encoding="utf-8")
+
+    with pytest.raises(
+        docs_module.ReportingError,
+        match=exactly(f"template missing GENERATED:STATS markers: {template}"),
+    ):
+        docs_module.generate_dataset_docs(data_root, template)
