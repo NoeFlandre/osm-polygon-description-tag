@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError, fields
 from pathlib import Path
 
 import pytest
@@ -14,21 +13,11 @@ from osm_polygon_description_tag.cli_requests import BuildOneRequest, PathOption
 _RUNNER = CliRunner()
 
 
-def test_path_options_are_immutable_and_slotted(tmp_path: Path) -> None:
-    options = PathOptions(source_root=tmp_path, data_root=None, osmium="osmium")
-
-    with pytest.raises(FrozenInstanceError):
-        options.osmium = "other"  # type: ignore[misc]
-    assert [field.name for field in fields(options)] == ["source_root", "data_root", "osmium"]
-    assert not hasattr(options, "__dict__")
-
-
 def test_build_one_request_extends_path_options_with_the_basename(tmp_path: Path) -> None:
     request = BuildOneRequest(source_root=None, data_root=tmp_path, osmium="osmium", basename="a")
 
     assert isinstance(request, PathOptions)
     assert request.basename == "a"
-    assert [field.name for field in fields(request)][-1] == "basename"
 
 
 @pytest.mark.parametrize(

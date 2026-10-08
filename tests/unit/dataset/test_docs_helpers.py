@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 from pathlib import Path
 from unittest.mock import Mock, call, patch
@@ -748,22 +749,8 @@ def test_malformed_marker_refusals_state_their_whole_message() -> None:
         )
 
 
-def test_generate_dataset_docs_still_accepts_and_ignores_the_deprecated_clock(
-    tmp_path: Path,
-) -> None:
-    template = tmp_path / "template.md"
+def test_generate_dataset_docs_has_no_clock_parameter() -> None:
+    parameters = inspect.signature(docs_module.generate_dataset_docs).parameters
 
-    def clock() -> str:
-        raise AssertionError("the deprecated clock must never be called")
-
-    with (
-        patch.object(docs_module, "collect_stats", return_value={"rows": 1}) as collect,
-        patch.object(docs_module, "_read_json_object", return_value={}),
-        patch.object(docs_module, "_ensure_h3_map", return_value=("h3", 1)),
-        patch.object(docs_module, "_ensure_area_histogram", return_value=("area", 1)),
-        patch.object(docs_module, "_write_dataset_hero"),
-        patch.object(docs_module, "_write_dataset_docs"),
-    ):
-        docs_module.generate_dataset_docs(tmp_path, template, clock=clock)
-
-    collect.assert_called_once_with(tmp_path)
+    assert "clock" not in parameters
+    assert list(parameters) == ["data_root", "template_path", "preserve_existing"]
