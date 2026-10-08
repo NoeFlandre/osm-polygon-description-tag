@@ -260,12 +260,23 @@ def _heal_interrupted_repair(manifest: Manifest, parquet: Path, manifest_path: P
     The text is already canonical by then, so the rows the interrupted run
     dropped are the gap between the recorded count and the Parquet's rows.
     That gap is recorded under the same reason a live repair uses.
+
+    The counts are reconciled whenever they disagree, even when the identity
+    already matches: an earlier heal that refreshed only the identity leaves
+    the stale ``included_rows`` beside a current identity. A Parquet with more
+    rows than the manifest records cannot be a drop of the recorded file, so
+    it is refused before either file is written.
     """
-    identity = output_identity_for(parquet)
-    if manifest.output == identity:
+    rows = _row_count(parquet)
+    recorded = manifest.counts.included_rows
+    if manifest.output == output_identity_for(parquet) and recorded == rows:
         return 0
-    dropped = max(0, manifest.counts.included_rows - _row_count(parquet))
-    write_manifest(_repaired_manifest(manifest, parquet, dropped), manifest_path)
+    if rows > recorded:
+        raise TextMigrationError(
+            f"cannot reconcile {parquet}: the Parquet has {rows} rows "
+            f"but the manifest records {recorded}"
+        )
+    write_manifest(_repaired_manifest(manifest, parquet, recorded - rows), manifest_path)
     return 1
 
 
