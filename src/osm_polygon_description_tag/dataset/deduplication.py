@@ -452,6 +452,18 @@ def _stage_changes(
     return changed, output_rows
 
 
+def _stage_changes_or_discard(
+    context: _DeduplicationContext,
+    stage_root: Path,
+) -> tuple[list[dict[str, Any]], int]:
+    try:
+        return _stage_changes(context, stage_root)
+    except BaseException:
+        # No state references this directory yet, so nothing can resume it.
+        shutil.rmtree(stage_root, ignore_errors=True)
+        raise
+
+
 def _state_payload(
     context: _DeduplicationContext,
     changed: list[dict[str, Any]],
@@ -511,12 +523,7 @@ def deduplicate_dataset(
     stage_token = uuid.uuid4().hex
     stage_dir = Path(".work") / "dedup" / stage_token
     stage_root = data_root / stage_dir
-    try:
-        changed, output_rows = _stage_changes(context, stage_root)
-    except BaseException:
-        # No state references this directory yet, so nothing can resume it.
-        shutil.rmtree(stage_root, ignore_errors=True)
-        raise
+    changed, output_rows = _stage_changes_or_discard(context, stage_root)
     state_payload = _state_payload(context, changed, output_rows)
     return _finish_deduplication(
         context,
