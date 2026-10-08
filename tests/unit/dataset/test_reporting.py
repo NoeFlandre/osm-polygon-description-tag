@@ -440,6 +440,12 @@ def test_collect_stats_rejects_final_artifact_without_successful_text(
     assert stats["area_m2_count"] == 0
 
 
+def test_collect_stats_refuses_an_injected_clock(tmp_path: Path) -> None:
+    """Stats are factual and carry no timestamp, so a caller cannot inject a clock."""
+    with pytest.raises(TypeError, match=r"got an unexpected keyword argument 'clock'"):
+        collect_stats(tmp_path, clock=lambda: "now")
+
+
 def test_generate_dataset_docs_installs_hero_image(tmp_path: Path) -> None:
     data_root = tmp_path / "generated"
     source_root = tmp_path / "raw"
