@@ -525,6 +525,52 @@ def test_resume_after_a_crash_that_dropped_rows_records_the_drop(
     assert migrate_dataset_text(data_root) == 0
 
 
+def test_a_heal_reconciles_counts_when_the_identity_already_matches(tmp_path: Path) -> None:
+    """An identity-only heal leaves stale counts beside a matching identity.
+
+    A crash that dropped a row, followed by a heal that only rewrote the output
+    identity, leaves a manifest whose identity matches the Parquet while
+    ``included_rows`` still counts the dropped row. The counts must be
+    reconciled even though the identity needs no change.
+    """
+    data_root, parquet, manifest_path = _prepare(tmp_path, [_row(1, "Kept"), _row(2, "Kept too")])
+    _write_parquet(parquet, [_row(1, "Kept")])
+    _write_manifest(manifest_path, parquet, included_rows=2)
+
+    assert migrate_dataset_text(data_root) == 1
+
+    counts = read_manifest(manifest_path).counts
+    assert counts.included_rows == pq.ParquetFile(parquet).metadata.num_rows == 1
+    assert counts.rejections == {text_migration.REJECTION_REASON: 1}
+    validate_finalized_artifacts(data_root)
+    assert migrate_dataset_text(data_root) == 0
+
+
+@pytest.mark.parametrize(
+    "identity_matches", [True, False], ids=["identity-matches", "identity-stale"]
+)
+def test_a_heal_refuses_a_parquet_with_more_rows_than_the_manifest_records(
+    tmp_path: Path, identity_matches: bool
+) -> None:
+    """More rows than recorded cannot come from dropping rows, so nothing is written."""
+    data_root, parquet, manifest_path = _prepare(tmp_path, [_row(1, "Kept"), _row(2, "Kept too")])
+    _write_manifest(manifest_path, parquet, included_rows=1)
+    if not identity_matches:
+        healthy = read_manifest(manifest_path)
+        write_manifest(
+            replace(healthy, output=replace(healthy.output, sha256="c" * 64)),
+            manifest_path,
+        )
+    manifest_before = manifest_path.read_bytes()
+    parquet_before = parquet.read_bytes()
+
+    with pytest.raises(TextMigrationError, match=re.escape(str(parquet))):
+        migrate_dataset_text(data_root)
+
+    assert manifest_path.read_bytes() == manifest_before
+    assert parquet.read_bytes() == parquet_before
+
+
 def test_the_migration_probe_reads_only_the_text_columns_in_bounded_batches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
