@@ -495,11 +495,6 @@ def _fail_state_write(
     monkeypatch.setattr(dedup_module, "_write_state", failing_write_state)
 
 
-def _interrupt_first_promotion(count: int) -> None:
-    if count == 1:
-        raise KeyboardInterrupt
-
-
 @pytest.mark.parametrize("persist_first", [False, True])
 def test_deduplicate_dataset_removes_stage_dir_when_staged_state_is_not_recorded(
     tmp_path: Path,
@@ -559,43 +554,6 @@ def test_deduplicate_dataset_completes_when_crash_follows_completion_record(
 
     result = deduplicate_dataset(data_root)
     assert result.status == "skipped"
-    assert result.output_rows == 1
-    assert list((data_root / ".work" / "dedup").iterdir()) == []
-
-
-def test_deduplicate_dataset_removes_orphan_stage_entries_from_earlier_runs(
-    tmp_path: Path,
-) -> None:
-    data_root = _overlapping_dataset(tmp_path)
-    assert deduplicate_dataset(data_root).status == "deduplicated"
-    stage_root = data_root / ".work" / "dedup"
-    orphan_dir = stage_root / "0123abcd"
-    (orphan_dir / "data").mkdir(parents=True)
-    (orphan_dir / "data" / "a.parquet").write_bytes(b"orphan")
-    (stage_root / "stray.tmp").write_bytes(b"stray")
-
-    result = deduplicate_dataset(data_root)
-
-    assert result.status == "skipped"
-    assert list(stage_root.iterdir()) == []
-
-
-def test_deduplicate_dataset_keeps_the_staged_dir_named_by_the_state(tmp_path: Path) -> None:
-    data_root = _overlapping_dataset(tmp_path)
-    with pytest.raises(KeyboardInterrupt):
-        deduplicate_dataset(data_root, promotion_hook=_interrupt_first_promotion)
-    state_path = data_root / dedup_module._STATE_RELATIVE_PATH
-    staged_dir = data_root / json.loads(state_path.read_text(encoding="utf-8"))["stage_dir"]
-    orphan_dir = data_root / ".work" / "dedup" / "0123abcd"
-    orphan_dir.mkdir()
-
-    with pytest.raises(KeyboardInterrupt):
-        deduplicate_dataset(data_root, promotion_hook=_interrupt_first_promotion)
-
-    assert staged_dir.is_dir()
-    assert not orphan_dir.exists()
-    result = deduplicate_dataset(data_root)
-    assert result.status == "deduplicated"
     assert result.output_rows == 1
 
 

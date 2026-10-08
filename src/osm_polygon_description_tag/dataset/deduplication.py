@@ -241,7 +241,23 @@ def _promote_staged(
             promotion_hook=promotion_hook,
             promoted=promoted,
         )
-    shutil.rmtree(stage_dir)
+
+
+def _remove_path(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def _remove_stage_dir(data_root: Path, state: Mapping[str, Any]) -> None:
+    """Remove the staged directory only after the complete state is recorded.
+
+    A crash between the two leaves an orphan that the next run's sweep removes.
+    """
+    stage_name = state.get("stage_dir")
+    if stage_name is not None:
+        _remove_path(data_root / str(stage_name))
 
 
 def _resume_staged(
@@ -258,6 +274,7 @@ def _resume_staged(
     complete.pop("stage_dir", None)
     complete["outputs"] = _promoted_output_hashes(current_inputs, _staged_output_hashes(state))
     _write_state(state_path, complete)
+    _remove_stage_dir(data_root, state)
     return DeduplicationResult(
         status="deduplicated",
         input_rows=int(state["input_rows"]),
