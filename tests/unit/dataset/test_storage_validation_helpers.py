@@ -640,6 +640,7 @@ def test_validate_manifest_pair_reads_the_expected_path_and_checks_identity(
             storage, "output_identity_for", return_value=expected_identity
         ) as output_identity,
         patch.object(storage, "is_resumable", return_value=True) as is_resumable,
+        patch.object(storage, "_validate_manifest_included_rows"),
     ):
         assert (
             _validate_manifest_pair(parquet, manifests_dir, require_current_contract=True)

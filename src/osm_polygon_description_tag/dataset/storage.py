@@ -865,7 +865,8 @@ def validate_finalized_artifacts(
 
     The validation is intentionally minimal: it only checks that every
     Parquet has a matching, parseable, schema-current manifest whose
-    output identity matches the Parquet. It does NOT call
+    output identity matches the Parquet and whose ``included_rows`` equals
+    the Parquet's row count. It does NOT call
     :func:`validate_geoparquet`; that stricter byte-level validation is
     performed separately, downstream, when the artifact is loaded. Callers
     that report whether an artifact set matches the current dataset contract
@@ -944,6 +945,7 @@ def _validate_manifest_pair_record(
     _validate_current_manifest_contract(
         manifest, output_identity, manifest_path, require_current_contract
     )
+    _validate_manifest_included_rows(parquet, manifest)
     return _ValidatedManifestPair(manifest_path, manifest)
 
 
@@ -976,6 +978,30 @@ def _validate_paired_output(
 ) -> None:
     if manifest.output != output_identity:
         raise StorageError(f"stale output identity for {parquet.name}")
+
+
+def _validate_manifest_included_rows(parquet: Path, manifest: Manifest) -> None:
+    """Reject a manifest whose recorded ``included_rows`` disagree with the Parquet.
+
+    Every writer records the rows it kept in the Parquet it finalized, so a
+    finalized pair always agrees. A disagreement means the counts describe a
+    different file than the one on disk, such as a repair interrupted after the
+    Parquet was promoted and before its manifest was rewritten.
+    """
+    rows = _read_parquet_row_count(parquet)
+    if rows != manifest.counts.included_rows:
+        raise StorageError(
+            f"manifest row count mismatch for {parquet.name}: "
+            f"recorded {manifest.counts.included_rows}, found {rows}"
+        )
+
+
+def _read_parquet_row_count(parquet: Path) -> int:
+    try:
+        with contextlib.closing(pq.ParquetFile(parquet)) as reader:
+            return reader.metadata.num_rows
+    except (OSError, pa.ArrowException) as error:
+        raise StorageError(f"cannot read finalized artifact {parquet}: {error}") from error
 
 
 def _validate_supported_manifest_version(manifest: Manifest) -> None:

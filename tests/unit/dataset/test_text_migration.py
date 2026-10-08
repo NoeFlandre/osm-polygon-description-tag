@@ -29,7 +29,10 @@ from osm_polygon_description_tag.dataset.manifest import (
     write_manifest,
 )
 from osm_polygon_description_tag.dataset.schema import SCHEMA, SCHEMA_VERSION
-from osm_polygon_description_tag.dataset.storage import validate_geoparquet
+from osm_polygon_description_tag.dataset.storage import (
+    validate_finalized_artifacts,
+    validate_geoparquet,
+)
 from osm_polygon_description_tag.dataset.text_migration import (
     TextMigrationError,
     migrate_dataset_text,
@@ -518,6 +521,7 @@ def test_resume_after_a_crash_that_dropped_rows_records_the_drop(
     counts = read_manifest(manifest_path).counts
     assert counts.included_rows == pq.ParquetFile(parquet).metadata.num_rows == 1
     assert counts.rejections == {text_migration.REJECTION_REASON: 1}
+    validate_finalized_artifacts(data_root)
     assert migrate_dataset_text(data_root) == 0
 
 
