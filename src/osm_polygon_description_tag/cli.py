@@ -10,6 +10,7 @@ import os
 import sys
 import uuid
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from importlib.metadata import version as package_version
 from pathlib import Path
 from types import SimpleNamespace
@@ -105,9 +106,14 @@ Osmium = Annotated[
 
 _DISTRIBUTION = "osm-polygon-description-tag"
 
-# stderr threshold for human-readable event lines, set by -v / -q. The JSONL
-# log always records every event.
-_verbosity = SimpleNamespace(stderr_level="INFO")
+
+@dataclass
+class _GlobalOptions:
+    """Root-callback options for one invocation, stored on that invocation's Click context."""
+
+    # stderr threshold for human-readable event lines, set by -v / -q. The JSONL
+    # log always records every event.
+    stderr_level: str = "INFO"
 
 
 def _show_version(value: bool) -> None:
@@ -118,6 +124,7 @@ def _show_version(value: bool) -> None:
 
 @app.callback()
 def _global_options(
+    ctx: typer.Context,
     version: Annotated[  # noqa: ARG001 - consumed by its eager callback
         bool,
         typer.Option(
@@ -140,7 +147,7 @@ def _global_options(
     """Build, validate and publish the OSM polygon description-tag dataset."""
     if verbose and quiet:
         raise UsageError("--verbose and --quiet cannot be combined")
-    _verbosity.stderr_level = "DEBUG" if verbose else "WARNING" if quiet else "INFO"
+    ctx.obj = _GlobalOptions(stderr_level="DEBUG" if verbose else "WARNING" if quiet else "INFO")
 
 
 class _DataRootOption(Protocol):
@@ -425,7 +432,7 @@ def handle_run_and_publish(args: SimpleNamespace) -> None:
             buffer_preflight=True,
             stderr=sys.stderr,
             observer=presenter.observe,
-            stderr_level=_verbosity.stderr_level,
+            stderr_level=getattr(args, "stderr_level", "INFO"),
         )
         if presenter is not None
         else None
@@ -687,6 +694,7 @@ def release_stats_command(
     "--source-root /path/to/pbfs --data-root /path/to/data-root",
 )
 def run_and_publish_command(
+    ctx: typer.Context,
     confirm_repo: Annotated[
         str,
         typer.Option(
@@ -708,6 +716,7 @@ def run_and_publish_command(
                 osmium=osmium,
                 confirm_repo=confirm_repo,
                 presenter=presenter,
+                stderr_level=ctx.ensure_object(_GlobalOptions).stderr_level,
             ),
         )
     finally:
@@ -800,16 +809,13 @@ def _normalize_columns() -> None:
 
 
 def _invoke_app(argv: Sequence[str] | None) -> int:
-    try:
-        # Without standalone mode, Click returns an Exit's code instead of raising.
-        code = app(
-            args=list(argv) if argv is not None else None,
-            prog_name="osm-polygon-description-tag",
-            standalone_mode=False,
-        )
-    finally:
-        # -v / -q apply to one invocation only.
-        _verbosity.stderr_level = "INFO"
+    # Without standalone mode, Click returns an Exit's code instead of raising.
+    # -v / -q live on this invocation's Click context, so they end with it.
+    code = app(
+        args=list(argv) if argv is not None else None,
+        prog_name="osm-polygon-description-tag",
+        standalone_mode=False,
+    )
     return code if isinstance(code, int) else 0
 
 
