@@ -508,6 +508,22 @@ def test_write_dataset_docs_renders_stats_map_and_canonical_json(
     ]
 
 
+def test_write_dataset_docs_writes_non_ascii_text_as_utf8_bytes(tmp_path: Path) -> None:
+    """The real writers encode README and stats text as UTF-8 on disk."""
+    template = tmp_path / "template.md"
+    template.write_text(
+        "<!-- GENERATED:STATS:START -->\nold\n<!-- GENERATED:STATS:END -->\n",
+        encoding="utf-8",
+    )
+    stats = {"name": "café", "rows": 4}
+
+    with patch.object(docs_module, "_render_stats_block", return_value="café stats"):
+        docs_module._write_dataset_docs(tmp_path, template, stats)
+
+    assert b"caf\xc3\xa9 stats" in (tmp_path / "README.md").read_bytes()
+    assert b'"name": "caf\xc3\xa9"' in (tmp_path / "stats.json").read_bytes()
+
+
 def test_write_dataset_docs_rejects_templates_without_stats_markers(tmp_path: Path) -> None:
     template = tmp_path / "template.md"
     template.write_text("no generated block", encoding="utf-8")

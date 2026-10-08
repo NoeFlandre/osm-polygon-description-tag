@@ -8,7 +8,6 @@ production code.
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 
@@ -48,8 +47,21 @@ def test_publication_state_writer_emits_sorted_pretty_utf8_json(work_dir: Path) 
 
     state_module._atomic_write_json(target, payload)
 
-    expected = (json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode(
-        "utf-8"
+    expected = (
+        b"{\n"
+        b'  "name": "caf\xc3\xa9",\n'
+        b'  "nested": {\n'
+        b'    "a": {\n'
+        b'      "x": null,\n'
+        b'      "y": "\xc3\xa9"\n'
+        b"    },\n"
+        b'    "b": [\n'
+        b"      2,\n"
+        b"      1\n"
+        b"    ]\n"
+        b"  },\n"
+        b'  "zeta": 1\n'
+        b"}\n"
     )
     actual = target.read_bytes()
     assert actual == expected
@@ -88,20 +100,6 @@ def test_atomic_write_if_changed_different_bytes_replace_content(work_dir: Path)
 
     assert target.read_bytes() == b"new bytes"
     assert _names(work_dir) == ["out.bin"]
-
-
-def test_text_write_encodes_utf8_and_keeps_unchanged_file(work_dir: Path) -> None:
-    target = work_dir / "README.md"
-
-    assert docs_module._atomic_write_if_changed(target, "héllo".encode()) is True
-
-    assert target.read_bytes() == b"h\xc3\xa9llo"
-    _pin_mtime(target)
-    before = target.stat()
-    assert docs_module._atomic_write_if_changed(target, "héllo".encode()) is False
-    after = target.stat()
-    assert after.st_ino == before.st_ino
-    assert after.st_mtime_ns == before.st_mtime_ns
 
 
 def test_atomic_write_if_changed_failed_rename_keeps_old_bytes_and_no_temp_file(
@@ -149,8 +147,9 @@ def test_write_map_block_marker_to_template_inserts_block_before_stats(work_dir:
 
 
 def test_write_map_block_marker_to_template_writes_crlf_input_back_as_lf(work_dir: Path) -> None:
-    # Current behaviour: the template is read with universal newlines, so a CRLF
-    # template is written back with LF endings. This pins that behaviour.
+    # KNOWN DEFECT (pinned, not desired): read_text in dataset/geography/card.py
+    # converts CRLF to LF, but the template should keep its bytes. A fix must
+    # change this test.
     template = work_dir / "card.md"
     template.write_bytes(_CARD_LF.replace("\n", "\r\n").encode("utf-8"))
 
