@@ -161,7 +161,7 @@ def write_map_block_marker_to_template(
     if start_count == 1 and end_count == 1:
         return
     new_text = _template_with_map_markers(text, asset_relative_path)
-    _atomic_write_template(template_path, new_text)
+    atomic_write_text(template_path, new_text)
 
 
 def _validate_marker_counts(start_count: int, end_count: int) -> None:
@@ -187,10 +187,6 @@ def _template_with_map_markers(text: str, asset_relative_path: str) -> str:
         f"{H3_MAP_END_MARKER}{newline}"
     )
     return text[: stats_match.start()] + block + text[stats_match.start() :]
-
-
-def _atomic_write_template(template_path: Path, new_text: str) -> None:
-    atomic_write_text(template_path, new_text)
 
 
 __all__ = [
