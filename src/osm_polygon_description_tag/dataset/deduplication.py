@@ -7,6 +7,7 @@ global pass over validated GeoParquets, keeps one canonical row for each
 
 from __future__ import annotations
 
+import contextlib
 import json
 import shutil
 import uuid
@@ -567,7 +568,10 @@ def _sweep_orphan_stage_entries(data_root: Path, state: Mapping[str, Any] | None
     referenced = _referenced_stage_name(state)
     for entry in list(stage_root.iterdir()):
         if entry.name != referenced:
-            _remove_path(entry)
+            # Best effort: an entry this process cannot remove, such as one owned by
+            # another uid, must not stop a run whose dataset state is already final.
+            with contextlib.suppress(OSError):
+                _remove_path(entry)
 
 
 def deduplicate_dataset(

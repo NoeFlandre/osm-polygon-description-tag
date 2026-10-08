@@ -5,6 +5,7 @@ import json
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
@@ -578,6 +579,34 @@ def test_deduplicate_dataset_removes_orphan_stage_entries_from_earlier_runs(
 
     assert result.status == "skipped"
     assert list(stage_root.iterdir()) == []
+
+
+def test_deduplicate_dataset_skips_orphan_stage_entries_it_cannot_remove(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = _overlapping_dataset(tmp_path)
+    assert deduplicate_dataset(data_root).status == "deduplicated"
+    stage_root = data_root / ".work" / "dedup"
+    orphan_dir = stage_root / "0123abcd"
+    (orphan_dir / "data").mkdir(parents=True)
+    (orphan_dir / "data" / "a.parquet").write_bytes(b"orphan owned by another uid")
+    (stage_root / "stray.tmp").write_bytes(b"stray")
+    real_rmtree = dedup_module.shutil.rmtree
+
+    def rmtree_refusing_orphan(path: Path, **kwargs: Any) -> None:
+        if path == orphan_dir:
+            raise PermissionError(13, "Permission denied", str(path))
+        real_rmtree(path, **kwargs)
+
+    monkeypatch.setattr(dedup_module.shutil, "rmtree", rmtree_refusing_orphan)
+
+    result = deduplicate_dataset(data_root)
+
+    assert result.status == "skipped"
+    assert result.output_rows == 1
+    assert orphan_dir.is_dir()
+    assert not (stage_root / "stray.tmp").exists()
 
 
 def test_deduplicate_dataset_keeps_the_staged_dir_named_by_the_state(tmp_path: Path) -> None:
