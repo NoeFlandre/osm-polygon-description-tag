@@ -39,6 +39,24 @@ def test_write_text_utf8_writes_utf8_bytes_in_place(tmp_path: Path) -> None:
     assert read_text_utf8(target) == "café\n"
 
 
+def test_read_text_utf8_uses_explicit_utf8_encoding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "in.txt"
+    target.write_bytes(b"x")
+    encodings: list[object] = []
+    real_read_text = Path.read_text
+
+    def spy(self: Path, *args: object, **kwargs: object) -> str:
+        encodings.append(kwargs.get("encoding"))
+        return real_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", spy)
+
+    assert read_text_utf8(target) == "x"
+    assert encodings == ["utf-8"]
+
+
 def test_write_text_utf8_uses_explicit_utf8_encoding(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
