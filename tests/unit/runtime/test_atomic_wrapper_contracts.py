@@ -90,17 +90,15 @@ def test_atomic_write_if_changed_different_bytes_replace_content(work_dir: Path)
     assert _names(work_dir) == ["out.bin"]
 
 
-def test_write_if_changed_text_wrapper_writes_utf8_and_keeps_unchanged_file(
-    work_dir: Path,
-) -> None:
+def test_text_write_encodes_utf8_and_keeps_unchanged_file(work_dir: Path) -> None:
     target = work_dir / "README.md"
 
-    assert docs_module._write_if_changed(target, "héllo") is True
+    assert docs_module._atomic_write_if_changed(target, "héllo".encode()) is True
 
     assert target.read_bytes() == b"h\xc3\xa9llo"
     _pin_mtime(target)
     before = target.stat()
-    assert docs_module._write_if_changed(target, "héllo") is False
+    assert docs_module._atomic_write_if_changed(target, "héllo".encode()) is False
     after = target.stat()
     assert after.st_ino == before.st_ino
     assert after.st_mtime_ns == before.st_mtime_ns
