@@ -536,11 +536,3 @@ def test_a_feature_spatial_row_disagreement_names_both_counts(
         match=exactly("feature/spatial row count mismatch: 3 != 99"),
     ):
         collect_stats(data_root)
-
-
-def test_reporting_facade_still_exports_the_runtime_clock() -> None:
-    from osm_polygon_description_tag.dataset import reporting
-    from osm_polygon_description_tag.runtime.time import utc_now_iso
-
-    assert reporting.utc_now_iso is utc_now_iso
-    assert "utc_now_iso" in reporting.__all__

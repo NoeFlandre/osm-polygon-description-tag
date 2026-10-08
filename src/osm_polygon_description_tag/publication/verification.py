@@ -64,6 +64,8 @@ def _authenticated_api() -> Any:
     api = new_hf_api()
     try:
         identity = api.whoami()
+    # Broad on purpose: whoami fails with HTTP, transport or token errors alike. All become one
+    # authentication failure, and the cause is chained.
     except Exception as error:
         raise HubVerificationError(f"Hub authentication failed: {error}") from error
     if not identity:
@@ -74,6 +76,8 @@ def _authenticated_api() -> Any:
 def _repository_revision(api: Any, repo_id: str) -> str:
     try:
         info = api.repo_info(repo_id, repo_type="dataset")
+    # Broad on purpose: any repo_info failure means the repository cannot be verified. The cause is
+    # chained.
     except Exception as error:
         raise HubVerificationError(
             f"Hub repository {repo_id} is not accessible: {error}"
@@ -97,6 +101,8 @@ def _paths_info(api: Any, repo_id: str, requested_paths: list[str], revision: st
                 repo_type="dataset",
             )
         )
+    # Broad on purpose: any batched path lookup failure leaves the remote state unverified. The
+    # cause is chained.
     except Exception as error:
         raise HubVerificationError(
             f"hub verification failed for {', '.join(requested_paths)}: {error}"
@@ -149,6 +155,8 @@ def _download_for_hash(
             item.relative_path,
             **download_kwargs,
         )
+    # Broad on purpose: download failures (HTTP, transport, cache I/O) all leave the content
+    # unverified. The cause is chained.
     except Exception as error:
         raise HubVerificationError(
             f"could not download {item.relative_path} from {repo_id}@{revision}: {error}"
@@ -229,6 +237,8 @@ def _read_file(repo_id: str, path: str, revision: str, cache_dir: Path | None) -
         )
         text = Path(local_path).read_bytes().decode()
         return text.replace("\r\n", "\n").replace("\r", "\n")
+    # Broad on purpose: the download and the UTF-8 decode fail in several ways. All become one read
+    # failure, and the cause is chained.
     except Exception as error:
         raise HubVerificationError(
             f"could not read {path} from {repo_id}@{revision}: {error}"
@@ -244,6 +254,8 @@ def _remote_inventory_paths(api: Any, repo_id: str, revision: str) -> set[str]:
                 repo_type="dataset",
             )
         )
+    # Broad on purpose: any inventory lookup failure leaves the revision unverified. The cause is
+    # chained.
     except Exception as error:
         raise HubVerificationError(
             f"hub inventory lookup failed at revision {revision}: {error}"

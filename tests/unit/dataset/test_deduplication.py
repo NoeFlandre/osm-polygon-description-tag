@@ -362,6 +362,25 @@ def test_deduplicate_dataset_rewrites_overlapping_rows_and_is_idempotent(tmp_pat
     assert second.output_rows == 2
 
 
+def test_deduplicate_dataset_spills_under_data_root_work_directory(tmp_path: Path) -> None:
+    data_root = tmp_path / "generated"
+    source_root = tmp_path / "raw"
+    (data_root / "data").mkdir(parents=True)
+    (data_root / "manifests").mkdir()
+    source_root.mkdir()
+    record = make_record_dict(
+        Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]),
+        {"description": "only"},
+        osm_id=1,
+        source_pbf="a.osm.pbf",
+    )
+    _write_source(data_root, source_root, "a", [record])
+
+    deduplicate_dataset(data_root)
+
+    assert (data_root / ".work" / "duckdb").is_dir()
+
+
 def test_deduplicate_dataset_resumes_after_promotion_interrupt(tmp_path: Path) -> None:
     data_root = tmp_path / "generated"
     source_root = tmp_path / "raw"

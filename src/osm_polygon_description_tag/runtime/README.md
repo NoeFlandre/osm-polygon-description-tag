@@ -8,8 +8,7 @@ Provide the canonical boundary for process-wide runtime support.
 
 This package owns approved path configuration, packaged-resource lookup, operational logging,
 interactive terminal presentation, and safe cleanup of abandoned application-owned temporary
-files. It also provides the shared UTC timestamp helper used by dataset reporting and workflow
-manifests.
+files. It also provides the shared UTC timestamp helper used by workflow manifests.
 
 ## Non-responsibilities
 

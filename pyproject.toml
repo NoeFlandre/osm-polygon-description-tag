@@ -113,7 +113,7 @@ max-complexity = 10
 
 [tool.ruff.lint.pylint]
 # Keyword-heavy builders are the norm here; the modules that already exceed the
-# bound are listed under per-file-ignores until each is reshaped (TODO(#62)).
+# bound are listed under per-file-ignores until each is reshaped (TODO(#141)).
 max-args = 8
 
 [tool.ruff.lint.per-file-ignores]
@@ -123,21 +123,22 @@ max-args = 8
 # Test fakes and lambdas mirror real signatures and names (trackio's Table,
 # HfApi classes), so unused arguments, pass-through lambdas and those names
 # are intentional there.
-"tests/**" = ["ARG", "PLW0108", "N802", "N806", "N818", "PLR0913"] # TODO(#62): remove blanket suppression.
-# Signatures that predate the argument-count bound (TODO(#62): reshape, then delete).
-"src/osm_polygon_description_tag/dataset/languages/worker.py" = ["PLR0913"] # TODO(#62)
-"src/osm_polygon_description_tag/grid_workflow.py" = ["PLR0913"] # TODO(#62)
-"src/osm_polygon_description_tag/language_cli.py" = ["PLR0913"] # TODO(#62)
-"src/osm_polygon_description_tag/publication/state.py" = ["PLR0913"] # TODO(#62)
-"src/osm_polygon_description_tag/workflow/build.py" = ["PLR0913"] # TODO(#62)
-"src/osm_polygon_description_tag/workflow/finalization.py" = ["PLR0913"] # TODO(#62)
-"src/osm_polygon_description_tag/workflow/grid_operator/bundle.py" = ["PLR0913"] # TODO(#62)
-"src/osm_polygon_description_tag/workflow/grid_operator/script.py" = ["PLR0913"] # TODO(#62)
-"src/osm_polygon_description_tag/workflow/grid_operator/stage.py" = ["PLR0913"] # TODO(#62)
-"src/osm_polygon_description_tag/workflow/grid_operator/submission.py" = ["PLR0913"] # TODO(#62)
-"src/osm_polygon_description_tag/workflow/grid_policy.py" = ["PLR0913"] # TODO(#62)
-"src/osm_polygon_description_tag/workflow/orchestrator.py" = ["PLR0913"] # TODO(#62)
-"src/osm_polygon_description_tag/workflow/source_runner.py" = ["PLR0913"] # TODO(#62)
+"tests/**" = ["ARG", "PLW0108", "N802", "N806", "N818"]
+# Signatures still over the argument-count bound (max-args 8). Reshaping them is
+# tracked in #141; delete each entry once its signature passes.
+"src/osm_polygon_description_tag/dataset/languages/worker.py" = ["PLR0913"] # TODO(#141)
+"src/osm_polygon_description_tag/grid_workflow.py" = ["PLR0913"] # TODO(#141)
+"src/osm_polygon_description_tag/language_cli.py" = ["PLR0913"] # TODO(#141)
+"src/osm_polygon_description_tag/publication/state.py" = ["PLR0913"] # TODO(#141)
+"src/osm_polygon_description_tag/workflow/build.py" = ["PLR0913"] # TODO(#141)
+"src/osm_polygon_description_tag/workflow/finalization.py" = ["PLR0913"] # TODO(#141)
+"src/osm_polygon_description_tag/workflow/grid_operator/bundle.py" = ["PLR0913"] # TODO(#141)
+"src/osm_polygon_description_tag/workflow/grid_operator/script.py" = ["PLR0913"] # TODO(#141)
+"src/osm_polygon_description_tag/workflow/grid_operator/stage.py" = ["PLR0913"] # TODO(#141)
+"src/osm_polygon_description_tag/workflow/grid_operator/submission.py" = ["PLR0913"] # TODO(#141)
+"src/osm_polygon_description_tag/workflow/grid_policy.py" = ["PLR0913"] # TODO(#141)
+"src/osm_polygon_description_tag/workflow/orchestrator.py" = ["PLR0913"] # TODO(#141)
+"src/osm_polygon_description_tag/workflow/source_runner.py" = ["PLR0913"] # TODO(#141)
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "typer._click".msg = "Private Typer module; import from osm_polygon_description_tag.runtime.click_compat."
