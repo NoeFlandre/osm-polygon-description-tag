@@ -9,6 +9,8 @@ Provide the canonical boundary for constructing and validating dataset artifacts
 Own the versioned Arrow and GeoParquet schema, record transformation, atomic storage, manifests,
 global identity deduplication, artifact-derived statistics, and deterministic dataset-card
 generation. Statistics live in `stats.py`; documentation and derived media live in `docs.py`.
+Verification of finalized outputs against their manifests and raw sources lives in
+`validation.py`, which the `validate` command calls.
 
 ## Non-responsibilities
 

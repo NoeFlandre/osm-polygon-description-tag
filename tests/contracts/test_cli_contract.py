@@ -9,7 +9,6 @@ import pytest
 from shapely.geometry import Polygon
 from typer import rich_utils
 
-from osm_polygon_description_tag import cli
 from osm_polygon_description_tag.cli import (
     handle_inspect,
     handle_publish,
@@ -17,6 +16,14 @@ from osm_polygon_description_tag.cli import (
     handle_validate,
     run,
 )
+from osm_polygon_description_tag.cli_requests import (
+    BuildOneRequest,
+    PathOptions,
+    PublishRequest,
+    RunAndPublishRequest,
+)
+from osm_polygon_description_tag.dataset import validation
+from osm_polygon_description_tag.dataset.manifest import output_identity_for
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import PublicationError
 from osm_polygon_description_tag.runtime import config as runtime_config
@@ -418,9 +425,8 @@ def test_publish_rejects_wrong_plan_identity(
     (data / "assets" / "area_distribution.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"hist" * 1024)
     (data / "assets" / "dataset-card-hero.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"hero" * 1024)
 
-    args = SimpleNamespace(
+    args = PublishRequest(
         plan="deadbeef",  # wrong on purpose
-        publisher=None,
         source_root=tmp_path / "raw",
         data_root=data,
         osmium="osmium",
@@ -455,12 +461,7 @@ def test_inspect_handler_prints_json_summary(
     source.mkdir()
     (source / "a.osm.pbf").write_bytes(b"x")
     data = tmp_path / "generated"
-    args = SimpleNamespace(
-        source_root=source,
-        data_root=data,
-        osmium="osmium",
-        export_config=Path("config/osmium-export.json"),
-    )
+    args = PathOptions(source_root=source, data_root=data, osmium="osmium")
 
     handle_inspect(args)
     captured = capsys.readouterr()
@@ -485,7 +486,7 @@ def test_validate_handler_sums_rows(
     write_geoparquet(iter([record]), data / "data" / "a.parquet", batch_size=10)
     parquet = data / "data" / "a.parquet"
     monkeypatch.setattr(
-        cli,
+        validation,
         "validate_finalized_artifacts",
         lambda _root, **_kwargs: {
             "parquets": (parquet,),
@@ -493,18 +494,13 @@ def test_validate_handler_sums_rows(
             "manifest_records": (
                 SimpleNamespace(
                     source=SimpleNamespace(name="a.osm.pbf"),
-                    output=cli.output_identity_for(parquet),
+                    output=output_identity_for(parquet),
                     counts=SimpleNamespace(included_rows=1, emitted_features=1, rejections={}),
                 ),
             ),
         },
     )
-    args = SimpleNamespace(
-        source_root=None,
-        data_root=data,
-        osmium="osmium",
-        export_config=Path("config/osmium-export.json"),
-    )
+    args = PathOptions(source_root=None, data_root=data, osmium="osmium")
 
     handle_validate(args)
     payload = json.loads(capsys.readouterr().out)
@@ -527,12 +523,7 @@ def test_publish_plan_handler_reports_identity(
     )
     (data / "assets" / "area_distribution.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"hist" * 1024)
     (data / "assets" / "dataset-card-hero.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"hero" * 1024)
-    args = SimpleNamespace(
-        source_root=tmp_path / "raw",
-        data_root=data,
-        osmium="osmium",
-        export_config=Path("config/osmium-export.json"),
-    )
+    args = PathOptions(source_root=tmp_path / "raw", data_root=data, osmium="osmium")
 
     handle_publish_plan(args)
     payload = json.loads(capsys.readouterr().out)
@@ -565,12 +556,11 @@ def test_handle_build_one_invokes_pipeline(
 
     monkeypatch.setattr(cli, "build_one", lambda *args, **kwargs: fake_result)
 
-    args = SimpleNamespace(
+    args = BuildOneRequest(
         basename="region.osm.pbf",
         source_root=source,
         data_root=data,
         osmium="osmium",
-        export_config=Path("config/osmium-export.json"),
     )
 
     cli.handle_build_one(args)
@@ -604,9 +594,8 @@ def test_handle_publish_invokes_execute_upload(
 
     monkeypatch.setattr(cli, "execute_upload", fake_execute)
 
-    args = SimpleNamespace(
+    args = PublishRequest(
         plan="abc",
-        publisher=None,
         source_root=tmp_path / "raw",
         data_root=data,
         osmium="osmium",
@@ -648,11 +637,8 @@ def test_handle_run_and_publish_invokes_orchestrator(
 
     monkeypatch.setattr(cli, "run_and_publish", fake_run_and_publish)
 
-    args = SimpleNamespace(
+    args = RunAndPublishRequest(
         confirm_repo="NoeFlandre/osm-polygon-description-tag",
-        preflight=None,
-        upload_runner=None,
-        clock=None,
         source_root=tmp_path / "raw",
         data_root=tmp_path / "generated",
         osmium="osmium",

@@ -18,14 +18,24 @@ import pytest
 from click import Command, Context
 
 from osm_polygon_description_tag import cli
-from osm_polygon_description_tag.cli_requests import BuildOneRequest, PathOptions
+from osm_polygon_description_tag.cli_requests import (
+    BuildOneRequest,
+    MigrateTextRequest,
+    PathOptions,
+    PublishRequest,
+    ReleaseStatsRequest,
+    RunAndPublishRequest,
+    TrackioSnapshotRequest,
+)
+from osm_polygon_description_tag.dataset import validation
+from osm_polygon_description_tag.dataset.manifest import output_identity_for
 from osm_polygon_description_tag.runtime import presentation
 from osm_polygon_description_tag.runtime.click_compat import ClickException, UsageError
 
 
 @pytest.fixture
 def paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
-    """Resolve paths from the handler's own arguments, and prove it did.
+    """Resolve paths from the handler's own request, and prove it did.
 
     A stub that ignores what it is handed cannot tell whether the handler
     passed its arguments or something else entirely, which is exactly the
@@ -35,7 +45,7 @@ def paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     resolved = SimpleNamespace(source_root=tmp_path / "sources", data_root=tmp_path / "data-root")
 
     def _resolve(args: object) -> SimpleNamespace:
-        assert isinstance(args, SimpleNamespace), f"handler passed {args!r} instead of its args"
+        assert isinstance(args, PathOptions), f"handler passed {args!r} instead of its request"
         return resolved
 
     def _data_root(args: object) -> Path:
@@ -58,7 +68,11 @@ def test_migrate_text_forwards_the_worker_count_and_reports_the_file_count(
 
     monkeypatch.setattr(cli, "migrate_dataset_text", _migrate)
 
-    cli.handle_migrate_text(SimpleNamespace(max_workers=4))
+    cli.handle_migrate_text(
+        MigrateTextRequest(
+            source_root=None, data_root=paths.data_root, osmium="fake-osmium", max_workers=4
+        )
+    )
     assert seen == {"data_root": paths.data_root, "max_workers": 4}
     assert json.loads(capsys.readouterr().out) == {
         "data_root": str(paths.data_root),
@@ -83,7 +97,13 @@ def test_release_stats_forwards_the_repo_confirmation_and_apply_gate(
     monkeypatch.setattr(cli, "release_metadata", _release)
     monkeypatch.setattr(cli, "dataset_card_template", lambda: "TEMPLATE")
 
-    args = SimpleNamespace(confirm_repo="owner/dataset", apply=True)
+    args = ReleaseStatsRequest(
+        source_root=None,
+        data_root=paths.data_root,
+        osmium="fake-osmium",
+        confirm_repo="owner/dataset",
+        apply=True,
+    )
 
     cli.handle_release_stats(args)
     assert seen == {
@@ -114,7 +134,15 @@ def test_release_stats_defaults_to_planning_when_apply_is_not_requested(
     )
     monkeypatch.setattr(cli, "dataset_card_template", lambda: "TEMPLATE")
 
-    cli.handle_release_stats(SimpleNamespace(confirm_repo="owner/dataset", apply=False))
+    cli.handle_release_stats(
+        ReleaseStatsRequest(
+            source_root=None,
+            data_root=paths.data_root,
+            osmium="fake-osmium",
+            confirm_repo="owner/dataset",
+            apply=False,
+        )
+    )
     assert seen == {"apply": False}
     capsys.readouterr()
 
@@ -137,12 +165,14 @@ def _build_one_request(tmp_path: Path, basename: str) -> BuildOneRequest:
     )
 
 
-def _cli_args(tmp_path: Path, **values: object) -> SimpleNamespace:
+def _cli_args[RequestT: PathOptions](
+    request_type: type[RequestT], tmp_path: Path, **values: Any
+) -> RequestT:
     source_root = tmp_path / "raw"
     data_root = tmp_path / "generated"
     source_root.mkdir(exist_ok=True)
     data_root.mkdir(exist_ok=True)
-    return SimpleNamespace(
+    return request_type(
         source_root=source_root,
         data_root=data_root,
         osmium="fake-osmium",
@@ -170,7 +200,7 @@ def test_cli_migration_handler_reports_migrated_files(
 
 
 def test_cli_resolve_paths_uses_supplied_roots(tmp_path: Path) -> None:
-    args = _cli_args(tmp_path)
+    args = _cli_args(PathOptions, tmp_path)
     paths = cli._resolve_paths(args)
 
     assert paths.source_root == args.source_root
@@ -327,6 +357,7 @@ def test_cli_run_and_publish_wires_tracker_logger_and_presenter(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     args = _cli_args(
+        RunAndPublishRequest,
         tmp_path,
         confirm_repo="owner/dataset",
         presenter=SimpleNamespace(observe=lambda _event: None),
@@ -404,7 +435,13 @@ def test_cli_run_and_publish_wires_tracker_logger_and_presenter(
 def test_cli_trackio_handler_reports_snapshot(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    args = _cli_args(tmp_path, project="p", space_id="o/s", run_name="snapshot-2026-08-20")
+    args = _cli_args(
+        TrackioSnapshotRequest,
+        tmp_path,
+        project="p",
+        space_id="o/s",
+        run_name="snapshot-2026-08-20",
+    )
     expected = SimpleNamespace(
         to_payload=lambda: {
             "project": "p",
@@ -562,7 +599,7 @@ def test_cli_validate_sorts_and_accumulates_every_parquet(
         return rows[path]
 
     monkeypatch.setattr(
-        cli,
+        validation,
         "validate_finalized_artifacts",
         lambda _root, **_kwargs: {
             "parquets": (first, second),
@@ -572,7 +609,7 @@ def test_cli_validate_sorts_and_accumulates_every_parquet(
                     source=SimpleNamespace(
                         name=f"{path.name.removesuffix('.manifest.json')}.osm.pbf"
                     ),
-                    output=cli.output_identity_for(parquet),
+                    output=output_identity_for(parquet),
                     counts=SimpleNamespace(
                         included_rows=rows[parquet],
                         emitted_features=rows[parquet],
@@ -583,7 +620,7 @@ def test_cli_validate_sorts_and_accumulates_every_parquet(
             ),
         },
     )
-    monkeypatch.setattr(cli, "validate_geoparquet", validate)
+    monkeypatch.setattr(validation, "validate_geoparquet", validate)
 
     cli.handle_validate(args)
     assert calls == [first, second]
@@ -638,7 +675,7 @@ def test_cli_build_one_rejects_an_unknown_source(
 def test_cli_publish_handler_executes_the_confirmed_plan(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    args = _cli_args(tmp_path, plan="identity")
+    args = _cli_args(PublishRequest, tmp_path, plan="identity")
     plan = SimpleNamespace(repo_id="owner/dataset", identity_sha256="identity")
     calls: list[tuple[object, object]] = []
     monkeypatch.setattr(
@@ -680,7 +717,7 @@ def test_cli_card_reports_stats_fields(
 def test_cli_publish_plan_reports_each_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    args = _cli_args(tmp_path)
+    args = _cli_args(PathOptions, tmp_path)
     plan = SimpleNamespace(
         repo_id="owner/dataset",
         identity_sha256="identity",

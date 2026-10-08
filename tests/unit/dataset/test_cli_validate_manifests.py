@@ -9,6 +9,7 @@ import pytest
 
 from osm_polygon_description_tag import cli
 from osm_polygon_description_tag.cli_requests import PathOptions
+from osm_polygon_description_tag.dataset import validation
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     manifest_path_for,
@@ -82,7 +83,7 @@ def test_validate_rejects_empty_existing_artifact_directories(tmp_path: Path) ->
 def test_validate_rejects_unpaired_artifacts(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, unpaired: str, manifest_factory
 ) -> None:
-    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    monkeypatch.setattr(validation, "validate_geoparquet", lambda _path, **_kwargs: 1)
     data_dir = tmp_path / "data"
     manifests_dir = tmp_path / "manifests"
     data_dir.mkdir()
@@ -100,7 +101,7 @@ def test_validate_rejects_unpaired_artifacts(
 def test_validate_rejects_a_corrupt_manifest(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    monkeypatch.setattr(validation, "validate_geoparquet", lambda _path, **_kwargs: 1)
     data_dir = tmp_path / "data"
     manifests_dir = tmp_path / "manifests"
     data_dir.mkdir()
@@ -158,7 +159,7 @@ def test_validate_reports_manifest_parse_errors_without_traceback(
 def test_validate_rejects_a_parquet_that_no_longer_matches_its_manifest(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, manifest_factory
 ) -> None:
-    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    monkeypatch.setattr(validation, "validate_geoparquet", lambda _path, **_kwargs: 1)
     parquet = _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
     parquet.write_bytes(b"changed bytes at the same path")
 
@@ -176,14 +177,14 @@ def test_validate_rechecks_output_identity_after_geoparquet_validation(
     _, parquet, _ = _write_real_artifact_pair(
         data_root, tmp_path / "raw", manifest_factory, valid_records[0]
     )
-    validate_geoparquet = cli.validate_geoparquet
+    validate_geoparquet = validation.validate_geoparquet
 
     def replace_after_validation(path: Path, **_kwargs: object) -> int:
         rows = validate_geoparquet(path, expected_source_pbf="a.osm.pbf")
         write_geoparquet([dict(valid_records[1], source_pbf="a.osm.pbf")], path)
         return rows
 
-    monkeypatch.setattr(cli, "validate_geoparquet", replace_after_validation)
+    monkeypatch.setattr(validation, "validate_geoparquet", replace_after_validation)
 
     with pytest.raises(StorageError, match="stale output identity for a.parquet"):
         cli.handle_validate(PathOptions(source_root=None, data_root=data_root, osmium="osmium"))
@@ -199,12 +200,12 @@ def test_validate_preserves_context_when_rereading_output_identity_fails(
     _, parquet, _ = _write_real_artifact_pair(
         data_root, tmp_path / "raw", manifest_factory, valid_records[0]
     )
-    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    monkeypatch.setattr(validation, "validate_geoparquet", lambda _path, **_kwargs: 1)
 
     def fail_identity(_path: Path) -> None:
         raise OSError("disk error")
 
-    monkeypatch.setattr(cli, "output_identity_for", fail_identity)
+    monkeypatch.setattr(validation, "output_identity_for", fail_identity)
 
     with pytest.raises(StorageError) as error:
         cli.handle_validate(PathOptions(source_root=None, data_root=data_root, osmium="osmium"))
@@ -215,7 +216,7 @@ def test_validate_preserves_context_when_rereading_output_identity_fails(
 def test_validate_does_not_reread_manifest_after_pair_validation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, manifest_factory
 ) -> None:
-    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    monkeypatch.setattr(validation, "validate_geoparquet", lambda _path, **_kwargs: 1)
     _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
     manifest_path = tmp_path / "manifests" / "a.manifest.json"
     replacement_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -265,7 +266,7 @@ def test_validate_rejects_a_manifest_source_name_without_pbf_suffix(
     manifest_factory,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    monkeypatch.setattr(validation, "validate_geoparquet", lambda _path, **_kwargs: 1)
     _write_artifact_pair(tmp_path, tmp_path, manifest_factory, name="region")
     manifest_path = tmp_path / "manifests" / "region.manifest.json"
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -385,7 +386,7 @@ def test_validate_accepts_a_source_name_discovered_with_an_empty_stem(
     manifest_factory,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    monkeypatch.setattr(validation, "validate_geoparquet", lambda _path, **_kwargs: 1)
     source_root = tmp_path / "raw"
     source_root.mkdir()
     source_path = source_root / ".osm.pbf"
@@ -467,7 +468,7 @@ def test_validate_rejects_symlinked_entries(
     capsys: pytest.CaptureFixture[str],
     entry_kind: str,
 ) -> None:
-    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    monkeypatch.setattr(validation, "validate_geoparquet", lambda _path, **_kwargs: 1)
     parquet = _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
     entry = parquet if entry_kind == "parquet" else tmp_path / "manifests" / "a.manifest.json"
     target = tmp_path / f"outside-{entry.name}"
@@ -490,7 +491,7 @@ def test_validate_rejects_symlinked_artifact_directories(
     capsys: pytest.CaptureFixture[str],
     directory_kind: str,
 ) -> None:
-    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    monkeypatch.setattr(validation, "validate_geoparquet", lambda _path, **_kwargs: 1)
     _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
     directory = tmp_path / directory_kind
     target = tmp_path / f"outside-{directory_kind}"
@@ -523,7 +524,7 @@ def test_validate_rejects_a_stale_manifest_contract(
     field: str,
     value: object,
 ) -> None:
-    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    monkeypatch.setattr(validation, "validate_geoparquet", lambda _path, **_kwargs: 1)
     _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
     manifest_path = tmp_path / "manifests" / "a.manifest.json"
     payload = json.loads(manifest_path.read_text())
@@ -550,7 +551,7 @@ def test_validate_rejects_string_encoded_manifest_contract_versions(
     field: str,
     value: str,
 ) -> None:
-    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    monkeypatch.setattr(validation, "validate_geoparquet", lambda _path, **_kwargs: 1)
     _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
     manifest_path = tmp_path / "manifests" / "a.manifest.json"
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -572,7 +573,7 @@ def test_validate_rejects_non_integer_manifest_schema_version(
     manifest_factory,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    monkeypatch.setattr(validation, "validate_geoparquet", lambda _path, **_kwargs: 1)
     _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
     manifest_path = tmp_path / "manifests" / "a.manifest.json"
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -631,7 +632,7 @@ def test_validate_rejects_malformed_manifest_provenance_fields(
     value: object,
     message: str,
 ) -> None:
-    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    monkeypatch.setattr(validation, "validate_geoparquet", lambda _path, **_kwargs: 1)
     _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
     manifest_path = tmp_path / "manifests" / "a.manifest.json"
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -652,7 +653,7 @@ def test_validate_rejects_a_manifest_row_count_mismatch(
     manifest_factory,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    monkeypatch.setattr(validation, "validate_geoparquet", lambda _path, **_kwargs: 1)
     _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
     manifest_path = tmp_path / "manifests" / "a.manifest.json"
     payload = json.loads(manifest_path.read_text())
@@ -683,7 +684,7 @@ def test_validate_rejects_inconsistent_manifest_count_equation(
     field: str,
     value: object,
 ) -> None:
-    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    monkeypatch.setattr(validation, "validate_geoparquet", lambda _path, **_kwargs: 1)
     _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
     manifest_path = tmp_path / "manifests" / "a.manifest.json"
     payload = json.loads(manifest_path.read_text())
@@ -704,7 +705,7 @@ def test_validate_accepts_manifest_counts_with_rejections(
     manifest_factory,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    monkeypatch.setattr(validation, "validate_geoparquet", lambda _path, **_kwargs: 1)
     _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
     manifest_path = tmp_path / "manifests" / "a.manifest.json"
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -734,7 +735,7 @@ def test_validate_requires_artifact_and_manifest_results_to_have_equal_lengths(
         counts=SimpleNamespace(included_rows=1, emitted_features=1, rejections={}),
     )
     monkeypatch.setattr(
-        cli,
+        validation,
         "validate_finalized_artifacts",
         lambda *_args, **_kwargs: {
             "parquets": (parquet, parquet),
@@ -742,8 +743,8 @@ def test_validate_requires_artifact_and_manifest_results_to_have_equal_lengths(
             "manifest_records": (manifest,),
         },
     )
-    monkeypatch.setattr(cli, "validate_geoparquet", lambda _path, **_kwargs: 1)
-    monkeypatch.setattr(cli, "output_identity_for", lambda _path: output_identity)
+    monkeypatch.setattr(validation, "validate_geoparquet", lambda _path, **_kwargs: 1)
+    monkeypatch.setattr(validation, "output_identity_for", lambda _path: output_identity)
 
     with pytest.raises(ValueError, match=r"zip\(\) argument 2 is shorter than argument 1"):
         cli.handle_validate(PathOptions(source_root=None, data_root=tmp_path, osmium="osmium"))
@@ -759,7 +760,7 @@ def test_validate_accepts_a_partial_set_with_matching_manifests(
     payload["counts"]["included_rows"] = 2
     manifest_path.write_text(json.dumps(payload))
     monkeypatch.setattr(
-        cli, "validate_geoparquet", lambda path, **_kwargs: 2 if path == parquet else 0
+        validation, "validate_geoparquet", lambda path, **_kwargs: 2 if path == parquet else 0
     )
 
     cli.handle_validate(PathOptions(source_root=None, data_root=tmp_path, osmium="osmium"))

@@ -18,6 +18,9 @@ from shapely.geometry import Polygon
 import osm_polygon_description_tag.publication.upload as publication_upload
 import osm_polygon_description_tag.workflow.orchestrator as workflow_orchestrator
 from osm_polygon_description_tag import cli
+from osm_polygon_description_tag.cli_requests import RunAndPublishRequest
+from osm_polygon_description_tag.dataset import validation
+from osm_polygon_description_tag.dataset.manifest import output_identity_for
 from osm_polygon_description_tag.osm.discovery import Source
 from osm_polygon_description_tag.osm.extraction import ExportRecord
 from osm_polygon_description_tag.publication.models import UploadItem, UploadPlan
@@ -194,9 +197,9 @@ def test_validate_success_payload_is_exact(
         data_root / "manifests" / "a.manifest.json",
         data_root / "manifests" / "b.manifest.json",
     )
-    monkeypatch.setattr(cli, "validate_geoparquet", lambda path, **_kwargs: rows[path])
+    monkeypatch.setattr(validation, "validate_geoparquet", lambda path, **_kwargs: rows[path])
     monkeypatch.setattr(
-        cli,
+        validation,
         "validate_finalized_artifacts",
         lambda _root, **_kwargs: {
             "parquets": (first, second),
@@ -206,7 +209,7 @@ def test_validate_success_payload_is_exact(
                     source=SimpleNamespace(
                         name=f"{path.name.removesuffix('.manifest.json')}.osm.pbf"
                     ),
-                    output=cli.output_identity_for(parquet),
+                    output=output_identity_for(parquet),
                     counts=SimpleNamespace(
                         included_rows=rows[parquet],
                         emitted_features=rows[parquet],
@@ -601,7 +604,7 @@ def _handler_stderr(cli_roots: tuple[Path, Path], capsys: pytest.CaptureFixture[
     presenter = TerminalPresenter(stderr=sys.stderr)
     try:
         cli.handle_run_and_publish(
-            SimpleNamespace(
+            RunAndPublishRequest(
                 confirm_repo=_RUN_AND_PUBLISH_REPO,
                 source_root=source_root,
                 data_root=data_root,
