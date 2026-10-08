@@ -517,15 +517,26 @@ def test_write_dataset_docs_writes_non_ascii_text_as_utf8_bytes(tmp_path: Path) 
     )
     stats = {"name": "café", "rows": 4}
 
-    with patch.object(docs_module, "_render_stats_block", return_value="café stats"):
+    with (
+        patch.object(docs_module, "_render_stats_block", return_value="café stats"),
+        patch.object(
+            docs_module,
+            "_render_h3_map_block",
+            return_value="![density map](assets/density.png)\n",
+        ),
+    ):
         docs_module._write_dataset_docs(tmp_path, template, stats)
 
     readme_bytes = (tmp_path / "README.md").read_bytes()
     stats_bytes = (tmp_path / "stats.json").read_bytes()
-    assert b"caf\xc3\xa9 stats" in readme_bytes
-    assert b'"name": "caf\xc3\xa9"' in stats_bytes
     assert b"\r" not in readme_bytes
-    assert readme_bytes.endswith(b"caf\xc3\xa9 stats<!-- GENERATED:STATS:END -->\n")
+    assert readme_bytes == (
+        b"<!-- GENERATED:H3_MAP:START -->\n"
+        b"![density map](assets/density.png)\n"
+        b"<!-- GENERATED:H3_MAP:END -->\n"
+        b"<!-- GENERATED:STATS:START -->\n"
+        b"caf\xc3\xa9 stats<!-- GENERATED:STATS:END -->\n"
+    )
     assert stats_bytes == b'{\n  "name": "caf\xc3\xa9",\n  "rows": 4\n}\n'
 
 

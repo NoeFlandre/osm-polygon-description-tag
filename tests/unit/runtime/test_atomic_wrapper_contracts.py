@@ -102,6 +102,14 @@ def test_atomic_write_if_changed_different_bytes_replace_content(work_dir: Path)
     assert _names(work_dir) == ["out.bin"]
 
 
+def test_atomic_write_if_changed_writes_given_utf8_bytes_verbatim(work_dir: Path) -> None:
+    target = work_dir / "text.txt"
+
+    assert docs_module._atomic_write_if_changed(target, "café".encode()) is True
+
+    assert target.read_bytes() == b"caf\xc3\xa9"
+
+
 def test_atomic_write_if_changed_failed_rename_keeps_old_bytes_and_no_temp_file(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -150,8 +158,9 @@ def test_write_map_block_marker_to_template_writes_crlf_input_back_as_lf(work_di
     # KNOWN DEFECT (pinned, not desired): read_text in dataset/geography/card.py
     # converts CRLF to LF, but the template should keep its bytes. A fix must
     # change this test.
-    # The same cause is in dataset/docs.py _card_source (read_text at lines 475
-    # and 478), so README generation also turns a CRLF template into LF.
+    # Only the card.py path is pinned in this file. dataset/docs.py _card_source
+    # uses the same read_text call (lines 475 and 478), so a CRLF template also
+    # gives an LF README there. No test in this file pins the docs.py path.
     template = work_dir / "card.md"
     template.write_bytes(_CARD_LF.replace("\n", "\r\n").encode("utf-8"))
 
