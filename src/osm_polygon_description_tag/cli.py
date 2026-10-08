@@ -10,10 +10,11 @@ import os
 import sys
 import uuid
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from importlib.metadata import version as package_version
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Annotated, Any, Protocol
+from typing import Annotated, Protocol
 
 import typer
 from typer import rich_utils
@@ -44,7 +45,7 @@ from osm_polygon_description_tag.observability.trackio import (
     TrackioRecorder,
     publish_snapshot,
 )
-from osm_polygon_description_tag.osm.discovery import discover_sources
+from osm_polygon_description_tag.osm.discovery import Source, discover_sources
 from osm_polygon_description_tag.osm.extraction import OsmiumExportError
 from osm_polygon_description_tag.publication import (
     PublicationError,
@@ -104,10 +105,16 @@ Osmium = Annotated[
 ]
 
 _DISTRIBUTION = "osm-polygon-description-tag"
+_DEFAULT_STDERR_LEVEL = "INFO"
 
-# stderr threshold for human-readable event lines, set by -v / -q. The JSONL
-# log always records every event.
-_verbosity = SimpleNamespace(stderr_level="INFO")
+
+@dataclass
+class _GlobalOptions:
+    """Root-callback options for one invocation, stored on that invocation's Click context."""
+
+    # stderr threshold for human-readable event lines, set by -v / -q. The JSONL
+    # log always records every event.
+    stderr_level: str = _DEFAULT_STDERR_LEVEL
 
 
 def _show_version(value: bool) -> None:
@@ -118,6 +125,7 @@ def _show_version(value: bool) -> None:
 
 @app.callback()
 def _global_options(
+    ctx: typer.Context,
     version: Annotated[  # noqa: ARG001 - consumed by its eager callback
         bool,
         typer.Option(
@@ -140,7 +148,8 @@ def _global_options(
     """Build, validate and publish the OSM polygon description-tag dataset."""
     if verbose and quiet:
         raise UsageError("--verbose and --quiet cannot be combined")
-    _verbosity.stderr_level = "DEBUG" if verbose else "WARNING" if quiet else "INFO"
+    level = "DEBUG" if verbose else "WARNING" if quiet else _DEFAULT_STDERR_LEVEL
+    ctx.obj = _GlobalOptions(stderr_level=level)
 
 
 class _DataRootOption(Protocol):
@@ -166,14 +175,14 @@ class _Interrupted(Exception):  # noqa: N818 - a control-flow signal, not an err
     """Carry Ctrl-C through Typer without its default exit-code conversion."""
 
 
-def _invoke[RequestT](handler: Callable[[RequestT], int], args: RequestT) -> None:
+def _invoke[RequestT](handler: Callable[[RequestT], None], args: RequestT) -> None:
     try:
         handler(args)
     except KeyboardInterrupt as error:
         raise _Interrupted from error
 
 
-def handle_inspect(args: PathOptions) -> int:
+def handle_inspect(args: PathOptions) -> None:
     paths = _resolve_paths(args)
     sources = discover_sources(paths.source_root)
     print_json(
@@ -194,15 +203,14 @@ def handle_inspect(args: PathOptions) -> int:
             ],
         }
     )
-    return 0
 
 
 def _build_paths_and_executor(
     args: PathOptions,
-) -> tuple[Paths, Callable[[Any], BuildResult]]:
+) -> tuple[Paths, Callable[[Source], BuildResult]]:
     paths = _resolve_paths(args)
 
-    def executor(source: Any) -> BuildResult:
+    def executor(source: Source) -> BuildResult:
         return build_one(
             source,
             paths,
@@ -213,12 +221,12 @@ def _build_paths_and_executor(
     return paths, executor
 
 
-def handle_build_one(args: BuildOneRequest) -> int:
+def handle_build_one(args: BuildOneRequest) -> None:
     paths, executor = _build_paths_and_executor(args)
     sources = discover_sources(paths.source_root)
     match = next((source for source in sources if source.name == args.basename), None)
     if match is None:
-        raise ValueError(f"source not discovered: {args.basename}")
+        raise MissingPathError(f"source not discovered: {args.basename}")
     result = executor(match)
     print_json(
         {
@@ -232,10 +240,9 @@ def handle_build_one(args: BuildOneRequest) -> int:
             "manifest_path": str(result.manifest_path),
         }
     )
-    return 0
 
 
-def handle_build_all(args: PathOptions) -> int:
+def handle_build_all(args: PathOptions) -> None:
     paths, executor = _build_paths_and_executor(args)
     sources = discover_sources(paths.source_root)
     results: list[BuildResult] = build_all(sources, build=executor)
@@ -252,19 +259,17 @@ def handle_build_all(args: PathOptions) -> int:
             ],
         }
     )
-    return 0
 
 
-def handle_validate(args: PathOptions) -> int:
+def handle_validate(args: PathOptions) -> None:
     data_root = _data_root(args)
     source_root = _validation_source_root(args, data_root)
     data_dir = data_root / "data"
     if not data_dir.is_dir():
-        raise ValueError(f"missing data directory: {data_dir}")
+        raise StorageError(f"missing data directory: {data_dir}")
     parquets, manifest_records = _validation_artifacts(data_root, data_dir)
     rows_total = _validate_artifact_pairs(parquets, manifest_records, source_root)
     print_json({"files": len(parquets), "rows": rows_total})
-    return 0
 
 
 def _validation_artifacts(
@@ -359,7 +364,7 @@ def _read_source_identity(source_path: Path) -> SourceIdentity:
         raise StorageError(f"cannot read source file {source_path}: {error}") from error
 
 
-def handle_card(args: PathOptions) -> int:
+def handle_card(args: PathOptions) -> None:
     data_root = _data_root(args)
     stats = generate_dataset_docs(data_root, dataset_card_template())
     print_json(
@@ -369,26 +374,23 @@ def handle_card(args: PathOptions) -> int:
             "name_suffixes": stats.get("name_suffixes", {}),
         }
     )
-    return 0
 
 
-def handle_migrate_schema(args: PathOptions) -> int:
+def handle_migrate_schema(args: PathOptions) -> None:
     """Upgrade existing legacy map Parquets without reading raw PBFs."""
     data_root = _data_root(args)
     migrated = migrate_dataset_schema(data_root)
     print_json({"data_root": str(data_root), "migrated_files": migrated})
-    return 0
 
 
-def handle_migrate_text(args: SimpleNamespace) -> int:
+def handle_migrate_text(args: SimpleNamespace) -> None:
     """Repair legacy untrimmed description text without reading raw PBFs."""
     data_root = _data_root(args)
     migrated = migrate_dataset_text(data_root, max_workers=args.max_workers)
     print_json({"data_root": str(data_root), "migrated_files": migrated})
-    return 0
 
 
-def handle_publish_plan(args: SimpleNamespace) -> int:
+def handle_publish_plan(args: SimpleNamespace) -> None:
     data_root = _data_root(args)
     plan = create_upload_plan(data_root)
     print_json(
@@ -400,18 +402,16 @@ def handle_publish_plan(args: SimpleNamespace) -> int:
             ],
         }
     )
-    return 0
 
 
-def handle_publish(args: SimpleNamespace) -> int:
+def handle_publish(args: SimpleNamespace) -> None:
     data_root = _data_root(args)
     plan = create_upload_plan(data_root)
     execute_upload(plan, confirmation=args.plan)
     print_json({"repo_id": plan.repo_id, "identity_sha256": plan.identity_sha256})
-    return 0
 
 
-def handle_release_stats(args: SimpleNamespace) -> int:
+def handle_release_stats(args: SimpleNamespace) -> None:
     """Compute, validate, and publish only the dataset card and stats report."""
     data_root = _data_root(args)
     report = release_metadata(
@@ -421,10 +421,9 @@ def handle_release_stats(args: SimpleNamespace) -> int:
         apply=args.apply,
     )
     print_json(report.to_payload())
-    return 0
 
 
-def handle_run_and_publish(args: SimpleNamespace) -> int:
+def handle_run_and_publish(args: SimpleNamespace) -> None:
     paths = _resolve_paths(args)
     tracker = TrackioRecorder(data_root=paths.data_root)
     presenter = getattr(args, "presenter", None)
@@ -435,7 +434,7 @@ def handle_run_and_publish(args: SimpleNamespace) -> int:
             buffer_preflight=True,
             stderr=sys.stderr,
             observer=presenter.observe,
-            stderr_level=_verbosity.stderr_level,
+            stderr_level=getattr(args, "stderr_level", _DEFAULT_STDERR_LEVEL),
         )
         if presenter is not None
         else None
@@ -461,10 +460,9 @@ def handle_run_and_publish(args: SimpleNamespace) -> int:
         if logger is not None:
             logger.close()
     print_json(report.to_payload())
-    return 0
 
 
-def handle_trackio_snapshot(args: SimpleNamespace) -> int:
+def handle_trackio_snapshot(args: SimpleNamespace) -> None:
     data_root = _data_root(args)
     report = publish_snapshot(
         data_root,
@@ -473,7 +471,6 @@ def handle_trackio_snapshot(args: SimpleNamespace) -> int:
         run_name=args.run_name,
     )
     print_json(report.to_payload())
-    return 0
 
 
 @app.command("inspect", help="Read-only discovery")
@@ -699,6 +696,7 @@ def release_stats_command(
     "--source-root /path/to/pbfs --data-root /path/to/data-root",
 )
 def run_and_publish_command(
+    ctx: typer.Context,
     confirm_repo: Annotated[
         str,
         typer.Option(
@@ -720,6 +718,7 @@ def run_and_publish_command(
                 osmium=osmium,
                 confirm_repo=confirm_repo,
                 presenter=presenter,
+                stderr_level=ctx.ensure_object(_GlobalOptions).stderr_level,
             ),
         )
     finally:
@@ -765,8 +764,8 @@ def _show_click_error(error: ClickException) -> None:
         usage = error.ctx.get_usage()
         if usage.startswith("Usage:"):
             usage = "usage:" + usage.removeprefix("Usage:")
-        print(usage, file=sys.stderr)  # noqa: T201 - usage errors go to stderr
-        print(f"error: {error.format_message()}", file=sys.stderr)  # noqa: T201 - as above
+        typer.echo(usage, err=True)
+        typer.echo(f"error: {error.format_message()}", err=True)
         return
     error.show(file=sys.stderr)
 
@@ -812,16 +811,13 @@ def _normalize_columns() -> None:
 
 
 def _invoke_app(argv: Sequence[str] | None) -> int:
-    try:
-        # Without standalone mode, Click returns an Exit's code instead of raising.
-        code = app(
-            args=list(argv) if argv is not None else None,
-            prog_name="osm-polygon-description-tag",
-            standalone_mode=False,
-        )
-    finally:
-        # -v / -q apply to one invocation only.
-        _verbosity.stderr_level = "INFO"
+    # Without standalone mode, Click returns an Exit's code instead of raising.
+    # -v / -q live on this invocation's Click context, so they end with it.
+    code = app(
+        args=list(argv) if argv is not None else None,
+        prog_name="osm-polygon-description-tag",
+        standalone_mode=False,
+    )
     return code if isinstance(code, int) else 0
 
 

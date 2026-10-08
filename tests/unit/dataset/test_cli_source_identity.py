@@ -120,11 +120,8 @@ def test_validate_passes_the_artifact_path_and_manifest_source_to_storage(
 
     monkeypatch.setattr(cli, "validate_geoparquet", validate)
 
-    exit_code = cli.handle_validate(
-        PathOptions(source_root=None, data_root=tmp_path, osmium="osmium")
-    )
+    cli.handle_validate(PathOptions(source_root=None, data_root=tmp_path, osmium="osmium"))
 
-    assert exit_code == 0
     assert calls == [(parquet, {"expected_source_pbf": "region.osm.pbf"})]
     assert json.loads(capsys.readouterr().out) == {"files": 1, "rows": 1}
 

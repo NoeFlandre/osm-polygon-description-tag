@@ -386,11 +386,7 @@ def test_run_three_is_pure_no_op(
     from osm_polygon_description_tag.dataset.docs import generate_dataset_docs
     from osm_polygon_description_tag.runtime.resources import dataset_card_template
 
-    generate_dataset_docs(
-        data_root,
-        dataset_card_template(),
-        clock=lambda: "2026-07-28T00:00:00+00:00",
-    )
+    generate_dataset_docs(data_root, dataset_card_template())
     assert (data_root / "assets" / "description_polygon_density.png").is_file()
     plan_meta = build_metadata_only_upload_plan(data_root)
     state = {

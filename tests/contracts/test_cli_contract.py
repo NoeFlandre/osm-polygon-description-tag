@@ -462,10 +462,9 @@ def test_inspect_handler_prints_json_summary(
         export_config=Path("config/osmium-export.json"),
     )
 
-    exit_code = handle_inspect(args)
+    handle_inspect(args)
     captured = capsys.readouterr()
 
-    assert exit_code == 0
     payload = json.loads(captured.out)
     assert payload["source_count"] == 1
     assert payload["sources"][0]["name"] == "a.osm.pbf"
@@ -507,10 +506,9 @@ def test_validate_handler_sums_rows(
         export_config=Path("config/osmium-export.json"),
     )
 
-    exit_code = handle_validate(args)
+    handle_validate(args)
     payload = json.loads(capsys.readouterr().out)
 
-    assert exit_code == 0
     assert payload["files"] == 1
     assert payload["rows"] == 1
 
@@ -536,10 +534,9 @@ def test_publish_plan_handler_reports_identity(
         export_config=Path("config/osmium-export.json"),
     )
 
-    exit_code = handle_publish_plan(args)
+    handle_publish_plan(args)
     payload = json.loads(capsys.readouterr().out)
 
-    assert exit_code == 0
     assert payload["repo_id"] == "NoeFlandre/osm-polygon-description-tag"
     assert len(payload["identity_sha256"]) == 64
     assert any(item["relative_path"] == "README.md" for item in payload["files"])
@@ -576,10 +573,9 @@ def test_handle_build_one_invokes_pipeline(
         export_config=Path("config/osmium-export.json"),
     )
 
-    exit_code = cli.handle_build_one(args)
+    cli.handle_build_one(args)
     payload = json.loads(capsys.readouterr().out)
 
-    assert exit_code == 0
     assert payload["source_name"] == "region.osm.pbf"
     assert payload["status"] == "built"
 
@@ -616,10 +612,9 @@ def test_handle_publish_invokes_execute_upload(
         osmium="osmium",
     )
 
-    exit_code = cli.handle_publish(args)
+    cli.handle_publish(args)
     payload = json.loads(capsys.readouterr().out)
 
-    assert exit_code == 0
     assert captured == [["NoeFlandre/osm-polygon-description-tag", "abc"]]
     assert payload["repo_id"] == "NoeFlandre/osm-polygon-description-tag"
 
@@ -663,10 +658,9 @@ def test_handle_run_and_publish_invokes_orchestrator(
         osmium="osmium",
     )
 
-    exit_code = cli.handle_run_and_publish(args)
+    cli.handle_run_and_publish(args)
     payload = json.loads(capsys.readouterr().out)
 
-    assert exit_code == 0
     assert payload["final_remote_revision"] == "rev-1"
     assert captured["osmium_executable"] == "osmium"
 
@@ -699,17 +693,38 @@ def test_every_option_of_every_command_has_help_text() -> None:
     assert missing == []
 
 
-def test_verbosity_is_reset_after_each_invocation(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_verbosity_is_reset_after_each_invocation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     import osm_polygon_description_tag.cli as cli_module
 
-    seen: list[str] = []
-    monkeypatch.setattr(
-        cli_module, "handle_validate", lambda _args: seen.append(cli_module._verbosity.stderr_level)
-    )
+    def fake_run_and_publish(**kwargs: object) -> SimpleNamespace:
+        logger = kwargs["logger"]
+        logger.event("source_skipped", level="WARNING", source="region.osm.pbf")
+        logger.event("run_summary", source_count=1)
+        return SimpleNamespace(to_payload=lambda: {"source_count": 1})
 
-    assert run(["-q", "validate"]) == 0
-    assert seen == ["WARNING"]
-    assert cli_module._verbosity.stderr_level == "INFO"
+    monkeypatch.setattr(cli_module, "run_and_publish", fake_run_and_publish)
+    (tmp_path / "raw").mkdir()
+    argv = [
+        "run-and-publish",
+        "--confirm-repo",
+        "NoeFlandre/osm-polygon-description-tag",
+        "--source-root",
+        str(tmp_path / "raw"),
+        "--data-root",
+        str(tmp_path / "generated"),
+    ]
+
+    assert run(["-q", *argv]) == 0
+    quiet_err = capsys.readouterr().err
+    assert "source_skipped" in quiet_err
+    assert "run_summary" not in quiet_err
+
+    assert run(argv) == 0
+    default_err = capsys.readouterr().err
+    assert "source_skipped" in default_err
+    assert "run_summary" in default_err
 
 
 def _exit_code_cases() -> list[tuple[type[Exception], int]]:

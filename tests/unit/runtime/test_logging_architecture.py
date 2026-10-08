@@ -29,12 +29,9 @@ from tests.helpers.messages import exactly
 
 @pytest.fixture
 def logger_factory():
-    from osm_polygon_description_tag.runtime.logging import (
-        RunLogger,
-        configure_rotation,
-    )
+    from osm_polygon_description_tag.runtime.logging import RunLogger
 
-    return RunLogger, configure_rotation
+    return RunLogger
 
 
 def test_observer_receives_redacted_event_and_cannot_break_logging(
@@ -83,7 +80,7 @@ def test_observer_receives_redacted_event_and_cannot_break_logging(
 def test_run_logger_writes_canonical_jsonl_and_human_stderr(
     tmp_path: Path, logger_factory, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    RunLogger, _configure = logger_factory
+    RunLogger = logger_factory
     data_root = tmp_path / "generated"
     data_root.mkdir()
     logger = RunLogger(
@@ -120,7 +117,7 @@ def test_run_logger_persists_after_preflight_in_memory_buffer(
     tmp_path: Path, logger_factory
 ) -> None:
     """Preflight-rejected events are buffered; never persisted or uploaded."""
-    RunLogger, _ = logger_factory
+    RunLogger = logger_factory
     data_root = tmp_path / "generated"
     data_root.mkdir()
     logger = RunLogger(
@@ -140,7 +137,7 @@ def test_run_logger_persists_after_preflight_in_memory_buffer(
 
 def test_run_logger_rejects_symlink_logs_dir(tmp_path: Path, logger_factory) -> None:
     """A symlinked logs directory is rejected before any write."""
-    RunLogger, _ = logger_factory
+    RunLogger = logger_factory
     data_root = tmp_path / "generated"
     data_root.mkdir()
     real_dir = tmp_path / "real_logs"
@@ -160,7 +157,7 @@ def test_run_logger_rejects_symlink_logs_dir(tmp_path: Path, logger_factory) -> 
 
 def test_run_logger_redacts_credential_values(tmp_path: Path, logger_factory) -> None:
     """Credential-like values are redacted before any sink writes them."""
-    RunLogger, _ = logger_factory
+    RunLogger = logger_factory
     data_root = tmp_path / "generated"
     data_root.mkdir()
     logger = RunLogger(
@@ -189,7 +186,7 @@ def test_run_logger_redacts_credential_values(tmp_path: Path, logger_factory) ->
 
 
 def test_run_logger_drops_non_allowlisted_context(tmp_path: Path, logger_factory) -> None:
-    RunLogger, _ = logger_factory
+    RunLogger = logger_factory
     data_root = tmp_path / "generated"
     data_root.mkdir()
     logger = RunLogger(
@@ -213,7 +210,7 @@ def test_run_logger_drops_non_allowlisted_context(tmp_path: Path, logger_factory
 
 def test_run_logger_emits_failure_and_interruption_events(tmp_path: Path, logger_factory) -> None:
     """Failure and KeyboardInterrupt are recorded with safe scalar context."""
-    RunLogger, _ = logger_factory
+    RunLogger = logger_factory
     data_root = tmp_path / "generated"
     data_root.mkdir()
     logger = RunLogger(
@@ -235,7 +232,7 @@ def test_run_logger_emits_failure_and_interruption_events(tmp_path: Path, logger
 
 def test_rotation_creates_bounded_backups(tmp_path: Path, logger_factory) -> None:
     """Rotation creates a configurable number of backups under a fixed size."""
-    RunLogger, configure = logger_factory
+    RunLogger = logger_factory
     data_root = tmp_path / "generated"
     data_root.mkdir()
     logger = RunLogger(
@@ -243,11 +240,7 @@ def test_rotation_creates_bounded_backups(tmp_path: Path, logger_factory) -> Non
         run_id="test-run-6",
         clock=lambda: "2026-07-28T00:00:00+00:00",
     )
-    configure(
-        logger,
-        max_bytes=200,
-        backups=5,
-    )
+    logger.configure_rotation(max_bytes=200, backups=5)
     payload = json.dumps({"event": "noop", "filler": "x" * 64}) + "\n"
     for _ in range(20):
         logger.append_raw(payload)
@@ -264,7 +257,7 @@ def test_rotation_creates_bounded_backups(tmp_path: Path, logger_factory) -> Non
 
 def test_rotation_rejects_symlink_or_traversal(tmp_path: Path, logger_factory) -> None:
     """Rotation must reject symlinked active files and unsafe backup names."""
-    RunLogger, configure = logger_factory
+    RunLogger = logger_factory
     data_root = tmp_path / "generated"
     data_root.mkdir()
     logger = RunLogger(
@@ -273,7 +266,7 @@ def test_rotation_rejects_symlink_or_traversal(tmp_path: Path, logger_factory) -
         clock=lambda: "2026-07-28T00:00:00+00:00",
     )
     # Configure triggers directory creation.
-    configure(logger, max_bytes=1024, backups=1)
+    logger.configure_rotation(max_bytes=1024, backups=1)
     active = data_root / "logs" / "run-and-publish.jsonl"
     target = tmp_path / "external-target"
     target.write_bytes(b"x")
@@ -288,7 +281,7 @@ def test_rotation_rejects_symlink_or_traversal(tmp_path: Path, logger_factory) -
 
 def test_logs_directory_never_appears_in_upload_plan(tmp_path: Path, logger_factory) -> None:
     """The logs directory is allowlisted locally but never in any UploadItem."""
-    RunLogger, _ = logger_factory
+    RunLogger = logger_factory
     data_root = tmp_path / "generated"
     data_root.mkdir()
     logger = RunLogger(
@@ -338,7 +331,7 @@ def test_logs_directory_never_appears_in_upload_plan(tmp_path: Path, logger_fact
 
 def test_no_op_run_appends_operational_logs_only(tmp_path: Path, logger_factory) -> None:
     """A no-op run may append operational logs without changing dataset state."""
-    RunLogger, _ = logger_factory
+    RunLogger = logger_factory
     data_root = tmp_path / "generated"
     data_root.mkdir()
     logger = RunLogger(
@@ -355,7 +348,7 @@ def test_no_op_run_appends_operational_logs_only(tmp_path: Path, logger_factory)
 
 def test_run_logger_scrubs_non_string_value_branches(tmp_path: Path, logger_factory) -> None:
     """Non-string values pass through ``_scrub_value`` unchanged."""
-    RunLogger, _ = logger_factory
+    RunLogger = logger_factory
     data_root = tmp_path / "generated"
     data_root.mkdir()
     logger = RunLogger(
@@ -385,7 +378,7 @@ def test_run_logger_reconfigure_rotation_rejects_invalid_values(
     tmp_path: Path, logger_factory
 ) -> None:
     """Rotation parameters must be positive/non-negative or the call raises."""
-    RunLogger, _ = logger_factory
+    RunLogger = logger_factory
     data_root = tmp_path / "generated"
     data_root.mkdir()
     logger = RunLogger(
@@ -403,7 +396,7 @@ def test_run_logger_approve_preflight_flushes_buffered_events(
     tmp_path: Path, logger_factory
 ) -> None:
     """``approve_preflight`` opens the persistent file and flushes buffered events."""
-    RunLogger, _ = logger_factory
+    RunLogger = logger_factory
     data_root = tmp_path / "generated"
     data_root.mkdir()
     logger = RunLogger(
@@ -424,7 +417,7 @@ def test_run_logger_approve_preflight_flushes_buffered_events(
 
 def test_run_logger_buffered_flush_then_deny_clears_buffer(tmp_path: Path, logger_factory) -> None:
     """Buffer is cleared if preflight is denied after partial buffer."""
-    RunLogger, _ = logger_factory
+    RunLogger = logger_factory
     data_root = tmp_path / "generated"
     data_root.mkdir()
     logger = RunLogger(
@@ -442,7 +435,7 @@ def test_run_logger_buffered_flush_then_deny_clears_buffer(tmp_path: Path, logge
 
 def test_run_logger_active_log_rejects_non_file(tmp_path: Path, logger_factory) -> None:
     """Active log path must be a regular file (not a directory)."""
-    RunLogger, _ = logger_factory
+    RunLogger = logger_factory
     data_root = tmp_path / "generated"
     data_root.mkdir()
     logs_dir = data_root / "logs"
@@ -460,7 +453,7 @@ def test_run_logger_active_log_rejects_non_file(tmp_path: Path, logger_factory) 
 
 def test_rotation_uses_hard_link_staging_and_atomic_replace(tmp_path: Path, logger_factory) -> None:
     """Rotation creates backups using same-directory hard links and atomic ``os.replace``."""
-    RunLogger, configure = logger_factory
+    RunLogger = logger_factory
     data_root = tmp_path / "generated"
     data_root.mkdir()
     logger = RunLogger(
@@ -468,7 +461,7 @@ def test_rotation_uses_hard_link_staging_and_atomic_replace(tmp_path: Path, logg
         run_id="test-run-15",
         clock=lambda: "2026-07-28T00:00:00+00:00",
     )
-    configure(logger, max_bytes=128, backups=3)
+    logger.configure_rotation(max_bytes=128, backups=3)
     payload = json.dumps({"event": "build_progress", "n": "x" * 32}) + "\n"
     for _ in range(10):
         logger.append_raw(payload)
@@ -484,7 +477,7 @@ def test_rotation_uses_hard_link_staging_and_atomic_replace(tmp_path: Path, logg
 
 def test_rotation_drops_oldest_backup_when_chain_full(tmp_path: Path, logger_factory) -> None:
     """When the backup chain is full the oldest backup is dropped on rotation."""
-    RunLogger, configure = logger_factory
+    RunLogger = logger_factory
     data_root = tmp_path / "generated"
     data_root.mkdir()
     logger = RunLogger(
@@ -492,7 +485,7 @@ def test_rotation_drops_oldest_backup_when_chain_full(tmp_path: Path, logger_fac
         run_id="test-run-16",
         clock=lambda: "2026-07-28T00:00:00+00:00",
     )
-    configure(logger, max_bytes=128, backups=2)
+    logger.configure_rotation(max_bytes=128, backups=2)
     payload = json.dumps({"event": "build_progress", "n": "x" * 32}) + "\n"
     for _ in range(10):
         logger.append_raw(payload)
@@ -507,7 +500,7 @@ def test_rotation_drops_oldest_backup_when_chain_full(tmp_path: Path, logger_fac
 
 def test_run_logger_close_is_idempotent_and_safe(tmp_path: Path, logger_factory) -> None:
     """Calling ``close`` multiple times or before any event is safe."""
-    RunLogger, _ = logger_factory
+    RunLogger = logger_factory
     data_root = tmp_path / "generated"
     data_root.mkdir()
     logger = RunLogger(
@@ -517,9 +510,12 @@ def test_run_logger_close_is_idempotent_and_safe(tmp_path: Path, logger_factory)
     )
     logger.close()
     logger.close()
-    # After close, events are buffered again.
+    # After close, events are persisted, never buffered where nothing flushes them.
     logger.event("after_close", level="INFO")
-    assert list(logger.drain())  # buffered because handle is closed
+    assert list(logger.drain()) == []
+    logger.close()
+    log = (data_root / "logs" / RunLogger.ACTIVE_NAME).read_text(encoding="utf-8")
+    assert '"event": "after_close"' in log
 
 
 def test_human_formatter_has_stable_header_and_insertion_order(tmp_path: Path) -> None:
@@ -578,7 +574,7 @@ def test_create_active_log_is_exclusive_and_private(
 def test_rotation_with_zero_backups_replaces_active_file_without_archive(
     tmp_path: Path, logger_factory
 ) -> None:
-    RunLogger, configure = logger_factory
+    RunLogger = logger_factory
     data_root = tmp_path / "generated"
     data_root.mkdir()
     logger = RunLogger(
@@ -586,7 +582,7 @@ def test_rotation_with_zero_backups_replaces_active_file_without_archive(
         run_id="rotation-zero",
         clock=lambda: "2026-07-28T00:00:00+00:00",
     )
-    configure(logger, max_bytes=1, backups=0)
+    logger.configure_rotation(max_bytes=1, backups=0)
 
     logger.append_raw("old")
 

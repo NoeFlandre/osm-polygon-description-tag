@@ -339,7 +339,7 @@ def test_stage_changes_accumulates_rows_across_all_parquets(
         def close(self) -> None:
             calls.append("close")
 
-    monkeypatch.setattr(dedup_module.duckdb, "connect", lambda: Connection())
+    monkeypatch.setattr(dedup_module, "open_data_connection", lambda _data_root: Connection())
     monkeypatch.setattr(dedup_module, "_canonical_relation", lambda *_args: None)
     monkeypatch.setattr(dedup_module, "_assert_known_sources", lambda *_args: None)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 from shapely.geometry import Polygon
@@ -119,12 +120,5 @@ def test_collect_stats_returns_none_for_empty_dataset(tmp_path: Path) -> None:
     assert stats["area_m2_max_m2"] is None
 
 
-def test_collect_stats_still_accepts_and_ignores_the_deprecated_clock(tmp_path: Path) -> None:
-    data_root = tmp_path / "generated"
-    (data_root / "data").mkdir(parents=True)
-    (data_root / "manifests").mkdir(parents=True)
-
-    def clock() -> str:
-        raise AssertionError("the deprecated clock must never be called")
-
-    assert collect_stats(data_root, clock=clock) == collect_stats(data_root)
+def test_collect_stats_takes_only_data_root() -> None:
+    assert list(inspect.signature(collect_stats).parameters) == ["data_root"]

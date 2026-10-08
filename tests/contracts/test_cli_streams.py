@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from shapely import to_wkb
@@ -18,6 +21,7 @@ from osm_polygon_description_tag import cli
 from osm_polygon_description_tag.osm.discovery import Source
 from osm_polygon_description_tag.osm.extraction import ExportRecord
 from osm_polygon_description_tag.publication.models import UploadItem, UploadPlan
+from osm_polygon_description_tag.runtime.presentation import TerminalPresenter
 from osm_polygon_description_tag.workflow.build import BuildResult
 from osm_polygon_description_tag.workflow.orchestrator import (
     OrchestrationReport,
@@ -547,6 +551,156 @@ def test_verbosity_flags_filter_the_human_event_lines(
     log = (data_root / "logs" / "run-and-publish.jsonl").read_text(encoding="utf-8")
     events = {json.loads(line)["event"] for line in log.splitlines()}
     assert {"resolved_config", "build_progress", "run_summary"} <= events
+
+
+_RUN_AND_PUBLISH_REPO = "NoeFlandre/osm-polygon-description-tag"
+
+
+def _run_and_publish_argv(cli_roots: tuple[Path, Path]) -> list[str]:
+    source_root, data_root = cli_roots
+    return [
+        "run-and-publish",
+        *_common_args(source_root, data_root),
+        "--confirm-repo",
+        _RUN_AND_PUBLISH_REPO,
+    ]
+
+
+def _stub_run_and_publish(monkeypatch: pytest.MonkeyPatch, error: Exception | None = None) -> None:
+    """Log one INFO event through the real logger, then raise ``error`` when given."""
+
+    def fake_run_and_publish(**kwargs: Any) -> SimpleNamespace:
+        kwargs["logger"].event("run_summary", source_count=1)
+        if error is not None:
+            raise error
+        return SimpleNamespace(to_payload=lambda: {"source_count": 1})
+
+    monkeypatch.setattr(cli, "run_and_publish", fake_run_and_publish)
+
+
+def _app_invoke(argv: list[str]) -> None:
+    """Call the Typer app object directly, as a test runner or library caller would."""
+    cli.app(args=argv, prog_name="osm-polygon-description-tag", standalone_mode=False)
+
+
+def _without_clock_and_run_id(stderr: str) -> str:
+    """Keep level, event and fields: the timestamp and the random run id differ per call."""
+    return re.sub(r"^\S+ (\w+) run=\S+ ", r"\1 ", stderr, flags=re.MULTILINE)
+
+
+def _run_stderr(argv: list[str], capsys: pytest.CaptureFixture[str]) -> str:
+    capsys.readouterr()
+    assert cli.run(argv) == 0
+    return _without_clock_and_run_id(capsys.readouterr().err)
+
+
+def _handler_stderr(cli_roots: tuple[Path, Path], capsys: pytest.CaptureFixture[str]) -> str:
+    """Call the run-and-publish handler with no verbosity flags, outside the group callback."""
+    source_root, data_root = cli_roots
+    capsys.readouterr()
+    presenter = TerminalPresenter(stderr=sys.stderr)
+    try:
+        cli.handle_run_and_publish(
+            SimpleNamespace(
+                confirm_repo=_RUN_AND_PUBLISH_REPO,
+                source_root=source_root,
+                data_root=data_root,
+                osmium="fake-osmium",
+                presenter=presenter,
+            )
+        )
+    finally:
+        presenter.close()
+    return _without_clock_and_run_id(capsys.readouterr().err)
+
+
+def _start_from_plain_invocation(
+    cli_roots: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Fix the starting level explicitly: a plain invocation leaves INFO, whatever ran before."""
+    _run_stderr(_run_and_publish_argv(cli_roots), capsys)
+
+
+def test_quiet_app_call_does_not_leak_into_a_later_command(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_roots: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _stub_run_and_publish(monkeypatch)
+    _start_from_plain_invocation(cli_roots, capsys)
+    baseline = _handler_stderr(cli_roots, capsys)
+    assert "INFO run_summary" in baseline
+
+    _app_invoke(["-q", *_run_and_publish_argv(cli_roots)])
+
+    assert _handler_stderr(cli_roots, capsys) == baseline
+
+
+def test_exception_through_app_call_leaves_no_verbosity_behind(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_roots: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _stub_run_and_publish(monkeypatch)
+    _start_from_plain_invocation(cli_roots, capsys)
+    baseline = _handler_stderr(cli_roots, capsys)
+
+    _stub_run_and_publish(monkeypatch, error=OSError("simulated failure"))
+    with pytest.raises(OSError, match="simulated failure"):
+        _app_invoke(["-v", *_run_and_publish_argv(cli_roots)])
+
+    _stub_run_and_publish(monkeypatch)
+    assert _handler_stderr(cli_roots, capsys) == baseline
+
+
+def test_exception_through_run_leaves_no_verbosity_behind(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_roots: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _stub_run_and_publish(monkeypatch)
+    _start_from_plain_invocation(cli_roots, capsys)
+    baseline = _handler_stderr(cli_roots, capsys)
+
+    _stub_run_and_publish(monkeypatch, error=OSError("simulated failure"))
+    assert cli.run(["-v", *_run_and_publish_argv(cli_roots)]) == 1
+
+    _stub_run_and_publish(monkeypatch)
+    assert _handler_stderr(cli_roots, capsys) == baseline
+
+
+def test_interleaved_verbose_and_quiet_invocations_match_isolated_runs(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_roots: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    argv = _run_and_publish_argv(cli_roots)
+    _stub_run_and_publish(monkeypatch)
+    _start_from_plain_invocation(cli_roots, capsys)
+    baseline = _handler_stderr(cli_roots, capsys)
+    alone = {flags: _run_stderr([*flags, *argv], capsys) for flags in (("-v",), ("-q",), ())}
+
+    for flags in (("-v",), ("-q",), (), ("-q",), ("-v",), ()):
+        _app_invoke([*flags, *argv])
+        assert _handler_stderr(cli_roots, capsys) == baseline, f"handler after direct {flags}"
+        assert _run_stderr([*flags, *argv], capsys) == alone[flags], f"run {flags}"
+
+
+def test_repeated_invocations_give_the_same_output(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_roots: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    argv = _run_and_publish_argv(cli_roots)
+    _stub_run_and_publish(monkeypatch)
+    _start_from_plain_invocation(cli_roots, capsys)
+    baseline = _handler_stderr(cli_roots, capsys)
+    first_quiet = _run_stderr(["-q", *argv], capsys)
+
+    for _ in range(3):
+        _app_invoke(["-v", *argv])
+        assert _handler_stderr(cli_roots, capsys) == baseline
+        assert _run_stderr(["-q", *argv], capsys) == first_quiet
 
 
 def test_verbose_and_quiet_cannot_be_combined(capsys: pytest.CaptureFixture[str]) -> None:

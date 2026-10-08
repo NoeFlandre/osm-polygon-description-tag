@@ -18,6 +18,9 @@ defined once, in `pyproject.toml`. `CITATION.cff` must have the same version.
 
 ### Fixed
 
+- The run log keeps events written after the log is closed or after a failed rotation. It no longer holds them in memory where they are never flushed (#159).
+- `build-one` exits with code 3 when the requested source is not discovered.
+  `validate` exits with code 4 when its data directory is missing (#135).
 - Resolve exact 180° longitude ties consistently during antimeridian clipping (#113).
 - Canonical selection puts null versions and timestamps last, matching DuckDB, and rejects malformed nonempty timestamps.
 - The uploader retries on timeout messages in stderr. It keeps live output and a bounded error tail (#105).
@@ -26,6 +29,7 @@ defined once, in `pyproject.toml`. `CITATION.cff` must have the same version.
 
 ### Changed
 
+- `collect_stats` and `generate_dataset_docs` no longer accept the ignored `clock` argument (#127).
 - The CLI imports matplotlib only when it draws a chart (#84).
 - The transform step orients each geometry one time for each record (#85).
 - H3 density counts rank unique rows in one pass (#82).

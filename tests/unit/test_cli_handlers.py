@@ -58,7 +58,7 @@ def test_migrate_text_forwards_the_worker_count_and_reports_the_file_count(
 
     monkeypatch.setattr(cli, "migrate_dataset_text", _migrate)
 
-    assert cli.handle_migrate_text(SimpleNamespace(max_workers=4)) == 0
+    cli.handle_migrate_text(SimpleNamespace(max_workers=4))
     assert seen == {"data_root": paths.data_root, "max_workers": 4}
     assert json.loads(capsys.readouterr().out) == {
         "data_root": str(paths.data_root),
@@ -85,7 +85,7 @@ def test_release_stats_forwards_the_repo_confirmation_and_apply_gate(
 
     args = SimpleNamespace(confirm_repo="owner/dataset", apply=True)
 
-    assert cli.handle_release_stats(args) == 0
+    cli.handle_release_stats(args)
     assert seen == {
         "data_root": paths.data_root,
         "template": "TEMPLATE",
@@ -114,7 +114,7 @@ def test_release_stats_defaults_to_planning_when_apply_is_not_requested(
     )
     monkeypatch.setattr(cli, "dataset_card_template", lambda: "TEMPLATE")
 
-    assert cli.handle_release_stats(SimpleNamespace(confirm_repo="owner/dataset", apply=False)) == 0
+    cli.handle_release_stats(SimpleNamespace(confirm_repo="owner/dataset", apply=False))
     assert seen == {"apply": False}
     capsys.readouterr()
 
@@ -162,7 +162,7 @@ def test_cli_migration_handler_reports_migrated_files(
         ),
     )
 
-    assert cli.handle_migrate_schema(args) == 0
+    cli.handle_migrate_schema(args)
     assert json.loads(capsys.readouterr().out) == {
         "data_root": str(args.data_root),
         "migrated_files": ["data/a.parquet"],
@@ -367,7 +367,7 @@ def test_cli_run_and_publish_wires_tracker_logger_and_presenter(
 
     monkeypatch.setattr(cli, "run_and_publish", workflow)
 
-    assert cli.handle_run_and_publish(args) == 0
+    cli.handle_run_and_publish(args)
     assert tracker_roots == [args.data_root]
     assert len(logger_calls) == 1
     assert logger_calls[0] == {
@@ -423,7 +423,7 @@ def test_cli_trackio_handler_reports_snapshot(
 
     monkeypatch.setattr(cli, "publish_snapshot", publish)
 
-    assert cli.handle_trackio_snapshot(args) == 0
+    cli.handle_trackio_snapshot(args)
     assert json.loads(capsys.readouterr().out) == expected.to_payload()
     assert calls == [(args.data_root, "p", "o/s")]
 
@@ -446,7 +446,7 @@ def test_cli_inspect_handler_reports_discovered_sources(
     export_config = tmp_path / "export.json"
     monkeypatch.setattr(cli, "osmium_export_config", lambda: export_config)
 
-    assert cli.handle_inspect(args) == 0
+    cli.handle_inspect(args)
     assert json.loads(capsys.readouterr().out) == {
         "source_root": str(args.source_root),
         "data_root": str(args.data_root),
@@ -486,7 +486,7 @@ def test_cli_build_all_handler_reports_each_result(
         cli, "build_all", lambda sources, build: [build(source) for source in sources]
     )
 
-    assert cli.handle_build_all(args) == 0
+    cli.handle_build_all(args)
     assert json.loads(capsys.readouterr().out) == {
         "count": 1,
         "results": [{"source_name": "region.osm.pbf", "status": "built", "included_rows": 4}],
@@ -526,7 +526,7 @@ def test_cli_build_one_reports_every_result_field(
         lambda root: [source] if root == paths.source_root else [],
     )
 
-    assert cli.handle_build_one(args) == 0
+    cli.handle_build_one(args)
     assert json.loads(capsys.readouterr().out) == {
         "source_name": args.basename,
         "output_name": "region.parquet",
@@ -585,7 +585,7 @@ def test_cli_validate_sorts_and_accumulates_every_parquet(
     )
     monkeypatch.setattr(cli, "validate_geoparquet", validate)
 
-    assert cli.handle_validate(args) == 0
+    cli.handle_validate(args)
     assert calls == [first, second]
     assert json.loads(capsys.readouterr().out) == {"files": 2, "rows": 5}
 
@@ -593,7 +593,7 @@ def test_cli_validate_sorts_and_accumulates_every_parquet(
 def test_cli_validate_reports_a_missing_data_directory(tmp_path: Path) -> None:
     args = _path_options(tmp_path)
 
-    with pytest.raises(ValueError, match="missing data directory"):
+    with pytest.raises(cli.StorageError, match="missing data directory"):
         cli.handle_validate(args)
 
 
@@ -612,7 +612,7 @@ def test_cli_card_passes_template_and_uses_empty_suffix_default(
 
     monkeypatch.setattr(cli, "generate_dataset_docs", generate)
 
-    assert cli.handle_card(args) == 0
+    cli.handle_card(args)
     assert captured == [(args.data_root, template)]
     assert json.loads(capsys.readouterr().out) == {
         "name_suffixes": {},
@@ -631,7 +631,7 @@ def test_cli_build_one_rejects_an_unknown_source(
     )
     monkeypatch.setattr(cli, "discover_sources", lambda _root: [])
 
-    with pytest.raises(ValueError, match="source not discovered: missing.osm.pbf"):
+    with pytest.raises(cli.MissingPathError, match="source not discovered: missing.osm.pbf"):
         cli.handle_build_one(args)
 
 
@@ -650,7 +650,7 @@ def test_cli_publish_handler_executes_the_confirmed_plan(
         cli, "execute_upload", lambda current, confirmation: calls.append((current, confirmation))
     )
 
-    assert cli.handle_publish(args) == 0
+    cli.handle_publish(args)
     assert calls == [(plan, "identity")]
     assert json.loads(capsys.readouterr().out) == {
         "repo_id": "owner/dataset",
@@ -669,7 +669,7 @@ def test_cli_card_reports_stats_fields(
         lambda root, _template: stats if root == args.data_root else pytest.fail("wrong data root"),
     )
 
-    assert cli.handle_card(args) == 0
+    cli.handle_card(args)
     assert json.loads(capsys.readouterr().out) == {
         "name_suffixes": {"fr": 3},
         "output_files": 2,
@@ -695,7 +695,7 @@ def test_cli_publish_plan_reports_each_file(
         lambda root: plan if root == args.data_root else pytest.fail("wrong data root"),
     )
 
-    assert cli.handle_publish_plan(args) == 0
+    cli.handle_publish_plan(args)
     assert json.loads(capsys.readouterr().out) == {
         "repo_id": "owner/dataset",
         "identity_sha256": "identity",
