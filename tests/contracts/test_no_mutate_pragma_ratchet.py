@@ -13,7 +13,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PRAGMA = "pragma: no mutate"
-MAX_NO_MUTATE_PRAGMA_LINES = 111
+MAX_NO_MUTATE_PRAGMA_LINES = 110
 
 
 def _pragma_lines() -> list[str]:

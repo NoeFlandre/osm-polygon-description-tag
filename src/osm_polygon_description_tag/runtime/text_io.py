@@ -27,7 +27,8 @@ def utf8_bytes(text: str) -> bytes:
 
 def decode_utf8(data: bytes, *, errors: str = "strict") -> str:
     """Decode ``data`` as UTF-8 text without newline translation, with ``errors`` handling."""
-    return data.decode(_UTF8, errors=errors)  # pragma: no mutate - bytes.decode defaults to UTF-8
+    # bytes.decode() defaults to UTF-8, so no codec argument is passed here.
+    return data.decode(errors=errors)
 
 
 __all__ = ["decode_utf8", "read_text_utf8", "utf8_bytes", "write_text_utf8"]
