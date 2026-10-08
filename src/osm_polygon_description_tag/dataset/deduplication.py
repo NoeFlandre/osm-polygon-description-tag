@@ -484,6 +484,31 @@ def _state_payload(
     }
 
 
+def _state_references_stage(state_path: Path, stage_name: str) -> bool:
+    """Return whether the state names ``stage_name``; an unreadable state counts as naming it."""
+    try:
+        recorded = _read_state(state_path)
+    except DeduplicationError:
+        return True
+    return recorded is not None and recorded.get("stage_dir") == stage_name
+
+
+def _record_staged_state(
+    context: _DeduplicationContext,
+    stage_dir: Path,
+    state: dict[str, object],
+) -> None:
+    stage_name = stage_dir.as_posix()
+    state["stage_dir"] = stage_name
+    try:
+        _write_state(context.state_path, state)
+    except BaseException:
+        # A state that names the directory keeps it for the next run to resume.
+        if not _state_references_stage(context.state_path, stage_name):
+            shutil.rmtree(context.data_root / stage_dir, ignore_errors=True)
+        raise
+
+
 def _finish_deduplication(
     context: _DeduplicationContext,
     stage_dir: Path,
@@ -493,8 +518,7 @@ def _finish_deduplication(
     promotion_hook: Callable[[int], None] | None,
 ) -> DeduplicationResult:
     if changed:
-        state["stage_dir"] = stage_dir.as_posix()
-        _write_state(context.state_path, state)
+        _record_staged_state(context, stage_dir, state)
         return _resume_staged(
             context.data_root,
             context.state_path,
