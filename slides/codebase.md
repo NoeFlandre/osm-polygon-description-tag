@@ -308,7 +308,7 @@ from validated final Parquets and matching manifests.
 Changing the README template does not require recomputing the plots. Changing
 the finalized dataset or renderer version does.
 
-<div class="source-note">Sources: src/osm_polygon_description_tag/dataset/reporting.py; src/osm_polygon_description_tag/dataset/geography</div>
+<div class="source-note">Sources: src/osm_polygon_description_tag/dataset/stats.py; src/osm_polygon_description_tag/dataset/docs.py; src/osm_polygon_description_tag/dataset/geography</div>
 
 ---
 

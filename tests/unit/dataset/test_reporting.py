@@ -6,11 +6,11 @@ import pytest
 from shapely.geometry import MultiPolygon, Polygon
 
 from osm_polygon_description_tag.dataset.canonical_rows import select_canonical_row
+from osm_polygon_description_tag.dataset.docs import generate_dataset_docs
 from osm_polygon_description_tag.dataset.geography import (
     aggregate_area_histogram,
     aggregate_h3_density,
 )
-from osm_polygon_description_tag.dataset.reporting import collect_stats, generate_dataset_docs
 from osm_polygon_description_tag.dataset.stats import (
     _collect_feature_summary,
     _collect_manifest_summary,
@@ -20,6 +20,7 @@ from osm_polygon_description_tag.dataset.stats import (
     _ingest_features,
     _new_connection,
     _validate_artifact,
+    collect_stats,
 )
 from osm_polygon_description_tag.dataset.unique_rows import iter_unique_parquet_batches
 from tests.conftest import make_record_dict
