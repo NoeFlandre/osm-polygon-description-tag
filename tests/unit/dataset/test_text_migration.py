@@ -495,6 +495,7 @@ def test_a_stale_manifest_from_an_interrupted_run_is_healed(tmp_path: Path) -> N
 
     assert migrate_dataset_text(data_root) == 1
     assert read_manifest(manifest_path).output == output_identity_for(parquet)
+    assert read_manifest(manifest_path).counts == healthy.counts
     assert migrate_dataset_text(data_root) == 0
 
 
