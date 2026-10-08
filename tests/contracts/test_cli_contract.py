@@ -9,12 +9,12 @@ import pytest
 from shapely.geometry import Polygon
 from typer import rich_utils
 
-from osm_polygon_description_tag.cli import (
+from osm_polygon_description_tag.cli import run
+from osm_polygon_description_tag.cli_handlers import (
     handle_inspect,
     handle_publish,
     handle_publish_plan,
     handle_validate,
-    run,
 )
 from osm_polygon_description_tag.cli_requests import (
     BuildOneRequest,
@@ -552,9 +552,9 @@ def test_handle_build_one_invokes_pipeline(
         manifest_path=data / "manifests" / "region.manifest.json",
     )
 
-    from osm_polygon_description_tag import cli
+    from osm_polygon_description_tag import cli, cli_handlers
 
-    monkeypatch.setattr(cli, "build_one", lambda *args, **kwargs: fake_result)
+    monkeypatch.setattr(cli_handlers, "build_one", lambda *args, **kwargs: fake_result)
 
     args = BuildOneRequest(
         basename="region.osm.pbf",
@@ -585,14 +585,14 @@ def test_handle_publish_invokes_execute_upload(
     (data / "assets" / "area_distribution.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"hist" * 1024)
     (data / "assets" / "dataset-card-hero.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"hero" * 1024)
 
-    from osm_polygon_description_tag import cli
+    from osm_polygon_description_tag import cli, cli_handlers
 
     captured: list[list[str]] = []
 
     def fake_execute(plan, *, confirmation, runner=None):  # type: ignore[no-untyped-def]
         captured.append([plan.repo_id, confirmation])
 
-    monkeypatch.setattr(cli, "execute_upload", fake_execute)
+    monkeypatch.setattr(cli_handlers, "execute_upload", fake_execute)
 
     args = PublishRequest(
         plan="abc",
@@ -611,7 +611,7 @@ def test_handle_publish_invokes_execute_upload(
 def test_handle_run_and_publish_invokes_orchestrator(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from osm_polygon_description_tag import cli
+    from osm_polygon_description_tag import cli, cli_handlers
 
     fake_report = {
         "preflight": {"source_count": 1},
@@ -635,7 +635,7 @@ def test_handle_run_and_publish_invokes_orchestrator(
         captured.update(kwargs)
         return type("R", (), {"to_payload": lambda self: fake_report})()
 
-    monkeypatch.setattr(cli, "run_and_publish", fake_run_and_publish)
+    monkeypatch.setattr(cli_handlers, "run_and_publish", fake_run_and_publish)
 
     args = RunAndPublishRequest(
         confirm_repo="NoeFlandre/osm-polygon-description-tag",
@@ -682,7 +682,7 @@ def test_every_option_of_every_command_has_help_text() -> None:
 def test_verbosity_is_reset_after_each_invocation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    import osm_polygon_description_tag.cli as cli_module
+    from osm_polygon_description_tag import cli_handlers
 
     def fake_run_and_publish(**kwargs: object) -> SimpleNamespace:
         logger = kwargs["logger"]
@@ -690,7 +690,7 @@ def test_verbosity_is_reset_after_each_invocation(
         logger.event("run_summary", source_count=1)
         return SimpleNamespace(to_payload=lambda: {"source_count": 1})
 
-    monkeypatch.setattr(cli_module, "run_and_publish", fake_run_and_publish)
+    monkeypatch.setattr(cli_handlers, "run_and_publish", fake_run_and_publish)
     (tmp_path / "raw").mkdir()
     argv = [
         "run-and-publish",

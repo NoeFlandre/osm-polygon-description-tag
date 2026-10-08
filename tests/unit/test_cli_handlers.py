@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 from click import Command, Context
 
-from osm_polygon_description_tag import cli
+from osm_polygon_description_tag import cli, cli_handlers
 from osm_polygon_description_tag.cli_requests import (
     BuildOneRequest,
     MigrateTextRequest,
@@ -51,8 +51,8 @@ def paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     def _data_root(args: object) -> Path:
         return _resolve(args).data_root
 
-    monkeypatch.setattr(cli, "_resolve_paths", _resolve)
-    monkeypatch.setattr(cli, "_data_root", _data_root)
+    monkeypatch.setattr(cli_handlers, "_resolve_paths", _resolve)
+    monkeypatch.setattr(cli_handlers, "_data_root", _data_root)
     return resolved
 
 
@@ -66,7 +66,7 @@ def test_migrate_text_forwards_the_worker_count_and_reports_the_file_count(
         seen["max_workers"] = max_workers
         return 3
 
-    monkeypatch.setattr(cli, "migrate_dataset_text", _migrate)
+    monkeypatch.setattr(cli_handlers, "migrate_dataset_text", _migrate)
 
     cli.handle_migrate_text(
         MigrateTextRequest(
@@ -94,8 +94,8 @@ def test_release_stats_forwards_the_repo_confirmation_and_apply_gate(
         seen.update(data_root=data_root, template=template, confirm_repo=confirm_repo, apply=apply)
         return Report()
 
-    monkeypatch.setattr(cli, "release_metadata", _release)
-    monkeypatch.setattr(cli, "dataset_card_template", lambda: "TEMPLATE")
+    monkeypatch.setattr(cli_handlers, "release_metadata", _release)
+    monkeypatch.setattr(cli_handlers, "dataset_card_template", lambda: "TEMPLATE")
 
     args = ReleaseStatsRequest(
         source_root=None,
@@ -125,14 +125,14 @@ def test_release_stats_defaults_to_planning_when_apply_is_not_requested(
             return {}
 
     monkeypatch.setattr(
-        cli,
+        cli_handlers,
         "release_metadata",
         lambda data_root, template, *, confirm_repo, apply: (
             seen.update(apply=apply),
             Report(),
         )[1],
     )
-    monkeypatch.setattr(cli, "dataset_card_template", lambda: "TEMPLATE")
+    monkeypatch.setattr(cli_handlers, "dataset_card_template", lambda: "TEMPLATE")
 
     cli.handle_release_stats(
         ReleaseStatsRequest(
@@ -185,7 +185,7 @@ def test_cli_migration_handler_reports_migrated_files(
 ) -> None:
     args = _path_options(tmp_path)
     monkeypatch.setattr(
-        cli,
+        cli_handlers,
         "migrate_dataset_schema",
         lambda root: (
             ["data/a.parquet"] if root == args.data_root else pytest.fail("wrong data root")
@@ -201,7 +201,7 @@ def test_cli_migration_handler_reports_migrated_files(
 
 def test_cli_resolve_paths_uses_supplied_roots(tmp_path: Path) -> None:
     args = _cli_args(PathOptions, tmp_path)
-    paths = cli._resolve_paths(args)
+    paths = cli_handlers._resolve_paths(args)
 
     assert paths.source_root == args.source_root
     assert paths.data_root == args.data_root
@@ -213,7 +213,7 @@ def test_cli_data_root_ignores_a_missing_source_root(
     monkeypatch.delenv("OSM_POLYGON_SOURCE_ROOT", raising=False)
     args = SimpleNamespace(source_root=None, data_root=tmp_path)
 
-    assert cli._data_root(args) == tmp_path
+    assert cli_handlers._data_root(args) == tmp_path
 
 
 def test_cli_print_json_is_sorted_and_indented(capsys: pytest.CaptureFixture[str]) -> None:
@@ -388,15 +388,15 @@ def test_cli_run_and_publish_wires_tracker_logger_and_presenter(
 
     report = SimpleNamespace(to_payload=lambda: {"status": "ok"})
 
-    monkeypatch.setattr(cli, "TrackioRecorder", FakeTracker)
-    monkeypatch.setattr(cli, "RunLogger", FakeLogger)
-    monkeypatch.setattr(cli.uuid, "uuid4", lambda: "run-id")
+    monkeypatch.setattr(cli_handlers, "TrackioRecorder", FakeTracker)
+    monkeypatch.setattr(cli_handlers, "RunLogger", FakeLogger)
+    monkeypatch.setattr(cli_handlers.uuid, "uuid4", lambda: "run-id")
 
     def workflow(**kwargs: object) -> SimpleNamespace:
         workflow_calls.append(kwargs)
         return report
 
-    monkeypatch.setattr(cli, "run_and_publish", workflow)
+    monkeypatch.setattr(cli_handlers, "run_and_publish", workflow)
 
     cli.handle_run_and_publish(args)
     assert tracker_roots == [args.data_root]
@@ -421,7 +421,7 @@ def test_cli_run_and_publish_wires_tracker_logger_and_presenter(
     ]
     assert workflow_calls == [
         {
-            "paths": cli._resolve_paths(args),
+            "paths": cli_handlers._resolve_paths(args),
             "confirm_repo": "owner/dataset",
             "osmium_executable": "fake-osmium",
             "logger": logger_instances[0],
@@ -458,7 +458,7 @@ def test_cli_trackio_handler_reports_snapshot(
         assert run_name == "snapshot-2026-08-20"
         return expected
 
-    monkeypatch.setattr(cli, "publish_snapshot", publish)
+    monkeypatch.setattr(cli_handlers, "publish_snapshot", publish)
 
     cli.handle_trackio_snapshot(args)
     assert json.loads(capsys.readouterr().out) == expected.to_payload()
@@ -476,12 +476,12 @@ def test_cli_inspect_handler_reports_discovered_sources(
         mtime_ns=34,
     )
     monkeypatch.setattr(
-        cli,
+        cli_handlers,
         "discover_sources",
         lambda root: [source] if root == args.source_root else [],
     )
     export_config = tmp_path / "export.json"
-    monkeypatch.setattr(cli, "osmium_export_config", lambda: export_config)
+    monkeypatch.setattr(cli_handlers, "osmium_export_config", lambda: export_config)
 
     cli.handle_inspect(args)
     assert json.loads(capsys.readouterr().out) == {
@@ -508,19 +508,19 @@ def test_cli_build_all_handler_reports_each_result(
     result = SimpleNamespace(source_name="region.osm.pbf", status="built", included_rows=4)
     paths = SimpleNamespace(source_root=args.source_root)
     monkeypatch.setattr(
-        cli,
+        cli_handlers,
         "_build_paths_and_executor",
         lambda value: (
             (paths, lambda _source: result) if value is args else pytest.fail("wrong args")
         ),
     )
     monkeypatch.setattr(
-        cli,
+        cli_handlers,
         "discover_sources",
         lambda root: ["source"] if root == paths.source_root else [],
     )
     monkeypatch.setattr(
-        cli, "build_all", lambda sources, build: [build(source) for source in sources]
+        cli_handlers, "build_all", lambda sources, build: [build(source) for source in sources]
     )
 
     cli.handle_build_all(args)
@@ -553,12 +553,12 @@ def test_cli_build_one_reports_every_result_field(
         return result
 
     monkeypatch.setattr(
-        cli,
+        cli_handlers,
         "_build_paths_and_executor",
         lambda value: (paths, executor) if value is args else pytest.fail("wrong args"),
     )
     monkeypatch.setattr(
-        cli,
+        cli_handlers,
         "discover_sources",
         lambda root: [source] if root == paths.source_root else [],
     )
@@ -641,13 +641,13 @@ def test_cli_card_passes_template_and_uses_empty_suffix_default(
     template = tmp_path / "template.md"
     captured: list[tuple[Path, Path]] = []
 
-    monkeypatch.setattr(cli, "dataset_card_template", lambda: template)
+    monkeypatch.setattr(cli_handlers, "dataset_card_template", lambda: template)
 
     def generate(root: Path, value: Path) -> dict[str, object]:
         captured.append((root, value))
         return {"output_files": 0, "rows": 0}
 
-    monkeypatch.setattr(cli, "generate_dataset_docs", generate)
+    monkeypatch.setattr(cli_handlers, "generate_dataset_docs", generate)
 
     cli.handle_card(args)
     assert captured == [(args.data_root, template)]
@@ -664,9 +664,9 @@ def test_cli_build_one_rejects_an_unknown_source(
     args = _build_one_request(tmp_path, "missing.osm.pbf")
     paths = SimpleNamespace(source_root=args.source_root)
     monkeypatch.setattr(
-        cli, "_build_paths_and_executor", lambda _value: (paths, lambda _source: None)
+        cli_handlers, "_build_paths_and_executor", lambda _value: (paths, lambda _source: None)
     )
-    monkeypatch.setattr(cli, "discover_sources", lambda _root: [])
+    monkeypatch.setattr(cli_handlers, "discover_sources", lambda _root: [])
 
     with pytest.raises(cli.MissingPathError, match="source not discovered: missing.osm.pbf"):
         cli.handle_build_one(args)
@@ -679,12 +679,14 @@ def test_cli_publish_handler_executes_the_confirmed_plan(
     plan = SimpleNamespace(repo_id="owner/dataset", identity_sha256="identity")
     calls: list[tuple[object, object]] = []
     monkeypatch.setattr(
-        cli,
+        cli_handlers,
         "create_upload_plan",
         lambda root: plan if root == args.data_root else pytest.fail("wrong data root"),
     )
     monkeypatch.setattr(
-        cli, "execute_upload", lambda current, confirmation: calls.append((current, confirmation))
+        cli_handlers,
+        "execute_upload",
+        lambda current, confirmation: calls.append((current, confirmation)),
     )
 
     cli.handle_publish(args)
@@ -701,7 +703,7 @@ def test_cli_card_reports_stats_fields(
     args = _path_options(tmp_path)
     stats = {"output_files": 2, "rows": 7, "name_suffixes": {"fr": 3}}
     monkeypatch.setattr(
-        cli,
+        cli_handlers,
         "generate_dataset_docs",
         lambda root, _template: stats if root == args.data_root else pytest.fail("wrong data root"),
     )
@@ -727,7 +729,7 @@ def test_cli_publish_plan_reports_each_file(
         ),
     )
     monkeypatch.setattr(
-        cli,
+        cli_handlers,
         "create_upload_plan",
         lambda root: plan if root == args.data_root else pytest.fail("wrong data root"),
     )
@@ -749,15 +751,15 @@ def test_cli_build_paths_executor_resolves_and_forwards_arguments(
     args = _path_options(tmp_path)
     config = tmp_path / "osmium-export.json"
     built: list[tuple[object, object, str]] = []
-    monkeypatch.setattr(cli, "osmium_export_config", lambda: config)
+    monkeypatch.setattr(cli_handlers, "osmium_export_config", lambda: config)
 
     def fake_build(source: object, paths: object, *, export_config: object, executable: str) -> str:
         built.append((source, export_config, executable))
         assert paths.data_root == args.data_root
         return "built"
 
-    monkeypatch.setattr(cli, "build_one", fake_build)
-    paths, executor = cli._build_paths_and_executor(args)
+    monkeypatch.setattr(cli_handlers, "build_one", fake_build)
+    paths, executor = cli_handlers._build_paths_and_executor(args)
 
     assert paths.data_root == args.data_root
     assert executor("source") == "built"

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from osm_polygon_description_tag import cli
+from osm_polygon_description_tag import cli, cli_handlers
 from osm_polygon_description_tag.cli_requests import PathOptions
 from osm_polygon_description_tag.dataset import validation
 from osm_polygon_description_tag.dataset.manifest import output_identity_for, source_identity_for
@@ -104,7 +104,7 @@ def test_validate_passes_the_artifact_path_and_manifest_source_to_storage(
     )
     calls: list[tuple[Path, dict[str, str]]] = []
 
-    monkeypatch.setattr(cli, "_validation_source_root", lambda *_args: None)
+    monkeypatch.setattr(cli_handlers, "_validation_source_root", lambda *_args: None)
     monkeypatch.setattr(
         validation,
         "validate_finalized_artifacts",
@@ -140,7 +140,7 @@ def test_validate_reports_when_manifest_source_name_does_not_map_to_artifact(
         output=output_identity_for(parquet),
         counts=SimpleNamespace(included_rows=1, emitted_features=1, rejections={}),
     )
-    monkeypatch.setattr(cli, "_validation_source_root", lambda *_args: None)
+    monkeypatch.setattr(cli_handlers, "_validation_source_root", lambda *_args: None)
     monkeypatch.setattr(
         validation,
         "validate_finalized_artifacts",
