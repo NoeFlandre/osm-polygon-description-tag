@@ -614,12 +614,20 @@ def _handler_stderr(cli_roots: tuple[Path, Path], capsys: pytest.CaptureFixture[
     return _without_clock_and_run_id(capsys.readouterr().err)
 
 
+def _start_from_plain_invocation(
+    cli_roots: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Fix the starting level explicitly: a plain invocation leaves INFO, whatever ran before."""
+    _run_stderr(_run_and_publish_argv(cli_roots), capsys)
+
+
 def test_quiet_app_call_does_not_leak_into_a_later_command(
     monkeypatch: pytest.MonkeyPatch,
     cli_roots: tuple[Path, Path],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _stub_run_and_publish(monkeypatch)
+    _start_from_plain_invocation(cli_roots, capsys)
     baseline = _handler_stderr(cli_roots, capsys)
     assert "INFO run_summary" in baseline
 
@@ -634,6 +642,7 @@ def test_exception_through_app_call_leaves_no_verbosity_behind(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _stub_run_and_publish(monkeypatch)
+    _start_from_plain_invocation(cli_roots, capsys)
     baseline = _handler_stderr(cli_roots, capsys)
 
     _stub_run_and_publish(monkeypatch, error=OSError("simulated failure"))
@@ -650,6 +659,7 @@ def test_exception_through_run_leaves_no_verbosity_behind(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _stub_run_and_publish(monkeypatch)
+    _start_from_plain_invocation(cli_roots, capsys)
     baseline = _handler_stderr(cli_roots, capsys)
 
     _stub_run_and_publish(monkeypatch, error=OSError("simulated failure"))
@@ -666,6 +676,7 @@ def test_interleaved_verbose_and_quiet_invocations_match_isolated_runs(
 ) -> None:
     argv = _run_and_publish_argv(cli_roots)
     _stub_run_and_publish(monkeypatch)
+    _start_from_plain_invocation(cli_roots, capsys)
     baseline = _handler_stderr(cli_roots, capsys)
     alone = {flags: _run_stderr([*flags, *argv], capsys) for flags in (("-v",), ("-q",), ())}
 
@@ -682,6 +693,7 @@ def test_repeated_invocations_give_the_same_output(
 ) -> None:
     argv = _run_and_publish_argv(cli_roots)
     _stub_run_and_publish(monkeypatch)
+    _start_from_plain_invocation(cli_roots, capsys)
     baseline = _handler_stderr(cli_roots, capsys)
     first_quiet = _run_stderr(["-q", *argv], capsys)
 

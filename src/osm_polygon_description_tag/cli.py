@@ -105,6 +105,7 @@ Osmium = Annotated[
 ]
 
 _DISTRIBUTION = "osm-polygon-description-tag"
+_DEFAULT_STDERR_LEVEL = "INFO"
 
 
 @dataclass
@@ -113,7 +114,7 @@ class _GlobalOptions:
 
     # stderr threshold for human-readable event lines, set by -v / -q. The JSONL
     # log always records every event.
-    stderr_level: str = "INFO"
+    stderr_level: str = _DEFAULT_STDERR_LEVEL
 
 
 def _show_version(value: bool) -> None:
@@ -147,7 +148,8 @@ def _global_options(
     """Build, validate and publish the OSM polygon description-tag dataset."""
     if verbose and quiet:
         raise UsageError("--verbose and --quiet cannot be combined")
-    ctx.obj = _GlobalOptions(stderr_level="DEBUG" if verbose else "WARNING" if quiet else "INFO")
+    level = "DEBUG" if verbose else "WARNING" if quiet else _DEFAULT_STDERR_LEVEL
+    ctx.obj = _GlobalOptions(stderr_level=level)
 
 
 class _DataRootOption(Protocol):
@@ -432,7 +434,7 @@ def handle_run_and_publish(args: SimpleNamespace) -> None:
             buffer_preflight=True,
             stderr=sys.stderr,
             observer=presenter.observe,
-            stderr_level=getattr(args, "stderr_level", "INFO"),
+            stderr_level=getattr(args, "stderr_level", _DEFAULT_STDERR_LEVEL),
         )
         if presenter is not None
         else None
