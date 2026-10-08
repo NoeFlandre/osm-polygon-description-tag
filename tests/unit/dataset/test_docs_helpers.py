@@ -520,8 +520,13 @@ def test_write_dataset_docs_writes_non_ascii_text_as_utf8_bytes(tmp_path: Path) 
     with patch.object(docs_module, "_render_stats_block", return_value="café stats"):
         docs_module._write_dataset_docs(tmp_path, template, stats)
 
-    assert b"caf\xc3\xa9 stats" in (tmp_path / "README.md").read_bytes()
-    assert b'"name": "caf\xc3\xa9"' in (tmp_path / "stats.json").read_bytes()
+    readme_bytes = (tmp_path / "README.md").read_bytes()
+    stats_bytes = (tmp_path / "stats.json").read_bytes()
+    assert b"caf\xc3\xa9 stats" in readme_bytes
+    assert b'"name": "caf\xc3\xa9"' in stats_bytes
+    assert b"\r" not in readme_bytes
+    assert readme_bytes.endswith(b"caf\xc3\xa9 stats<!-- GENERATED:STATS:END -->\n")
+    assert stats_bytes == b'{\n  "name": "caf\xc3\xa9",\n  "rows": 4\n}\n'
 
 
 def test_write_dataset_docs_rejects_templates_without_stats_markers(tmp_path: Path) -> None:
