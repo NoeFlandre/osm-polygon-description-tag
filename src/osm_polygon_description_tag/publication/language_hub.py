@@ -81,6 +81,8 @@ class HuggingFaceLanguageHub:
         """Return the dataset repository's current commit SHA."""
         try:
             info = self.api.repo_info(repo_id, repo_type=REPO_TYPE)
+        # Broad on purpose: any repo_info failure means the repository cannot be verified. The cause
+        # is chained.
         except Exception as error:
             raise LanguagePublicationError(
                 f"Hub repository {repo_id} is not accessible: {error}"
@@ -117,6 +119,8 @@ class HuggingFaceLanguageHub:
                 commit_message=COMMIT_MESSAGE,
                 parent_commit=revision,
             )
+        # Broad on purpose: a failed commit may already have landed, so every failure is surfaced
+        # rather than narrowed. The cause is chained.
         except Exception as error:
             raise LanguagePublicationError(
                 f"cannot create the language publication commit for {plan.repo_id}: {error}"
@@ -126,6 +130,8 @@ class HuggingFaceLanguageHub:
         try:
             local = self.api.hf_hub_download(**self._readme_kwargs(repo_id, revision))
             return _readme_text(local)
+        # Broad on purpose: any README download failure blocks the card update. The cause is
+        # chained.
         except Exception as error:
             raise LanguagePublicationError(
                 f"cannot read {README_PATH} at repository revision {revision}: {error}"
@@ -145,6 +151,8 @@ class HuggingFaceLanguageHub:
     def _operation(self, path: str, content: object) -> Any:
         try:
             return commit_operation_add(path, content)
+        # Broad on purpose: any failure preparing an upload operation blocks the commit. The cause
+        # is chained.
         except Exception as error:
             raise LanguagePublicationError(
                 f"cannot prepare language publication file {path}: {error}"
@@ -214,6 +222,8 @@ class HuggingFaceLanguageHub:
         _require_repo_id(repo_id)
         try:
             payload = self._viewer_payload(repo_id)
+        # Broad on purpose: the Viewer request can fail in HTTP, transport or JSON decoding. All are
+        # reported, and the cause is chained.
         except Exception as error:
             raise LanguagePublicationError(
                 f"cannot read Dataset Viewer splits for {repo_id}: {error}"
@@ -234,6 +244,8 @@ class HuggingFaceLanguageHub:
             try:
                 factory: Any = lazy_huggingface_hub.get_session
                 self._http_session = factory()
+            # Broad on purpose: session factory failures come from optional dependency setup. The
+            # cause is chained.
             except Exception as error:
                 raise LanguagePublicationError(
                     f"cannot initialize Dataset Viewer HTTP session: {error}"
