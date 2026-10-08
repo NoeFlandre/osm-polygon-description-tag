@@ -7,7 +7,7 @@ file atomically keep using ``atomic_write_text`` from ``runtime.atomic``.
 
 from pathlib import Path
 
-_UTF8 = "utf-8"  # pragma: no mutate - codec names are case-insensitive
+_UTF8 = "utf-8"
 
 
 def read_text_utf8(path: Path) -> str:
@@ -27,7 +27,7 @@ def utf8_bytes(text: str) -> bytes:
 
 def decode_utf8(data: bytes, *, errors: str = "strict") -> str:
     """Decode ``data`` as UTF-8 text without newline translation, with ``errors`` handling."""
-    return data.decode(_UTF8, errors=errors)
+    return data.decode(_UTF8, errors=errors)  # pragma: no mutate - bytes.decode defaults to UTF-8
 
 
 __all__ = ["decode_utf8", "read_text_utf8", "utf8_bytes", "write_text_utf8"]
