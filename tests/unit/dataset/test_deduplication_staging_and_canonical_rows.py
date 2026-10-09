@@ -155,6 +155,37 @@ def test_resume_staged_accepts_state_without_a_stage_directory(
     assert result == DeduplicationResult("deduplicated", 2, 1, 1, 1)
 
 
+def test_resume_staged_records_completion_before_removing_stage(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    data_root = tmp_path / "generated"
+    stage = data_root / ".work" / "dedup" / "token"
+    stage.mkdir(parents=True)
+    state = {
+        "status": "staged",
+        "stage_dir": ".work/dedup/token",
+        "inputs": {},
+        "input_rows": 2,
+        "output_rows": 1,
+        "duplicate_rows": 1,
+        "files": [],
+    }
+    stage_present_at_completion: list[bool] = []
+
+    def record(_path: Path, payload: Mapping[str, object]) -> None:
+        if payload["status"] == "complete":
+            stage_present_at_completion.append(stage.is_dir())
+
+    monkeypatch.setattr(dedup_module, "_promote_staged", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(dedup_module, "_verify_staged_inputs", lambda *_args: {})
+    monkeypatch.setattr(dedup_module, "_write_state", record)
+
+    _resume_staged(data_root, tmp_path / "state.json", state)  # type: ignore[arg-type]
+
+    assert stage_present_at_completion == [True]
+    assert not stage.exists()
+
+
 def test_deduplicate_dataset_forwards_promotion_hook_when_resuming_staged(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -600,7 +631,7 @@ def test_promote_entry_moves_both_files_and_reports_each_promotion(tmp_path: Pat
     assert (root / "manifests" / "a.manifest.json").read_bytes() == b"manifest"
 
 
-def test_promote_staged_removes_stage_after_all_entries(tmp_path: Path) -> None:
+def test_promote_staged_keeps_stage_until_completion_is_recorded(tmp_path: Path) -> None:
     root = tmp_path / "root"
     stage = root / ".work" / "dedup" / "token"
     parquet = stage / "data" / "a.parquet"
@@ -625,7 +656,10 @@ def test_promote_staged_removes_stage_after_all_entries(tmp_path: Path) -> None:
     _promote_staged(root, state, promotion_hook=progress.append)
 
     assert progress == [1, 2]
-    assert not stage.exists()
+    assert not parquet.exists()
+    assert not manifest.exists()
+    assert (root / "data" / "a.parquet").is_file()
+    assert stage.is_dir()
 
 
 def test_promote_staged_rejects_a_missing_stage_directory(tmp_path: Path) -> None:
