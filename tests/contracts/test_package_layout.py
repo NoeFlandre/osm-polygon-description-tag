@@ -1,4 +1,5 @@
 import importlib
+import os
 import tomllib
 from pathlib import Path
 
@@ -13,6 +14,8 @@ MAX_STATS_MODULE_LINES = 600
 
 
 def test_stats_is_split_into_modules_under_the_size_bound() -> None:
+    if "MUTANT_UNDER_TEST" in os.environ:
+        pytest.skip("static architecture bounds are checked on the canonical source tree")
     dataset_root = Path(osm_polygon_description_tag.__file__).parent / "dataset"
     for module in STATS_MODULES:
         path = dataset_root / f"{module}.py"
