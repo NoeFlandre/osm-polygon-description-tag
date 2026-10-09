@@ -82,9 +82,7 @@ def _repository_revision(api: Any, repo_id: str) -> str:
         raise HubVerificationError(
             f"Hub repository {repo_id} is not accessible: {error}"
         ) from error
-    # pragma: no mutate start - missing SHA defaults are normalized below
-    repo_sha = getattr(info, "sha", None)
-    # pragma: no mutate end
+    repo_sha = getattr(info, "sha", None)  # pragma: no mutate - SHA default normalized below
     revision = str(repo_sha or "")
     if not revision:
         raise HubVerificationError(f"Hub repository {repo_id} returned an empty revision")
@@ -309,9 +307,7 @@ def _deletion_revision(api: Any, repo_id: str, commit: Any) -> str | None:
     if revision:
         return str(revision)
     info = api.repo_info(repo_id, repo_type="dataset")
-    # pragma: no mutate start - missing SHA defaults are normalized below
-    repo_sha = getattr(info, "sha", None)
-    # pragma: no mutate end
+    repo_sha = getattr(info, "sha", None)  # pragma: no mutate - SHA default normalized below
     return str(repo_sha or "") or None
 
 

@@ -82,7 +82,7 @@ def _canonical_localized(value: object) -> list[dict[str, str]]:
     """Return localized entries with trimmed values, dropping blank ones."""
     if not _is_entry_sequence(value):
         return []
-    entries = cast(Sequence[object], value)  # pragma: no mutate - static narrowing
+    entries = cast(Sequence[object], value)
     candidates = map(_canonical_entry, entries)
     return [entry for entry in candidates if entry is not None]
 

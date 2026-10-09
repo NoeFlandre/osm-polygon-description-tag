@@ -92,7 +92,7 @@ def _read_state(path: Path) -> dict[str, Any] | None:
         raise DeduplicationError(f"invalid deduplication state: {path}") from error
     if not isinstance(value, dict):
         raise DeduplicationError(f"deduplication state must be an object: {path}")
-    return cast(dict[str, Any], value)  # pragma: no mutate - runtime-only type narrowing
+    return cast(dict[str, Any], value)
 
 
 def _write_state(path: Path, payload: Mapping[str, object]) -> None:
@@ -105,7 +105,7 @@ def _input_hashes(parquets: Iterable[Path]) -> dict[str, str]:
 
 
 def _staged_output_hashes(state: Mapping[str, Any]) -> dict[str, str]:
-    entries = cast(list[Mapping[str, Any]], state["files"])  # pragma: no mutate - static cast
+    entries = cast(list[Mapping[str, Any]], state["files"])
     return {Path(str(entry["parquet"])).name: str(entry["parquet_sha256"]) for entry in entries}
 
 
@@ -231,9 +231,7 @@ def _promote_staged(
     if not stage_dir.is_dir() or stage_dir.is_symlink():
         raise DeduplicationError(f"staged deduplication directory is missing: {stage_dir}")
     promoted = 0
-    for entry in cast(
-        list[dict[str, Any]], state["files"]
-    ):  # pragma: no mutate - runtime-only type narrowing
+    for entry in cast(list[dict[str, Any]], state["files"]):
         promoted = _promote_entry(
             stage_dir,
             data_root,
@@ -310,9 +308,7 @@ def _validated_parquets(data_root: Path) -> tuple[Path, ...]:
     if not data_dir.is_dir() or not tuple(data_dir.glob("*.parquet")):
         return ()
     validated = validate_finalized_artifacts(data_root)
-    # pragma: no mutate start - runtime-only type narrowing
     parquets = tuple(cast(Sequence[Path], validated["parquets"]))
-    # pragma: no mutate end
     for parquet in parquets:
         validate_geoparquet(parquet)
     return parquets

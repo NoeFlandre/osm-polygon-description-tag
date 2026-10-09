@@ -18,9 +18,7 @@ def cleanup_stale_owned_temps(data_root: Path) -> tuple[Path, ...]:
     removed: list[Path] = []
     for directory, exact_targets in locations:
         removed.extend(_cleanup_directory(directory, exact_targets))
-    # pragma: no mutate start - all returned paths use the three fixed locations
-    ordered = sorted(removed, key=lambda path: str(path))
-    # pragma: no mutate end
+    ordered = sorted(removed, key=lambda path: str(path))  # pragma: no mutate - fixed locations
     return tuple(ordered)
 
 

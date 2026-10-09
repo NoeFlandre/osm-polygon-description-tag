@@ -27,6 +27,7 @@ from osm_polygon_description_tag.publication.models import (
     UploadPlan,
 )
 from osm_polygon_description_tag.publication.upload import build_command
+from osm_polygon_description_tag.runtime.text_io import utf8_bytes
 
 ALLOWED_TOP_LEVEL = {
     "README.md",
@@ -364,7 +365,7 @@ def _finalize_upload_plan(data_root: Path, items: tuple[UploadItem, ...]) -> Upl
         identity_sha256=_EMPTY_IDENTITY,
     )
     # pragma: no mutate end
-    identity = file_sha256_bytes(provisional.to_json().encode("utf-8"))  # pragma: no mutate
+    identity = file_sha256_bytes(utf8_bytes(provisional.to_json()))
     return UploadPlan(
         repo_id=REPO_ID,
         data_root=str(resolved_root),

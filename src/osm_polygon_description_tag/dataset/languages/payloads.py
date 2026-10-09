@@ -61,7 +61,7 @@ class PayloadReader:
         value = self.raw(key)
         if not isinstance(value, list):
             raise self._error(f"{self._label} field {key} must be a list")
-        return cast(list[object], value)  # pragma: no mutate - static narrowing
+        return cast(list[object], value)
 
     def texts(self, key: str) -> tuple[str, ...]:
         """Return a list field whose items are all strings."""
@@ -69,7 +69,7 @@ class PayloadReader:
         for item in values:
             if not isinstance(item, str):
                 raise self._error(f"{self._label} field {key} must contain only strings")
-        typed_values = cast(list[str], values)  # pragma: no mutate - static narrowing
+        typed_values = cast(list[str], values)
         return tuple(typed_values)
 
     def mapping(self, key: str) -> Mapping[str, object]:
@@ -77,7 +77,7 @@ class PayloadReader:
         value = self.raw(key)
         if not isinstance(value, Mapping):
             raise self._error(f"{self._label} field {key} must be an object")
-        return cast(Mapping[str, object], value)  # pragma: no mutate - static narrowing
+        return cast(Mapping[str, object], value)
 
     def reader(self, key: str) -> "PayloadReader":
         """Return a reader for one nested object field."""
@@ -93,7 +93,7 @@ def require_object(
     """Return a reader for ``payload``, rejecting non-object documents."""
     if not isinstance(payload, Mapping):
         raise error(f"{label} payload must be an object")
-    typed_payload = cast(Mapping[str, object], payload)  # pragma: no mutate - static narrowing
+    typed_payload = cast(Mapping[str, object], payload)
     return PayloadReader(typed_payload, error=error, label=label)
 
 

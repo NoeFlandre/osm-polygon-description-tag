@@ -666,7 +666,7 @@ def _finite_bbox_columns(batch: pa.RecordBatch) -> list[np.ndarray] | None:
     columns = [_finite_float_column(batch, name) for name in _BBOX_COLUMNS]
     if any(values is None for values in columns):
         return None
-    return cast(list[np.ndarray], columns)  # pragma: no mutate - static narrowing after the guard
+    return cast(list[np.ndarray], columns)
 
 
 def _vectorized_spatial_summary(batch: pa.RecordBatch) -> _SpatialSummary | None:

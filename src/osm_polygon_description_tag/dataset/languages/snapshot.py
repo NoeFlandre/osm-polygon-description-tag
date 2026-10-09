@@ -34,6 +34,7 @@ from osm_polygon_description_tag.dataset.languages.payloads import PayloadReader
 from osm_polygon_description_tag.dataset.manifest import file_sha256
 from osm_polygon_description_tag.dataset.schema import SCHEMA, SCHEMA_VERSION
 from osm_polygon_description_tag.runtime.serialization import canonical_json_text, sha256_json
+from osm_polygon_description_tag.runtime.text_io import read_text_utf8
 from osm_polygon_description_tag.runtime.validation import validate_fingerprint
 
 SNAPSHOT_SCHEMA_VERSION: Final = 1
@@ -554,7 +555,7 @@ def read_snapshot(run_dir: Path) -> SnapshotManifest:
     if path.is_symlink():
         raise SnapshotError(f"snapshot must not be a symlink: {path}")
     try:
-        text = path.read_text(encoding="utf-8")  # pragma: no mutate - codec alias only
+        text = read_text_utf8(path)
         payload = json.loads(text)
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise SnapshotError(f"cannot read snapshot {path}: {error}") from error

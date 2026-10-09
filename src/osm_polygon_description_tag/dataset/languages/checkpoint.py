@@ -22,6 +22,7 @@ from typing import Final
 from osm_polygon_description_tag.dataset.languages.atomic import atomic_write_json
 from osm_polygon_description_tag.dataset.languages.paths import relative_posix_path
 from osm_polygon_description_tag.dataset.languages.payloads import PayloadReader, require_object
+from osm_polygon_description_tag.runtime.text_io import read_text_utf8, utf8_bytes
 from osm_polygon_description_tag.runtime.validation import FINGERPRINT_PATTERN
 
 CHECKPOINT_SCHEMA_VERSION: Final = 1
@@ -125,7 +126,7 @@ class ShardPaths:
 
 def _shard_key(shard: str) -> str:
     _validate_relative_shard(shard)
-    shard_bytes = shard.encode("utf-8")  # pragma: no mutate - codec alias only
+    shard_bytes = utf8_bytes(shard)
     return hashlib.sha256(shard_bytes).hexdigest()[:32]
 
 
@@ -444,7 +445,7 @@ def _read_json_object(path: Path, label: str) -> Mapping[str, object]:
     if path.is_symlink():
         raise CheckpointError(f"{label} must not be a symlink: {path}")
     try:
-        text = path.read_text(encoding="utf-8")  # pragma: no mutate - codec alias only
+        text = read_text_utf8(path)
         payload = json.loads(text)
     except (OSError, UnicodeError) as error:
         raise CheckpointError(f"cannot read {label} {path}: {error}") from error

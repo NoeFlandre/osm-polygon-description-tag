@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import IO, Any
 
 from osm_polygon_description_tag.runtime.atomic import fsync_dir
+from osm_polygon_description_tag.runtime.text_io import utf8_bytes
 from osm_polygon_description_tag.runtime.time import utc_now_iso
 from osm_polygon_description_tag.runtime.units import MIB
 
@@ -329,9 +330,7 @@ class RunLogger:
         assert self._handle is not None
         if not raw.endswith("\n"):
             raw = raw + "\n"
-        # pragma: no mutate start - UTF-8 codec names are case-insensitive
-        payload = raw.encode("utf-8")
-        # pragma: no mutate end
+        payload = utf8_bytes(raw)
         self._handle.write(payload)
         with contextlib.suppress(OSError):
             os.fsync(self._handle.fileno())

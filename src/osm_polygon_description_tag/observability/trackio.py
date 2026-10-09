@@ -21,6 +21,7 @@ from typing import Any, Protocol, cast
 from urllib.parse import quote
 
 from osm_polygon_description_tag.dataset.stats import collect_stats
+from osm_polygon_description_tag.runtime.text_io import utf8_bytes
 from osm_polygon_description_tag.runtime.units import GIB, MIB
 
 DEFAULT_TRACKIO_PROJECT = "osm-polygon-description-tag"
@@ -371,7 +372,7 @@ def _plot_specs() -> tuple[tuple[str, str, str, str], ...]:
 
 def _load_backend() -> TrackioBackend | None:
     try:
-        return cast(TrackioBackend, importlib.import_module("trackio"))  # pragma: no mutate
+        return cast(TrackioBackend, importlib.import_module("trackio"))
     except (ImportError, OSError):
         return None
 
@@ -530,7 +531,7 @@ def _read_stats(data_root: Path) -> dict[str, Any]:
 
 def _stats_sha256(stats: Mapping[str, Any]) -> str:
     encoded = json.dumps(stats, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()  # pragma: no mutate
+    return hashlib.sha256(utf8_bytes(encoded)).hexdigest()
 
 
 def publish_snapshot(

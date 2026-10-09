@@ -45,6 +45,7 @@ from osm_polygon_description_tag.dataset.stats import (
 from osm_polygon_description_tag.dataset.text import TEXT_CONTRACT_VERSION
 from osm_polygon_description_tag.runtime.atomic import atomic_write_bytes
 from osm_polygon_description_tag.runtime.resources import dataset_card_hero
+from osm_polygon_description_tag.runtime.text_io import read_text_utf8, utf8_bytes
 
 _H3_MAP_CACHE_SCHEMA_VERSION = 2
 _H3_MAP_RENDER_VERSION = 2
@@ -91,9 +92,7 @@ def _h3_map_input_sha256(stats: Mapping[str, Any]) -> str:
         "files": file_inputs,
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    # pragma: no mutate start - UTF-8 codec names are case-insensitive
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
-    # pragma: no mutate end
+    return hashlib.sha256(utf8_bytes(encoded)).hexdigest()
 
 
 def _atomic_write_if_changed(path: Path, data: bytes) -> bool:
@@ -471,12 +470,8 @@ def _card_source(
     """
     existing_path = data_root / "README.md"
     if preserve_existing and existing_path.is_file():
-        # pragma: no mutate start - UTF-8 read aliases are runtime-equivalent
-        return existing_path.read_text(encoding="utf-8"), True
-        # pragma: no mutate end
-    # pragma: no mutate start - UTF-8 read aliases are runtime-equivalent
-    return template_path.read_text(encoding="utf-8"), False
-    # pragma: no mutate end
+        return read_text_utf8(existing_path), True
+    return read_text_utf8(template_path), False
 
 
 def _newline_for(text: str) -> str:
@@ -602,9 +597,7 @@ def _write_dataset_docs(
     preserve_existing: bool = False,
 ) -> None:
     stats_json = json.dumps(stats, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    # pragma: no mutate start - UTF-8 codec names are case-insensitive
-    stats_sha256 = hashlib.sha256(stats_json.encode("utf-8")).hexdigest()
-    # pragma: no mutate end
+    stats_sha256 = hashlib.sha256(utf8_bytes(stats_json)).hexdigest()
     source, is_published_card = _card_source(
         data_root, template_path, preserve_existing=preserve_existing
     )
@@ -612,10 +605,8 @@ def _write_dataset_docs(
         raise ReportingError(f"template missing GENERATED:STATS markers: {template_path}")
     readme = _update_stats_block(source, stats, stats_sha256)
     readme = _update_map_block(readme, _render_h3_map_block())
-    # pragma: no mutate start - UTF-8 codec names are case-insensitive
-    stats_bytes = stats_json.encode("utf-8")
-    readme_bytes = readme.encode("utf-8")
-    # pragma: no mutate end
+    stats_bytes = utf8_bytes(stats_json)
+    readme_bytes = utf8_bytes(readme)
     _atomic_write_if_changed(data_root / "stats.json", stats_bytes)
     _atomic_write_if_changed(data_root / "README.md", readme_bytes)
 

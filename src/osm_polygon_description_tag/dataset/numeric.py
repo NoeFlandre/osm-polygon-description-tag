@@ -9,6 +9,6 @@ from typing import Any, cast
 def coerce_float_values(values: Sequence[object]) -> tuple[float, ...] | None:
     """Convert persisted numeric values, returning ``None`` on bad input."""
     try:
-        return tuple(float(cast(Any, value)) for value in values)  # pragma: no mutate
+        return tuple(float(cast(Any, value)) for value in values)
     except (TypeError, ValueError):
         return None

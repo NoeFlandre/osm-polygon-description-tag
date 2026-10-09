@@ -30,6 +30,7 @@ from osm_polygon_description_tag.publication.language import (
 )
 from osm_polygon_description_tag.publication.models import UploadItem, UploadPlan
 from osm_polygon_description_tag.runtime.logging import RunLogger
+from osm_polygon_description_tag.runtime.text_io import read_text_utf8
 
 PUBLICATION_STATE_FILENAME: Final = "language-publication.json"
 STATE_SCHEMA_VERSION: Final = 1
@@ -134,7 +135,7 @@ def read_language_publication_state(state_path: Path) -> PublicationOutcome | No
     if not state_path.is_file():
         return None
     try:
-        text = state_path.read_text(encoding="utf-8")  # pragma: no mutate - codec alias only
+        text = read_text_utf8(state_path)
         payload = json.loads(text)
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise LanguagePublicationError(

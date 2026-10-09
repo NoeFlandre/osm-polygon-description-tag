@@ -30,6 +30,7 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
 )
 from osm_polygon_description_tag.dataset.languages.validation import RunReport
 from osm_polygon_description_tag.dataset.manifest import file_sha256
+from osm_polygon_description_tag.runtime.text_io import read_text_utf8
 from osm_polygon_description_tag.workflow.grid_policy import (
     MAX_PROCESSING_SECONDS,
     MAX_WALLTIME_SECONDS,
@@ -412,7 +413,7 @@ def _read_staged_resume_field(stage_path: Path) -> object:
     object still has to carry the field, and that refusal does reach the caller.
     """
     try:
-        payload = json.loads(stage_path.read_text(encoding="utf-8"))  # pragma: no mutate - alias
+        payload = json.loads(read_text_utf8(stage_path))
         reader = require_object(payload, error=GridOperatorError, label="stage")
     except (OSError, UnicodeError, json.JSONDecodeError, GridOperatorError):
         return None

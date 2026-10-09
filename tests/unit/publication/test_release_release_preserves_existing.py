@@ -7,6 +7,7 @@ assets, verify the remote revision, and stay byte-stable across runs.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -222,6 +223,44 @@ def test_sync_remote_card_preserves_utf8_and_newline_bytes(tmp_path: Path) -> No
     # Name the entry from the directory listing: ``exists()`` case-folds on APFS.
     cards = [entry.name for entry in tmp_path.iterdir() if entry.name.lower() == "readme.md"]
     assert cards == ["README.md"]
+
+
+def test_sync_remote_card_leaves_an_identical_local_card_untouched(tmp_path: Path) -> None:
+    target = tmp_path / "README.md"
+    target.write_text("remote card", encoding="utf-8")
+    # A rewrite would stamp the current time, so a sentinel mtime shows whether
+    # the file was touched at all, whatever the filesystem's timestamp resolution.
+    sentinel_ns = 1_000_000_000 * 1_000_000_000
+    os.utime(target, ns=(sentinel_ns, sentinel_ns))
+
+    class Reader:
+        def read_file(self, repo_id: str, path: str, *, revision: str) -> str:
+            return "remote card"
+
+    release_module._sync_remote_card(tmp_path, Reader(), REPO_ID, "revision")
+
+    assert target.read_text(encoding="utf-8") == "remote card"
+    assert target.stat().st_mtime_ns == sentinel_ns
+
+
+def test_sync_remote_card_creates_the_local_card_when_none_exists(tmp_path: Path) -> None:
+    class Reader:
+        def read_file(self, repo_id: str, path: str, *, revision: str) -> str:
+            return "remote card"
+
+    release_module._sync_remote_card(tmp_path, Reader(), REPO_ID, "revision")
+
+    assert (tmp_path / "README.md").read_text(encoding="utf-8") == "remote card"
+    assert list(tmp_path.glob(".*.tmp")) == []
+
+
+def test_sync_remote_card_without_a_remote_card_changes_nothing(tmp_path: Path) -> None:
+    target = tmp_path / "README.md"
+    target.write_text("local card", encoding="utf-8")
+
+    release_module._sync_remote_card(tmp_path, _RecordingVerifier(), REPO_ID, "revision")
+
+    assert target.read_text(encoding="utf-8") == "local card"
 
 
 def test_apply_refuses_metadata_revision_mismatch(workspace: Path) -> None:
