@@ -41,7 +41,6 @@ MOVED_WORKFLOWS = {
     "_retrieval_snapshot_target",
     "seed_retrieval_snapshot",
     "transport_payload",
-    "utc_now",
     "_verify_local_staged_files",
     "handle_export",
     "handle_grid_collect",
@@ -70,6 +69,15 @@ def test_language_cli_is_only_command_wiring() -> None:
         pytest.skip("static architecture bounds are checked on the canonical source tree")
     assert CLI_PATH.read_text(encoding="utf-8").count("\n") < 600
     assert not (_defined_functions(CLI_PATH) & MOVED_WORKFLOWS)
+
+
+def test_clock_helper_is_defined_only_in_runtime_time() -> None:
+    defining = {
+        path.relative_to(SOURCE_ROOT)
+        for path in SOURCE_ROOT.rglob("*.py")
+        if "utc_now" in _defined_functions(path)
+    }
+    assert defining == {Path("runtime") / "time.py"}
 
 
 def test_language_workflow_modules_exist_and_are_bounded() -> None:

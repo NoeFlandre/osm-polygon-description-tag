@@ -23,6 +23,7 @@ from osm_polygon_description_tag.dataset.languages.models import (
     language_model_identity,
 )
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
+from osm_polygon_description_tag.runtime import time as runtime_time
 from tests.conftest import make_record_dict
 from tests.helpers.patching import patch_modules
 from tests.helpers.sentences import fake_splitter
@@ -42,7 +43,13 @@ def _fake_sentence_splitter(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(name="night_clock")
 def night_clock(monkeypatch: pytest.MonkeyPatch) -> datetime:
-    """Freeze Grid handlers so their day/night policy is deterministic."""
+    """Freeze Grid handlers so their day/night policy is deterministic.
+
+    Grid modules bind the runtime ``utc_now`` by name, so each binding is patched.
+    The identity checks fail loudly if a module regrows a local clock.
+    """
+    assert grid_transport.utc_now is runtime_time.utc_now
+    assert grid_workflow.utc_now is runtime_time.utc_now
     patch_modules(
         monkeypatch,
         (

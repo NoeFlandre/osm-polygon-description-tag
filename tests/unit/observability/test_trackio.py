@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 from typing import ClassVar
@@ -250,13 +251,8 @@ def test_publish_snapshot_forwards_exact_configuration_and_report(monkeypatch) -
 
 
 def test_publish_snapshot_uses_utc_date_when_run_name_is_omitted(monkeypatch) -> None:
-    from datetime import datetime as real_datetime
-
-    class _DateTime:
-        @staticmethod
-        def now(tz: object) -> real_datetime:
-            assert tz is trackio.UTC
-            return real_datetime(2026, 8, 22, tzinfo=tz)
+    # 23:30 UTC is already the next day in Paris, so a local-date run name would fail.
+    late_utc = datetime(2026, 8, 22, 23, 30, tzinfo=UTC)
 
     class _Recorder:
         run_names: ClassVar[list[str | None]] = []
@@ -278,7 +274,7 @@ def test_publish_snapshot_uses_utc_date_when_run_name_is_omitted(monkeypatch) ->
         def finish(self) -> None:
             return None
 
-    monkeypatch.setattr(trackio, "datetime", _DateTime)
+    monkeypatch.setattr(trackio, "utc_now", lambda: late_utc)
     monkeypatch.setattr(trackio, "collect_stats", lambda _root: {"files": []})
     monkeypatch.setattr(trackio, "TrackioRecorder", _Recorder)
     monkeypatch.setattr(trackio, "snapshot_run_name", lambda value: f"named-{value}")
