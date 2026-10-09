@@ -17,7 +17,10 @@ from shapely.geometry import Polygon
 
 import osm_polygon_description_tag.publication.upload as publication_upload
 import osm_polygon_description_tag.workflow.orchestrator as workflow_orchestrator
-from osm_polygon_description_tag import cli
+from osm_polygon_description_tag import cli, cli_handlers
+from osm_polygon_description_tag.cli_requests import RunAndPublishRequest
+from osm_polygon_description_tag.dataset import validation
+from osm_polygon_description_tag.dataset.manifest import output_identity_for
 from osm_polygon_description_tag.osm.discovery import Source
 from osm_polygon_description_tag.osm.extraction import ExportRecord
 from osm_polygon_description_tag.publication.models import UploadItem, UploadPlan
@@ -82,8 +85,8 @@ def test_inspect_success_payload_is_exact(
     source_path = source_root / "region.osm.pbf"
     source = Source(source_path, "region.osm.pbf", "region.parquet", 9, 123)
     export_config = source_root.parent / "osmium-export.json"
-    monkeypatch.setattr(cli, "discover_sources", lambda _root: (source,))
-    monkeypatch.setattr(cli, "osmium_export_config", lambda: export_config)
+    monkeypatch.setattr(cli_handlers, "discover_sources", lambda _root: (source,))
+    monkeypatch.setattr(cli_handlers, "osmium_export_config", lambda: export_config)
 
     exit_code, payload = _run_json(["inspect", *_common_args(source_root, data_root)], capsys)
 
@@ -122,8 +125,8 @@ def test_build_one_success_payload_is_exact(
         output_path=data_root / "data" / source.output_name,
         manifest_path=data_root / "manifests" / "region.manifest.json",
     )
-    monkeypatch.setattr(cli, "discover_sources", lambda _root: (source,))
-    monkeypatch.setattr(cli, "build_one", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr(cli_handlers, "discover_sources", lambda _root: (source,))
+    monkeypatch.setattr(cli_handlers, "build_one", lambda *_args, **_kwargs: result)
 
     exit_code, payload = _run_json(
         ["build-one", *_common_args(source_root, data_root), source.name], capsys
@@ -159,8 +162,8 @@ def test_build_all_success_payload_is_exact(
         data_root / "data" / source.output_name,
         data_root / "manifests" / "region.manifest.json",
     )
-    monkeypatch.setattr(cli, "discover_sources", lambda _root: (source,))
-    monkeypatch.setattr(cli, "build_all", lambda _sources, *, build: [result])
+    monkeypatch.setattr(cli_handlers, "discover_sources", lambda _root: (source,))
+    monkeypatch.setattr(cli_handlers, "build_all", lambda _sources, *, build: [result])
 
     exit_code, payload = _run_json(["build-all", *_common_args(source_root, data_root)], capsys)
 
@@ -194,9 +197,9 @@ def test_validate_success_payload_is_exact(
         data_root / "manifests" / "a.manifest.json",
         data_root / "manifests" / "b.manifest.json",
     )
-    monkeypatch.setattr(cli, "validate_geoparquet", lambda path, **_kwargs: rows[path])
+    monkeypatch.setattr(validation, "validate_geoparquet", lambda path, **_kwargs: rows[path])
     monkeypatch.setattr(
-        cli,
+        validation,
         "validate_finalized_artifacts",
         lambda _root, **_kwargs: {
             "parquets": (first, second),
@@ -206,7 +209,7 @@ def test_validate_success_payload_is_exact(
                     source=SimpleNamespace(
                         name=f"{path.name.removesuffix('.manifest.json')}.osm.pbf"
                     ),
-                    output=cli.output_identity_for(parquet),
+                    output=output_identity_for(parquet),
                     counts=SimpleNamespace(
                         included_rows=rows[parquet],
                         emitted_features=rows[parquet],
@@ -231,7 +234,7 @@ def test_generate_card_success_payload_is_exact(
 ) -> None:
     source_root, data_root = cli_roots
     monkeypatch.setattr(
-        cli,
+        cli_handlers,
         "generate_dataset_docs",
         lambda _root, _template: {
             "output_files": 2,
@@ -266,7 +269,7 @@ def test_publish_plan_success_payload_is_exact(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     source_root, data_root = cli_roots
-    monkeypatch.setattr(cli, "create_upload_plan", lambda _root: _upload_plan(data_root))
+    monkeypatch.setattr(cli_handlers, "create_upload_plan", lambda _root: _upload_plan(data_root))
 
     exit_code, payload = _run_json(["publish-plan", *_common_args(source_root, data_root)], capsys)
 
@@ -286,9 +289,9 @@ def test_publish_success_payload_is_exact(
     source_root, data_root = cli_roots
     plan = _upload_plan(data_root)
     executions: list[tuple[UploadPlan, str]] = []
-    monkeypatch.setattr(cli, "create_upload_plan", lambda _root: plan)
+    monkeypatch.setattr(cli_handlers, "create_upload_plan", lambda _root: plan)
     monkeypatch.setattr(
-        cli,
+        cli_handlers,
         "execute_upload",
         lambda actual, *, confirmation: executions.append((actual, confirmation)),
     )
@@ -336,7 +339,7 @@ def test_publish_subprocess_failures_use_plain_cli_error_path(
         ),
         identity_sha256="identity",
     )
-    monkeypatch.setattr(cli, "create_upload_plan", lambda _root: plan)
+    monkeypatch.setattr(cli_handlers, "create_upload_plan", lambda _root: plan)
 
     def fail(*_args: object, **_kwargs: object) -> None:
         raise failure
@@ -383,7 +386,7 @@ def test_run_and_publish_success_payload_is_exact(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     source_root, data_root = cli_roots
-    monkeypatch.setattr(cli, "run_and_publish", lambda **_kwargs: _report())
+    monkeypatch.setattr(cli_handlers, "run_and_publish", lambda **_kwargs: _report())
 
     exit_code, payload = _run_json(
         [
@@ -421,7 +424,7 @@ def test_domain_error_is_exact_plain_stderr(
     def fail_discovery(_root: Path) -> object:
         raise ValueError("boom")
 
-    monkeypatch.setattr(cli, "discover_sources", fail_discovery)
+    monkeypatch.setattr(cli_handlers, "discover_sources", fail_discovery)
 
     exit_code = cli.run(_inspect_args(tmp_path / "raw", tmp_path / "generated"))
     captured = capsys.readouterr()
@@ -440,7 +443,7 @@ def test_keyboard_interrupt_returns_130_without_output(
     def interrupt_discovery(_root: Path) -> object:
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(cli, "discover_sources", interrupt_discovery)
+    monkeypatch.setattr(cli_handlers, "discover_sources", interrupt_discovery)
 
     exit_code = cli.run(_inspect_args(tmp_path / "raw", tmp_path / "generated"))
     captured = capsys.readouterr()
@@ -483,7 +486,7 @@ def _patch_real_orchestrator(monkeypatch: pytest.MonkeyPatch, source_root: Path)
             progress_interval=1,
         )
 
-    monkeypatch.setattr(cli, "run_and_publish", run_real_orchestrator)
+    monkeypatch.setattr(cli_handlers, "run_and_publish", run_real_orchestrator)
 
 
 def _run_and_publish(flags: list[str], source_root: Path, data_root: Path) -> int:
@@ -575,7 +578,7 @@ def _stub_run_and_publish(monkeypatch: pytest.MonkeyPatch, error: Exception | No
             raise error
         return SimpleNamespace(to_payload=lambda: {"source_count": 1})
 
-    monkeypatch.setattr(cli, "run_and_publish", fake_run_and_publish)
+    monkeypatch.setattr(cli_handlers, "run_and_publish", fake_run_and_publish)
 
 
 def _app_invoke(argv: list[str]) -> None:
@@ -601,7 +604,7 @@ def _handler_stderr(cli_roots: tuple[Path, Path], capsys: pytest.CaptureFixture[
     presenter = TerminalPresenter(stderr=sys.stderr)
     try:
         cli.handle_run_and_publish(
-            SimpleNamespace(
+            RunAndPublishRequest(
                 confirm_repo=_RUN_AND_PUBLISH_REPO,
                 source_root=source_root,
                 data_root=data_root,
