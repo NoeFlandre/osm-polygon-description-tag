@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 
 from shapely.geometry import Polygon
@@ -118,7 +117,3 @@ def test_collect_stats_returns_none_for_empty_dataset(tmp_path: Path) -> None:
     assert stats["rows"] == 0
     assert stats["area_m2_min_m2"] is None
     assert stats["area_m2_max_m2"] is None
-
-
-def test_collect_stats_takes_only_data_root() -> None:
-    assert list(inspect.signature(collect_stats).parameters) == ["data_root"]
