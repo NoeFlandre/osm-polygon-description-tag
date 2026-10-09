@@ -90,7 +90,10 @@ _LAZY_EXPORTS = {
         "osm_polygon_description_tag.dataset.migration",
         "migrate_dataset_schema",
     ),
-    "ReportingError": ("osm_polygon_description_tag.dataset.stats", "ReportingError"),
+    "ReportingError": (
+        "osm_polygon_description_tag.dataset.stats_manifest",
+        "ReportingError",
+    ),
     "collect_stats": ("osm_polygon_description_tag.dataset.stats", "collect_stats"),
     "generate_dataset_docs": ("osm_polygon_description_tag.dataset.docs", "generate_dataset_docs"),
     **{

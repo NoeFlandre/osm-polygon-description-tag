@@ -1,10 +1,49 @@
+import importlib
 import tomllib
 from pathlib import Path
+
+import pytest
 
 import osm_polygon_description_tag
 
 STAGED_PACKAGES = ("runtime", "osm", "dataset", "workflow")
 CANONICAL_PACKAGES = (*STAGED_PACKAGES, "publication")
+STATS_MODULES = ("stats", "stats_features", "stats_geometry", "stats_manifest")
+MAX_STATS_MODULE_LINES = 600
+
+
+def test_stats_is_split_into_modules_under_the_size_bound() -> None:
+    dataset_root = Path(osm_polygon_description_tag.__file__).parent / "dataset"
+    for module in STATS_MODULES:
+        path = dataset_root / f"{module}.py"
+        assert path.is_file(), path
+        assert len(path.read_text(encoding="utf-8").splitlines()) <= MAX_STATS_MODULE_LINES, path
+
+
+@pytest.mark.parametrize(
+    ("name", "module"),
+    [
+        ("collect_stats", "stats"),
+        ("ReportingError", "stats_manifest"),
+        ("ManifestSummary", "stats_manifest"),
+        ("FeatureSummary", "stats_features"),
+        ("collect_spatial_summary", "stats_geometry"),
+    ],
+)
+def test_each_stats_name_is_defined_by_the_module_that_owns_it(name: str, module: str) -> None:
+    owner = importlib.import_module(f"osm_polygon_description_tag.dataset.{module}")
+    assert getattr(owner, name).__module__ == owner.__name__
+
+
+def test_dataset_stats_keeps_its_public_names_importable_from_its_path() -> None:
+    stats = importlib.import_module("osm_polygon_description_tag.dataset.stats")
+    for name in (
+        "collect_stats",
+        "ReportingError",
+        "STATS_SCHEMA_VERSION",
+        "TEXT_REJECTION_REASONS",
+    ):
+        assert hasattr(stats, name), name
 
 
 def test_unit_tests_mirror_source_domains() -> None:

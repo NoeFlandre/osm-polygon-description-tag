@@ -8,7 +8,8 @@ Provide the canonical boundary for constructing and validating dataset artifacts
 
 Own the versioned Arrow and GeoParquet schema, record transformation, atomic storage, manifests,
 global identity deduplication, artifact-derived statistics, and deterministic dataset-card
-generation. Statistics live in `stats.py`; documentation and derived media live in `docs.py`.
+generation. Statistics live in `stats.py`, with its helpers in `stats_manifest.py`,
+`stats_features.py`, and `stats_geometry.py`; documentation and derived media live in `docs.py`.
 Verification of finalized outputs against their manifests and raw sources lives in
 `validation.py`, which the `validate` command calls.
 
@@ -33,7 +34,8 @@ library.
 bounded batches through owned temporary files and atomically promotes only a validated artifact.
 Manifests identify source and output bytes; the deduplication stage removes cross-PBF duplicate
 OSM identities atomically. `stats.py` derives statistics from final artifacts and their matching
-manifests, while `docs.py` renders the dataset card and derived media from those statistics.
+manifests (`stats_manifest.py` validates them, `stats_features.py` and `stats_geometry.py`
+aggregate them), while `docs.py` renders the dataset card and derived media from those statistics.
 
 ## Safety and determinism invariants
 

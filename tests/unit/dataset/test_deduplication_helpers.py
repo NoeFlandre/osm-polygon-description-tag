@@ -11,9 +11,8 @@ from shapely import from_wkb, to_wkb
 from shapely.geometry import Polygon
 
 import osm_polygon_description_tag.dataset.deduplication as dedup_module
-import osm_polygon_description_tag.dataset.stats as stats_module
 import osm_polygon_description_tag.runtime.atomic as atomic_module
-from osm_polygon_description_tag.dataset import canonical_rows
+from osm_polygon_description_tag.dataset import canonical_rows, stats_features
 from osm_polygon_description_tag.dataset.deduplication import (
     DUPLICATE_REJECTION_REASON,
     DeduplicationError,
@@ -709,12 +708,12 @@ def test_all_canonical_selectors_choose_the_same_payload_for_opposite_endian_geo
     def selected_stats(paths: tuple[Path, Path]) -> tuple[object, ...]:
         connection = duckdb.connect()
         try:
-            stats_module._create_feature_table(connection)
+            stats_features.create_feature_table(connection)
             for path in paths:
                 reader = pq.ParquetFile(path)
-                for batch in reader.iter_batches(columns=stats_module._FEATURE_COLUMNS):
-                    stats_module._insert_batch(connection, batch, path.name)
-            stats_module._create_unique_feature_view(connection)
+                for batch in reader.iter_batches(columns=stats_features._FEATURE_COLUMNS):
+                    stats_features._insert_batch(connection, batch, path.name)
+            stats_features.create_unique_feature_view(connection)
             row = connection.execute(
                 "SELECT description, area_m2, geometry, "  # noqa: S608 - shared canonical SQL policy
                 f"{canonical_rows._full_row_fingerprint_sql(key_value_columns_are_maps=True)} "
