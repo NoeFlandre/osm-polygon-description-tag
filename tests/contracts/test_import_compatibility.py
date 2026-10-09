@@ -13,6 +13,9 @@ from osm_polygon_description_tag.dataset import migration as dataset_migration
 from osm_polygon_description_tag.dataset import schema as dataset_schema
 from osm_polygon_description_tag.dataset import stats as dataset_stats
 from osm_polygon_description_tag.dataset import storage as dataset_storage
+from osm_polygon_description_tag.dataset import storage_artifacts as dataset_storage_artifacts
+from osm_polygon_description_tag.dataset import storage_errors as dataset_storage_errors
+from osm_polygon_description_tag.dataset import storage_validation as dataset_storage_validation
 from osm_polygon_description_tag.dataset import text_migration as dataset_text_migration
 from osm_polygon_description_tag.dataset import transform as dataset_transform
 from osm_polygon_description_tag.publication import models as publication_models
@@ -47,6 +50,9 @@ def test_dataset_package_exports_exact_stable_module_api() -> None:
         dataset_schema,
         dataset_transform,
         dataset_storage,
+        dataset_storage_artifacts,
+        dataset_storage_errors,
+        dataset_storage_validation,
         dataset_manifest,
         dataset_migration,
         dataset_text_migration,

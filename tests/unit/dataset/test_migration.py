@@ -29,7 +29,7 @@ from osm_polygon_description_tag.dataset.migration import (
     migrate_dataset_schema,
 )
 from osm_polygon_description_tag.dataset.schema import SCHEMA, SCHEMA_VERSION
-from osm_polygon_description_tag.dataset.storage import StorageError
+from osm_polygon_description_tag.dataset.storage_errors import StorageError
 
 
 def _legacy_schema() -> pa.Schema:

@@ -282,7 +282,7 @@ def test_iter_unique_parquet_batches_validates_before_reading_paths(
     (data_root / "data").mkdir(parents=True)
     calls: list[Path] = []
     monkeypatch.setattr(
-        "osm_polygon_description_tag.dataset.storage.validate_finalized_artifacts",
+        "osm_polygon_description_tag.dataset.storage_artifacts.validate_finalized_artifacts",
         lambda root: calls.append(root),
     )
 

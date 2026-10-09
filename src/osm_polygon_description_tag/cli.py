@@ -45,7 +45,7 @@ from osm_polygon_description_tag.dataset.languages.detector import LanguageDetec
 from osm_polygon_description_tag.dataset.manifest import ManifestError
 from osm_polygon_description_tag.dataset.migration import MigrationError
 from osm_polygon_description_tag.dataset.stats_manifest import ReportingError
-from osm_polygon_description_tag.dataset.storage import StorageError
+from osm_polygon_description_tag.dataset.storage_errors import StorageError
 from osm_polygon_description_tag.dataset.text_migration import TextMigrationError
 from osm_polygon_description_tag.language_cli import language_app
 from osm_polygon_description_tag.osm.extraction import OsmiumExportError

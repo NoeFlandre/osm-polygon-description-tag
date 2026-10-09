@@ -55,7 +55,7 @@ def sorted_parquets(directory: Path) -> list[Path]:
 
     This helper intentionally does NOT validate manifest matches; that
     step is the responsibility of
-    :func:`osm_polygon_description_tag.dataset.storage.validate_finalized_artifacts`,
+    :func:`osm_polygon_description_tag.dataset.storage_artifacts.validate_finalized_artifacts`,
     which is the shared validation primitive.
     """
     if not directory.exists():
@@ -258,14 +258,14 @@ def collect_h3_counts(
     leaving the parameter unset.
 
     The aggregated artifacts are first validated via
-    :func:`osm_polygon_description_tag.dataset.storage.validate_finalized_artifacts`
+    :func:`osm_polygon_description_tag.dataset.storage_artifacts.validate_finalized_artifacts`
     so that mismatched, stale, or corrupt parquet/manifest pairs cannot
     be observed as a partial map.
     """
     from osm_polygon_description_tag.dataset.geography.h3_policy import (
         DEFAULT_H3_RESOLUTION,
     )
-    from osm_polygon_description_tag.dataset.storage import validate_finalized_artifacts
+    from osm_polygon_description_tag.dataset.storage_artifacts import validate_finalized_artifacts
 
     validate_finalized_artifacts(data_root)
 

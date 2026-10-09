@@ -9,7 +9,7 @@ import pyarrow as pa
 import pytest
 from shapely.geometry import MultiPolygon, Polygon
 
-from osm_polygon_description_tag.dataset import storage
+from osm_polygon_description_tag.dataset import storage, storage_errors
 from osm_polygon_description_tag.dataset.constants import DEFAULT_WRITE_BATCH_SIZE
 from osm_polygon_description_tag.dataset.schema import SCHEMA
 from tests.conftest import make_record_dict
@@ -148,7 +148,7 @@ def test_batches_default_validator_rejects_duplicate_identities(tmp_path: Path) 
     duplicate = _record(42, Polygon([(0, 0), (0, 1), (1, 1), (1, 0)]))
     target = tmp_path / "duplicates.parquet"
 
-    with pytest.raises(storage.StorageError, match="duplicate"):
+    with pytest.raises(storage_errors.StorageError, match="duplicate"):
         storage.write_geoparquet_batches([_batch([duplicate, duplicate])], target)
 
     assert not target.exists()

@@ -31,6 +31,7 @@ import osm_polygon_description_tag.dataset.geography.aggregation as aggregation_
 # Import the actual function that the package uses to ensure coverage
 # against the no-pq.read_table contract.
 import osm_polygon_description_tag.dataset.geography.parquet_inputs as parquet_inputs_module
+from osm_polygon_description_tag.dataset import storage_artifacts
 from osm_polygon_description_tag.dataset.geography import (
     DEFAULT_H3_RESOLUTION,
     PARQUET_INPUT_COLUMNS,
@@ -276,8 +277,6 @@ def test_collect_h3_counts_resolution_falsy_does_not_use_default(
 def test_collect_h3_counts_forwards_exact_resolution_to_assignment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import osm_polygon_description_tag.dataset.storage as storage_module
-
     observed: list[tuple[float, float, int]] = []
     validated: list[Path] = []
     parquet_path = tmp_path / "data" / "region.parquet"
@@ -289,7 +288,7 @@ def test_collect_h3_counts_forwards_exact_resolution_to_assignment(
         lambda _root, _paths: iter(((parquet_path, 2.0, 1.0), (parquet_path, 4.0, 3.0))),
     )
     monkeypatch.setattr(
-        storage_module,
+        storage_artifacts,
         "validate_finalized_artifacts",
         lambda root: validated.append(root),
     )
@@ -743,15 +742,13 @@ def test_parquet_inputs_module_does_not_call_pq_read_table() -> None:
 
 def test_aggregate_h3_density_uses_validate_finalized_artifacts(tmp_path: Path) -> None:
     """``aggregate_h3_density`` must use the shared validation primitive."""
-    from osm_polygon_description_tag.dataset.storage import (
-        validate_finalized_artifacts,
-    )
+    from osm_polygon_description_tag.dataset.storage_artifacts import validate_finalized_artifacts
 
     data_root = _plant_two_parquets(tmp_path)
 
     # Drop one manifest: the shared primitive must reject this state.
     (data_root / "manifests" / "beta.manifest.json").unlink()
-    from osm_polygon_description_tag.dataset.storage import StorageError
+    from osm_polygon_description_tag.dataset.storage_errors import StorageError
 
     with pytest.raises(StorageError, match="mismatch"):
         validate_finalized_artifacts(data_root)
@@ -771,10 +768,8 @@ def test_generate_dataset_docs_uses_validate_finalized_artifacts(tmp_path: Path)
         source_identity_for,
         write_manifest,
     )
-    from osm_polygon_description_tag.dataset.storage import (
-        StorageError,
-        write_geoparquet,
-    )
+    from osm_polygon_description_tag.dataset.storage import write_geoparquet
+    from osm_polygon_description_tag.dataset.storage_errors import StorageError
     from osm_polygon_description_tag.runtime.resources import dataset_card_template
 
     data_root = tmp_path / "generated"
@@ -882,9 +877,7 @@ def test_a_unique_row_failure_is_reported_with_its_own_message(
 def test_collect_h3_counts_names_the_missing_data_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from osm_polygon_description_tag.dataset import storage
-
-    monkeypatch.setattr(storage, "validate_finalized_artifacts", lambda data_root: None)
+    monkeypatch.setattr(storage_artifacts, "validate_finalized_artifacts", lambda data_root: None)
 
     with pytest.raises(H3AggregationError) as error:
         collect_h3_counts(tmp_path)

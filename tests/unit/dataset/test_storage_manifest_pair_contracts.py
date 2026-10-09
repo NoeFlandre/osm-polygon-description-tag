@@ -9,7 +9,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from osm_polygon_description_tag.dataset import storage
+from osm_polygon_description_tag.dataset import storage_artifacts, storage_validation
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     RunCounts,
@@ -18,7 +18,7 @@ from osm_polygon_description_tag.dataset.manifest import (
     output_identity_for,
     write_manifest,
 )
-from osm_polygon_description_tag.dataset.storage import StorageError
+from osm_polygon_description_tag.dataset.storage_errors import StorageError
 
 
 def _write_finalized_pair(
@@ -52,7 +52,7 @@ def test_validation_rejects_a_manifest_whose_included_rows_disagree_with_the_par
     _write_finalized_pair(tmp_path, manifest_factory, rows=rows, included_rows=included_rows)
 
     with pytest.raises(StorageError) as error:
-        storage.validate_finalized_artifacts(tmp_path)
+        storage_artifacts.validate_finalized_artifacts(tmp_path)
 
     assert str(error.value) == (
         f"manifest row count mismatch for region.parquet: recorded {included_rows}, found {rows}"
@@ -64,7 +64,7 @@ def test_validation_accepts_a_manifest_whose_included_rows_match_the_parquet(
 ) -> None:
     _write_finalized_pair(tmp_path, manifest_factory, rows=2, included_rows=2)
 
-    result = storage.validate_finalized_artifacts(tmp_path)
+    result = storage_artifacts.validate_finalized_artifacts(tmp_path)
 
     assert result["parquets"] == (tmp_path / "data" / "region.parquet",)
 
@@ -80,18 +80,18 @@ def test_validate_manifest_pair_default_does_not_require_current_contract(
     manifest_path.write_bytes(b"tiny manifest fixture")
     identity = object()
     manifest = SimpleNamespace(
-        manifest_schema_version=storage.MANIFEST_SCHEMA_VERSION,
+        manifest_schema_version=storage_artifacts.MANIFEST_SCHEMA_VERSION,
         source=object(),
         output=identity,
     )
 
     with (
-        patch.object(storage, "read_manifest", return_value=manifest),
-        patch.object(storage, "output_identity_for", return_value=identity),
-        patch.object(storage, "is_resumable") as is_resumable,
-        patch.object(storage, "_validate_manifest_included_rows"),
+        patch.object(storage_artifacts, "read_manifest", return_value=manifest),
+        patch.object(storage_artifacts, "output_identity_for", return_value=identity),
+        patch.object(storage_artifacts, "is_resumable") as is_resumable,
+        patch.object(storage_artifacts, "_validate_manifest_included_rows"),
     ):
-        pair = storage._validate_manifest_pair_record(parquet, manifests_dir)
+        pair = storage_artifacts._validate_manifest_pair_record(parquet, manifests_dir)
 
     assert pair.path == manifest_path
     is_resumable.assert_not_called()
@@ -107,20 +107,22 @@ def test_validate_manifest_pair_enforces_current_contract_when_requested(
     (manifests_dir / "region.manifest.json").write_bytes(b"tiny manifest fixture")
     identity = object()
     manifest = SimpleNamespace(
-        manifest_schema_version=storage.MANIFEST_SCHEMA_VERSION,
+        manifest_schema_version=storage_artifacts.MANIFEST_SCHEMA_VERSION,
         source=object(),
         output=identity,
     )
 
     with (
-        patch.object(storage, "read_manifest", return_value=manifest),
-        patch.object(storage, "output_identity_for", return_value=identity),
-        patch.object(storage, "is_resumable", return_value=False) as is_resumable,
+        patch.object(storage_artifacts, "read_manifest", return_value=manifest),
+        patch.object(storage_artifacts, "output_identity_for", return_value=identity),
+        patch.object(storage_artifacts, "is_resumable", return_value=False) as is_resumable,
         pytest.raises(
             StorageError, match="manifest contract does not match current configuration"
         ) as error,
     ):
-        storage._validate_manifest_pair(parquet, manifests_dir, require_current_contract=True)
+        storage_artifacts._validate_manifest_pair(
+            parquet, manifests_dir, require_current_contract=True
+        )
 
     is_resumable.assert_called_once_with(manifest, manifest.source, identity)
     assert str(manifests_dir / "region.manifest.json") in str(error.value)
@@ -137,7 +139,7 @@ def test_validate_manifest_pair_names_a_non_regular_artifact(tmp_path: Path) -> 
     (manifests_dir / "region.manifest.json").write_bytes(b"tiny manifest fixture")
 
     with pytest.raises(StorageError) as error:
-        storage.validate_finalized_artifacts(data_root)
+        storage_artifacts.validate_finalized_artifacts(data_root)
 
     assert str(error.value) == f"finalized artifact is not a regular file: {parquet}"
 
@@ -154,7 +156,7 @@ def test_validate_manifest_pair_names_a_non_regular_manifest(tmp_path: Path) -> 
     manifest_path.mkdir()
 
     with pytest.raises(StorageError) as error:
-        storage.validate_finalized_artifacts(data_root)
+        storage_artifacts.validate_finalized_artifacts(data_root)
 
     assert str(error.value) == f"manifest is not a regular file: {manifest_path}"
 
@@ -170,7 +172,7 @@ def test_validate_finalized_artifacts_rejects_a_symlinked_data_root(tmp_path: Pa
         pytest.skip("filesystem does not support directory symlinks")
 
     with pytest.raises(StorageError, match="data root is not a regular directory"):
-        storage.validate_finalized_artifacts(data_root)
+        storage_artifacts.validate_finalized_artifacts(data_root)
 
 
 def test_validate_manifest_pair_preserves_artifact_inspection_context(
@@ -191,7 +193,7 @@ def test_validate_manifest_pair_preserves_artifact_inspection_context(
     monkeypatch.setattr(Path, "is_symlink", fail_for_parquet)
 
     with pytest.raises(StorageError) as error:
-        storage._validate_manifest_pair(parquet, manifests_dir)
+        storage_artifacts._validate_manifest_pair(parquet, manifests_dir)
 
     assert str(error.value) == f"cannot inspect finalized artifact {parquet}: permission denied"
 
@@ -215,7 +217,7 @@ def test_validate_manifest_pair_preserves_manifest_inspection_context(
     monkeypatch.setattr(Path, "is_symlink", fail_for_manifest)
 
     with pytest.raises(StorageError) as error:
-        storage._validate_manifest_pair(parquet, manifests_dir)
+        storage_artifacts._validate_manifest_pair(parquet, manifests_dir)
 
     assert str(error.value) == f"cannot inspect manifest {manifest_path}: permission denied"
 
@@ -227,17 +229,17 @@ def test_validate_manifest_pair_preserves_output_read_context(tmp_path: Path) ->
     manifests_dir.mkdir()
     (manifests_dir / "region.manifest.json").write_bytes(b"tiny manifest fixture")
     manifest = SimpleNamespace(
-        manifest_schema_version=storage.MANIFEST_SCHEMA_VERSION,
+        manifest_schema_version=storage_artifacts.MANIFEST_SCHEMA_VERSION,
         source=object(),
         output=object(),
     )
 
     with (
-        patch.object(storage, "read_manifest", return_value=manifest),
-        patch.object(storage, "output_identity_for", side_effect=OSError("disk error")),
+        patch.object(storage_artifacts, "read_manifest", return_value=manifest),
+        patch.object(storage_artifacts, "output_identity_for", side_effect=OSError("disk error")),
         pytest.raises(StorageError) as error,
     ):
-        storage._validate_manifest_pair(parquet, manifests_dir)
+        storage_artifacts._validate_manifest_pair(parquet, manifests_dir)
 
     assert str(error.value) == f"cannot read finalized artifact {parquet}: disk error"
 
@@ -255,7 +257,7 @@ def test_validate_manifest_pair_uses_the_data_root_for_manifest_lookup(
     manifest_path.write_bytes(b"tiny manifest fixture")
     identity = object()
     manifest = SimpleNamespace(
-        manifest_schema_version=storage.MANIFEST_SCHEMA_VERSION,
+        manifest_schema_version=storage_artifacts.MANIFEST_SCHEMA_VERSION,
         source=object(),
         output=identity,
     )
@@ -265,13 +267,13 @@ def test_validate_manifest_pair_uses_the_data_root_for_manifest_lookup(
         lookup_calls.append((output_name, data_root))
         return manifest_path
 
-    monkeypatch.setattr(storage, "manifest_path_for", resolve_manifest)
+    monkeypatch.setattr(storage_artifacts, "manifest_path_for", resolve_manifest)
     with (
-        patch.object(storage, "read_manifest", return_value=manifest),
-        patch.object(storage, "output_identity_for", return_value=identity),
-        patch.object(storage, "_validate_manifest_included_rows"),
+        patch.object(storage_artifacts, "read_manifest", return_value=manifest),
+        patch.object(storage_artifacts, "output_identity_for", return_value=identity),
+        patch.object(storage_artifacts, "_validate_manifest_included_rows"),
     ):
-        result = storage._validate_manifest_pair(parquet, manifests_dir)
+        result = storage_artifacts._validate_manifest_pair(parquet, manifests_dir)
 
     assert result == manifest_path
     assert lookup_calls == [(parquet.name, tmp_path)]
@@ -281,7 +283,7 @@ def test_validate_source_reports_the_expected_manifest_identity() -> None:
     state = SimpleNamespace(source_pbf=None)
 
     with pytest.raises(StorageError) as error:
-        storage._validate_source(
+        storage_validation._validate_source(
             state, current="actual.osm.pbf", expected_source_pbf="recorded.osm.pbf"
         )
 

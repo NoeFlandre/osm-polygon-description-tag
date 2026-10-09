@@ -15,7 +15,7 @@ import pytest
 from shapely import from_wkb
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag.dataset import storage
+from osm_polygon_description_tag.dataset import storage_validation
 from osm_polygon_description_tag.dataset.canonical_rows import (
     canonical_rows_with_text_flag_sql,
     select_canonical_row,
@@ -79,13 +79,13 @@ def _write_legacy_dataset(
     data_root: Path, sources: Path, shards: dict[str, list[dict[str, object]]], monkeypatch
 ) -> None:
     """Write rows that fail the text contract, as legacy artifacts can contain."""
-    real = storage._validate_description_values
+    real = storage_validation._validate_description_values
 
     def lenient(description: object, localized: object, **_kwargs: object) -> None:
         real(description, localized, require_successful_text=False)
 
     with monkeypatch.context() as patched:
-        patched.setattr(storage, "_validate_description_values", lenient)
+        patched.setattr(storage_validation, "_validate_description_values", lenient)
         write_finalized_dataset(data_root, sources, shards)
 
 
@@ -117,7 +117,7 @@ def test_invalid_geometry_in_a_text_rejected_top_row_still_fails(
     top["source_pbf"] = "b.osm.pbf"
     with monkeypatch.context() as patched:
         # Legacy artifacts predate the write-time geometry check.
-        patched.setattr(storage, "_validate_geometry", lambda _geometry, _type: None)
+        patched.setattr(storage_validation, "_validate_geometry", lambda _geometry, _type: None)
         _write_legacy_dataset(data_root, tmp_path / "sources", {"a": [good], "b": [top]}, patched)
 
     with pytest.raises(H3AggregationError, match="invalid or empty geometry"):

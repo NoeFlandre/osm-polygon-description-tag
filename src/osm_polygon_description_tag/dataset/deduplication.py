@@ -39,11 +39,9 @@ from osm_polygon_description_tag.dataset.manifest import (
     write_manifest,
 )
 from osm_polygon_description_tag.dataset.schema import SCHEMA
-from osm_polygon_description_tag.dataset.storage import (
-    validate_finalized_artifacts,
-    validate_geoparquet,
-    write_geoparquet_batches,
-)
+from osm_polygon_description_tag.dataset.storage import write_geoparquet_batches
+from osm_polygon_description_tag.dataset.storage_artifacts import validate_finalized_artifacts
+from osm_polygon_description_tag.dataset.storage_validation import validate_geoparquet
 from osm_polygon_description_tag.dataset.text import sql_literal as _sql_literal
 from osm_polygon_description_tag.runtime.atomic import atomic_write_text
 

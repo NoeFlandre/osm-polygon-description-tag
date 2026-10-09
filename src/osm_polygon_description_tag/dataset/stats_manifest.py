@@ -22,7 +22,7 @@ from osm_polygon_description_tag.dataset.manifest import (
     output_identity_for,
     read_manifest,
 )
-from osm_polygon_description_tag.dataset.storage import validate_geoparquet
+from osm_polygon_description_tag.dataset.storage_validation import validate_geoparquet
 
 
 class ReportingError(ValueError):
