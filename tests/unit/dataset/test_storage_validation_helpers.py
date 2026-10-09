@@ -18,10 +18,7 @@ from osm_polygon_description_tag.dataset import (
     storage_validation,
 )
 from osm_polygon_description_tag.dataset.manifest import ManifestError
-from osm_polygon_description_tag.dataset.storage import (
-    arrow_record,
-    write_geoparquet,
-)
+from osm_polygon_description_tag.dataset.storage import arrow_record, write_geoparquet
 from osm_polygon_description_tag.dataset.storage_artifacts import (
     _check_artifact_stems,
     _require_artifact_directories,

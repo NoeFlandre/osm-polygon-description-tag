@@ -12,6 +12,8 @@ from shapely import to_wkb
 from shapely.geometry import MultiPolygon, Point, Polygon
 
 import osm_polygon_description_tag.dataset.stats as stats_module
+from osm_polygon_description_tag.dataset import stats_features, stats_geometry, stats_manifest
+from osm_polygon_description_tag.dataset.text import successful_description_text_sql
 from tests.helpers.messages import exactly
 
 
@@ -23,32 +25,32 @@ def test_collect_feature_summary_forwards_each_query_and_quantile_contract() -> 
 
     with (
         patch.object(
-            stats_module,
-            "_query_int",
+            stats_features,
+            "query_int",
             side_effect=[7, 11, 9, 10, 3, 5, 4, 9],
         ) as query_int,
         patch.object(
-            stats_module,
+            stats_features,
             "_ordered_counts",
             side_effect=[{"relation": 4}, {"Polygon": 8}],
         ) as ordered_counts,
         patch.object(
-            stats_module,
+            stats_features,
             "_suffix_counts",
             side_effect=[{"en": 6}, {"fr": 7}],
         ) as suffix_counts,
         patch.object(
-            stats_module,
+            stats_features,
             "_description_word_stats",
             side_effect=[(3, 30, 10.0), (4, 40, 11.0)],
         ) as word_stats,
         patch.object(
-            stats_module,
+            stats_features,
             "_quantile_or_none",
             side_effect=[1.0, 2.0, 3.0, 4.0, 5.0],
         ) as quantile,
     ):
-        summary = stats_module._collect_feature_summary(connection)
+        summary = stats_features.collect_feature_summary(connection)
 
     assert summary.rows == 11
     assert summary.raw_successful_text_rows == 9
@@ -81,7 +83,7 @@ def test_collect_feature_summary_forwards_each_query_and_quantile_contract() -> 
         call(
             connection,
             "SELECT COUNT(*) FROM all_features WHERE "  # noqa: S608 - internal fixed columns
-            + stats_module.successful_description_text_sql(localized_is_map=True),
+            + successful_description_text_sql(localized_is_map=True),
         ),
         call(connection, "SELECT COUNT(*) FROM (SELECT DISTINCT osm_type, osm_id FROM features)"),
         call(connection, "SELECT COUNT(*) FROM features WHERE description IS NOT NULL"),
@@ -140,7 +142,7 @@ def test_collect_manifest_summary_accumulates_and_sorts_file_provenance(
             ),
             counts=SimpleNamespace(emitted_features=emitted, rejections=rejections),
         )
-        return stats_module._ValidatedArtifact(parquet=path, manifest=manifest)
+        return stats_manifest.ValidatedArtifact(parquet=path, manifest=manifest)
 
     artifacts = (
         artifact(first, "b.osm.pbf", 20, 3, {"z": 1}),
@@ -148,10 +150,10 @@ def test_collect_manifest_summary_accumulates_and_sorts_file_provenance(
     )
 
     with (
-        patch.object(stats_module, "_rows_in_parquet", side_effect=[6, 4]),
-        patch.object(stats_module, "file_sha256", side_effect=["out-b", "out-a"]),
+        patch.object(stats_manifest, "_rows_in_parquet", side_effect=[6, 4]),
+        patch.object(stats_manifest, "file_sha256", side_effect=["out-b", "out-a"]),
     ):
-        summary = stats_module._collect_manifest_summary(artifacts)
+        summary = stats_manifest.collect_manifest_summary(artifacts)
 
     assert summary.emitted_features == 7
     assert summary.rejections == {"a": 2, "z": 1}
@@ -184,7 +186,7 @@ def test_collect_manifest_summary_accumulates_and_sorts_file_provenance(
 
 
 def test_build_stats_payload_preserves_public_fields_and_zero_rate_fallback() -> None:
-    feature_summary = stats_module._FeatureSummary(
+    feature_summary = stats_features.FeatureSummary(
         rows=10,
         unique_osm_objects=7,
         osm_types={"relation": 4},
@@ -210,7 +212,7 @@ def test_build_stats_payload_preserves_public_fields_and_zero_rate_fallback() ->
         data_max_timestamp_utc="2024-02-01T00:00:00+00:00",
         raw_successful_text_rows=8,
     )
-    manifest_summary = stats_module._ManifestSummary(
+    manifest_summary = stats_manifest.ManifestSummary(
         emitted_features=12,
         rejections={"duplicate_osm_object": 2},
         source_bytes_total=30,
@@ -237,7 +239,7 @@ def test_build_stats_payload_preserves_public_fields_and_zero_rate_fallback() ->
     assert payload["area_m2_p75_m2"] == 4.0
     assert payload["files"] == [{"parquet": "a.parquet"}]
 
-    no_duplicate_manifest_summary = stats_module._ManifestSummary(
+    no_duplicate_manifest_summary = stats_manifest.ManifestSummary(
         emitted_features=12,
         rejections={"other": 1},
         source_bytes_total=30,
@@ -251,7 +253,7 @@ def test_build_stats_payload_preserves_public_fields_and_zero_rate_fallback() ->
         == 0
     )
 
-    empty_feature_summary = stats_module._FeatureSummary(
+    empty_feature_summary = stats_features.FeatureSummary(
         **{**feature_summary.__dict__, "rows": 0, "unique_osm_objects": 0}
     )
     assert (
@@ -277,7 +279,7 @@ def _spatial_batch(rows: list[dict[str, object]]) -> pa.RecordBatch:
             pa.array([row["max_y"] for row in rows], type=pa.float64()),
             pa.array([row["wkb"] for row in rows], type=pa.binary()),
         ],
-        names=stats_module._SPATIAL_COLUMNS,
+        names=stats_geometry._SPATIAL_COLUMNS,
     )
 
 
@@ -308,7 +310,7 @@ def test_the_batch_extent_takes_each_edge_from_its_own_column() -> None:
         },
     ]
 
-    summary = stats_module._summarize_spatial_batch(
+    summary = stats_geometry._summarize_spatial_batch(
         _spatial_batch(rows), source_name="region.parquet", row_offset=0
     )
 
@@ -340,7 +342,7 @@ def test_multipolygon_components_accumulate_across_the_batch() -> None:
         },
     ]
 
-    summary = stats_module._summarize_spatial_batch(
+    summary = stats_geometry._summarize_spatial_batch(
         _spatial_batch(rows), source_name="region.parquet", row_offset=0
     )
 
@@ -362,10 +364,10 @@ def test_an_invalid_bounding_box_names_its_source_and_row() -> None:
     ]
 
     with pytest.raises(
-        stats_module.ReportingError,
+        stats_manifest.ReportingError,
         match=exactly("invalid bounding box in region.parquet at row 7"),
     ):
-        stats_module._summarize_spatial_batch(
+        stats_geometry._summarize_spatial_batch(
             _spatial_batch(rows), source_name="region.parquet", row_offset=7
         )
 
@@ -375,10 +377,10 @@ def test_merge_bboxes_takes_each_edge_from_its_own_position() -> None:
     current = (-10.0, -20.0, 30.0, 40.0)
     addition = (-5.0, -25.0, 35.0, 15.0)
 
-    assert stats_module._merge_bboxes(current, addition) == (-10.0, -25.0, 35.0, 40.0)
-    assert stats_module._merge_bboxes(None, addition) == addition
-    assert stats_module._merge_bboxes(current, None) == current
-    assert stats_module._merge_bboxes(None, None) is None
+    assert stats_geometry._merge_bboxes(current, addition) == (-10.0, -25.0, 35.0, 40.0)
+    assert stats_geometry._merge_bboxes(None, addition) == addition
+    assert stats_geometry._merge_bboxes(current, None) == current
+    assert stats_geometry._merge_bboxes(None, None) is None
 
 
 def test_spatial_totals_accumulate_across_every_batch(
@@ -416,22 +418,22 @@ def test_spatial_totals_accumulate_across_every_batch(
         _spatial_batch([_multi(5, min_x=2.0, min_y=3.0, max_x=4.0, max_y=90.0)]),
     ]
     offsets: list[int] = []
-    real = stats_module._summarize_spatial_batch
+    real = stats_geometry._summarize_spatial_batch
 
     def _record(batch: object, *, source_name: str, row_offset: int):  # type: ignore[no-untyped-def]
         offsets.append(row_offset)
         return real(batch, source_name=source_name, row_offset=row_offset)
 
-    monkeypatch.setattr(stats_module, "_summarize_spatial_batch", _record)
+    monkeypatch.setattr(stats_geometry, "_summarize_spatial_batch", _record)
     monkeypatch.setattr(
-        stats_module, "iter_unique_parquet_batches", lambda *_a, **_k: iter(batches)
+        stats_geometry, "iter_unique_parquet_batches", lambda *_a, **_k: iter(batches)
     )
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     artifact = SimpleNamespace(parquet=data_dir / "unique.parquet")
 
-    summary = stats_module._collect_spatial_summary((artifact,))
+    summary = stats_geometry.collect_spatial_summary((artifact,))
 
     # 1 + 2 + 1 rows, so the third batch must start at 3, not at 2.
     assert summary.rows == 4
@@ -474,12 +476,12 @@ def test_hole_counts_accumulate_across_batches(
         _spatial_batch([_row_with_hole("b.parquet")]),
     ]
     monkeypatch.setattr(
-        stats_module, "iter_unique_parquet_batches", lambda *_a, **_k: iter(batches)
+        stats_geometry, "iter_unique_parquet_batches", lambda *_a, **_k: iter(batches)
     )
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    summary = stats_module._collect_spatial_summary(
+    summary = stats_geometry.collect_spatial_summary(
         (SimpleNamespace(parquet=data_dir / "unique.parquet"),)
     )
 
@@ -506,10 +508,10 @@ def test_a_row_is_named_by_its_own_source_column_when_present() -> None:
     ]
 
     with pytest.raises(
-        stats_module.ReportingError,
+        stats_manifest.ReportingError,
         match=exactly("invalid bounding box in shard-a.parquet at row 3"),
     ):
-        stats_module._summarize_spatial_batch(
+        stats_geometry._summarize_spatial_batch(
             _spatial_batch(rows), source_name="region.parquet", row_offset=3
         )
 
@@ -551,10 +553,10 @@ def test_every_row_validator_is_told_which_row_it_is_looking_at(
     rows = [_good_row("shard-a.parquet"), _good_row("shard-b.parquet") | broken]
 
     with pytest.raises(
-        stats_module.ReportingError,
+        stats_manifest.ReportingError,
         match=rf"\A{re.escape(message)} shard-b\.parquet at row 4(:|\Z)",
     ):
-        stats_module._summarize_spatial_batch(
+        stats_geometry._summarize_spatial_batch(
             _spatial_batch(rows), source_name="region.parquet", row_offset=3
         )
 
@@ -579,7 +581,7 @@ def test_hole_counts_accumulate_across_rows_of_one_batch() -> None:
         for geometry in (two_holes, one_hole)
     ]
 
-    summary = stats_module._summarize_spatial_batch(
+    summary = stats_geometry._summarize_spatial_batch(
         _spatial_batch(rows), source_name="region.parquet", row_offset=0
     )
 
@@ -600,33 +602,33 @@ def test_a_batch_without_a_source_column_falls_back_to_the_given_name() -> None:
             pa.array([1.0], type=pa.float64()),
             pa.array([to_wkb(_square(0, 0))], type=pa.binary()),
         ],
-        names=[name for name in stats_module._SPATIAL_COLUMNS if name != "source_pbf"],
+        names=[name for name in stats_geometry._SPATIAL_COLUMNS if name != "source_pbf"],
     )
 
     with pytest.raises(
-        stats_module.ReportingError,
+        stats_manifest.ReportingError,
         match=exactly("invalid bounding box in region.parquet at row 3"),
     ):
-        stats_module._summarize_spatial_batch(batch, source_name="region.parquet", row_offset=3)
+        stats_geometry._summarize_spatial_batch(batch, source_name="region.parquet", row_offset=3)
 
 
 def test_a_malformed_geometry_names_its_source_and_row() -> None:
     """The row's identity travels down into every measurement failure."""
     with pytest.raises(
-        stats_module.ReportingError,
+        stats_manifest.ReportingError,
         match=r"\Amalformed geometry in region\.parquet at row 9: .*\Z",
     ):
-        stats_module._geometry_measurements(
+        stats_geometry._geometry_measurements(
             b"not wkb", "Polygon", source_name="region.parquet", row_index=9
         )
 
 
 def test_an_unsupported_geometry_type_names_its_source_and_row() -> None:
     with pytest.raises(
-        stats_module.ReportingError,
+        stats_manifest.ReportingError,
         match=exactly("unsupported geometry in region.parquet at row 4: 'Point'"),
     ):
-        stats_module._geometry_measurements(
+        stats_geometry._geometry_measurements(
             to_wkb(Point(0, 0)), "Point", source_name="region.parquet", row_index=4
         )
 
@@ -645,7 +647,7 @@ def test_holes_accumulate_across_polygon_components() -> None:
         [(20, 20), (20, 30), (30, 30), (30, 20)], [[(21, 21), (21, 22), (22, 22), (22, 21)]]
     )
 
-    vertices, rings, holes = stats_module._polygon_measurements((holed, other))
+    vertices, rings, holes = stats_geometry._polygon_measurements((holed, other))
 
     assert holes == 3
     assert rings == 5

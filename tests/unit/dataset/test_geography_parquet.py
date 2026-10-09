@@ -815,7 +815,7 @@ def test_generate_dataset_docs_uses_validate_finalized_artifacts(tmp_path: Path)
     )
     # The reporting layer wraps the shared validation primitive and
     # translates the failure into a ReportingError.
-    from osm_polygon_description_tag.dataset.stats import ReportingError
+    from osm_polygon_description_tag.dataset.stats_manifest import ReportingError
 
     with pytest.raises((StorageError, ReportingError), match="(invalid|schema|manifest)"):
         generate_dataset_docs(

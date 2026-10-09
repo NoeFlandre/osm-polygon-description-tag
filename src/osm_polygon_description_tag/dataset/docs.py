@@ -37,11 +37,8 @@ from osm_polygon_description_tag.dataset.geography.card import (
 from osm_polygon_description_tag.dataset.geography.rendering import render_density_map
 from osm_polygon_description_tag.dataset.manifest import file_sha256
 from osm_polygon_description_tag.dataset.numeric import coerce_float_values as _coerce_float_values
-from osm_polygon_description_tag.dataset.stats import (
-    TEXT_REJECTION_REASONS,
-    ReportingError,
-    collect_stats,
-)
+from osm_polygon_description_tag.dataset.stats import TEXT_REJECTION_REASONS, collect_stats
+from osm_polygon_description_tag.dataset.stats_manifest import ReportingError
 from osm_polygon_description_tag.dataset.text import TEXT_CONTRACT_VERSION
 from osm_polygon_description_tag.runtime.atomic import atomic_write_bytes
 from osm_polygon_description_tag.runtime.resources import dataset_card_hero

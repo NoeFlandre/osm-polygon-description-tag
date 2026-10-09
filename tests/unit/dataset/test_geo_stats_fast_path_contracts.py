@@ -5,7 +5,7 @@ import pyarrow as pa
 import pytest
 from shapely.geometry import GeometryCollection, Point, Polygon
 
-import osm_polygon_description_tag.dataset.stats as stats_module
+from osm_polygon_description_tag.dataset import stats_geometry, stats_manifest
 from osm_polygon_description_tag.dataset.geography import parquet_inputs
 
 _SQUARE = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
@@ -69,10 +69,10 @@ def test_spatial_summary_reports_invalid_values_in_each_bbox_column(
     )
 
     with pytest.raises(
-        stats_module.ReportingError,
+        stats_manifest.ReportingError,
         match=r"\Ainvalid bounding box in region\.parquet at row 7\Z",
     ):
-        stats_module._summarize_spatial_batch(
+        stats_geometry._summarize_spatial_batch(
             batch,
             source_name="caller.parquet",
             row_offset=7,
@@ -85,7 +85,7 @@ def test_vectorized_spatial_summary_keeps_low_order_area_contributions() -> None
         [1e16, 1.0, 1.0],
     )
 
-    summary = stats_module._summarize_spatial_batch(
+    summary = stats_geometry._summarize_spatial_batch(
         batch,
         source_name="region.parquet",
         row_offset=0,
@@ -102,9 +102,9 @@ def test_spatial_summary_uses_the_vectorized_result(
     def row_fallback(*_args: object, **_kwargs: object) -> None:
         pytest.fail("a valid batch must use the vectorized summary")
 
-    monkeypatch.setattr(stats_module, "_summarize_spatial_batch_rows", row_fallback)
+    monkeypatch.setattr(stats_geometry, "_summarize_spatial_batch_rows", row_fallback)
 
-    summary = stats_module._summarize_spatial_batch(
+    summary = stats_geometry._summarize_spatial_batch(
         batch,
         source_name="region.parquet",
         row_offset=0,
@@ -117,11 +117,11 @@ def test_spatial_summary_uses_the_vectorized_result(
 
 def test_measured_summary_rejects_extra_bbox_columns() -> None:
     batch = _spatial_batch([_SQUARE], [1.0])
-    geometries = stats_module._vectorized_geometries(batch)
+    geometries = stats_geometry._vectorized_geometries(batch)
     assert geometries is not None
 
     with pytest.raises(ValueError, match=r"zip\(\).*shorter"):
-        stats_module._measured_summary(
+        stats_geometry._measured_summary(
             np.array([1.0]),
             [np.array([0.0])] * 5,
             geometries,
