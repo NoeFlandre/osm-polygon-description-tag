@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 
 from shapely.geometry import Polygon
@@ -14,7 +13,7 @@ from osm_polygon_description_tag.dataset.manifest import (
     source_identity_for,
     write_manifest,
 )
-from osm_polygon_description_tag.dataset.reporting import collect_stats
+from osm_polygon_description_tag.dataset.stats import collect_stats
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from tests.conftest import make_record_dict
 
@@ -118,7 +117,3 @@ def test_collect_stats_returns_none_for_empty_dataset(tmp_path: Path) -> None:
     assert stats["rows"] == 0
     assert stats["area_m2_min_m2"] is None
     assert stats["area_m2_max_m2"] is None
-
-
-def test_collect_stats_takes_only_data_root() -> None:
-    assert list(inspect.signature(collect_stats).parameters) == ["data_root"]

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import inspect
+import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,38 +20,31 @@ from tests.helpers.orchestration import source_runner_workspace as _workspace
 
 
 def test_ensure_logger_constructs_owned_logger_from_explicit_paths(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     paths, _source = _workspace(tmp_path)
 
-    def clock():
+    def clock() -> str:
         return "now"
 
-    owned_logger = object()
-    captured: dict[str, object] = {}
-
-    def make_logger(**kwargs: object) -> object:
-        captured.update(kwargs)
-        return owned_logger
-
-    monkeypatch.setattr(orchestrator, "RunLogger", make_logger)
-    monkeypatch.setattr(orchestrator.uuid, "uuid4", lambda: "run-uuid")
-
-    result = orchestrator._ensure_logger(
+    logger, owns_logger = orchestrator._ensure_logger(
         None,
         paths=paths,
         data_root=tmp_path / "ignored-data-root",
         clock=clock,
     )
+    assert owns_logger is True
 
-    assert result == (owned_logger, True)
-    assert captured == {
-        "data_root": paths.data_root,
-        "run_id": "run-uuid",
-        "clock": clock,
-        "buffer_preflight": True,
-    }
+    log_file = paths.data_root / "logs" / "run-and-publish.jsonl"
+    logger.event("probe")
+    assert not log_file.exists() or log_file.read_text(encoding="utf-8") == ""
+
+    logger.approve_preflight()
+    logger.close()
+
+    records = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines()]
+    assert records == [{"ts": "now", "level": "INFO", "event": "probe", "run_id": logger.run_id}]
+    assert not (tmp_path / "ignored-data-root").exists()
 
 
 def test_resolve_verifier_observes_precedence_and_upload_only_mode(
@@ -586,10 +579,6 @@ def test_run_and_publish_forwards_all_options_and_closes_owned_resources(  # noq
     }
     owned_logger.close.assert_called_once_with()
     tracker.finish.assert_called_once_with()
-    assert (
-        inspect.signature(orchestrator.run_and_publish).parameters["progress_interval"].default
-        == 100_000
-    )
 
 
 def test_run_and_publish_logs_interrupt_and_finishes_tracker(

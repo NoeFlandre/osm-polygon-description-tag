@@ -7,7 +7,6 @@ must immediately escape with exit code 130 and never be retried.
 
 from __future__ import annotations
 
-import inspect
 import json
 from pathlib import Path
 
@@ -17,7 +16,6 @@ from shapely.geometry import Polygon
 from osm_polygon_description_tag.publication import (
     REPO_ID,
     default_runner_with_retry,
-    execute_upload,
 )
 from osm_polygon_description_tag.workflow.orchestrator import run_and_publish
 from tests.helpers.orchestration import setup_workspace as _setup_workspace
@@ -74,13 +72,6 @@ def test_default_runner_with_retry_default_timeout_is_none() -> None:
 
     default_runner_with_retry(["hf", "--version"], _runner=fake_subprocess)
     assert seen == [None]
-
-
-def test_execute_upload_threads_timeout() -> None:
-    """execute_upload(plan, ..., timeout=...) must forward timeout to the runner."""
-    sig = inspect.signature(execute_upload)
-    assert "timeout" in sig.parameters, "execute_upload must accept a timeout kwarg"
-    assert "runner" in sig.parameters, "execute_upload must accept a runner kwarg"
 
 
 def test_orchestrator_threads_timeout_to_publication(

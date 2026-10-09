@@ -19,8 +19,9 @@ CANONICAL_DEPENDENCIES = {
     "observability": {"runtime", "dataset", "observability"},
     "workflow": {"runtime", "osm", "dataset", "publication", "observability", "workflow"},
 }
-CONSOLE_MODULES = ("cli", "language_cli")
+CONSOLE_MODULES = ("cli", "cli_handlers", "language_cli")
 CONSOLE_SUPPORT_MODULES = {
+    "cli_handlers",
     "cli_requests",
     "grid_transport",
     "grid_workflow",
@@ -96,6 +97,20 @@ def test_console_modules_import_only_canonical_packages(module_name: str) -> Non
         if imported_module.split(".", maxsplit=1)[0] not in allowed
     ]
     assert violations == []
+
+
+def _top_level_functions(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
+
+
+def test_console_handlers_live_outside_the_typer_declarations() -> None:
+    """cli.py keeps the Typer declarations and error plumbing; handle_* live in cli_handlers."""
+    cli_handlers_functions = _top_level_functions(PACKAGE_ROOT / "cli_handlers.py")
+    assert {name for name in cli_handlers_functions if name.startswith("handle_")}
+    assert {
+        name for name in _top_level_functions(PACKAGE_ROOT / "cli.py") if name.startswith("handle_")
+    } == set()
 
 
 def test_grid_operator_is_split_into_cohesive_package_modules() -> None:

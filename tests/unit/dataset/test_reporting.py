@@ -6,11 +6,11 @@ import pytest
 from shapely.geometry import MultiPolygon, Polygon
 
 from osm_polygon_description_tag.dataset.canonical_rows import select_canonical_row
+from osm_polygon_description_tag.dataset.docs import generate_dataset_docs
 from osm_polygon_description_tag.dataset.geography import (
     aggregate_area_histogram,
     aggregate_h3_density,
 )
-from osm_polygon_description_tag.dataset.reporting import collect_stats, generate_dataset_docs
 from osm_polygon_description_tag.dataset.stats import (
     _collect_feature_summary,
     _collect_manifest_summary,
@@ -20,6 +20,7 @@ from osm_polygon_description_tag.dataset.stats import (
     _ingest_features,
     _new_connection,
     _validate_artifact,
+    collect_stats,
 )
 from osm_polygon_description_tag.dataset.unique_rows import iter_unique_parquet_batches
 from tests.conftest import make_record_dict
@@ -438,6 +439,12 @@ def test_collect_stats_rejects_final_artifact_without_successful_text(
     assert stats["unique_polygons_with_successful_nonempty_text"] == 0
     assert stats["persisted_text_rejection_rows"] == 1
     assert stats["area_m2_count"] == 0
+
+
+def test_collect_stats_refuses_an_injected_clock(tmp_path: Path) -> None:
+    """Stats are factual and carry no timestamp, so a caller cannot inject a clock."""
+    with pytest.raises(TypeError, match=r"got an unexpected keyword argument 'clock'"):
+        collect_stats(tmp_path, clock=lambda: "now")
 
 
 def test_generate_dataset_docs_installs_hero_image(tmp_path: Path) -> None:

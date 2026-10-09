@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import uuid
 from dataclasses import replace
 from pathlib import Path
@@ -26,6 +25,7 @@ from osm_polygon_description_tag.dataset.storage import (
     validate_geoparquet,
 )
 from osm_polygon_description_tag.runtime.atomic import fsync_dir as _fsync_dir
+from osm_polygon_description_tag.runtime.atomic import fsync_file
 
 
 class MigrationError(RuntimeError):
@@ -60,8 +60,7 @@ def _migrate_parquet(path: Path) -> bool:
     except (OSError, pa.ArrowException, StorageError) as error:
         raise MigrationError(f"cannot migrate {path}: {error}") from error
     finally:
-        if temporary.exists():
-            temporary.unlink()
+        temporary.unlink(missing_ok=True)
 
 
 def _requires_migration(schema: pa.Schema, path: Path) -> bool:
@@ -85,8 +84,7 @@ def _rewrite_legacy_parquet(
 
 
 def promote_migrated_parquet(temporary: Path, target: Path) -> None:
-    with Path(temporary).open("rb") as handle:
-        os.fsync(handle.fileno())
+    fsync_file(Path(temporary))
     Path(temporary).replace(target)
     _fsync_dir(target.parent)
 

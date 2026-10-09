@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import inspect
 import json
 from pathlib import Path
 from unittest.mock import Mock, call, patch
@@ -9,6 +8,7 @@ from unittest.mock import Mock, call, patch
 import pytest
 
 import osm_polygon_description_tag.dataset.docs as docs_module
+from osm_polygon_description_tag.runtime.resources import dataset_card_template
 from tests.helpers.messages import exactly
 
 
@@ -492,7 +492,7 @@ def test_write_dataset_docs_renders_stats_map_and_canonical_json(
         ) as render_stats,
         patch.object(docs_module, "_render_h3_map_block", return_value="map body") as render_map,
         patch.object(docs_module, "install_map_block", return_value="mapped readme") as install_map,
-        patch.object(docs_module, "_write_if_changed") as write_if_changed,
+        patch.object(docs_module, "_atomic_write_if_changed") as write_if_changed,
         patch.object(docs_module.json, "dumps", wraps=json.dumps) as dumps,
     ):
         docs_module._write_dataset_docs(tmp_path, template, stats)
@@ -503,8 +503,8 @@ def test_write_dataset_docs_renders_stats_map_and_canonical_json(
     assert install_map.call_args.args[0].count(docs_module.H3_MAP_START_MARKER) == 1
     install_map.assert_called_once_with(install_map.call_args.args[0], "map body")
     assert write_if_changed.call_args_list == [
-        call(tmp_path / "stats.json", stats_json),
-        call(tmp_path / "README.md", "mapped readme"),
+        call(tmp_path / "stats.json", stats_json.encode("utf-8")),
+        call(tmp_path / "README.md", b"mapped readme"),
     ]
 
 
@@ -533,7 +533,7 @@ def test_write_dataset_docs_requires_both_h3_markers_before_installing_map(
     with (
         patch.object(docs_module, "_render_stats_block", return_value="stats"),
         patch.object(docs_module, "install_map_block") as install_map,
-        patch.object(docs_module, "_write_if_changed"),
+        patch.object(docs_module, "_atomic_write_if_changed"),
     ):
         docs_module._write_dataset_docs(tmp_path, template, stats)
 
@@ -749,8 +749,24 @@ def test_malformed_marker_refusals_state_their_whole_message() -> None:
         )
 
 
-def test_generate_dataset_docs_has_no_clock_parameter() -> None:
-    parameters = inspect.signature(docs_module.generate_dataset_docs).parameters
+def test_generate_dataset_docs_refuses_an_injected_clock(tmp_path: Path) -> None:
+    """Card output is deterministic, so a caller cannot inject a clock."""
+    with pytest.raises(TypeError):
+        docs_module.generate_dataset_docs(tmp_path, tmp_path / "template.md", clock=lambda: "now")
 
-    assert "clock" not in parameters
-    assert list(parameters) == ["data_root", "template_path", "preserve_existing"]
+
+def test_generate_dataset_docs_preserve_existing_keeps_only_a_published_card(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "generated"
+    (data_root / "data").mkdir(parents=True)
+    (data_root / "manifests").mkdir()
+    published_prose = "published prose that a release must keep\n"
+    (data_root / "README.md").write_text(published_prose, encoding="utf-8")
+    template = dataset_card_template()
+
+    docs_module.generate_dataset_docs(data_root, template, preserve_existing=True)
+    assert published_prose in (data_root / "README.md").read_text(encoding="utf-8")
+
+    docs_module.generate_dataset_docs(data_root, template)
+    assert published_prose not in (data_root / "README.md").read_text(encoding="utf-8")
