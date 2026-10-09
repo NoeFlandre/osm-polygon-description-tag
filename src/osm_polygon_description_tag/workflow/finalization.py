@@ -121,7 +121,6 @@ def write_metadata_state(
 def refresh_dataset_docs(
     paths: Paths,
     *,
-    clock: object = None,  # noqa: ARG001 - deprecated and ignored; docs carry no timestamp
     logger: RunLogger,
     docs_generator: Callable[..., object] = generate_dataset_docs,
 ) -> None:

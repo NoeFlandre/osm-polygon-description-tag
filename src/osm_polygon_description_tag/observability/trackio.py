@@ -15,13 +15,14 @@ import json
 import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date
 from pathlib import Path
 from typing import Any, Protocol, cast
 from urllib.parse import quote
 
 from osm_polygon_description_tag.dataset.stats import collect_stats
 from osm_polygon_description_tag.runtime.text_io import utf8_bytes
+from osm_polygon_description_tag.runtime.time import utc_now
 from osm_polygon_description_tag.runtime.units import GIB, MIB
 
 DEFAULT_TRACKIO_PROJECT = "osm-polygon-description-tag"
@@ -545,7 +546,7 @@ def publish_snapshot(
     """Log one completed dataset snapshot and its per-file metric curve."""
     stats = collect_stats(data_root)
     stats_sha256 = _stats_sha256(stats)
-    resolved_run_name = run_name or snapshot_run_name(datetime.now(UTC).date().isoformat())
+    resolved_run_name = run_name or snapshot_run_name(utc_now().date().isoformat())
     recorder = TrackioRecorder(
         data_root=data_root,
         backend=backend,

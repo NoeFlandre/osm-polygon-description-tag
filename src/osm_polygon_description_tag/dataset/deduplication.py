@@ -7,6 +7,7 @@ global pass over validated GeoParquets, keeps one canonical row for each
 
 from __future__ import annotations
 
+import contextlib
 import json
 import shutil
 import uuid
@@ -54,6 +55,7 @@ _row_fingerprint = _canonical_rows._row_fingerprint
 _timestamp_rank = _canonical_rows._timestamp_rank
 _version = _canonical_rows._version
 _STATE_RELATIVE_PATH = Path(".work") / "dedup-state.json"
+_STAGE_RELATIVE_ROOT = Path(".work") / "dedup"
 _BATCH_SIZE = DEFAULT_ARROW_BATCH_SIZE
 
 
@@ -239,7 +241,23 @@ def _promote_staged(
             promotion_hook=promotion_hook,
             promoted=promoted,
         )
-    shutil.rmtree(stage_dir)
+
+
+def _remove_path(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def _remove_stage_dir(data_root: Path, state: Mapping[str, Any]) -> None:
+    """Remove the staged directory only after the complete state is recorded.
+
+    A crash between the two leaves an orphan that the next run's sweep removes.
+    """
+    stage_name = state.get("stage_dir")
+    if stage_name is not None:
+        _remove_path(data_root / str(stage_name))
 
 
 def _resume_staged(
@@ -256,6 +274,7 @@ def _resume_staged(
     complete.pop("stage_dir", None)
     complete["outputs"] = _promoted_output_hashes(current_inputs, _staged_output_hashes(state))
     _write_state(state_path, complete)
+    _remove_stage_dir(data_root, state)
     return DeduplicationResult(
         status="deduplicated",
         input_rows=int(state["input_rows"]),
@@ -449,6 +468,18 @@ def _stage_changes(
     return changed, output_rows
 
 
+def _stage_changes_or_discard(
+    context: _DeduplicationContext,
+    stage_root: Path,
+) -> tuple[list[dict[str, Any]], int]:
+    try:
+        return _stage_changes(context, stage_root)
+    except BaseException:
+        # No state references this directory yet, so nothing can resume it.
+        shutil.rmtree(stage_root, ignore_errors=True)
+        raise
+
+
 def _state_payload(
     context: _DeduplicationContext,
     changed: list[dict[str, Any]],
@@ -468,6 +499,31 @@ def _state_payload(
     }
 
 
+def _state_references_stage(state_path: Path, stage_name: str) -> bool:
+    """Return whether the state names ``stage_name``; an unreadable state counts as naming it."""
+    try:
+        recorded = _read_state(state_path)
+    except DeduplicationError:
+        return True
+    return recorded is not None and recorded.get("stage_dir") == stage_name
+
+
+def _record_staged_state(
+    context: _DeduplicationContext,
+    stage_dir: Path,
+    state: dict[str, object],
+) -> None:
+    stage_name = stage_dir.as_posix()
+    state["stage_dir"] = stage_name
+    try:
+        _write_state(context.state_path, state)
+    except BaseException:
+        # A state that names the directory keeps it for the next run to resume.
+        if not _state_references_stage(context.state_path, stage_name):
+            shutil.rmtree(context.data_root / stage_dir, ignore_errors=True)
+        raise
+
+
 def _finish_deduplication(
     context: _DeduplicationContext,
     stage_dir: Path,
@@ -477,8 +533,7 @@ def _finish_deduplication(
     promotion_hook: Callable[[int], None] | None,
 ) -> DeduplicationResult:
     if changed:
-        state["stage_dir"] = stage_dir.as_posix()
-        _write_state(context.state_path, state)
+        _record_staged_state(context, stage_dir, state)
         return _resume_staged(
             context.data_root,
             context.state_path,
@@ -490,6 +545,31 @@ def _finish_deduplication(
     return _skipped_result(context.input_rows, output_rows)
 
 
+def _referenced_stage_name(state: Mapping[str, Any] | None) -> str | None:
+    if state is None or state.get("status") != "staged":
+        return None
+    stage_dir = state.get("stage_dir")
+    return None if stage_dir is None else Path(str(stage_dir)).name
+
+
+def _sweep_orphan_stage_entries(data_root: Path, state: Mapping[str, Any] | None) -> None:
+    """Remove staging entries that no state references, such as after a hard kill.
+
+    The caller has already read the state, so an unreadable state never reaches
+    this point and nothing is removed without knowing what the state names.
+    """
+    stage_root = data_root / _STAGE_RELATIVE_ROOT
+    if not stage_root.is_dir():
+        return
+    referenced = _referenced_stage_name(state)
+    for entry in list(stage_root.iterdir()):
+        if entry.name != referenced:
+            # Best effort: an entry this process cannot remove, such as one owned by
+            # another uid, must not stop a run whose dataset state is already final.
+            with contextlib.suppress(OSError):
+                _remove_path(entry)
+
+
 def deduplicate_dataset(
     data_root: Path,
     *,
@@ -498,6 +578,7 @@ def deduplicate_dataset(
     """Deduplicate all finalized per-PBF Parquets with atomic resumption."""
     state_path = data_root / _STATE_RELATIVE_PATH
     state = _read_state(state_path)
+    _sweep_orphan_stage_entries(data_root, state)
     if state is not None and state.get("status") == "staged":
         return _resume_staged(data_root, state_path, state, promotion_hook=promotion_hook)
     context, result = _prepare_context(data_root, state_path, state)
@@ -506,9 +587,9 @@ def deduplicate_dataset(
     if context is None:
         raise DeduplicationError("deduplication context was not created")
     stage_token = uuid.uuid4().hex
-    stage_dir = Path(".work") / "dedup" / stage_token
+    stage_dir = _STAGE_RELATIVE_ROOT / stage_token
     stage_root = data_root / stage_dir
-    changed, output_rows = _stage_changes(context, stage_root)
+    changed, output_rows = _stage_changes_or_discard(context, stage_root)
     state_payload = _state_payload(context, changed, output_rows)
     return _finish_deduplication(
         context,

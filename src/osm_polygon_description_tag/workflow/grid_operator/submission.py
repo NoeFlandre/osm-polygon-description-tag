@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from osm_polygon_description_tag.dataset.languages.atomic import atomic_write_json
 from osm_polygon_description_tag.dataset.languages.checkpoint import shard_paths
+from osm_polygon_description_tag.runtime.time import utc_now
 from osm_polygon_description_tag.workflow.grid_policy import (
     MAX_WALLTIME_SECONDS,
     REQUIRED_CORES,
@@ -292,7 +293,7 @@ def _shard_state_block(
     """Block on the shard's own state, then on policy freshness if required."""
     blocked_reason = _initial_checkpoint_block(paths, bundle)
     if blocked_reason is None and require_fresh_policy:
-        blocked_reason = _policy_freshness_block(policy, now or datetime.now(UTC))
+        blocked_reason = _policy_freshness_block(policy, now or utc_now())
     return blocked_reason
 
 
@@ -390,7 +391,7 @@ def submit_job(
             job_name=plan.job_name,
             walltime_seconds=plan.walltime_seconds,
             cores=plan.cores,
-            recorded_at=(now or datetime.now(UTC)).isoformat(),
+            recorded_at=(now or utc_now()).isoformat(),
             attempt=plan.attempt,
         )
         atomic_write_json(paths.intent, intent.to_payload())

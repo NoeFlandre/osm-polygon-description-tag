@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from osm_polygon_description_tag.dataset.languages.atomic import atomic_write_json
 from osm_polygon_description_tag.dataset.languages.checkpoint import ShardStatus
 from osm_polygon_description_tag.dataset.languages.validation import RunReport, ShardReport
+from osm_polygon_description_tag.runtime.time import utc_now
 from osm_polygon_description_tag.workflow.grid_scheduler import JobState
 
 from .bundle import existing_bundle, read_intent
@@ -133,5 +134,5 @@ def _acknowledge_intent(
         intent,
         result_acknowledged=True,
         result_complete=report.is_complete,
-        collected_at=(now or datetime.now(UTC)).isoformat(),
+        collected_at=(now or utc_now()).isoformat(),
     )
