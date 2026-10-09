@@ -16,8 +16,8 @@ from shapely import to_wkb
 from shapely.geometry import MultiPolygon, Point, Polygon
 
 from osm_polygon_description_tag.dataset.canonical_rows import (
-    _full_row_fingerprint_sql,
     _fingerprint_value_sql,
+    _full_row_fingerprint_sql,
     _row_fingerprint,
     canonical_geometry_wkb,
     canonical_rows_sql,
@@ -468,6 +468,7 @@ def test_fingerprint_encoding_refuses_a_column_without_a_canonical_encoding() ->
         _fingerprint_value_sql("timestamp", key_value_columns_are_maps=False)
 
     assert str(error.value) == "no canonical fingerprint encoding for column 'timestamp'"
+
 
 @pytest.mark.parametrize("maps", [False, True], ids=["list", "map"])
 def test_sql_row_fingerprint_matches_python_row_fingerprint_for_edge_cases(maps: bool) -> None:
