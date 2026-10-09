@@ -5,7 +5,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from osm_polygon_description_tag.dataset.languages.checkpoint import (
@@ -67,6 +67,10 @@ def _checkpoint_example(*, row_count: int, cursor: int, batch_size: int) -> Shar
     )
 
 
+# Each example fsyncs the file and its directory. Disk flush latency is set by the
+# machine, not by the code, so a stalled flush fails the 200 ms dev deadline. The
+# ci and mutation profiles already disable the deadline; this keeps dev aligned.
+@settings(deadline=None)
 @given(checkpoint=_checkpoints())
 @example(checkpoint=_checkpoint_example(row_count=0, cursor=0, batch_size=4))
 @example(checkpoint=_checkpoint_example(row_count=12, cursor=8, batch_size=4))
@@ -112,6 +116,7 @@ def _receipt_example(input_row_start: int) -> PartReceipt:
     )
 
 
+@settings(deadline=None)
 @given(receipt=_receipts())
 @example(receipt=_receipt_example(0))
 @example(receipt=_receipt_example(4))
