@@ -227,7 +227,7 @@ def _scalar_value_sql(column: str, quoted: str) -> str:
     if pa.types.is_floating(field_type):
         return _json_double_sql(f"CAST({quoted} AS DOUBLE)")
     if pa.types.is_integer(field_type):
-        return f"CAST(CAST({quoted} AS BIGINT) AS VARCHAR)"
+        return f"CAST({quoted} AS VARCHAR)"
     if pa.types.is_string(field_type):
         return _json_string_sql(quoted)
     raise ValueError(f"no canonical fingerprint encoding for column {column!r}")

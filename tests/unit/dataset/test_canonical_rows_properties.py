@@ -17,6 +17,7 @@ from shapely.geometry import MultiPolygon, Point, Polygon
 
 from osm_polygon_description_tag.dataset.canonical_rows import (
     _full_row_fingerprint_sql,
+    _fingerprint_value_sql,
     _row_fingerprint,
     canonical_geometry_wkb,
     canonical_rows_sql,
@@ -393,7 +394,7 @@ _FINGERPRINT_TEXTS = (
     "\U0001f600",
     "",
 )
-_FINGERPRINT_AREAS = (1e-05, 0.1, 1e16, 12345.678)
+_FINGERPRINT_AREAS = (1e-05, 0.1, 1e16, 12345.678, float("nan"), float("inf"), float("-inf"))
 _FINGERPRINT_GEOMETRIES = (
     _SQL_POLYGON,
     MultiPolygon(
@@ -404,6 +405,69 @@ _FINGERPRINT_GEOMETRIES = (
     ),
 )
 
+
+@pytest.mark.parametrize("maps", [False, True], ids=["list", "map"])
+def test_sql_row_fingerprint_sorts_key_value_entries_like_python(maps: bool) -> None:
+    """Python sorts key/value entries by key; the DuckDB payload must sort them the same way.
+
+    The edge-case fixtures already list their entries in sorted order, so a
+    fingerprint that skipped the sort would still match them. Here every
+    key/value column is written out of order, with several entries, so only a
+    real sort gives the same digest in both selectors.
+    """
+    rows = []
+    for index, text in enumerate(_FINGERPRINT_TEXTS):
+        base = make_record_dict(
+            _SQL_POLYGON, {"description": "seed"}, osm_id=78, source_pbf=f"{index}.osm.pbf"
+        )
+        rows.append(
+            {
+                **base,
+                "localized_names": [
+                    {"key": "it", "value": text},
+                    {"key": "de", "value": "Name"},
+                    {"key": "fr", "value": text},
+                ],
+                "localized_descriptions": [
+                    {"key": "zh", "value": "z"},
+                    {"key": "en", "value": text},
+                    {"key": "ar", "value": "a"},
+                ],
+                "tags": [{"key": "name", "value": text}, {"key": "description", "value": "d"}],
+            }
+        )
+    # arrow_record sorts key/value entries, so the unsorted order is restored
+    # afterwards: the DuckDB side must receive it unsorted to prove it sorts.
+    records = [
+        {**arrow_record(row), **{name: row[name] for name in KEY_VALUE_COLUMNS}} for row in rows
+    ]
+    if maps:
+        for record in records:
+            for name in KEY_VALUE_COLUMNS:
+                record[name] = [(entry["key"], entry["value"]) for entry in record[name]]
+        table = pa.Table.from_pylist(records, schema=_MAP_SCHEMA)
+    else:
+        table = pa.Table.from_pylist(records, schema=SCHEMA)
+    _SQL_CONNECTION.register("canonical_candidates", table)
+    try:
+        query = (
+            "SELECT source_pbf, "  # noqa: S608 - fixed internal SQL
+            f"{_full_row_fingerprint_sql(key_value_columns_are_maps=maps)} AS fingerprint "
+            "FROM canonical_candidates"
+        )
+        actual = dict(_SQL_CONNECTION.execute(query).fetchall())
+    finally:
+        _SQL_CONNECTION.unregister("canonical_candidates")
+
+    assert actual == {row["source_pbf"]: _row_fingerprint(row) for row in rows}
+
+
+def test_fingerprint_encoding_refuses_a_column_without_a_canonical_encoding() -> None:
+    """A column type the fingerprint cannot encode must fail with the exact message."""
+    with pytest.raises(ValueError) as error:
+        _fingerprint_value_sql("timestamp", key_value_columns_are_maps=False)
+
+    assert str(error.value) == "no canonical fingerprint encoding for column 'timestamp'"
 
 @pytest.mark.parametrize("maps", [False, True], ids=["list", "map"])
 def test_sql_row_fingerprint_matches_python_row_fingerprint_for_edge_cases(maps: bool) -> None:
