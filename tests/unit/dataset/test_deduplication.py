@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import shutil
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -626,6 +627,59 @@ def test_deduplicate_dataset_keeps_the_staged_dir_named_by_the_state(tmp_path: P
     result = deduplicate_dataset(data_root)
     assert result.status == "deduplicated"
     assert result.output_rows == 1
+
+
+def test_failed_staged_state_write_reports_its_error_when_stage_dir_is_already_gone(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = _overlapping_dataset(tmp_path)
+    real_write_state = dedup_module._write_state
+
+    def write_after_stage_dir_vanishes(path: Path, payload: Mapping[str, object]) -> None:
+        if payload.get("status") != "staged":
+            real_write_state(path, payload)
+            return
+        shutil.rmtree(data_root / str(payload["stage_dir"]))
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(dedup_module, "_write_state", write_after_stage_dir_vanishes)
+
+    # Cleaning up a directory that is already missing must not replace the write error.
+    with pytest.raises(OSError, match="no space left on device"):
+        deduplicate_dataset(data_root)
+    monkeypatch.undo()
+
+    assert not (data_root / dedup_module._STATE_RELATIVE_PATH).exists()
+    result = deduplicate_dataset(data_root)
+    assert result.status == "deduplicated"
+    assert result.output_rows == 1
+
+
+def test_unreadable_state_after_failed_write_keeps_the_staged_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = _overlapping_dataset(tmp_path)
+    real_write_state = dedup_module._write_state
+    named_dirs: list[Path] = []
+
+    def write_torn_state(path: Path, payload: Mapping[str, object]) -> None:
+        if payload.get("status") != "staged":
+            real_write_state(path, payload)
+            return
+        named_dirs.append(data_root / str(payload["stage_dir"]))
+        path.write_text('{"status": "st', encoding="utf-8")
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(dedup_module, "_write_state", write_torn_state)
+    with pytest.raises(OSError, match="no space left on device"):
+        deduplicate_dataset(data_root)
+    monkeypatch.undo()
+
+    # The unreadable state may still name the directory, so the next run must be able to resume it.
+    assert len(named_dirs) == 1
+    assert named_dirs[0].is_dir()
 
 
 def test_deduplicate_dataset_refuses_staged_resume_after_input_drift(tmp_path: Path) -> None:
