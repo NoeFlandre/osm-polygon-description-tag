@@ -1,13 +1,72 @@
 """Contracts for finalized-artifact manifest pairing."""
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from osm_polygon_description_tag.dataset import storage
+from osm_polygon_description_tag.dataset.manifest import (
+    Manifest,
+    RunCounts,
+    SourceIdentity,
+    manifest_path_for,
+    output_identity_for,
+    write_manifest,
+)
 from osm_polygon_description_tag.dataset.storage import StorageError
+
+
+def _write_finalized_pair(
+    data_root: Path, manifest_factory, *, rows: int, included_rows: int
+) -> None:
+    """Write a Parquet with ``rows`` rows and a manifest that records ``included_rows``."""
+    data_dir = data_root / "data"
+    data_dir.mkdir(parents=True)
+    (data_root / "manifests").mkdir()
+    parquet = data_dir / "region.parquet"
+    pq.write_table(pa.table({"description": ["text"] * rows}), parquet)
+    manifest: Manifest = manifest_factory(
+        source=SourceIdentity("region.osm.pbf", 1, 1, "a" * 64),
+        output=output_identity_for(parquet),
+    )
+    counts = RunCounts(included_rows, included_rows, {})
+    write_manifest(
+        replace(manifest, counts=counts),
+        manifest_path_for(parquet.name, data_root),
+    )
+
+
+@pytest.mark.parametrize(
+    ("rows", "included_rows"),
+    [(1, 2), (2, 3)],
+    ids=["issue-160-stale-count", "overstated-count"],
+)
+def test_validation_rejects_a_manifest_whose_included_rows_disagree_with_the_parquet(
+    tmp_path: Path, manifest_factory, rows: int, included_rows: int
+) -> None:
+    _write_finalized_pair(tmp_path, manifest_factory, rows=rows, included_rows=included_rows)
+
+    with pytest.raises(StorageError) as error:
+        storage.validate_finalized_artifacts(tmp_path)
+
+    assert str(error.value) == (
+        f"manifest row count mismatch for region.parquet: recorded {included_rows}, found {rows}"
+    )
+
+
+def test_validation_accepts_a_manifest_whose_included_rows_match_the_parquet(
+    tmp_path: Path, manifest_factory
+) -> None:
+    _write_finalized_pair(tmp_path, manifest_factory, rows=2, included_rows=2)
+
+    result = storage.validate_finalized_artifacts(tmp_path)
+
+    assert result["parquets"] == (tmp_path / "data" / "region.parquet",)
 
 
 def test_validate_manifest_pair_default_does_not_require_current_contract(
@@ -30,6 +89,7 @@ def test_validate_manifest_pair_default_does_not_require_current_contract(
         patch.object(storage, "read_manifest", return_value=manifest),
         patch.object(storage, "output_identity_for", return_value=identity),
         patch.object(storage, "is_resumable") as is_resumable,
+        patch.object(storage, "_validate_manifest_included_rows"),
     ):
         pair = storage._validate_manifest_pair_record(parquet, manifests_dir)
 
@@ -209,6 +269,7 @@ def test_validate_manifest_pair_uses_the_data_root_for_manifest_lookup(
     with (
         patch.object(storage, "read_manifest", return_value=manifest),
         patch.object(storage, "output_identity_for", return_value=identity),
+        patch.object(storage, "_validate_manifest_included_rows"),
     ):
         result = storage._validate_manifest_pair(parquet, manifests_dir)
 

@@ -18,6 +18,8 @@ defined once, in `pyproject.toml`. `CITATION.cff` must have the same version.
 
 ### Fixed
 
+- Resuming an interrupted text migration records the rows the interrupted run dropped in `included_rows` and `rejections`. The manifest no longer overstates the rows (#160).
+- Finalized-artifact validation rejects a manifest whose `included_rows` differs from its Parquet's row count. Only `validate` checked this before, so the deduplication, histogram and geography readers accepted stale counts (#160).
 - The run log keeps events written after the log is closed or after a failed rotation. It no longer holds them in memory where they are never flushed (#159).
 - `build-one` exits with code 3 when the requested source is not discovered.
   `validate` exits with code 4 when its data directory is missing (#135).

@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from osm_polygon_description_tag import cli
@@ -21,8 +23,13 @@ from osm_polygon_description_tag.dataset.storage import StorageError, write_geop
 from osm_polygon_description_tag.osm.discovery import discover_sources
 
 
+def _write_parquet(path: Path, rows: int = 1) -> None:
+    """Write a Parquet whose footer records ``rows`` rows, which validation reads."""
+    pq.write_table(pa.table({"description": ["text"] * rows}), path)
+
+
 def _write_artifact_pair(
-    tmp_path: Path, data_root: Path, manifest_factory, name: str = "a"
+    tmp_path: Path, data_root: Path, manifest_factory, name: str = "a", rows: int = 1
 ) -> Path:
     data_dir = data_root / "data"
     manifests_dir = data_root / "manifests"
@@ -32,7 +39,7 @@ def _write_artifact_pair(
     source.parent.mkdir(parents=True, exist_ok=True)
     source.write_bytes(b"tiny source fixture")
     parquet = data_dir / f"{name}.parquet"
-    parquet.write_bytes(b"tiny parquet fixture")
+    _write_parquet(parquet, rows)
     write_manifest(
         manifest_factory(
             source=source_identity_for(source),
@@ -399,7 +406,7 @@ def test_validate_accepts_a_source_name_discovered_with_an_empty_stem(
     data_dir.mkdir(parents=True)
     (data_root / "manifests").mkdir()
     parquet = data_dir / source.output_name
-    parquet.write_bytes(b"tiny parquet fixture")
+    _write_parquet(parquet)
     write_manifest(
         manifest_factory(
             source=source_identity_for(source.path),
@@ -753,7 +760,7 @@ def test_validate_requires_artifact_and_manifest_results_to_have_equal_lengths(
 def test_validate_accepts_a_partial_set_with_matching_manifests(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, manifest_factory, capsys
 ) -> None:
-    parquet = _write_artifact_pair(tmp_path, tmp_path, manifest_factory, "one-of-many")
+    parquet = _write_artifact_pair(tmp_path, tmp_path, manifest_factory, "one-of-many", rows=2)
     manifest_path = tmp_path / "manifests" / "one-of-many.manifest.json"
     payload = json.loads(manifest_path.read_text())
     payload["counts"]["emitted_features"] = 2
