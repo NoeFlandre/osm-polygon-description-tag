@@ -222,6 +222,17 @@ def _key_value_json_sql(entries: str) -> str:
     return _concat_sql(sql_literal("["), elements, sql_literal("]"))
 
 
+def _scalar_value_sql(column: str, quoted: str) -> str:
+    field_type = SCHEMA.field(column).type
+    if pa.types.is_floating(field_type):
+        return _json_double_sql(f"CAST({quoted} AS DOUBLE)")
+    if pa.types.is_integer(field_type):
+        return f"CAST(CAST({quoted} AS BIGINT) AS VARCHAR)"
+    if pa.types.is_string(field_type):
+        return _json_string_sql(quoted)
+    raise ValueError(f"no canonical fingerprint encoding for column {column!r}")
+
+
 def _fingerprint_value_sql(column: str, *, key_value_columns_are_maps: bool) -> str:
     """Return SQL that writes one fingerprint member as ``_fingerprint_value`` does."""
     quoted = f'"{column}"'
@@ -231,15 +242,7 @@ def _fingerprint_value_sql(column: str, *, key_value_columns_are_maps: bool) -> 
         entries = f"map_entries({quoted})" if key_value_columns_are_maps else quoted
         encoded = _key_value_json_sql(entries)
     else:
-        field_type = SCHEMA.field(column).type
-        if pa.types.is_floating(field_type):
-            encoded = _json_double_sql(f"CAST({quoted} AS DOUBLE)")
-        elif pa.types.is_integer(field_type):
-            encoded = f"CAST(CAST({quoted} AS BIGINT) AS VARCHAR)"
-        elif pa.types.is_string(field_type):
-            encoded = _json_string_sql(quoted)
-        else:
-            raise ValueError(f"no canonical fingerprint encoding for column {column!r}")
+        encoded = _scalar_value_sql(column, quoted)
     return f"CASE WHEN {quoted} IS NULL THEN 'null' ELSE {encoded} END"
 
 
