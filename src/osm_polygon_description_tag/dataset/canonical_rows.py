@@ -209,13 +209,25 @@ def _concat_sql(*parts: str) -> str:
     return " || ".join(parts)
 
 
+def _key_value_member_sql(field: str) -> str:
+    """Return SQL for one ``"field":<json string>`` member of a key/value entry.
+
+    The field name is both the JSON label and the struct field read, so a
+    misspelled name changes the payload.
+    """
+    return _concat_sql(
+        sql_literal(f'"{field}":'),
+        _json_string_sql(f"e.{field}"),
+    )
+
+
 def _key_value_json_sql(entries: str) -> str:
     """Return SQL for a key/value list in the Python ``mapping_to_pairs`` order."""
     pair = _concat_sql(
-        sql_literal('{"key":'),
-        _json_string_sql("e.key"),
-        sql_literal(',"value":'),
-        _json_string_sql("e.value"),
+        sql_literal("{"),
+        _key_value_member_sql("key"),
+        sql_literal(","),
+        _key_value_member_sql("value"),
         sql_literal("}"),
     )
     elements = f"array_to_string(list_transform(list_sort({entries}), e -> {pair}), ',')"
