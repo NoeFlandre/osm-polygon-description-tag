@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
+from osm_polygon_description_tag.runtime.time import utc_now
 from osm_polygon_description_tag.workflow.grid_operator import (
     GridOperatorError,
     gather_policy_evidence,
@@ -54,15 +55,6 @@ def transport_payload(
         "stdout": result.stdout,
         "timed_out": result.timed_out,
     }
-
-
-def utc_now() -> datetime:
-    """Return the current instant.
-
-    This is the one clock the Grid handlers read, so a test can freeze it and
-    evaluate the Europe/Paris day/night policy at a chosen moment.
-    """
-    return datetime.now(UTC)
 
 
 def capture_policy(

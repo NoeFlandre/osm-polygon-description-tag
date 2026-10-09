@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from osm_polygon_description_tag.dataset.languages.atomic import atomic_write_json
 from osm_polygon_description_tag.dataset.languages.validation import RunReport, validate_run
+from osm_polygon_description_tag.runtime.time import utc_now
 from osm_polygon_description_tag.workflow.grid_scheduler import (
     DEFAULT_COMMAND_TIMEOUT,
     CommandRunner,
@@ -175,7 +176,7 @@ def _record_terminal_reconciliation(
     updated = replace(
         intent,
         terminal_state=str(JobState.TERMINATED),
-        reconciled_at=(now or datetime.now(UTC)).isoformat(),
+        reconciled_at=(now or utc_now()).isoformat(),
     )
     atomic_write_json(paths.intent, updated.to_payload())
     return updated

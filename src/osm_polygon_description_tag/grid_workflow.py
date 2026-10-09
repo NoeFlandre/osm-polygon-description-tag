@@ -15,9 +15,9 @@ from osm_polygon_description_tag.grid_transport import (
     remote_child,
     seed_retrieval_snapshot,
     transport_payload,
-    utc_now,
 )
 from osm_polygon_description_tag.runtime.presentation import print_json
+from osm_polygon_description_tag.runtime.time import utc_now
 from osm_polygon_description_tag.workflow.grid_operator import (
     GridOperatorError,
     JobBundle,
