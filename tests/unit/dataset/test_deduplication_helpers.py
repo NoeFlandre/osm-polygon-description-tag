@@ -41,7 +41,8 @@ from osm_polygon_description_tag.dataset.manifest import (
     write_manifest,
 )
 from osm_polygon_description_tag.dataset.schema import SCHEMA
-from osm_polygon_description_tag.dataset.storage import validate_geoparquet, write_geoparquet
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
+from osm_polygon_description_tag.dataset.storage_validation import validate_geoparquet
 from tests.conftest import make_record_dict
 from tests.helpers.dataset import two_deduplication_records as _two_records
 

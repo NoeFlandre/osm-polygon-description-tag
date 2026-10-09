@@ -44,7 +44,7 @@ def _require_batch_size(batch_size: int) -> None:
 def _validate_input(data_root: Path, validate: bool) -> None:
     if not validate:
         return
-    from osm_polygon_description_tag.dataset.storage import validate_finalized_artifacts
+    from osm_polygon_description_tag.dataset.storage_artifacts import validate_finalized_artifacts
 
     validate_finalized_artifacts(data_root)
 

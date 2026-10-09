@@ -97,16 +97,16 @@ _LAZY_EXPORTS = {
         name: ("osm_polygon_description_tag.dataset.schema", name)
         for name in ("GEOPARQUET_VERSION", "SCHEMA", "SCHEMA_VERSION", "geo_metadata")
     },
+    "StorageError": ("osm_polygon_description_tag.dataset.storage_errors", "StorageError"),
     **{
-        name: ("osm_polygon_description_tag.dataset.storage", name)
-        for name in (
-            "StorageError",
-            "validate_finalized_artifacts",
-            "validate_finalized_artifacts_strict",
-            "validate_geoparquet",
-            "write_geoparquet",
-        )
+        name: ("osm_polygon_description_tag.dataset.storage_artifacts", name)
+        for name in ("validate_finalized_artifacts", "validate_finalized_artifacts_strict")
     },
+    "validate_geoparquet": (
+        "osm_polygon_description_tag.dataset.storage_validation",
+        "validate_geoparquet",
+    ),
+    "write_geoparquet": ("osm_polygon_description_tag.dataset.storage", "write_geoparquet"),
     "TextMigrationError": (
         "osm_polygon_description_tag.dataset.text_migration",
         "TextMigrationError",

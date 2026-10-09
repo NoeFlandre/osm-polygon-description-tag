@@ -43,7 +43,7 @@ from osm_polygon_description_tag.dataset.manifest import (
 )
 from osm_polygon_description_tag.dataset.numeric import coerce_float_values as _coerce_float_values
 from osm_polygon_description_tag.dataset.schema import SCHEMA, SCHEMA_VERSION
-from osm_polygon_description_tag.dataset.storage import validate_geoparquet
+from osm_polygon_description_tag.dataset.storage_validation import validate_geoparquet
 from osm_polygon_description_tag.dataset.text import successful_description_text_sql
 from osm_polygon_description_tag.dataset.unique_rows import (
     iter_unique_parquet_batches,

@@ -21,7 +21,8 @@ from osm_polygon_description_tag.dataset.manifest import (
     source_identity_for,
     write_manifest,
 )
-from osm_polygon_description_tag.dataset.storage import StorageError, write_geoparquet
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
+from osm_polygon_description_tag.dataset.storage_errors import StorageError
 
 
 def _write_source(source_root: Path, name: str = "region.osm.pbf") -> Path:

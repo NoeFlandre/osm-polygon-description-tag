@@ -8,12 +8,12 @@ from shapely import to_wkb
 from shapely.geometry import Polygon
 
 from osm_polygon_description_tag.dataset.schema import SCHEMA
-from osm_polygon_description_tag.dataset.storage import (
-    StorageError,
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
+from osm_polygon_description_tag.dataset.storage_errors import StorageError
+from osm_polygon_description_tag.dataset.storage_validation import (
     _validate_area,
     _validate_geometry,
     validate_geoparquet,
-    write_geoparquet,
 )
 from tests.conftest import make_record_dict
 from tests.helpers.messages import exactly

@@ -12,11 +12,11 @@ from pathlib import Path
 import pytest
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag.dataset.storage import (
-    StorageError,
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
+from osm_polygon_description_tag.dataset.storage_errors import StorageError
+from osm_polygon_description_tag.dataset.storage_validation import (
     _UniquenessIndex,
     validate_geoparquet,
-    write_geoparquet,
 )
 from tests.conftest import make_record_dict
 
