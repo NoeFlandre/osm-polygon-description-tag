@@ -11,7 +11,11 @@ import re
 import tomllib
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# mutmut runs this test from a copy of the repository named ``mutants/``. That copy's
+# ``src/`` holds generated mutant code that repeats pragma comments, so counting there
+# gives a different total. Count the real repository's source in that case.
+_TEST_TREE_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = _TEST_TREE_ROOT.parent if _TEST_TREE_ROOT.name == "mutants" else _TEST_TREE_ROOT
 PRAGMA = "pragma: no mutate"
 MAX_NO_MUTATE_PRAGMA_LINES = 110
 

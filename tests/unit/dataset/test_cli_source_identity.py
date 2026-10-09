@@ -6,9 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from osm_polygon_description_tag import cli
+from osm_polygon_description_tag import cli, cli_handlers
 from osm_polygon_description_tag.cli_requests import PathOptions
-from osm_polygon_description_tag.dataset.manifest import source_identity_for
+from osm_polygon_description_tag.dataset import validation
+from osm_polygon_description_tag.dataset.manifest import output_identity_for, source_identity_for
 from osm_polygon_description_tag.dataset.storage import StorageError
 
 
@@ -21,7 +22,7 @@ def test_source_validation_rejects_a_missing_file_with_context(tmp_path: Path) -
     source_root.mkdir()
 
     with pytest.raises(StorageError) as error:
-        cli._validate_source_file_identity(_source_manifest("missing.osm.pbf"), source_root)
+        validation.validate_source_file_identity(_source_manifest("missing.osm.pbf"), source_root)
 
     assert str(error.value) == (
         f"source identity mismatch: missing regular source file {source_root / 'missing.osm.pbf'}"
@@ -40,7 +41,7 @@ def test_source_validation_rejects_a_symlink_even_when_its_identity_matches(
     manifest = SimpleNamespace(source=source_identity_for(source))
 
     with pytest.raises(StorageError) as error:
-        cli._validate_source_file_identity(manifest, source_root)
+        validation.validate_source_file_identity(manifest, source_root)
 
     assert str(error.value) == (
         f"source identity mismatch: missing regular source file {source_root / 'linked.osm.pbf'}"
@@ -64,7 +65,7 @@ def test_source_validation_preserves_file_inspection_context(
     monkeypatch.setattr(Path, "is_symlink", fail_for_source)
 
     with pytest.raises(StorageError) as error:
-        cli._validate_source_file_identity(_source_manifest(source.name), source_root)
+        validation.validate_source_file_identity(_source_manifest(source.name), source_root)
 
     assert str(error.value) == f"cannot inspect source file {source}: permission denied"
 
@@ -80,10 +81,10 @@ def test_source_validation_preserves_file_read_context(
     def fail_read(_path: Path) -> None:
         raise OSError("disk error")
 
-    monkeypatch.setattr(cli, "source_identity_for", fail_read)
+    monkeypatch.setattr(validation, "source_identity_for", fail_read)
 
     with pytest.raises(StorageError) as error:
-        cli._validate_source_file_identity(_source_manifest(source.name), source_root)
+        validation.validate_source_file_identity(_source_manifest(source.name), source_root)
 
     assert str(error.value) == f"cannot read source file {source}: disk error"
 
@@ -98,14 +99,14 @@ def test_validate_passes_the_artifact_path_and_manifest_source_to_storage(
     manifest_path = tmp_path / "manifests" / "region.manifest.json"
     manifest = SimpleNamespace(
         source=SimpleNamespace(name="region.osm.pbf"),
-        output=cli.output_identity_for(parquet),
+        output=output_identity_for(parquet),
         counts=SimpleNamespace(included_rows=1, emitted_features=1, rejections={}),
     )
     calls: list[tuple[Path, dict[str, str]]] = []
 
-    monkeypatch.setattr(cli, "_validation_source_root", lambda *_args: None)
+    monkeypatch.setattr(cli_handlers, "_validation_source_root", lambda *_args: None)
     monkeypatch.setattr(
-        cli,
+        validation,
         "validate_finalized_artifacts",
         lambda *_args, **_kwargs: {
             "parquets": (parquet,),
@@ -118,7 +119,7 @@ def test_validate_passes_the_artifact_path_and_manifest_source_to_storage(
         calls.append((path, kwargs))
         return 1
 
-    monkeypatch.setattr(cli, "validate_geoparquet", validate)
+    monkeypatch.setattr(validation, "validate_geoparquet", validate)
 
     cli.handle_validate(PathOptions(source_root=None, data_root=tmp_path, osmium="osmium"))
 
@@ -136,12 +137,12 @@ def test_validate_reports_when_manifest_source_name_does_not_map_to_artifact(
     manifest_path = tmp_path / "manifests" / "region.manifest.json"
     manifest = SimpleNamespace(
         source=SimpleNamespace(name="different.osm.pbf"),
-        output=cli.output_identity_for(parquet),
+        output=output_identity_for(parquet),
         counts=SimpleNamespace(included_rows=1, emitted_features=1, rejections={}),
     )
-    monkeypatch.setattr(cli, "_validation_source_root", lambda *_args: None)
+    monkeypatch.setattr(cli_handlers, "_validation_source_root", lambda *_args: None)
     monkeypatch.setattr(
-        cli,
+        validation,
         "validate_finalized_artifacts",
         lambda *_args, **_kwargs: {
             "parquets": (parquet,),
@@ -149,7 +150,7 @@ def test_validate_reports_when_manifest_source_name_does_not_map_to_artifact(
             "manifest_records": (manifest,),
         },
     )
-    monkeypatch.setattr(cli, "validate_geoparquet", lambda *_args, **_kwargs: 1)
+    monkeypatch.setattr(validation, "validate_geoparquet", lambda *_args, **_kwargs: 1)
 
     with pytest.raises(StorageError) as error:
         cli.handle_validate(PathOptions(source_root=None, data_root=tmp_path, osmium="osmium"))

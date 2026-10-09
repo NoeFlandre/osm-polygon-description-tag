@@ -8,7 +8,8 @@ The canonical implementation is organized by operational domain:
 - `publication`: upload planning, state, execution, and Hub verification;
 - `observability`: optional Trackio snapshot and live pipeline metrics;
 - `workflow`: preflight, resumable builds, completeness, and lifecycle composition;
-- `cli.py`: the stable console entry point;
+- `cli.py`: the stable console entry point (Typer declarations, global options, exit codes);
+- `cli_handlers.py`: the command handlers that `cli.py` dispatches to;
 - `language_cli.py`: the `language` command group, backed by
   `language_workflow.py` (local detection), `grid_workflow.py` and
   `grid_transport.py` (Grid'5000 runs), and `publication_workflow.py`
