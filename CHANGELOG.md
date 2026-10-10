@@ -26,6 +26,7 @@ defined once, in `pyproject.toml`. `CITATION.cff` must have the same version.
   `validate` exits with code 4 when its data directory is missing (#135).
 - Resolve exact 180° longitude ties consistently during antimeridian clipping (#113).
 - Canonical selection puts null versions and timestamps last, matching DuckDB, and rejects malformed nonempty timestamps.
+- DuckDB and Python compute the same row fingerprint for canonical selection. Rows tied on version, timestamp and source now pick the same winner in both (control-character and float text previously differed).
 - The uploader retries on timeout messages in stderr. It keeps live output and a bounded error tail (#105).
 - The private `typer._click` import is isolated. The declared `typer` minimum version now works (#71).
 - The tool reports preflight timeouts and OS errors as `PreflightError` (#70).

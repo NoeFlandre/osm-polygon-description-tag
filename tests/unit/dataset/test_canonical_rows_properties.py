@@ -3,22 +3,27 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from itertools import permutations
+from itertools import permutations, product
+from typing import cast
 
 import duckdb
 import pyarrow as pa
 import pytest
 from hypothesis import given
+from hypothesis import settings as hypothesis_settings
 from hypothesis import strategies as st
 from shapely import to_wkb
-from shapely.geometry import Point, Polygon
+from shapely.geometry import MultiPolygon, Point, Polygon
 
 from osm_polygon_description_tag.dataset.canonical_rows import (
+    _fingerprint_value_sql,
+    _full_row_fingerprint_sql,
+    _row_fingerprint,
     canonical_geometry_wkb,
     canonical_rows_sql,
     select_canonical_row,
 )
-from osm_polygon_description_tag.dataset.schema import SCHEMA
+from osm_polygon_description_tag.dataset.schema import KEY_VALUE_COLUMNS, SCHEMA
 from osm_polygon_description_tag.dataset.storage import arrow_record
 from tests.conftest import make_record_dict
 
@@ -113,6 +118,10 @@ def test_the_winner_has_the_highest_version_present(rows: list[dict[str, object]
         assert winner["version"] == max(versions)
 
 
+# DuckDB plans the fingerprint query for every example, so one example takes about
+# 0.1 s per query and can exceed the dev profile's 200 ms deadline on a cold start.
+# The ci and mutation profiles already disable the deadline; this keeps dev aligned.
+@hypothesis_settings(deadline=None)
 @given(st.lists(_SQL_CANDIDATE, min_size=1, max_size=5))
 def test_duckdb_canonical_rows_match_python_selection(
     candidates: list[dict[str, object]],
@@ -315,3 +324,189 @@ def test_topologically_equal_polygons_keep_their_distinct_ring_order() -> None:
 
     assert first.equals(rotated)
     assert canonical_geometry_wkb(to_wkb(first)) != canonical_geometry_wkb(to_wkb(rotated))
+
+
+_MAP_SCHEMA = pa.schema(
+    [
+        pa.field(field.name, pa.map_(pa.string(), pa.string()), nullable=field.nullable)
+        if field.name in KEY_VALUE_COLUMNS
+        else field
+        for field in SCHEMA
+    ]
+)
+
+
+def _candidate_table(rows: list[dict[str, object]], *, maps: bool) -> pa.Table:
+    """Return the rows as Arrow, optionally with key/value columns as maps (the stats view)."""
+    records = [arrow_record(row) for row in rows]
+    if not maps:
+        return pa.Table.from_pylist(records, schema=SCHEMA)
+    as_maps: list[dict[str, object]] = []
+    for record in records:
+        converted = dict(record)
+        for name in KEY_VALUE_COLUMNS:
+            entries = cast("list[dict[str, str]]", record[name])
+            converted[name] = [(entry["key"], entry["value"]) for entry in entries]
+        as_maps.append(converted)
+    return pa.Table.from_pylist(as_maps, schema=_MAP_SCHEMA)
+
+
+@pytest.mark.parametrize("maps", [False, True], ids=["list", "map"])
+def test_reported_control_character_tie_has_the_same_winner_in_both_selectors(maps: bool) -> None:
+    """Rows tied on version, timestamp and source are ordered by the row fingerprint.
+
+    The fingerprint must be the same value in Python and DuckDB, otherwise the
+    two selectors disagree on which row wins. Here the descriptions are a null
+    and U+001E, which the text rules treat as not usable.
+    """
+    base = make_record_dict(
+        _SQL_POLYGON, {"description": "seed"}, osm_id=77, source_pbf="0.osm.pbf"
+    )
+    rows = [
+        {**base, "version": None, "timestamp": None, "description": None, "area_m2": 0.5},
+        {**base, "version": None, "timestamp": None, "description": "\x1e", "area_m2": 1.0},
+    ]
+
+    for ordered_rows in permutations(rows):
+        table = _candidate_table(list(ordered_rows), maps=maps)
+        table_rows = table.to_pylist()
+        _SQL_CONNECTION.register("canonical_candidates", table)
+        try:
+            expected = select_canonical_row(table_rows)
+            query = canonical_rows_sql(
+                "canonical_candidates", _SQL_COLUMNS, key_value_columns_are_maps=maps
+            )
+            actual = _SQL_CONNECTION.execute(query).to_arrow_table().to_pylist()
+
+            assert actual == [expected]
+        finally:
+            _SQL_CONNECTION.unregister("canonical_candidates")
+
+
+_FINGERPRINT_TEXTS = (
+    *(chr(code) for code in range(0x20)),
+    '"',
+    "\\",
+    "\\u001E",
+    "\x7f",
+    "\u2028",
+    "é",
+    "\U0001f600",
+    "",
+)
+_FINGERPRINT_AREAS = (1e-05, 0.1, 1e16, 12345.678, float("nan"), float("inf"), float("-inf"))
+_FINGERPRINT_GEOMETRIES = (
+    _SQL_POLYGON,
+    MultiPolygon(
+        [
+            Polygon([(0, 0), (0, 2), (2, 2), (2, 0)], [[(0.5, 0.5), (1.5, 0.5), (1.5, 1.5)]]),
+            Polygon([(5, 5), (5, 6), (6, 6), (6, 5)]),
+        ]
+    ),
+)
+
+
+@pytest.mark.parametrize("maps", [False, True], ids=["list", "map"])
+def test_sql_row_fingerprint_sorts_key_value_entries_like_python(maps: bool) -> None:
+    """Python sorts key/value entries by key; the DuckDB payload must sort them the same way.
+
+    The edge-case fixtures already list their entries in sorted order, so a
+    fingerprint that skipped the sort would still match them. Here every
+    key/value column is written out of order, with several entries, so only a
+    real sort gives the same digest in both selectors.
+    """
+    rows = []
+    for index, text in enumerate(_FINGERPRINT_TEXTS):
+        base = make_record_dict(
+            _SQL_POLYGON, {"description": "seed"}, osm_id=78, source_pbf=f"{index}.osm.pbf"
+        )
+        rows.append(
+            {
+                **base,
+                "localized_names": [
+                    {"key": "it", "value": text},
+                    {"key": "de", "value": "Name"},
+                    {"key": "fr", "value": text},
+                ],
+                "localized_descriptions": [
+                    {"key": "zh", "value": "z"},
+                    {"key": "en", "value": text},
+                    {"key": "ar", "value": "a"},
+                ],
+                "tags": [{"key": "name", "value": text}, {"key": "description", "value": "d"}],
+            }
+        )
+    # arrow_record sorts key/value entries, so the unsorted order is restored
+    # afterwards: the DuckDB side must receive it unsorted to prove it sorts.
+    records = [
+        {**arrow_record(row), **{name: row[name] for name in KEY_VALUE_COLUMNS}} for row in rows
+    ]
+    if maps:
+        for record in records:
+            for name in KEY_VALUE_COLUMNS:
+                record[name] = [(entry["key"], entry["value"]) for entry in record[name]]
+        table = pa.Table.from_pylist(records, schema=_MAP_SCHEMA)
+    else:
+        table = pa.Table.from_pylist(records, schema=SCHEMA)
+    _SQL_CONNECTION.register("canonical_candidates", table)
+    try:
+        query = (
+            "SELECT source_pbf, "  # noqa: S608 - fixed internal SQL
+            f"{_full_row_fingerprint_sql(key_value_columns_are_maps=maps)} AS fingerprint "
+            "FROM canonical_candidates"
+        )
+        actual = dict(_SQL_CONNECTION.execute(query).fetchall())
+    finally:
+        _SQL_CONNECTION.unregister("canonical_candidates")
+
+    assert actual == {row["source_pbf"]: _row_fingerprint(row) for row in rows}
+
+
+def test_fingerprint_encoding_refuses_a_column_without_a_canonical_encoding() -> None:
+    """A column type the fingerprint cannot encode must fail with the exact message."""
+    with pytest.raises(ValueError) as error:
+        _fingerprint_value_sql("timestamp", key_value_columns_are_maps=False)
+
+    assert str(error.value) == "no canonical fingerprint encoding for column 'timestamp'"
+
+
+@pytest.mark.parametrize("maps", [False, True], ids=["list", "map"])
+def test_sql_row_fingerprint_matches_python_row_fingerprint_for_edge_cases(maps: bool) -> None:
+    """The DuckDB tie-break fingerprint must be byte-identical to the Python one.
+
+    The Python fingerprint is the SHA-256 of ``json.dumps`` output. Control
+    characters are escaped with lowercase hex and floats use Python's repr, so
+    the DuckDB payload must reproduce both exactly, for list and map columns.
+    """
+    rows = []
+    for index, (text, area_m2, geometry) in enumerate(
+        product(_FINGERPRINT_TEXTS, _FINGERPRINT_AREAS, _FINGERPRINT_GEOMETRIES)
+    ):
+        base = make_record_dict(
+            geometry, {"description": "seed"}, osm_id=77, source_pbf=f"{index}.osm.pbf"
+        )
+        rows.append(
+            {
+                **base,
+                "name": text,
+                "description": text,
+                "localized_names": [{"key": "fr", "value": text}],
+                "localized_descriptions": [{"key": "fr", "value": text}],
+                "tags": [{"key": "description", "value": text}, {"key": "name", "value": text}],
+                "area_m2": area_m2,
+            }
+        )
+    table = _candidate_table(rows, maps=maps)
+    table_rows = table.to_pylist()
+    _SQL_CONNECTION.register("canonical_candidates", table)
+    try:
+        query = (
+            "SELECT source_pbf, "  # noqa: S608 - fixed internal SQL
+            f"{_full_row_fingerprint_sql(key_value_columns_are_maps=maps)} AS fingerprint "
+            "FROM canonical_candidates"
+        )
+        actual = dict(_SQL_CONNECTION.execute(query).fetchall())
+    finally:
+        _SQL_CONNECTION.unregister("canonical_candidates")
+
+    assert actual == {row["source_pbf"]: _row_fingerprint(row) for row in table_rows}
