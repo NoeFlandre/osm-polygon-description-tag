@@ -1,7 +1,7 @@
 """Characterisation of the generated dataset-card statistics block.
 
 The digests were recorded before the statistics-section split. They pin the
-exact bytes of ``_render_stats_block`` for each branch the split moves, so any
+exact bytes of ``render_stats_block`` for each branch the split moves, so any
 change in what the card shows fails here rather than in a published artifact.
 """
 
@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from osm_polygon_description_tag.dataset.docs import _render_stats_block
+from osm_polygon_description_tag.dataset.stats_card import render_stats_block
 
 _STATS_SHA256 = "c" * 64
 
@@ -108,13 +108,13 @@ _VARIANTS = {"full": _full_stats, "minimal": _minimal_stats, "edge": _edge_stats
 
 @pytest.mark.parametrize("variant", sorted(_VARIANTS))
 def test_stats_block_bytes_match_the_recorded_digest(variant: str) -> None:
-    rendered = _render_stats_block(_VARIANTS[variant](), _STATS_SHA256)
+    rendered = render_stats_block(_VARIANTS[variant](), _STATS_SHA256)
 
     assert hashlib.sha256(rendered.encode("utf-8")).hexdigest() == _RECORDED_DIGESTS[variant]
 
 
 def test_stats_block_leads_with_the_recorded_identity_comments() -> None:
-    rendered = _render_stats_block(_full_stats(), _STATS_SHA256)
+    rendered = render_stats_block(_full_stats(), _STATS_SHA256)
 
     assert rendered.splitlines()[:3] == [
         f"<!-- stats_sha256: {_STATS_SHA256} -->",
