@@ -8,7 +8,6 @@ global pass over validated GeoParquets, keeps one canonical row for each
 from __future__ import annotations
 
 import contextlib
-import json
 import shutil
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -29,6 +28,15 @@ from osm_polygon_description_tag.dataset.canonical_rows import (
     select_canonical_row,
 )
 from osm_polygon_description_tag.dataset.constants import DEFAULT_ARROW_BATCH_SIZE
+from osm_polygon_description_tag.dataset.deduplication_state import (
+    DeduplicationError,
+    input_hashes,
+    read_state,
+    recorded_input_hashes,
+    staged_input_drift_names,
+    staged_output_hashes,
+    write_state,
+)
 from osm_polygon_description_tag.dataset.duckdb_runtime import open_data_connection
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
@@ -43,7 +51,6 @@ from osm_polygon_description_tag.dataset.storage import write_geoparquet_batches
 from osm_polygon_description_tag.dataset.storage_artifacts import validate_finalized_artifacts
 from osm_polygon_description_tag.dataset.storage_validation import validate_geoparquet
 from osm_polygon_description_tag.dataset.text import sql_literal as _sql_literal
-from osm_polygon_description_tag.runtime.atomic import atomic_write_text
 
 DEDUPLICATION_POLICY_VERSION = CANONICAL_ROW_POLICY_VERSION
 DUPLICATE_REJECTION_REASON = "duplicate_osm_object"
@@ -55,10 +62,6 @@ _version = _canonical_rows._version
 _STATE_RELATIVE_PATH = Path(".work") / "dedup-state.json"
 _STAGE_RELATIVE_ROOT = Path(".work") / "dedup"
 _BATCH_SIZE = DEFAULT_ARROW_BATCH_SIZE
-
-
-class DeduplicationError(RuntimeError):
-    """Raised when finalized artifacts cannot be deduplicated safely."""
 
 
 @dataclass(frozen=True)
@@ -83,75 +86,18 @@ class _DeduplicationContext:
     input_rows: int
 
 
-def _read_state(path: Path) -> dict[str, Any] | None:
-    if not path.is_file():
-        return None
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise DeduplicationError(f"invalid deduplication state: {path}") from error
-    if not isinstance(value, dict):
-        raise DeduplicationError(f"deduplication state must be an object: {path}")
-    return cast(dict[str, Any], value)
-
-
-def _write_state(path: Path, payload: Mapping[str, object]) -> None:
-    body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    atomic_write_text(path, body)
-
-
-def _input_hashes(parquets: Iterable[Path]) -> dict[str, str]:
-    return {path.name: file_sha256(path) for path in parquets}
-
-
-def _staged_output_hashes(state: Mapping[str, Any]) -> dict[str, str]:
-    entries = cast(list[Mapping[str, Any]], state["files"])
-    return {Path(str(entry["parquet"])).name: str(entry["parquet_sha256"]) for entry in entries}
-
-
-def _recorded_input_hashes(state: Mapping[str, Any]) -> Mapping[str, Any]:
-    expected = state.get("inputs")
-    if not isinstance(expected, Mapping):
-        raise DeduplicationError("staged deduplication state is missing input identities")
-    return expected
-
-
-def _staged_input_drift_names(
-    current: Mapping[str, str],
-    expected: Mapping[str, Any],
-    staged_outputs: Mapping[str, str],
-) -> tuple[str, ...]:
-    names = set(current) | set(expected)
-    return tuple(
-        sorted(
-            name for name in names if _input_name_drifted(name, current, expected, staged_outputs)
-        )
-    )
-
-
-def _input_name_drifted(
-    name: str,
-    current: Mapping[str, str],
-    expected: Mapping[str, Any],
-    staged_outputs: Mapping[str, str],
-) -> bool:
-    if name not in current or name not in expected:
-        return True
-    return current[name] != expected[name] and current[name] != staged_outputs.get(name)
-
-
 def _verify_staged_inputs(data_root: Path, state: Mapping[str, Any]) -> dict[str, str]:
     """Return the current input hashes after refusing any drift from the staged state."""
-    expected_inputs = _recorded_input_hashes(state)
+    expected_inputs = recorded_input_hashes(state)
     # pragma: no mutate start - deterministic ordering for byte-stable hashing
-    current_inputs = _input_hashes(
+    current_inputs = input_hashes(
         sorted((data_root / "data").glob("*.parquet"), key=lambda path: path.name)
     )
     # pragma: no mutate end
-    drifted = _staged_input_drift_names(
+    drifted = staged_input_drift_names(
         current_inputs,
         expected_inputs,
-        _staged_output_hashes(state),
+        staged_output_hashes(state),
     )
     if drifted:
         raise DeduplicationError(
@@ -270,8 +216,8 @@ def _resume_staged(
     complete = dict(state)
     complete["status"] = "complete"
     complete.pop("stage_dir", None)
-    complete["outputs"] = _promoted_output_hashes(current_inputs, _staged_output_hashes(state))
-    _write_state(state_path, complete)
+    complete["outputs"] = _promoted_output_hashes(current_inputs, staged_output_hashes(state))
+    write_state(state_path, complete)
     _remove_stage_dir(data_root, state)
     return DeduplicationResult(
         status="deduplicated",
@@ -361,7 +307,7 @@ def _prepare_context(
     parquets = _validated_parquets(data_root)
     if not parquets:
         return None, _skipped_result()
-    inputs = _input_hashes(parquets)
+    inputs = input_hashes(parquets)
     result = _complete_result(state, inputs, parquets)
     if result is not None:
         return None, result
@@ -500,7 +446,7 @@ def _state_payload(
 def _state_references_stage(state_path: Path, stage_name: str) -> bool:
     """Return whether the state names ``stage_name``; an unreadable state counts as naming it."""
     try:
-        recorded = _read_state(state_path)
+        recorded = read_state(state_path)
     except DeduplicationError:
         return True
     return recorded is not None and recorded.get("stage_dir") == stage_name
@@ -514,7 +460,7 @@ def _record_staged_state(
     stage_name = stage_dir.as_posix()
     state["stage_dir"] = stage_name
     try:
-        _write_state(context.state_path, state)
+        write_state(context.state_path, state)
     except BaseException:
         # A state that names the directory keeps it for the next run to resume.
         if not _state_references_stage(context.state_path, stage_name):
@@ -539,7 +485,7 @@ def _finish_deduplication(
             promotion_hook=promotion_hook,
         )
     state["outputs"] = dict(sorted(context.inputs.items()))
-    _write_state(context.state_path, state)
+    write_state(context.state_path, state)
     return _skipped_result(context.input_rows, output_rows)
 
 
@@ -575,7 +521,7 @@ def deduplicate_dataset(
 ) -> DeduplicationResult:
     """Deduplicate all finalized per-PBF Parquets with atomic resumption."""
     state_path = data_root / _STATE_RELATIVE_PATH
-    state = _read_state(state_path)
+    state = read_state(state_path)
     _sweep_orphan_stage_entries(data_root, state)
     if state is not None and state.get("status") == "staged":
         return _resume_staged(data_root, state_path, state, promotion_hook=promotion_hook)
