@@ -8,12 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from osm_polygon_description_tag import (
-    grid_workflow,
-    language_cli,
-    language_workflow,
-    publication_workflow,
-)
+from osm_polygon_description_tag import language_cli
 from osm_polygon_description_tag.dataset.languages.detector import LanguageDetector
 from osm_polygon_description_tag.dataset.languages.models import (
     CASCADE_DETECTOR_NAME,
@@ -21,6 +16,11 @@ from osm_polygon_description_tag.dataset.languages.models import (
     LanguagePolicy,
     cascade_model_identity,
     language_model_identity,
+)
+from osm_polygon_description_tag.workflow import (
+    grid_workflow,
+    language_workflow,
+    publication_workflow,
 )
 from tests.helpers.messages import exactly
 from tests.helpers.patching import patch_modules

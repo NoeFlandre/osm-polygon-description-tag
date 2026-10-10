@@ -16,25 +16,25 @@ from osm_polygon_description_tag.dataset.languages.worker import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_BUDGET_SECONDS,
 )
-from osm_polygon_description_tag.grid_workflow import (
+from osm_polygon_description_tag.workflow import grid_driver as _grid_driver
+from osm_polygon_description_tag.workflow.grid_policy import (
+    MAX_PROCESSING_SECONDS,
+    MAX_WALLTIME_SECONDS,
+)
+from osm_polygon_description_tag.workflow.grid_workflow import (
     handle_grid_collect,
     handle_grid_prepare,
     handle_grid_stage,
     handle_grid_status,
     handle_grid_submit,
 )
-from osm_polygon_description_tag.language_workflow import (
+from osm_polygon_description_tag.workflow.language_workflow import (
     handle_prepare,
     handle_run,
     handle_validate,
     resolve_language_policy,
 )
-from osm_polygon_description_tag.publication_workflow import handle_export, handle_publish
-from osm_polygon_description_tag.workflow import grid_driver as _grid_driver
-from osm_polygon_description_tag.workflow.grid_policy import (
-    MAX_PROCESSING_SECONDS,
-    MAX_WALLTIME_SECONDS,
-)
+from osm_polygon_description_tag.workflow.publication_workflow import handle_export, handle_publish
 
 language_app = typer.Typer(
     name="language",

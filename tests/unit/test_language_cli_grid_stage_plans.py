@@ -7,13 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from osm_polygon_description_tag import (
-    grid_transport,
-    grid_workflow,
-    language_cli,
-    language_workflow,
-)
+from osm_polygon_description_tag import language_cli
 from osm_polygon_description_tag.cli import run
+from osm_polygon_description_tag.workflow import grid_transport, grid_workflow, language_workflow
 from tests.helpers.language_cli import (
     SAT_MODEL_PATH,
     SHARD,
