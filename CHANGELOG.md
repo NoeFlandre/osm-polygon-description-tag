@@ -33,6 +33,7 @@ defined once, in `pyproject.toml`. `CITATION.cff` must have the same version.
 ### Changed
 
 - `collect_stats` and `generate_dataset_docs` no longer accept the ignored `clock` argument (#127).
+- The language workflow modules moved under `workflow/`: `grid_transport`, `grid_workflow`, `language_workflow` and `publication_workflow` are now imported from there. The command-line behaviour is unchanged (#127).
 - The CLI imports matplotlib only when it draws a chart (#84).
 - The transform step orients each geometry one time for each record (#85).
 - H3 density counts rank unique rows in one pass (#82).

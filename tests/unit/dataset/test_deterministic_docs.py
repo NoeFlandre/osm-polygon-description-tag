@@ -20,10 +20,7 @@ from shapely.geometry import Polygon
 import osm_polygon_description_tag.dataset.docs as docs_module
 from osm_polygon_description_tag.cli import run as cli_run
 from osm_polygon_description_tag.dataset.docs import (
-    _fmt_bytes,
-    _fmt_median,
     _h3_map_input_sha256,
-    _render_stats_block,
     collect_stats,
     generate_dataset_docs,
 )
@@ -36,6 +33,11 @@ from osm_polygon_description_tag.dataset.manifest import (
     output_identity_for,
     source_identity_for,
     write_manifest,
+)
+from osm_polygon_description_tag.dataset.stats_card import (
+    _fmt_bytes,
+    _fmt_median,
+    render_stats_block,
 )
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.publication import REPO_ID
@@ -172,7 +174,7 @@ def test_card_renders_only_ten_suffixes_in_deterministic_order(tmp_path: Path) -
     stats = collect_stats(data_root)
     stats["description_suffixes"] = {f"s{index:02d}": 1 for index in range(11)}
 
-    rendered = _render_stats_block(stats, "0" * 64)
+    rendered = render_stats_block(stats, "0" * 64)
 
     positions = [rendered.index(f"| `s{index:02d}` |") for index in range(10)]
     assert positions == sorted(positions)
@@ -216,7 +218,7 @@ def test_stats_block_is_an_exact_contract_for_non_default_values() -> None:
         "data_max_timestamp_utc": "2026-01-01T00:00:00Z",
     }
 
-    rendered = _render_stats_block(stats, "abc")
+    rendered = render_stats_block(stats, "abc")
 
     assert rendered == "\n".join(
         [
@@ -407,7 +409,7 @@ def test_stats_block_omits_timestamp_line_when_one_bound_is_missing() -> None:
         "data_max_timestamp_utc": "",
     }
 
-    rendered = _render_stats_block(stats, "hash")
+    rendered = render_stats_block(stats, "hash")
 
     assert "**OSM object timestamps (UTC):**" not in rendered
 

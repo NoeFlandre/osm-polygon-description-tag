@@ -9,6 +9,8 @@ import pytest
 from shapely.geometry import Polygon
 
 import osm_polygon_description_tag.dataset.docs as docs_module
+from osm_polygon_description_tag.dataset import stats_card
+from osm_polygon_description_tag.dataset.stats import TEXT_REJECTION_REASONS
 from osm_polygon_description_tag.runtime.resources import dataset_card_template
 from tests.conftest import make_record_dict
 from tests.helpers.dataset import write_finalized_dataset
@@ -244,7 +246,7 @@ def test_ensure_area_histogram_reuses_or_rebuilds_and_returns_current_row_count(
 
     input_hash.assert_called_once_with(stats)
     valid.assert_called_once_with(
-        tmp_path / docs_module._AREA_HISTOGRAM_ASSET_RELATIVE_PATH,
+        tmp_path / docs_module.AREA_HISTOGRAM_ASSET_RELATIVE_PATH,
         {},
         "hash",
     )
@@ -262,7 +264,7 @@ def test_ensure_area_histogram_reuses_or_rebuilds_and_returns_current_row_count(
 
     aggregate.assert_called_once_with(tmp_path, require_successful_text=False)
     write_histogram.assert_called_once_with(
-        counts, tmp_path / docs_module._AREA_HISTOGRAM_ASSET_RELATIVE_PATH
+        counts, tmp_path / docs_module.AREA_HISTOGRAM_ASSET_RELATIVE_PATH
     )
 
 
@@ -293,7 +295,7 @@ def test_render_stats_block_uses_zero_defaults_and_actual_medians() -> None:
         "data_max_timestamp_utc": None,
     }
 
-    rendered = docs_module._render_stats_block(stats, "hash")
+    rendered = stats_card.render_stats_block(stats, "hash")
 
     assert "| Closed ways | 0 |" in rendered
     assert "| Relations | 0 |" in rendered
@@ -304,7 +306,7 @@ def test_render_stats_block_uses_zero_defaults_and_actual_medians() -> None:
 
 def test_successful_text_count_uses_current_legacy_and_fallback_keys() -> None:
     assert (
-        docs_module._successful_text_count(
+        stats_card._successful_text_count(
             {
                 "unique_polygons_with_successful_nonempty_text": 8,
                 "unique_polygons_with_text": 7,
@@ -313,25 +315,25 @@ def test_successful_text_count_uses_current_legacy_and_fallback_keys() -> None:
         )
         == 8
     )
-    assert docs_module._successful_text_count({"unique_polygons_with_text": 7}, 1) == 7
-    assert docs_module._successful_text_count({}, 1) == 1
+    assert stats_card._successful_text_count({"unique_polygons_with_text": 7}, 1) == 7
+    assert stats_card._successful_text_count({}, 1) == 1
 
 
 def test_render_text_rejection_section_uses_categories_and_safe_defaults() -> None:
     rendered = "\n".join(
-        docs_module._render_text_rejection_section(
+        stats_card._render_text_rejection_section(
             {"text_rejection_counts": {"blank_description": 3}}
         )
     )
 
     assert "| `blank_description` | 3 |" in rendered
     assert "| `no_description` | 0 |" in rendered
-    malformed = "\n".join(docs_module._render_text_rejection_section({"text_rejection_counts": 3}))
+    malformed = "\n".join(stats_card._render_text_rejection_section({"text_rejection_counts": 3}))
     assert "| `blank_description` | 0 |" in malformed
 
 
 def test_format_bytes_handles_values_above_the_last_named_unit() -> None:
-    assert docs_module._fmt_bytes(1024**5) == "1,024.0 TiB"
+    assert stats_card._fmt_bytes(1024**5) == "1,024.0 TiB"
 
 
 @pytest.mark.parametrize(
@@ -344,15 +346,15 @@ def test_format_bytes_handles_values_above_the_last_named_unit() -> None:
     ],
 )
 def test_format_area_uses_stable_metric_units(value: float | None, expected: str) -> None:
-    assert docs_module._fmt_area(value) == expected
+    assert stats_card._fmt_area(value) == expected
 
 
 def test_format_bbox_rejects_invalid_extents_and_formats_valid_extent() -> None:
-    assert docs_module._fmt_bbox(None) == "—"
-    assert docs_module._fmt_bbox([0, 1, 2]) == "—"
-    assert docs_module._fmt_bbox([0, 1, "bad", 2]) == "—"
-    assert docs_module._fmt_bbox([0, 1, float("inf"), 2]) == "—"
-    assert docs_module._fmt_bbox([-1.25, -2.5, 3.75, 4.5]) == (
+    assert stats_card._fmt_bbox(None) == "—"
+    assert stats_card._fmt_bbox([0, 1, 2]) == "—"
+    assert stats_card._fmt_bbox([0, 1, "bad", 2]) == "—"
+    assert stats_card._fmt_bbox([0, 1, float("inf"), 2]) == "—"
+    assert stats_card._fmt_bbox([-1.25, -2.5, 3.75, 4.5]) == (
         "lon -1.2500° to 3.7500°, lat -2.5000° to 4.5000°"
     )
 
@@ -412,7 +414,7 @@ def test_front_matter_separator_accepts_a_carriage_return_boundary() -> None:
 def test_update_stats_block_converts_generated_lf_to_card_crlf() -> None:
     readme = "card\r\n"
 
-    with patch.object(docs_module, "_render_stats_block", return_value="line one\nline two"):
+    with patch.object(docs_module, "render_stats_block", return_value="line one\nline two"):
         updated = docs_module._update_stats_block(readme, {}, "hash")
 
     assert "line one\r\nline two" in updated
@@ -456,7 +458,7 @@ def test_update_stats_block_rejects_malformed_marker_counts(readme: str) -> None
 
 
 def test_update_stats_block_inserts_missing_block() -> None:
-    with patch.object(docs_module, "_render_stats_block", return_value="new stats"):
+    with patch.object(docs_module, "render_stats_block", return_value="new stats"):
         updated = docs_module._update_stats_block("card", {}, "hash")
 
     assert updated == (
@@ -468,7 +470,7 @@ def test_update_stats_block_rejects_marker_pair_without_start_newline() -> None:
     readme = docs_module._STATS_START_MARKER + "old\n" + docs_module._STATS_END_MARKER
 
     with (
-        patch.object(docs_module, "_render_stats_block", return_value="new stats"),
+        patch.object(docs_module, "render_stats_block", return_value="new stats"),
         pytest.raises(docs_module.ReportingError, match="malformed"),
     ):
         docs_module._update_stats_block(readme, {}, "hash")
@@ -491,7 +493,7 @@ def test_write_dataset_docs_renders_stats_map_and_canonical_json(
 
     with (
         patch.object(
-            docs_module, "_render_stats_block", return_value="generated stats"
+            docs_module, "render_stats_block", return_value="generated stats"
         ) as render_stats,
         patch.object(docs_module, "_render_h3_map_block", return_value="map body") as render_map,
         patch.object(docs_module, "install_map_block", return_value="mapped readme") as install_map,
@@ -534,7 +536,7 @@ def test_write_dataset_docs_requires_both_h3_markers_before_installing_map(
     stats = {"rows": 1, "h3_occupied_cells": 1}
 
     with (
-        patch.object(docs_module, "_render_stats_block", return_value="stats"),
+        patch.object(docs_module, "render_stats_block", return_value="stats"),
         patch.object(docs_module, "install_map_block") as install_map,
         patch.object(docs_module, "_atomic_write_if_changed"),
     ):
@@ -583,7 +585,7 @@ def test_generate_dataset_docs_orchestrates_all_outputs(
 def test_text_rejection_section_distinguishes_persisted_artifacts_exactly() -> None:
     stats = {
         "text_rejection_counts": {
-            reason: index + 1 for index, reason in enumerate(docs_module.TEXT_REJECTION_REASONS)
+            reason: index + 1 for index, reason in enumerate(TEXT_REJECTION_REASONS)
         },
         "persisted_text_rejection_rows": 12,
     }
@@ -600,8 +602,7 @@ def test_text_rejection_section_distinguishes_persisted_artifacts_exactly() -> N
         "| --- | ---: |",
     ]
     expected.extend(
-        f"| `{reason}` | {index + 1:,} |"
-        for index, reason in enumerate(docs_module.TEXT_REJECTION_REASONS)
+        f"| `{reason}` | {index + 1:,} |" for index, reason in enumerate(TEXT_REJECTION_REASONS)
     )
     expected.extend(
         [
@@ -614,11 +615,11 @@ def test_text_rejection_section_distinguishes_persisted_artifacts_exactly() -> N
         ]
     )
 
-    assert docs_module._render_text_rejection_section(stats) == expected
+    assert stats_card._render_text_rejection_section(stats) == expected
 
 
 def test_text_rejection_section_keeps_legacy_fallbacks_safe() -> None:
-    rendered = docs_module._render_text_rejection_section({"persisted_text_rejection_rows": 0})
+    rendered = stats_card._render_text_rejection_section({"persisted_text_rejection_rows": 0})
 
     assert "**Persisted artifact rows excluded by the final text predicate:** 0." in rendered
 
@@ -644,7 +645,7 @@ def test_area_formatting_switches_units_exactly_at_its_boundaries(
     The published card states dataset areas, so an off-by-one divisor or a
     boundary that flips a unit is a wrong number in front of every reader.
     """
-    assert docs_module._fmt_area(value) == expected
+    assert stats_card._fmt_area(value) == expected
 
 
 def test_polygon_counts_fall_back_to_the_row_count_then_to_zero() -> None:
@@ -656,24 +657,24 @@ def test_polygon_counts_fall_back_to_the_row_count_then_to_zero() -> None:
         "regional_rows": 11,
         "manifest_duplicate_rows": 3,
     }
-    assert docs_module._polygon_count_metrics(complete) == (11, 7, 2, 3)
+    assert stats_card._polygon_count_metrics(complete) == (11, 7, 2, 3)
 
     without_unique = {"rows": 5}
-    assert docs_module._polygon_count_metrics(without_unique) == (5, 5, 0, 0)
+    assert stats_card._polygon_count_metrics(without_unique) == (5, 5, 0, 0)
 
-    assert docs_module._polygon_count_metrics({}) == (0, 0, 0, 0)
+    assert stats_card._polygon_count_metrics({}) == (0, 0, 0, 0)
 
 
 def test_polygon_counts_derive_regional_rows_when_the_stats_omit_them() -> None:
     stats = {"globally_unique_polygons": 4, "regional_overlap_duplicate_rows": 6}
 
-    assert docs_module._polygon_count_metrics(stats) == (10, 4, 6, 0)
+    assert stats_card._polygon_count_metrics(stats) == (10, 4, 6, 0)
 
 
 def test_manifest_duplicates_fall_back_to_the_deduplicated_row_count() -> None:
     stats = {"globally_unique_polygons": 1, "deduplicated_rows": 8}
 
-    assert docs_module._polygon_count_metrics(stats)[3] == 8
+    assert stats_card._polygon_count_metrics(stats)[3] == 8
 
 
 def test_geometry_stats_render_as_zero_when_the_stats_omit_them() -> None:
@@ -683,7 +684,7 @@ def test_geometry_stats_render_as_zero_when_the_stats_omit_them() -> None:
     default was unreached -- and a card that invents counts is worse than one
     that omits them, because the number looks measured.
     """
-    rows = docs_module._render_geometry_stats_section({"output_files": 0})
+    rows = stats_card._render_geometry_stats_section({"output_files": 0})
 
     assert (
         "| Geometry totals (vertices / rings / holes / MultiPolygon parts) | 0 / 0 / 0 / 0 |"
@@ -694,7 +695,7 @@ def test_geometry_stats_render_as_zero_when_the_stats_omit_them() -> None:
 
 def test_a_non_mapping_geometry_type_breakdown_is_treated_as_empty() -> None:
     """Stats files are read from disk, so the shape cannot be assumed."""
-    rows = docs_module._render_geometry_stats_section(
+    rows = stats_card._render_geometry_stats_section(
         {"output_files": 1, "geometry_types": ["Polygon"]}
     )
 
@@ -702,7 +703,7 @@ def test_a_non_mapping_geometry_type_breakdown_is_treated_as_empty() -> None:
 
 
 def test_geometry_type_counts_are_read_from_the_breakdown_when_present() -> None:
-    rows = docs_module._render_geometry_stats_section(
+    rows = stats_card._render_geometry_stats_section(
         {
             "output_files": 1,
             "geometry_types": {"Polygon": 7, "MultiPolygon": 3},
@@ -727,7 +728,7 @@ def test_a_continental_area_is_divided_by_exactly_one_million() -> None:
     still rounds to the same tenth. The published total is continental, and
     there the error becomes visible -- which is the number people read.
     """
-    assert docs_module._fmt_area(1e11) == "100,000.0 km\u00b2"
+    assert stats_card._fmt_area(1e11) == "100,000.0 km\u00b2"
 
 
 def test_a_body_starting_with_a_bare_carriage_return_is_not_given_another() -> None:

@@ -1,5 +1,6 @@
 """Direct contracts for deduplication staging, promotion, and state."""
 
+import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,15 +21,15 @@ from osm_polygon_description_tag.dataset.deduplication import (
     _batches_for_source,
     _canonical_relation,
     _read_manifests,
-    _read_state,
-    _recorded_input_hashes,
     _sql_literal,
     _stage_source,
-    _staged_input_drift_names,
     _validated_parquets,
     _verify_staged_inputs,
-    _write_state,
+    read_state,
+    recorded_input_hashes,
     select_canonical_row,
+    staged_input_drift_names,
+    write_state,
 )
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
@@ -227,7 +228,7 @@ def test_stage_source_returns_no_stage_when_no_rows_are_dropped(tmp_path: Path) 
 
 def test_write_state_is_sorted_atomic_json_with_trailing_newline(tmp_path: Path) -> None:
     path = tmp_path / ".work" / "dedup-state.json"
-    _write_state(path, {"z": 1, "a": {"b": 2}})
+    write_state(path, {"z": 1, "a": {"b": 2}})
 
     assert path.read_text(encoding="utf-8") == ('{\n  "a": {\n    "b": 2\n  },\n  "z": 1\n}\n')
     assert list(path.parent.glob("*.tmp")) == []
@@ -236,7 +237,7 @@ def test_write_state_is_sorted_atomic_json_with_trailing_newline(tmp_path: Path)
 def test_write_state_preserves_unicode_json_bytes(tmp_path: Path) -> None:
     path = tmp_path / ".work" / "state.json"
 
-    _write_state(path, {"value": "café"})
+    write_state(path, {"value": "café"})
 
     assert '"café"'.encode() in path.read_bytes()
 
@@ -244,7 +245,7 @@ def test_write_state_preserves_unicode_json_bytes(tmp_path: Path) -> None:
 def test_write_state_writes_sorted_indented_unicode_json_bytes(tmp_path: Path) -> None:
     path = tmp_path / "state.json"
 
-    _write_state(path, {"z": "é", "a": 1})
+    write_state(path, {"z": "é", "a": 1})
 
     assert path.read_bytes() == '{\n  "a": 1,\n  "z": "é"\n}\n'.encode()
 
@@ -253,15 +254,15 @@ def test_write_state_keeps_unicode_unescaped(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     options: dict[str, object] = {}
-    original_dumps = dedup_module.json.dumps
+    original_dumps = json.dumps
 
     def dumps(value: object, *args: object, **kwargs: object) -> str:
         options.update(kwargs)
         return original_dumps(value, *args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(dedup_module.json, "dumps", dumps)
+    monkeypatch.setattr(json, "dumps", dumps)
 
-    _write_state(tmp_path / "state.json", {"value": "café"})
+    write_state(tmp_path / "state.json", {"value": "café"})
 
     assert options["ensure_ascii"] is False
 
@@ -271,10 +272,10 @@ def test_write_state_creates_nested_parent_and_atomically_replaces_existing_stat
 ) -> None:
     path = tmp_path / ".work" / "nested" / "dedup-state.json"
 
-    _write_state(path, {"value": "first"})
-    _write_state(path, {"value": "second"})
+    write_state(path, {"value": "first"})
+    write_state(path, {"value": "second"})
 
-    assert _read_state(path) == {"value": "second"}
+    assert read_state(path) == {"value": "second"}
     assert list(path.parent.glob("*.tmp")) == []
 
 
@@ -303,7 +304,7 @@ def test_write_state_fsyncs_the_file_and_parent_directory(
     )
     path = tmp_path / ".work" / "state.json"
 
-    _write_state(path, {"value": "durable"})
+    write_state(path, {"value": "durable"})
 
     assert opened_directories == [(str(path.parent), os.O_RDONLY)]
     assert synced_descriptors[-1] == directory_fd
@@ -319,7 +320,7 @@ def test_sql_literal_escapes_values_for_sql_string_literals(value: str, expected
 
 
 def test_read_state_returns_none_when_state_file_is_absent(tmp_path: Path) -> None:
-    assert _read_state(tmp_path / "missing.json") is None
+    assert read_state(tmp_path / "missing.json") is None
 
 
 def test_read_state_requests_utf8_decoding(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -338,7 +339,7 @@ def test_read_state_requests_utf8_decoding(monkeypatch: pytest.MonkeyPatch) -> N
 
     state_path = StatePath()
 
-    assert _read_state(state_path) == {"value": "café"}  # type: ignore[arg-type]
+    assert read_state(state_path) == {"value": "café"}  # type: ignore[arg-type]
     assert encodings == ["utf-8"]
 
 
@@ -348,36 +349,36 @@ def test_read_state_rejects_invalid_or_non_object_payloads(tmp_path: Path, conte
     path.write_text(contents, encoding="utf-8")
 
     with pytest.raises(DeduplicationError, match="deduplication state"):
-        _read_state(path)
+        read_state(path)
 
 
 def test_recorded_input_hashes_requires_a_mapping_with_a_stable_error() -> None:
     with pytest.raises(DeduplicationError) as error:
-        _recorded_input_hashes({})
+        recorded_input_hashes({})
 
     assert str(error.value) == "staged deduplication state is missing input identities"
 
 
 def test_staged_input_drift_names_reports_missing_and_extra_inputs() -> None:
-    assert _staged_input_drift_names(
+    assert staged_input_drift_names(
         {"a.parquet": "a"},
         {"a.parquet": "a", "b.parquet": "b"},
         {},
     ) == ("b.parquet",)
-    assert _staged_input_drift_names(
+    assert staged_input_drift_names(
         {"a.parquet": "a", "b.parquet": "b"},
         {"a.parquet": "a"},
         {},
     ) == ("b.parquet",)
     assert (
-        _staged_input_drift_names(
+        staged_input_drift_names(
             {"a.parquet": "new"},
             {"a.parquet": "old"},
             {"a.parquet": "new"},
         )
         == ()
     )
-    assert _staged_input_drift_names(
+    assert staged_input_drift_names(
         {"a.parquet": "new"},
         {"a.parquet": "old"},
         {},
@@ -390,7 +391,7 @@ def test_verify_staged_inputs_reports_all_drifted_names_in_order(
     (tmp_path / "data").mkdir()
     monkeypatch.setattr(
         dedup_module,
-        "_input_hashes",
+        "input_hashes",
         lambda _paths: {"b.parquet": "new-b", "a.parquet": "new-a"},
     )
 
