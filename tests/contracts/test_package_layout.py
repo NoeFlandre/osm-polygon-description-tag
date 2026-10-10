@@ -10,7 +10,7 @@ import osm_polygon_description_tag
 STAGED_PACKAGES = ("runtime", "osm", "dataset", "workflow")
 CANONICAL_PACKAGES = (*STAGED_PACKAGES, "publication")
 STATS_MODULES = ("stats", "stats_features", "stats_geometry", "stats_manifest")
-MAX_STATS_MODULE_LINES = 600
+MAX_DATASET_MODULE_LINES = 600
 
 
 def test_stats_is_split_into_modules_under_the_size_bound() -> None:
@@ -20,7 +20,19 @@ def test_stats_is_split_into_modules_under_the_size_bound() -> None:
     for module in STATS_MODULES:
         path = dataset_root / f"{module}.py"
         assert path.is_file(), path
-        assert len(path.read_text(encoding="utf-8").splitlines()) <= MAX_STATS_MODULE_LINES, path
+        assert len(path.read_text(encoding="utf-8").splitlines()) <= MAX_DATASET_MODULE_LINES, path
+
+
+def test_every_dataset_module_stays_under_the_size_bound() -> None:
+    if "MUTANT_UNDER_TEST" in os.environ:
+        pytest.skip("static architecture bounds are checked on the canonical source tree")
+    dataset_root = Path(osm_polygon_description_tag.__file__).parent / "dataset"
+    oversized = {
+        str(path.relative_to(dataset_root)): len(path.read_text(encoding="utf-8").splitlines())
+        for path in sorted(dataset_root.rglob("*.py"))
+        if len(path.read_text(encoding="utf-8").splitlines()) > MAX_DATASET_MODULE_LINES
+    }
+    assert oversized == {}
 
 
 @pytest.mark.parametrize(
