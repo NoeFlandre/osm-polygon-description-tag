@@ -8,7 +8,7 @@ ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.16
 
 FROM ${UV_IMAGE} AS uv
 
-FROM python:3.12-slim-bookworm AS base
+FROM python:3.14-slim-bookworm AS base
 
 COPY --from=uv /uv /uvx /usr/local/bin/
 
