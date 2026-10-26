@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -80,10 +81,13 @@ def test_pre_commit_and_just_are_configured() -> None:
 def test_github_actions_runs_complete_quality_gate() -> None:
     workflow = (PROJECT_ROOT / ".github" / "workflows" / "quality.yml").read_text(encoding="utf-8")
 
+    # Actions must be pinned to a full commit SHA, but the exact SHA is left to
+    # Dependabot so a routine action bump does not fail this contract.
+    for action in ("actions/checkout", "astral-sh/setup-uv"):
+        assert re.search(rf"{re.escape(action)}@[0-9a-f]{{40}} # v", workflow)
+
     for token in (
         "ubuntu-latest",
-        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-        "astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7",
         'version: "0.11.16"',
         "uv python install 3.12",
         "osmium-tool",
