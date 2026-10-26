@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -45,6 +46,38 @@ def test_ensure_logger_constructs_owned_logger_from_explicit_paths(
     records = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines()]
     assert records == [{"ts": "now", "level": "INFO", "event": "probe", "run_id": logger.run_id}]
     assert not (tmp_path / "ignored-data-root").exists()
+
+
+def test_ensure_logger_gives_each_owned_logger_a_fresh_uuid4_run_id(tmp_path: Path) -> None:
+    def clock() -> str:
+        return "now"
+
+    first, _ = orchestrator._ensure_logger(None, paths=None, data_root=tmp_path, clock=clock)
+    second, _ = orchestrator._ensure_logger(None, paths=None, data_root=tmp_path, clock=clock)
+
+    assert str(uuid.UUID(first.run_id, version=4)) == first.run_id
+    assert str(uuid.UUID(second.run_id, version=4)) == second.run_id
+    assert first.run_id != second.run_id
+    first.close()
+    second.close()
+
+
+def test_ensure_logger_without_paths_writes_under_the_given_data_root(tmp_path: Path) -> None:
+    def clock() -> str:
+        return "now"
+
+    logger, owns_logger = orchestrator._ensure_logger(
+        None, paths=None, data_root=tmp_path, clock=clock
+    )
+    assert owns_logger is True
+
+    logger.event("probe")
+    logger.approve_preflight()
+    logger.close()
+
+    log_file = tmp_path / "logs" / "run-and-publish.jsonl"
+    records = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines()]
+    assert records == [{"ts": "now", "level": "INFO", "event": "probe", "run_id": logger.run_id}]
 
 
 def test_resolve_verifier_observes_precedence_and_upload_only_mode(
