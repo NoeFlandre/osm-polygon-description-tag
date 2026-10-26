@@ -23,7 +23,10 @@ ENV UV_LINK_MODE=copy \
 
 # The production CLI invokes the real osmium-tool binary. Install it in the
 # shared base so development and runtime images use the same binary contract.
+# The upgrade applies Debian security fixes (e.g. libssl3) that land before the
+# python:3.12-slim-bookworm tag is rebuilt.
 RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends libpcre2-8-0 osmium-tool \
     && rm -rf /var/lib/apt/lists/*
 
