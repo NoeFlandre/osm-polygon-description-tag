@@ -89,13 +89,13 @@ def test_resume_staged_promotes_state_and_returns_deduplicated_result(
     monkeypatch.setattr(dedup_module, "_promote_staged", promote)
     monkeypatch.setattr(
         dedup_module,
-        "_write_state",
+        "write_state",
         lambda path, payload: writes.append((path, dict(payload))),
     )
     hashed_paths: list[Path] = []
     monkeypatch.setattr(
         dedup_module,
-        "_input_hashes",
+        "input_hashes",
         lambda paths: hashed_paths.extend(paths) or {"a.parquet": "output-sha"},
     )
     hook = object()
@@ -140,12 +140,12 @@ def test_resume_staged_accepts_state_without_a_stage_directory(
     monkeypatch.setattr(dedup_module, "_promote_staged", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         dedup_module,
-        "_input_hashes",
+        "input_hashes",
         lambda _paths: {"a.parquet": "output-sha"},
     )
     monkeypatch.setattr(
         dedup_module,
-        "_write_state",
+        "write_state",
         lambda _path, payload: writes.append(dict(payload)),
     )
 
@@ -178,7 +178,7 @@ def test_resume_staged_records_completion_before_removing_stage(
 
     monkeypatch.setattr(dedup_module, "_promote_staged", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(dedup_module, "_verify_staged_inputs", lambda *_args: {})
-    monkeypatch.setattr(dedup_module, "_write_state", record)
+    monkeypatch.setattr(dedup_module, "write_state", record)
 
     _resume_staged(data_root, tmp_path / "state.json", state)  # type: ignore[arg-type]
 
@@ -208,7 +208,7 @@ def test_deduplicate_dataset_forwards_promotion_hook_when_resuming_staged(
         calls.append((root, state_path, actual_state, promotion_hook))
         return result
 
-    monkeypatch.setattr(dedup_module, "_read_state", read_state)
+    monkeypatch.setattr(dedup_module, "read_state", read_state)
     monkeypatch.setattr(dedup_module, "_resume_staged", resume)
 
     assert deduplicate_dataset(tmp_path, promotion_hook=hook) is result
@@ -223,7 +223,7 @@ def test_deduplicate_dataset_preserves_state_and_uses_stable_stage_path(
     result = object()
     seen: dict[str, object] = {}
 
-    monkeypatch.setattr(dedup_module, "_read_state", lambda _path: state)
+    monkeypatch.setattr(dedup_module, "read_state", lambda _path: state)
 
     def prepare(
         root: Path, state_path: Path, actual_state: Mapping[str, object]
@@ -286,7 +286,7 @@ def test_deduplicate_dataset_preserves_state_and_uses_stable_stage_path(
 def test_deduplicate_dataset_rejects_missing_context(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(dedup_module, "_read_state", lambda _path: None)
+    monkeypatch.setattr(dedup_module, "read_state", lambda _path: None)
     monkeypatch.setattr(dedup_module, "_prepare_context", lambda *_args: (None, None))
 
     with pytest.raises(
@@ -303,7 +303,7 @@ def test_prepare_context_returns_cached_result_without_reading_manifests(
     state = {"status": "complete"}
     cached = DeduplicationResult("skipped", 1, 1, 0, 0)
     monkeypatch.setattr(dedup_module, "_validated_parquets", lambda _root: (parquet,))
-    monkeypatch.setattr(dedup_module, "_input_hashes", lambda _paths: {"a.parquet": "sha"})
+    monkeypatch.setattr(dedup_module, "input_hashes", lambda _paths: {"a.parquet": "sha"})
 
     def complete_result(
         actual_state: object, inputs: object, parquets: object
@@ -333,7 +333,7 @@ def test_prepare_context_preserves_incomplete_state_in_context(
     state = {"status": "staged"}
     manifests = {"a.parquet": SimpleNamespace(source=SimpleNamespace(name="a.osm.pbf"))}
     monkeypatch.setattr(dedup_module, "_validated_parquets", lambda _root: (parquet,))
-    monkeypatch.setattr(dedup_module, "_input_hashes", lambda _paths: {"a.parquet": "sha"})
+    monkeypatch.setattr(dedup_module, "input_hashes", lambda _paths: {"a.parquet": "sha"})
     monkeypatch.setattr(dedup_module, "_complete_result", lambda *_args: None)
     monkeypatch.setattr(dedup_module, "_read_manifests", lambda *_args: manifests)
     monkeypatch.setattr(dedup_module, "_current_output_rows", lambda _paths: 4)
@@ -757,7 +757,7 @@ def test_finish_deduplication_writes_complete_state_without_changes(
     writes: list[tuple[Path, dict[str, object]]] = []
     monkeypatch.setattr(
         dedup_module,
-        "_write_state",
+        "write_state",
         lambda path, payload: writes.append((path, dict(payload))),
     )
 

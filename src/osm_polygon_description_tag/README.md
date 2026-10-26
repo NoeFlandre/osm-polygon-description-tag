@@ -11,9 +11,9 @@ The canonical implementation is organized by operational domain:
 - `cli.py`: the stable console entry point (Typer declarations, global options, exit codes);
 - `cli_handlers.py`: the command handlers that `cli.py` dispatches to;
 - `language_cli.py`: the `language` command group, backed by
-  `language_workflow.py` (local detection), `grid_workflow.py` and
-  `grid_transport.py` (Grid'5000 runs), and `publication_workflow.py`
-  (language export and publication).
+  `workflow/language_workflow.py` (local detection), `workflow/grid_workflow.py`
+  and `workflow/grid_transport.py` (Grid'5000 runs), and
+  `workflow/publication_workflow.py` (language export and publication).
 
 The domain packages contain the implementation. There are no compatibility
 re-exports: import each name from the module that defines it.

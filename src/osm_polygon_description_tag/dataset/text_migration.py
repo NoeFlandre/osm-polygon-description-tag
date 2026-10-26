@@ -42,12 +42,9 @@ from osm_polygon_description_tag.dataset.migration import (
     require_migration_directories,
 )
 from osm_polygon_description_tag.dataset.schema import SCHEMA, geo_metadata
-from osm_polygon_description_tag.dataset.storage import (
-    DICTIONARY_COLUMNS,
-    GEOPARQUET_COMPRESSION,
-    StorageError,
-    validate_geoparquet,
-)
+from osm_polygon_description_tag.dataset.storage import DICTIONARY_COLUMNS, GEOPARQUET_COMPRESSION
+from osm_polygon_description_tag.dataset.storage_errors import StorageError
+from osm_polygon_description_tag.dataset.storage_validation import validate_geoparquet
 from osm_polygon_description_tag.dataset.text import (
     has_successful_description_text,
     trimmed_nonempty_text,

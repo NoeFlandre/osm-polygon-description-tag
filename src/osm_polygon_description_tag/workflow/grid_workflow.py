@@ -7,15 +7,6 @@ from pathlib import Path
 
 from osm_polygon_description_tag.dataset.languages.snapshot import SnapshotManifest, read_snapshot
 from osm_polygon_description_tag.dataset.languages.validation import RunReport
-from osm_polygon_description_tag.grid_transport import (
-    capture_policy,
-    execute_transport,
-    grid_command_runner,
-    portable_remote_paths,
-    remote_child,
-    seed_retrieval_snapshot,
-    transport_payload,
-)
 from osm_polygon_description_tag.runtime.presentation import print_json
 from osm_polygon_description_tag.runtime.time import utc_now
 from osm_polygon_description_tag.workflow.grid_operator import (
@@ -42,6 +33,15 @@ from osm_polygon_description_tag.workflow.grid_operator import (
 )
 from osm_polygon_description_tag.workflow.grid_policy import evaluate_policy
 from osm_polygon_description_tag.workflow.grid_scheduler import CommandRunner
+from osm_polygon_description_tag.workflow.grid_transport import (
+    capture_policy,
+    execute_transport,
+    grid_command_runner,
+    portable_remote_paths,
+    remote_child,
+    seed_retrieval_snapshot,
+    transport_payload,
+)
 
 
 def handle_grid_prepare(

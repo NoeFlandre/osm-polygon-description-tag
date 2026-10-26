@@ -127,7 +127,6 @@ max-args = 8
 # Signatures still over the argument-count bound (max-args 8). Reshaping them is
 # tracked in #141; delete each entry once its signature passes.
 "src/osm_polygon_description_tag/dataset/languages/worker.py" = ["PLR0913"] # TODO(#141)
-"src/osm_polygon_description_tag/grid_workflow.py" = ["PLR0913"] # TODO(#141)
 "src/osm_polygon_description_tag/language_cli.py" = ["PLR0913"] # TODO(#141)
 "src/osm_polygon_description_tag/publication/state.py" = ["PLR0913"] # TODO(#141)
 "src/osm_polygon_description_tag/workflow/build.py" = ["PLR0913"] # TODO(#141)
@@ -137,6 +136,7 @@ max-args = 8
 "src/osm_polygon_description_tag/workflow/grid_operator/stage.py" = ["PLR0913"] # TODO(#141)
 "src/osm_polygon_description_tag/workflow/grid_operator/submission.py" = ["PLR0913"] # TODO(#141)
 "src/osm_polygon_description_tag/workflow/grid_policy.py" = ["PLR0913"] # TODO(#141)
+"src/osm_polygon_description_tag/workflow/grid_workflow.py" = ["PLR0913"] # TODO(#141)
 "src/osm_polygon_description_tag/workflow/orchestrator.py" = ["PLR0913"] # TODO(#141)
 "src/osm_polygon_description_tag/workflow/source_runner.py" = ["PLR0913"] # TODO(#141)
 

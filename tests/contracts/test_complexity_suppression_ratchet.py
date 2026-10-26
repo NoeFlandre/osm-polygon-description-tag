@@ -10,7 +10,7 @@ COMPLEXITY_RULES = frozenset({"C901", "PLR0912", "PLR0913", "PLR0915"})
 BASELINE_CONFIG_SUPPRESSIONS = frozenset(
     {
         ("src/osm_polygon_description_tag/dataset/languages/worker.py", "PLR0913"),
-        ("src/osm_polygon_description_tag/grid_workflow.py", "PLR0913"),
+        ("src/osm_polygon_description_tag/workflow/grid_workflow.py", "PLR0913"),
         ("src/osm_polygon_description_tag/language_cli.py", "PLR0913"),
         ("src/osm_polygon_description_tag/publication/state.py", "PLR0913"),
         ("src/osm_polygon_description_tag/workflow/build.py", "PLR0913"),

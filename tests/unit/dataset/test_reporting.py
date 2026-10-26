@@ -11,16 +11,19 @@ from osm_polygon_description_tag.dataset.geography import (
     aggregate_area_histogram,
     aggregate_h3_density,
 )
-from osm_polygon_description_tag.dataset.stats import (
-    _collect_feature_summary,
-    _collect_manifest_summary,
-    _create_feature_table,
-    _create_unique_feature_view,
-    _find_validated_artifacts,
-    _ingest_features,
-    _new_connection,
+from osm_polygon_description_tag.dataset.stats import _new_connection, collect_stats
+from osm_polygon_description_tag.dataset.stats_features import (
+    collect_feature_summary,
+    create_feature_table,
+    create_unique_feature_view,
+    ingest_features,
+)
+from osm_polygon_description_tag.dataset.stats_geometry import collect_spatial_summary
+from osm_polygon_description_tag.dataset.stats_manifest import (
+    ReportingError,
     _validate_artifact,
-    collect_stats,
+    collect_manifest_summary,
+    find_validated_artifacts,
 )
 from osm_polygon_description_tag.dataset.unique_rows import iter_unique_parquet_batches
 from tests.conftest import make_record_dict
@@ -47,13 +50,13 @@ def test_reporting_phases_validate_and_summarize_artifacts_in_filename_order(
     source_root.mkdir()
     write_reporting_fixture(data_root, source_root)
 
-    artifacts = _find_validated_artifacts(data_root)
+    artifacts = find_validated_artifacts(data_root)
     assert [artifact.parquet.name for artifact in artifacts] == [
         "region-a.parquet",
         "region-b.parquet",
     ]
 
-    summary = _collect_manifest_summary(artifacts)
+    summary = collect_manifest_summary(artifacts)
 
     assert summary.emitted_features == 7
     assert summary.rejections == {"no_nonempty_description": 4}
@@ -83,14 +86,14 @@ def test_reporting_feature_phase_matches_public_stats(tmp_path: Path) -> None:
     source_root = tmp_path / "raw"
     source_root.mkdir()
     write_reporting_fixture(data_root, source_root)
-    artifacts = _find_validated_artifacts(data_root)
+    artifacts = find_validated_artifacts(data_root)
 
     connection = _new_connection(data_root)
     try:
-        _create_feature_table(connection)
-        _ingest_features(connection, artifacts)
-        _create_unique_feature_view(connection)
-        summary = _collect_feature_summary(connection)
+        create_feature_table(connection)
+        ingest_features(connection, artifacts)
+        create_unique_feature_view(connection)
+        summary = collect_feature_summary(connection)
     finally:
         connection.close()
 
@@ -530,16 +533,17 @@ def test_a_feature_spatial_row_disagreement_names_both_counts(
     source_root = tmp_path / "raw"
     source_root.mkdir()
     write_reporting_fixture(data_root, source_root)
-    real = stats_module._collect_spatial_summary
+    real = collect_spatial_summary
 
+    # collect_stats reads the name from dataset.stats, so the patch belongs there.
     monkeypatch.setattr(
         stats_module,
-        "_collect_spatial_summary",
+        "collect_spatial_summary",
         lambda artifacts: replace(real(artifacts), rows=99),
     )
 
     with pytest.raises(
-        stats_module.ReportingError,
+        ReportingError,
         match=exactly("feature/spatial row count mismatch: 3 != 99"),
     ):
         collect_stats(data_root)

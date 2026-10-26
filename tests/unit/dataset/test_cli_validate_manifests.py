@@ -11,7 +11,7 @@ import pytest
 
 from osm_polygon_description_tag import cli
 from osm_polygon_description_tag.cli_requests import PathOptions
-from osm_polygon_description_tag.dataset import storage, validation
+from osm_polygon_description_tag.dataset import storage_artifacts, validation
 from osm_polygon_description_tag.dataset.manifest import (
     Manifest,
     manifest_path_for,
@@ -19,7 +19,8 @@ from osm_polygon_description_tag.dataset.manifest import (
     source_identity_for,
     write_manifest,
 )
-from osm_polygon_description_tag.dataset.storage import StorageError, write_geoparquet
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
+from osm_polygon_description_tag.dataset.storage_errors import StorageError
 from osm_polygon_description_tag.osm.discovery import discover_sources
 
 
@@ -226,16 +227,16 @@ def test_validate_does_not_reread_manifest_after_pair_validation(
     monkeypatch.setattr(validation, "validate_geoparquet", lambda _path, **_kwargs: 1)
     _write_artifact_pair(tmp_path, tmp_path, manifest_factory)
     manifest_path = tmp_path / "manifests" / "a.manifest.json"
-    real_read_manifest = storage.read_manifest
+    real_read_manifest = storage_artifacts.read_manifest
     read_paths: list[Path] = []
 
     def record_read(path: Path) -> Manifest:
         read_paths.append(path)
         return real_read_manifest(path)
 
-    # The validation path reads manifests through storage.read_manifest, so the
+    # The validation path reads manifests through storage_artifacts.read_manifest, so the
     # spy must replace that module global (raising=True makes a wrong target fail).
-    monkeypatch.setattr(storage, "read_manifest", record_read)
+    monkeypatch.setattr(storage_artifacts, "read_manifest", record_read)
 
     cli.handle_validate(PathOptions(source_root=None, data_root=tmp_path, osmium="osmium"))
     assert read_paths == [manifest_path]

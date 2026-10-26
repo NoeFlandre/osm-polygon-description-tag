@@ -9,11 +9,6 @@ from pathlib import Path
 import pytest
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag import (
-    grid_transport,
-    grid_workflow,
-    language_workflow,
-)
 from osm_polygon_description_tag.cli import run
 from osm_polygon_description_tag.dataset.languages.detector import LanguageDetector
 from osm_polygon_description_tag.dataset.languages.models import (
@@ -24,6 +19,7 @@ from osm_polygon_description_tag.dataset.languages.models import (
 )
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
 from osm_polygon_description_tag.runtime import time as runtime_time
+from osm_polygon_description_tag.workflow import grid_transport, grid_workflow, language_workflow
 from tests.conftest import make_record_dict
 from tests.helpers.patching import patch_modules
 from tests.helpers.sentences import fake_splitter

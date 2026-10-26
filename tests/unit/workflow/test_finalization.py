@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 import osm_polygon_description_tag.workflow.finalization as finalization_module
-from osm_polygon_description_tag.dataset.storage import StorageError
+from osm_polygon_description_tag.dataset.storage_errors import StorageError
 from osm_polygon_description_tag.osm.discovery import Source
 from osm_polygon_description_tag.publication.models import PublicationError, UploadItem, UploadPlan
 from osm_polygon_description_tag.runtime.config import Paths

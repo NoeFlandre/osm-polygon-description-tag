@@ -56,7 +56,8 @@ from osm_polygon_description_tag.dataset.manifest import (
     source_identity_for,
     write_manifest,
 )
-from osm_polygon_description_tag.dataset.storage import StorageError, write_geoparquet
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
+from osm_polygon_description_tag.dataset.storage_errors import StorageError
 from tests.conftest import make_record_dict
 from tests.helpers.dataset import write_reporting_fixture as _populate_dataset
 
@@ -257,7 +258,9 @@ def test_aggregate_area_histogram_reads_only_area_column_with_requested_batch_si
     unique_rows = Mock(return_value=[batch])
 
     with (
-        patch("osm_polygon_description_tag.dataset.storage.validate_finalized_artifacts_strict"),
+        patch(
+            "osm_polygon_description_tag.dataset.storage_artifacts.validate_finalized_artifacts_strict"
+        ),
         patch.object(area_histogram_module, "iter_unique_parquet_batches", unique_rows),
     ):
         kwargs = {} if batch_size is None else {"batch_size": batch_size}
@@ -281,7 +284,9 @@ def test_aggregate_area_histogram_skips_null_values_in_a_streamed_batch(
     unique_rows = Mock(return_value=[batch])
 
     with (
-        patch("osm_polygon_description_tag.dataset.storage.validate_finalized_artifacts_strict"),
+        patch(
+            "osm_polygon_description_tag.dataset.storage_artifacts.validate_finalized_artifacts_strict"
+        ),
         patch.object(area_histogram_module, "iter_unique_parquet_batches", unique_rows),
     ):
         counts = aggregate_area_histogram(data_root)
@@ -327,7 +332,7 @@ def test_aggregate_area_histogram_rejects_invalid_area_rows(tmp_path: Path) -> N
 
 def test_aggregate_area_histogram_rejects_orphan_parquet(tmp_path: Path) -> None:
     """An orphan Parquet (no matching manifest) must be rejected, matching the H3 contract."""
-    from osm_polygon_description_tag.dataset.storage import StorageError
+    from osm_polygon_description_tag.dataset.storage_errors import StorageError
 
     (tmp_path / "data").mkdir(parents=True)
     _write_parquet_with_areas(tmp_path / "data", "lonely", [10.0])

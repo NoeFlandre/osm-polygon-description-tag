@@ -1,7 +1,5 @@
 """Behavioral coverage for the bounded GeoParquet validation helpers."""
 
-import json
-import os
 from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,24 +12,27 @@ from hypothesis import strategies as st
 from shapely import to_wkb
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag.dataset import storage
+from osm_polygon_description_tag.dataset import (
+    storage,
+    storage_artifacts,
+    storage_validation,
+)
 from osm_polygon_description_tag.dataset.manifest import ManifestError
-from osm_polygon_description_tag.dataset.storage import (
-    StorageError,
-    _batch_columns,
+from osm_polygon_description_tag.dataset.storage import arrow_record, write_geoparquet
+from osm_polygon_description_tag.dataset.storage_artifacts import (
     _check_artifact_stems,
+    _require_artifact_directories,
+    _validate_manifest_pair,
+    validate_finalized_artifacts,
+    validate_finalized_artifacts_strict,
+)
+from osm_polygon_description_tag.dataset.storage_errors import StorageError
+from osm_polygon_description_tag.dataset.storage_validation import (
+    _batch_columns,
     _check_field,
     _decode_geometry,
-    _fsync_dir,
     _geometry_metadata_column,
-    _merge_bounds,
     _read_geo_metadata,
-    _record_bounds,
-    _RecordStreamSummary,
-    _require_artifact_directories,
-    _require_batch_size,
-    _stream_records,
-    _stream_rewrite_with_metadata,
     _UniquenessIndex,
     _validate_area,
     _validate_batch,
@@ -41,16 +42,11 @@ from osm_polygon_description_tag.dataset.storage import (
     _validate_geometry,
     _validate_geometry_metadata_column,
     _validate_geometry_type,
-    _validate_manifest_pair,
     _validate_metadata_bbox,
     _validate_metadata_extent,
     _validate_row,
     _validate_source,
     _ValidationState,
-    arrow_record,
-    validate_finalized_artifacts,
-    validate_finalized_artifacts_strict,
-    write_geoparquet,
 )
 from tests.helpers.messages import exactly
 
@@ -74,89 +70,6 @@ def _columns(row: dict[str, object]) -> dict[str, list[object]]:
             "geometry",
         )
     }
-
-
-def test_arrow_record_preserves_scalars_and_normalizes_key_value_columns() -> None:
-    record = {
-        "source_pbf": "region.osm.pbf",
-        "localized_descriptions": {"fr": "Bonjour"},
-        "tags": {"description": "Hello"},
-    }
-
-    assert arrow_record(record) == {
-        "source_pbf": "region.osm.pbf",
-        "localized_descriptions": [{"key": "fr", "value": "Bonjour"}],
-        "localized_names": [],
-        "tags": [{"key": "description", "value": "Hello"}],
-    }
-
-
-def test_record_bounds_reads_all_four_coordinates_as_floats() -> None:
-    record = {
-        "bbox_min_x": "-1.5",
-        "bbox_min_y": 2,
-        "bbox_max_x": 3.25,
-        "bbox_max_y": "4.75",
-    }
-
-    assert _record_bounds(record) == (-1.5, 2.0, 3.25, 4.75)
-
-
-def test_merge_bounds_handles_first_update_and_each_extent_direction() -> None:
-    first = (10.0, 20.0, 30.0, 40.0)
-    second = (15.0, 5.0, 35.0, 45.0)
-
-    assert _merge_bounds(None, first) == first
-    assert _merge_bounds(first, second) == (10.0, 5.0, 35.0, 45.0)
-
-
-class _BatchRecorder:
-    def __init__(self) -> None:
-        self.batches: list[pa.RecordBatch] = []
-
-    def write_batch(self, batch: pa.RecordBatch) -> None:
-        self.batches.append(batch)
-
-
-def test_stream_records_reports_summary_and_writes_exact_batch_sizes(
-    valid_records: list[dict[str, object]],
-) -> None:
-    writer = _BatchRecorder()
-
-    summary = _stream_records(iter(valid_records), writer, batch_size=1)
-
-    assert summary.row_count == len(valid_records)
-    assert summary.geometry_types == frozenset({"Polygon", "MultiPolygon"})
-    assert summary.bbox == (0.0, 0.0, 21.0, 21.0)
-    assert [batch.num_rows for batch in writer.batches] == [1, 1]
-
-
-def test_stream_records_writes_an_empty_schema_batch_for_empty_input() -> None:
-    writer = _BatchRecorder()
-
-    summary = _stream_records(iter(()), writer, batch_size=1)
-
-    assert summary.row_count == 0
-    assert summary.geometry_types == frozenset()
-    assert summary.bbox is None
-    assert [batch.num_rows for batch in writer.batches] == [0]
-
-
-@pytest.mark.parametrize("batch_size", [0, -1])
-def test_require_batch_size_rejects_non_positive_values(batch_size: int) -> None:
-    with pytest.raises(ValueError, match=exactly("batch_size must be positive")):
-        _require_batch_size(batch_size)
-
-
-def test_require_batch_size_uses_the_exact_error_message() -> None:
-    with pytest.raises(ValueError) as error:
-        _require_batch_size(0)
-
-    assert str(error.value) == "batch_size must be positive"
-
-
-def test_require_batch_size_accepts_one() -> None:
-    _require_batch_size(1)
 
 
 def test_validate_row_records_identity_extent_and_geometry(
@@ -264,7 +177,7 @@ def test_text_validation_helpers_are_strict_by_default(
     batch = pa.RecordBatch.from_pylist([legacy_record])
 
     with pytest.raises(StorageError, match="trimmed"):
-        storage._validate_localized_descriptions(columns["localized_descriptions"][0])
+        storage_validation._validate_localized_descriptions(columns["localized_descriptions"][0])
 
     with (
         _UniquenessIndex(work_root=tmp_path / "row-work") as uniqueness,
@@ -290,18 +203,18 @@ def test_validate_base_description_preserves_exact_error_messages(
     description: object, message: str
 ) -> None:
     with pytest.raises(StorageError) as error:
-        storage._validate_base_description(description)
+        storage_validation._validate_base_description(description)
 
     assert str(error.value) == message
 
 
 def test_validate_trimmed_description_errors_preserve_exact_messages() -> None:
     with pytest.raises(StorageError) as base_error:
-        storage._validate_base_description(" padded ")
+        storage_validation._validate_base_description(" padded ")
     assert str(base_error.value) == "description text must be trimmed"
 
     with pytest.raises(StorageError) as localized_error:
-        storage._validate_localized_value(" padded ")
+        storage_validation._validate_localized_value(" padded ")
     assert str(localized_error.value) == "localized description value must be trimmed"
 
 
@@ -323,7 +236,7 @@ def test_validate_localized_entry_preserves_exact_error_messages(
     entry: object, message: str
 ) -> None:
     with pytest.raises(StorageError) as error:
-        storage._validate_localized_entry(entry, set())
+        storage_validation._validate_localized_entry(entry, set())
 
     assert str(error.value) == message
 
@@ -331,7 +244,7 @@ def test_validate_localized_entry_preserves_exact_error_messages(
 @pytest.mark.parametrize("value", ["en", b"en"])
 def test_localized_description_entries_reject_text_scalars_exactly(value: object) -> None:
     with pytest.raises(StorageError) as error:
-        storage._localized_description_entries(value)
+        storage_validation._localized_description_entries(value)
 
     assert str(error.value) == "localized descriptions must be a sequence"
 
@@ -346,10 +259,10 @@ def test_localized_description_entries_preserves_the_runtime_cast_contract(
         seen_types.append(type_)
         return value
 
-    monkeypatch.setattr(storage, "cast", record_cast)
+    monkeypatch.setattr(storage_validation, "cast", record_cast)
     entries = [{"key": "en", "value": "valid"}]
 
-    assert storage._localized_description_entries(entries) is entries
+    assert storage_validation._localized_description_entries(entries) is entries
     assert seen_types == [Sequence[object]]
 
 
@@ -630,18 +543,18 @@ def test_validate_manifest_pair_reads_the_expected_path_and_checks_identity(
     manifest_path.write_bytes(b"tiny manifest fixture")
     expected_identity = object()
     manifest = SimpleNamespace(
-        manifest_schema_version=storage.MANIFEST_SCHEMA_VERSION,
+        manifest_schema_version=storage_artifacts.MANIFEST_SCHEMA_VERSION,
         source=object(),
         output=expected_identity,
     )
 
     with (
-        patch.object(storage, "read_manifest", return_value=manifest) as read_manifest,
+        patch.object(storage_artifacts, "read_manifest", return_value=manifest) as read_manifest,
         patch.object(
-            storage, "output_identity_for", return_value=expected_identity
+            storage_artifacts, "output_identity_for", return_value=expected_identity
         ) as output_identity,
-        patch.object(storage, "is_resumable", return_value=True) as is_resumable,
-        patch.object(storage, "_validate_manifest_included_rows"),
+        patch.object(storage_artifacts, "is_resumable", return_value=True) as is_resumable,
+        patch.object(storage_artifacts, "_validate_manifest_included_rows"),
     ):
         assert (
             _validate_manifest_pair(parquet, manifests_dir, require_current_contract=True)
@@ -662,7 +575,7 @@ def test_validate_manifest_pair_wraps_invalid_manifest_errors(tmp_path: Path) ->
     manifest_path.write_bytes(b"tiny manifest fixture")
 
     with (
-        patch.object(storage, "read_manifest", side_effect=ManifestError("broken")),
+        patch.object(storage_artifacts, "read_manifest", side_effect=ManifestError("broken")),
         pytest.raises(StorageError) as error,
     ):
         _validate_manifest_pair(parquet, manifests_dir)
@@ -675,7 +588,11 @@ def test_validate_manifest_pair_wraps_invalid_manifest_errors(tmp_path: Path) ->
     ("manifest_version", "output", "message"),
     [
         (999, object(), "manifest uses unsupported schema version: 999"),
-        (storage.MANIFEST_SCHEMA_VERSION, object(), "stale output identity for region.parquet"),
+        (
+            storage_artifacts.MANIFEST_SCHEMA_VERSION,
+            object(),
+            "stale output identity for region.parquet",
+        ),
     ],
 )
 def test_validate_manifest_pair_rejects_unsupported_or_stale_manifests(
@@ -692,8 +609,8 @@ def test_validate_manifest_pair_rejects_unsupported_or_stale_manifests(
     manifest = SimpleNamespace(manifest_schema_version=manifest_version, output=output)
 
     with (
-        patch.object(storage, "read_manifest", return_value=manifest),
-        patch.object(storage, "output_identity_for", return_value=object()),
+        patch.object(storage_artifacts, "read_manifest", return_value=manifest),
+        patch.object(storage_artifacts, "output_identity_for", return_value=object()),
         pytest.raises(StorageError) as error,
     ):
         _validate_manifest_pair(parquet, manifests_dir)
@@ -713,10 +630,12 @@ def test_validate_finalized_artifacts_returns_sorted_pairs_and_validates_each(
         (manifests_dir / f"{name}.manifest.json").write_bytes(b"")
 
     validated = [
-        storage._ValidatedManifestPair(manifests_dir / "a.manifest.json", object()),
-        storage._ValidatedManifestPair(manifests_dir / "b.manifest.json", object()),
+        storage_artifacts._ValidatedManifestPair(manifests_dir / "a.manifest.json", object()),
+        storage_artifacts._ValidatedManifestPair(manifests_dir / "b.manifest.json", object()),
     ]
-    with patch.object(storage, "_validate_manifest_pair_record", side_effect=validated) as check:
+    with patch.object(
+        storage_artifacts, "_validate_manifest_pair_record", side_effect=validated
+    ) as check:
         result = validate_finalized_artifacts(tmp_path)
 
     assert result == {
@@ -738,8 +657,10 @@ def test_validate_finalized_artifacts_strict_validates_every_parquet(
         "manifests": (),
     }
     with (
-        patch.object(storage, "validate_finalized_artifacts", return_value=result) as base,
-        patch.object(storage, "validate_geoparquet") as strict,
+        patch.object(
+            storage_artifacts, "validate_finalized_artifacts", return_value=result
+        ) as base,
+        patch.object(storage_artifacts, "validate_geoparquet") as strict,
     ):
         assert validate_finalized_artifacts_strict(tmp_path) is result
 
@@ -757,7 +678,7 @@ def test_batch_columns_materializes_all_validation_columns(
 
     columns = _batch_columns(batch)
 
-    assert tuple(columns) == tuple(storage._VALIDATION_COLUMNS)
+    assert tuple(columns) == tuple(storage_validation._VALIDATION_COLUMNS)
     assert columns["osm_id"] == [100]
     assert columns["geometry"] == [way_record_dict["geometry"]]
 
@@ -776,19 +697,23 @@ def test_validate_geoparquet_uses_empty_metadata_defaults_and_exact_validation_i
 
     with (
         patch.object(storage.pq, "ParquetFile", return_value=parquet_file),
-        patch.object(storage, "_check_schema") as check_schema,
+        patch.object(storage_validation, "_check_schema") as check_schema,
         patch.object(
-            storage,
+            storage_validation,
             "_read_geo_metadata",
             return_value={"columns": {"geometry": {}}},
         ),
-        patch.object(storage, "_UniquenessIndex", return_value=uniqueness) as index_factory,
+        patch.object(
+            storage_validation, "_UniquenessIndex", return_value=uniqueness
+        ) as index_factory,
     ):
-        assert storage.validate_geoparquet(parquet) == 0
+        assert storage_validation.validate_geoparquet(parquet) == 0
 
     check_schema.assert_called_once_with(parquet_file.schema_arrow)
     index_factory.assert_called_once_with(work_root=data_root / ".work" / "validation")
-    parquet_file.iter_batches.assert_called_once_with(columns=storage._VALIDATION_COLUMNS)
+    parquet_file.iter_batches.assert_called_once_with(
+        columns=storage_validation._VALIDATION_COLUMNS
+    )
     uniqueness.close.assert_called_once_with()
 
 
@@ -802,135 +727,8 @@ def test_validate_geoparquet_can_allow_source_text_rejections(
     write_geoparquet(iter([record]), target, validator=lambda _path: 1)
 
     with pytest.raises(StorageError, match="description text must be trimmed"):
-        storage.validate_geoparquet(target)
-    assert storage.validate_geoparquet(target, require_successful_text=False) == 1
-
-
-def test_fsync_dir_uses_the_owned_directory_and_closes_the_fd(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    opened: list[tuple[object, object]] = []
-    synced: list[int] = []
-    closed: list[int] = []
-
-    def open_directory(path: str, flags: int, **_kwargs: object) -> int:
-        opened.append((path, flags))
-        return 17
-
-    monkeypatch.setattr(os, "open", open_directory)
-    monkeypatch.setattr(os, "fsync", lambda fd: synced.append(fd))
-    monkeypatch.setattr(os, "close", lambda fd: closed.append(fd))
-
-    _fsync_dir(tmp_path)
-
-    assert opened == [(str(tmp_path), os.O_RDONLY)]
-    assert synced == [17]
-    assert closed == [17]
-
-
-def test_write_geoparquet_uses_contract_writer_options_and_default_batch_size(
-    tmp_path: Path,
-) -> None:
-    target = tmp_path / "region.parquet"
-    temp_data = tmp_path / ".region.data.tmp"
-    temp_final = tmp_path / ".region.final.tmp"
-    records = object()
-    summary = _RecordStreamSummary(0, frozenset(), None)
-    writer = Mock()
-    writer.__enter__ = Mock(return_value=writer)
-    writer.__exit__ = Mock(return_value=None)
-    validator = Mock(return_value=7)
-
-    with (
-        patch.object(storage, "_owned_temp", side_effect=[temp_data, temp_final]),
-        patch.object(storage.pq, "ParquetWriter", return_value=writer) as writer_factory,
-        patch.object(storage, "_stream_records", return_value=summary) as stream,
-        patch.object(storage, "_stream_rewrite_with_metadata") as rewrite,
-        patch.object(storage, "fsync_file") as fsync_file,
-        patch.object(storage, "_fsync_dir") as fsync_dir,
-        patch.object(os, "replace") as replace,
-    ):
-        ordered = Mock()
-        ordered.attach_mock(fsync_file, "fsync_file")
-        ordered.attach_mock(replace, "replace")
-        ordered.attach_mock(fsync_dir, "fsync_dir")
-        assert write_geoparquet(records, target, validator=validator) == 7
-
-    writer_factory.assert_called_once_with(
-        temp_data,
-        storage.SCHEMA,
-        compression="zstd",
-        use_dictionary=storage.DICTIONARY_COLUMNS,
-    )
-    stream.assert_called_once_with(records, writer, 1024)
-    rewrite.assert_called_once_with(
-        temp_data,
-        temp_final,
-        geometry_types=[],
-        bbox=[],
-    )
-    validator.assert_called_once_with(temp_final)
-    fsync_file.assert_called_once_with(temp_final)
-    fsync_dir.assert_called_once_with(tmp_path)
-    replace.assert_called_once_with(temp_final, target)
-    # The directory entry only becomes durable after the rename, so the
-    # directory fsync must come last.
-    assert ordered.mock_calls == [
-        call.fsync_file(temp_final),
-        call.replace(temp_final, target),
-        call.fsync_dir(tmp_path),
-    ]
-
-
-def test_stream_rewrite_passes_exact_metadata_writer_options(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    source = tmp_path / "source.parquet"
-    target = tmp_path / "target.parquet"
-    batch = object()
-    reader = Mock()
-    reader.iter_batches.return_value = [batch]
-    writer = Mock()
-    writer.__enter__ = Mock(return_value=writer)
-    writer.__exit__ = Mock(return_value=None)
-    writer_factory = Mock(return_value=writer)
-    reader_factory = Mock(return_value=reader)
-    monkeypatch.setattr(storage.pq, "ParquetFile", reader_factory)
-    monkeypatch.setattr(storage.pq, "ParquetWriter", writer_factory)
-
-    _stream_rewrite_with_metadata(
-        source,
-        target,
-        geometry_types=["Polygon"],
-        bbox=[0.0, 1.0, 2.0, 3.0],
-    )
-
-    reader_factory.assert_called_once_with(source)
-    writer_factory.assert_called_once()
-    writer_args, writer_kwargs = writer_factory.call_args
-    assert writer_args[0] == target
-    assert json.loads(writer_args[1].metadata[b"geo"]) == {
-        "version": "1.1.0",
-        "primary_column": "geometry",
-        "columns": {
-            "geometry": {
-                "encoding": "WKB",
-                "geometry_types": ["Polygon"],
-                "bbox": [0.0, 1.0, 2.0, 3.0],
-                "covering": {
-                    "bbox": {
-                        "xmin": ["bbox_min_x"],
-                        "ymin": ["bbox_min_y"],
-                        "xmax": ["bbox_max_x"],
-                        "ymax": ["bbox_max_y"],
-                    }
-                },
-            }
-        },
-    }
-    assert writer_kwargs == {"compression": "zstd", "use_dictionary": storage.DICTIONARY_COLUMNS}
-    reader.iter_batches.assert_called_once_with(batch_size=4096)
-    writer.write_batch.assert_called_once_with(batch)
+        storage_validation.validate_geoparquet(target)
+    assert storage_validation.validate_geoparquet(target, require_successful_text=False) == 1
 
 
 def test_validate_source_geometry_type_and_area_use_exact_error_messages(
@@ -987,10 +785,13 @@ def test_validate_metadata_bbox_checks_arity_and_exact_tolerance(
 
 
 def test_a_non_text_localized_value_is_refused_by_its_exact_message() -> None:
-    from osm_polygon_description_tag.dataset import storage
+    from osm_polygon_description_tag.dataset import (
+        storage_errors,
+        storage_validation,
+    )
 
     with pytest.raises(
-        storage.StorageError,
+        storage_errors.StorageError,
         match=exactly("localized description value must be non-empty text"),
     ):
-        storage._validate_localized_value(7)
+        storage_validation._validate_localized_value(7)

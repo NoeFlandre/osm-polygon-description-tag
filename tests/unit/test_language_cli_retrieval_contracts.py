@@ -12,14 +12,14 @@ from pathlib import Path
 
 import pytest
 
-from osm_polygon_description_tag.grid_transport import (
+from osm_polygon_description_tag.workflow.grid_operator import GridOperatorError
+from osm_polygon_description_tag.workflow.grid_transport import (
     _prepare_retrieval_directory,
     _retrieval_snapshot_source,
     _retrieval_snapshot_target,
     remote_child,
 )
-from osm_polygon_description_tag.grid_workflow import _require_retrieved_run_dir
-from osm_polygon_description_tag.workflow.grid_operator import GridOperatorError
+from osm_polygon_description_tag.workflow.grid_workflow import _require_retrieved_run_dir
 
 
 @pytest.mark.parametrize(

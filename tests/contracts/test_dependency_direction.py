@@ -23,10 +23,6 @@ CONSOLE_MODULES = ("cli", "cli_handlers", "language_cli")
 CONSOLE_SUPPORT_MODULES = {
     "cli_handlers",
     "cli_requests",
-    "grid_transport",
-    "grid_workflow",
-    "language_workflow",
-    "publication_workflow",
 }
 
 

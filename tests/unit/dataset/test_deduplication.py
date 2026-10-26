@@ -228,13 +228,13 @@ def test_row_fingerprint_is_utf8_and_stringifies_non_json_values() -> None:
 
 def test_row_fingerprint_requests_ascii_false(monkeypatch: pytest.MonkeyPatch) -> None:
     options: dict[str, object] = {}
-    original_dumps = dedup_module.json.dumps
+    original_dumps = json.dumps
 
     def dumps(value: object, *args: object, **kwargs: object) -> str:
         options.update(kwargs)
         return original_dumps(value, *args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(dedup_module.json, "dumps", dumps)
+    monkeypatch.setattr(json, "dumps", dumps)
 
     _row_fingerprint({"description": "café"})
 
@@ -484,7 +484,7 @@ def _fail_state_write(
     error: BaseException,
 ) -> None:
     """Raise ``error`` when a state with ``status`` is written, optionally after persisting it."""
-    real_write_state = dedup_module._write_state
+    real_write_state = dedup_module.write_state
 
     def failing_write_state(path: Path, payload: Mapping[str, object]) -> None:
         if payload.get("status") != status:
@@ -494,7 +494,7 @@ def _fail_state_write(
             real_write_state(path, payload)
         raise error
 
-    monkeypatch.setattr(dedup_module, "_write_state", failing_write_state)
+    monkeypatch.setattr(dedup_module, "write_state", failing_write_state)
 
 
 def _interrupt_first_promotion(count: int) -> None:
@@ -634,7 +634,7 @@ def test_failed_staged_state_write_reports_its_error_when_stage_dir_is_already_g
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     data_root = _overlapping_dataset(tmp_path)
-    real_write_state = dedup_module._write_state
+    real_write_state = dedup_module.write_state
 
     def write_after_stage_dir_vanishes(path: Path, payload: Mapping[str, object]) -> None:
         if payload.get("status") != "staged":
@@ -643,7 +643,7 @@ def test_failed_staged_state_write_reports_its_error_when_stage_dir_is_already_g
         shutil.rmtree(data_root / str(payload["stage_dir"]))
         raise OSError("no space left on device")
 
-    monkeypatch.setattr(dedup_module, "_write_state", write_after_stage_dir_vanishes)
+    monkeypatch.setattr(dedup_module, "write_state", write_after_stage_dir_vanishes)
 
     # Cleaning up a directory that is already missing must not replace the write error.
     with pytest.raises(OSError, match="no space left on device"):
@@ -661,7 +661,7 @@ def test_unreadable_state_after_failed_write_keeps_the_staged_dir(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     data_root = _overlapping_dataset(tmp_path)
-    real_write_state = dedup_module._write_state
+    real_write_state = dedup_module.write_state
     named_dirs: list[Path] = []
 
     def write_torn_state(path: Path, payload: Mapping[str, object]) -> None:
@@ -672,7 +672,7 @@ def test_unreadable_state_after_failed_write_keeps_the_staged_dir(
         path.write_text('{"status": "st', encoding="utf-8")
         raise OSError("no space left on device")
 
-    monkeypatch.setattr(dedup_module, "_write_state", write_torn_state)
+    monkeypatch.setattr(dedup_module, "write_state", write_torn_state)
     with pytest.raises(OSError, match="no space left on device"):
         deduplicate_dataset(data_root)
     monkeypatch.undo()

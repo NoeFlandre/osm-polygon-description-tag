@@ -28,11 +28,9 @@ from osm_polygon_description_tag.dataset.manifest import (
     write_manifest,
 )
 from osm_polygon_description_tag.dataset.schema import SCHEMA_VERSION
-from osm_polygon_description_tag.dataset.storage import (
-    StorageError,
-    validate_geoparquet,
-    write_geoparquet,
-)
+from osm_polygon_description_tag.dataset.storage import write_geoparquet
+from osm_polygon_description_tag.dataset.storage_errors import StorageError
+from osm_polygon_description_tag.dataset.storage_validation import validate_geoparquet
 from osm_polygon_description_tag.dataset.transform import (
     RejectedFeature,
     early_rejection_reason,

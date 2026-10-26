@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 from shapely.geometry import Polygon
 
-from osm_polygon_description_tag import language_workflow
 from osm_polygon_description_tag.cli import run
 from osm_polygon_description_tag.dataset.languages.checkpoint import (
     exclusive_worker_lock,
@@ -18,6 +17,7 @@ from osm_polygon_description_tag.dataset.languages.models import (
     language_model_identity,
 )
 from osm_polygon_description_tag.dataset.storage import write_geoparquet
+from osm_polygon_description_tag.workflow import language_workflow
 from tests.conftest import make_record_dict
 from tests.helpers.language_cli import (
     SAT_MODEL_PATH,

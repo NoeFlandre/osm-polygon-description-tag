@@ -6,7 +6,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from osm_polygon_description_tag.dataset.storage import StorageError, _read_parquet_row_count
+from osm_polygon_description_tag.dataset.storage_artifacts import _read_parquet_row_count
+from osm_polygon_description_tag.dataset.storage_errors import StorageError
 
 
 @pytest.mark.parametrize("rows", [0, 1, 3], ids=["empty", "one-row", "three-rows"])

@@ -64,6 +64,20 @@ def test_every_exported_name_resolves_to_its_defining_module(package_name: str) 
         assert getattr(package, name) is expected, name
 
 
+def test_lazy_exports_name_the_module_that_defines_them() -> None:
+    """A lazy export that names a re-exporting module hides where the name lives."""
+    package = importlib.import_module("osm_polygon_description_tag.dataset")
+
+    assert package._LAZY_EXPORTS["ReportingError"] == (
+        "osm_polygon_description_tag.dataset.stats_manifest",
+        "ReportingError",
+    )
+    assert package._LAZY_EXPORTS["collect_stats"] == (
+        "osm_polygon_description_tag.dataset.stats",
+        "collect_stats",
+    )
+
+
 @pytest.mark.parametrize("package_name", LAZY_PACKAGES)
 def test_the_export_table_and_public_surface_agree_exactly(package_name: str) -> None:
     """A name in one and not the other is either dead or unreachable."""

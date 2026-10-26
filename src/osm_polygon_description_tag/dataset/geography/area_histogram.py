@@ -119,7 +119,7 @@ def aggregate_area_histogram(
 
     An empty data directory yields all-zeros, preserving every label.
     """
-    from osm_polygon_description_tag.dataset.storage import (
+    from osm_polygon_description_tag.dataset.storage_artifacts import (
         validate_finalized_artifacts,
         validate_finalized_artifacts_strict,
     )

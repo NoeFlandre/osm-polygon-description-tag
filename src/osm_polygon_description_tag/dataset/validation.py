@@ -17,11 +17,9 @@ from osm_polygon_description_tag.dataset.manifest import (
     output_identity_for,
     source_identity_for,
 )
-from osm_polygon_description_tag.dataset.storage import (
-    StorageError,
-    validate_finalized_artifacts,
-    validate_geoparquet,
-)
+from osm_polygon_description_tag.dataset.storage_artifacts import validate_finalized_artifacts
+from osm_polygon_description_tag.dataset.storage_errors import StorageError
+from osm_polygon_description_tag.dataset.storage_validation import validate_geoparquet
 
 
 @dataclass(frozen=True, slots=True)

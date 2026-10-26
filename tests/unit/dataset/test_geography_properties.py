@@ -12,6 +12,7 @@ import pytest
 from hypothesis import assume, given
 from hypothesis import strategies as st
 
+from osm_polygon_description_tag.dataset import storage_artifacts
 from osm_polygon_description_tag.dataset.geography import area_histogram
 from osm_polygon_description_tag.dataset.geography.h3_policy import (
     H3PolicyError,
@@ -175,10 +176,10 @@ class _AreaBatch:
 
 
 def _aggregate_areas(areas: list[float]) -> dict[str, int]:
-    from osm_polygon_description_tag.dataset import storage
-
     with pytest.MonkeyPatch.context() as patcher:
-        patcher.setattr(storage, "validate_finalized_artifacts_strict", lambda _root: None)
+        patcher.setattr(
+            storage_artifacts, "validate_finalized_artifacts_strict", lambda _root: None
+        )
         patcher.setattr(
             area_histogram,
             "iter_unique_parquet_batches",

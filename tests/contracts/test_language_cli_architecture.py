@@ -9,10 +9,10 @@ import pytest
 SOURCE_ROOT = Path(__file__).parents[2] / "src" / "osm_polygon_description_tag"
 CLI_PATH = SOURCE_ROOT / "language_cli.py"
 WORKFLOW_MODULES = (
-    SOURCE_ROOT / "language_workflow.py",
-    SOURCE_ROOT / "grid_transport.py",
-    SOURCE_ROOT / "grid_workflow.py",
-    SOURCE_ROOT / "publication_workflow.py",
+    SOURCE_ROOT / "workflow" / "language_workflow.py",
+    SOURCE_ROOT / "workflow" / "grid_transport.py",
+    SOURCE_ROOT / "workflow" / "grid_workflow.py",
+    SOURCE_ROOT / "workflow" / "publication_workflow.py",
 )
 
 MOVED_WORKFLOWS = {

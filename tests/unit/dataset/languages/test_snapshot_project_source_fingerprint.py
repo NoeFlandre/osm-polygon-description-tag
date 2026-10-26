@@ -10,6 +10,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from osm_polygon_description_tag.dataset.languages import snapshot as snapshot_module
+from osm_polygon_description_tag.dataset.languages import snapshot_model
 from osm_polygon_description_tag.dataset.languages.models import (
     LanguagePolicy,
     cascade_model_identity,
@@ -26,6 +27,7 @@ from osm_polygon_description_tag.dataset.languages.snapshot import (
     source_path_for,
 )
 from osm_polygon_description_tag.dataset.schema import SCHEMA
+from osm_polygon_description_tag.runtime.serialization import sha256_json
 from tests.helpers.language_setup import LanguageRunSetup
 from tests.helpers.language_setup import rewrite_snapshot as _rewrite
 from tests.helpers.messages import exactly
@@ -146,10 +148,10 @@ def test_legacy_lingua_payload_without_cascade_fields_remains_readable(
     legacy_payload["model_identity"] = {
         key: value
         for key, value in payload["model_identity"].items()
-        if key in snapshot_module._LEGACY_MODEL_FIELDS
+        if key in snapshot_model._LEGACY_MODEL_FIELDS
     }
     legacy_payload.pop("snapshot_id")
-    payload["snapshot_id"] = snapshot_module._sha256_json(legacy_payload)
+    payload["snapshot_id"] = sha256_json(legacy_payload)
     (run / "snapshot.json").write_text(json.dumps(payload), encoding="utf-8")
 
     assert read_snapshot(run).model_identity == language_model_identity(LanguagePolicy())
@@ -323,7 +325,7 @@ def test_a_snapshot_frozen_before_the_splitter_was_recorded_must_be_re_prepared(
         for name in _SPLITTER_FIELDS:
             payload["model_identity"].pop(name)
         identity = {key: value for key, value in payload.items() if key != "snapshot_id"}
-        payload["snapshot_id"] = snapshot_module._sha256_json(identity)
+        payload["snapshot_id"] = sha256_json(identity)
 
     _rewrite(run, to_the_old_shape)
 
@@ -339,7 +341,7 @@ def test_a_snapshot_frozen_before_the_splitter_was_recorded_must_be_re_prepared(
 
 def test_the_legacy_payload_never_gained_the_splitter_fields() -> None:
     """Legacy ids were hashed over exactly these names; adding one breaks them."""
-    assert snapshot_module._LEGACY_MODEL_FIELDS == (
+    assert snapshot_model._LEGACY_MODEL_FIELDS == (
         "library_name",
         "library_version",
         "language_scope",

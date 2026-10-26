@@ -15,8 +15,7 @@ import pyarrow as pa
 import pytest
 from shapely.geometry import LineString, MultiPolygon, Polygon
 
-import osm_polygon_description_tag.dataset.stats as stats_module
-from osm_polygon_description_tag.dataset import storage
+from osm_polygon_description_tag.dataset import stats_geometry, stats_manifest, storage
 from osm_polygon_description_tag.dataset.geography import area_histogram, parquet_inputs
 from osm_polygon_description_tag.dataset.schema import SCHEMA
 from tests.conftest import make_record_dict
@@ -224,10 +223,10 @@ def _spatial_batch(shapes: list[object], **overrides: object) -> pa.RecordBatch:
 
 def test_vectorized_spatial_summary_equals_the_row_pass() -> None:
     batch = _spatial_batch([_SQUARE, _HOLED, _MULTI, _SQUARE])
-    fast = stats_module._vectorized_spatial_summary(batch)
-    rows = stats_module._summarize_spatial_batch_rows(batch, source_name="a", row_offset=0)
+    fast = stats_geometry._vectorized_spatial_summary(batch)
+    rows = stats_geometry._summarize_spatial_batch_rows(batch, source_name="a", row_offset=0)
     assert fast == rows
-    assert stats_module._summarize_spatial_batch(batch, source_name="a", row_offset=0) == rows
+    assert stats_geometry._summarize_spatial_batch(batch, source_name="a", row_offset=0) == rows
     assert fast is not None
     assert fast.geometry_holes_total == 1
     assert fast.multipolygon_components_total == 2
@@ -238,8 +237,8 @@ def test_vectorized_spatial_summary_equals_the_row_pass() -> None:
             Polygon([(4, -1), (4, 1), (8, 1), (8, -1)]),
         ]
     )
-    asymmetric_fast = stats_module._vectorized_spatial_summary(asymmetric)
-    asymmetric_rows = stats_module._summarize_spatial_batch_rows(
+    asymmetric_fast = stats_geometry._vectorized_spatial_summary(asymmetric)
+    asymmetric_rows = stats_geometry._summarize_spatial_batch_rows(
         asymmetric, source_name="a", row_offset=0
     )
     assert asymmetric_fast == asymmetric_rows
@@ -248,8 +247,8 @@ def test_vectorized_spatial_summary_equals_the_row_pass() -> None:
 
 def test_vectorized_spatial_summary_keeps_the_first_signed_zero() -> None:
     batch = _spatial_batch([_SQUARE, _SQUARE], bbox_min_x=[0.0, -0.0], bbox_max_x=[-0.0, 0.0])
-    fast = stats_module._vectorized_spatial_summary(batch)
-    rows = stats_module._summarize_spatial_batch_rows(batch, source_name="a", row_offset=0)
+    fast = stats_geometry._vectorized_spatial_summary(batch)
+    rows = stats_geometry._summarize_spatial_batch_rows(batch, source_name="a", row_offset=0)
     assert fast is not None
     assert repr(fast.dataset_bbox) == repr(rows.dataset_bbox)
 
@@ -273,19 +272,19 @@ def test_vectorized_spatial_summary_keeps_the_first_signed_zero() -> None:
 )
 def test_vectorized_spatial_summary_declines_invalid_batches(overrides: dict[str, object]) -> None:
     batch = _spatial_batch([_SQUARE, _SQUARE], **overrides)
-    assert stats_module._vectorized_spatial_summary(batch) is None
+    assert stats_geometry._vectorized_spatial_summary(batch) is None
 
 
 def test_vectorized_spatial_summary_declines_an_empty_batch() -> None:
     batch = _spatial_batch([_SQUARE]).slice(0, 0)
-    assert stats_module._vectorized_spatial_summary(batch) is None
+    assert stats_geometry._vectorized_spatial_summary(batch) is None
 
 
 def test_invalid_batches_still_report_the_row_pass_error() -> None:
     line = LineString([(0, 0), (1, 1)]).wkb
     batch = _spatial_batch([_SQUARE, _SQUARE], geometry=[_SQUARE.wkb, line])
-    with pytest.raises(stats_module.ReportingError, match="at row 8"):
-        stats_module._summarize_spatial_batch(batch, source_name="a", row_offset=7)
+    with pytest.raises(stats_manifest.ReportingError, match="at row 8"):
+        stats_geometry._summarize_spatial_batch(batch, source_name="a", row_offset=7)
 
 
 # --- H3 centroids ----------------------------------------------------------------------

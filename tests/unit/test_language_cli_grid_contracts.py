@@ -16,13 +16,7 @@ from typing import Any
 
 import pytest
 
-from osm_polygon_description_tag import (
-    grid_transport,
-    grid_workflow,
-    language_cli,
-    language_workflow,
-    publication_workflow,
-)
+from osm_polygon_description_tag import language_cli
 from osm_polygon_description_tag.dataset.languages.models import (
     CASCADE_DETECTOR_NAME,
     DEFAULT_LANGUAGE_SCOPE,
@@ -30,6 +24,12 @@ from osm_polygon_description_tag.dataset.languages.models import (
     language_model_identity,
 )
 from osm_polygon_description_tag.dataset.languages.snapshot import SnapshotError
+from osm_polygon_description_tag.workflow import (
+    grid_transport,
+    grid_workflow,
+    language_workflow,
+    publication_workflow,
+)
 from osm_polygon_description_tag.workflow.grid_operator import GridOperatorError
 from tests.helpers.messages import exactly
 from tests.helpers.patching import patch_modules

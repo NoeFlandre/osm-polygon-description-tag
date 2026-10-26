@@ -10,7 +10,7 @@ from osm_polygon_description_tag import cli, cli_handlers
 from osm_polygon_description_tag.cli_requests import PathOptions
 from osm_polygon_description_tag.dataset import validation
 from osm_polygon_description_tag.dataset.manifest import output_identity_for, source_identity_for
-from osm_polygon_description_tag.dataset.storage import StorageError
+from osm_polygon_description_tag.dataset.storage_errors import StorageError
 
 
 def _source_manifest(name: str) -> SimpleNamespace:

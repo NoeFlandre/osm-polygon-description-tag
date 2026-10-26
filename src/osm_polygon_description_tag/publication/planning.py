@@ -11,7 +11,8 @@ from osm_polygon_description_tag.dataset.manifest import (
     output_identity_for,
     read_manifest,
 )
-from osm_polygon_description_tag.dataset.storage import StorageError, validate_geoparquet
+from osm_polygon_description_tag.dataset.storage_errors import StorageError
+from osm_polygon_description_tag.dataset.storage_validation import validate_geoparquet
 from osm_polygon_description_tag.publication.artifacts import (
     AREA_HISTOGRAM_ARTIFACT,
     DATASET_CARD_HERO_ARTIFACT,

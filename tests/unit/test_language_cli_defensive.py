@@ -11,12 +11,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from osm_polygon_description_tag import (
-    grid_transport,
-    grid_workflow,
-    language_cli,
-    language_workflow,
-)
+from osm_polygon_description_tag import language_cli
+from osm_polygon_description_tag.workflow import grid_transport, grid_workflow, language_workflow
 from osm_polygon_description_tag.workflow.grid_operator import GridOperatorError
 from osm_polygon_description_tag.workflow.grid_scheduler import SchedulerError
 from tests.helpers.messages import exactly

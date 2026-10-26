@@ -18,12 +18,9 @@ from osm_polygon_description_tag.dataset.manifest import (
     write_manifest,
 )
 from osm_polygon_description_tag.dataset.schema import KEY_VALUE_COLUMNS, SCHEMA, SCHEMA_VERSION
-from osm_polygon_description_tag.dataset.storage import (
-    GEOPARQUET_COMPRESSION,
-    StorageError,
-    arrow_record,
-    validate_geoparquet,
-)
+from osm_polygon_description_tag.dataset.storage import GEOPARQUET_COMPRESSION, arrow_record
+from osm_polygon_description_tag.dataset.storage_errors import StorageError
+from osm_polygon_description_tag.dataset.storage_validation import validate_geoparquet
 from osm_polygon_description_tag.runtime.atomic import fsync_dir as _fsync_dir
 from osm_polygon_description_tag.runtime.atomic import fsync_file
 
