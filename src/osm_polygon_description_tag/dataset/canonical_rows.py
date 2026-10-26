@@ -8,11 +8,13 @@ import math
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
+import pyarrow as pa
 from shapely import from_wkb, to_wkb
 
 from osm_polygon_description_tag.dataset.schema import KEY_VALUE_COLUMNS, SCHEMA, mapping_to_pairs
 from osm_polygon_description_tag.dataset.text import (
     description_row_has_successful_text,
+    sql_literal,
     successful_description_text_sql,
 )
 
@@ -163,23 +165,117 @@ def select_canonical_row(
     return _best_ranked_row(candidates)
 
 
-def _sql_fingerprint_value(column: str, *, key_value_columns_are_maps: bool) -> str:
+# ``json.dumps(ensure_ascii=False)`` escapes exactly these characters. The
+# backslash comes first so that the later replacements are not escaped again.
+_JSON_STRING_ESCAPES = tuple(
+    (character, json.dumps(character, ensure_ascii=False)[1:-1])
+    for character in ("\\", '"', *map(chr, range(0x20)))
+    if json.dumps(character, ensure_ascii=False)[1:-1] != character
+)
+_JSON_STRING_ESCAPE_PATTERN = r'[\x00-\x1f"\\]'
+
+
+def _json_string_sql(expression: str) -> str:
+    """Return SQL that writes a non-null string exactly as ``json.dumps`` does.
+
+    DuckDB's own JSON escaping uses uppercase hex for control characters, so
+    the payload is built here. Strings without an escapable character skip the
+    replacement chain.
+    """
+    escaped = expression
+    for character, replacement in _JSON_STRING_ESCAPES:
+        escaped = f"replace({escaped}, chr({ord(character)}), {sql_literal(replacement)})"
+    return (
+        f"'\"' || CASE WHEN regexp_matches({expression}, "
+        f"{sql_literal(_JSON_STRING_ESCAPE_PATTERN)}) THEN {escaped} ELSE {expression} END || '\"'"
+    )
+
+
+def _json_double_sql(expression: str) -> str:
+    """Return SQL that writes a non-null double exactly as ``json.dumps`` does.
+
+    ``CAST(... AS VARCHAR)`` yields the shortest round-trip text that Python's
+    ``repr`` also yields for finite values, such as ``1e-05`` and ``1e+16``.
+    """
+    return (
+        f"CASE WHEN isnan({expression}) THEN 'NaN' "
+        f"WHEN isinf({expression}) AND {expression} > 0 THEN 'Infinity' "
+        f"WHEN isinf({expression}) THEN '-Infinity' "
+        f"ELSE CAST({expression} AS VARCHAR) END"
+    )
+
+
+def _concat_sql(*parts: str) -> str:
+    return " || ".join(parts)
+
+
+def _key_value_member_sql(field: str) -> str:
+    """Return SQL for one ``"field":<json string>`` member of a key/value entry.
+
+    The field name is both the JSON label and the struct field read, so a
+    misspelled name changes the payload.
+    """
+    return _concat_sql(
+        sql_literal(f'"{field}":'),
+        _json_string_sql(f"e.{field}"),
+    )
+
+
+def _key_value_json_sql(entries: str) -> str:
+    """Return SQL for a key/value list in the Python ``mapping_to_pairs`` order."""
+    pair = _concat_sql(
+        sql_literal("{"),
+        _key_value_member_sql("key"),
+        sql_literal(","),
+        _key_value_member_sql("value"),
+        sql_literal("}"),
+    )
+    elements = f"array_to_string(list_transform(list_sort({entries}), e -> {pair}), ',')"
+    return _concat_sql(sql_literal("["), elements, sql_literal("]"))
+
+
+def _scalar_value_sql(column: str, quoted: str) -> str:
+    field_type = SCHEMA.field(column).type
+    if pa.types.is_floating(field_type):
+        return _json_double_sql(f"CAST({quoted} AS DOUBLE)")
+    if pa.types.is_integer(field_type):
+        return f"CAST({quoted} AS VARCHAR)"
+    if pa.types.is_string(field_type):
+        return _json_string_sql(quoted)
+    raise ValueError(f"no canonical fingerprint encoding for column {column!r}")
+
+
+def _fingerprint_value_sql(column: str, *, key_value_columns_are_maps: bool) -> str:
+    """Return SQL that writes one fingerprint member as ``_fingerprint_value`` does."""
     quoted = f'"{column}"'
     if column == "geometry":
-        return f"lower(hex({canonical_geometry_wkb_sql(quoted)}))"
-    if column in KEY_VALUE_COLUMNS:
+        encoded = f"'\"' || lower(hex({canonical_geometry_wkb_sql(quoted)})) || '\"'"
+    elif column in KEY_VALUE_COLUMNS:
         entries = f"map_entries({quoted})" if key_value_columns_are_maps else quoted
-        return f"list_sort({entries})"
-    return quoted
+        encoded = _key_value_json_sql(entries)
+    else:
+        encoded = _scalar_value_sql(column, quoted)
+    return f"CASE WHEN {quoted} IS NULL THEN 'null' ELSE {encoded} END"
 
 
 def _full_row_fingerprint_sql(*, key_value_columns_are_maps: bool = False) -> str:
-    fields = ", ".join(
-        f"'{column}', "
-        f"{_sql_fingerprint_value(column, key_value_columns_are_maps=key_value_columns_are_maps)}"
+    """Return SQL for the SHA-256 of the exact payload that ``_row_fingerprint`` hashes."""
+    members = [
+        _concat_sql(
+            sql_literal(f'"{column}":'),
+            _fingerprint_value_sql(column, key_value_columns_are_maps=key_value_columns_are_maps),
+        )
         for column in sorted(CANONICAL_FINGERPRINT_COLUMNS)
-    )
-    return f"sha256(json_object({fields}))"
+    ]
+    # Every member is non-NULL, so one variadic concat builds the payload in a
+    # single pass instead of copying the growing string once per member.
+    pieces = [sql_literal("{")]
+    for position, member in enumerate(members):
+        if position:
+            pieces.append(sql_literal(","))
+        pieces.append(member)
+    pieces.append(sql_literal("}"))
+    return f"sha256(concat({', '.join(pieces)}))"
 
 
 def canonical_row_order_sql(*, key_value_columns_are_maps: bool = False) -> str:
