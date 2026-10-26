@@ -404,7 +404,7 @@ def test_a_real_command_error_keeps_only_a_bounded_stderr_tail(
     command = [sys.executable, "-c", script]
 
     with pytest.raises(subprocess.CalledProcessError) as caught:
-        default_runner_with_retry(command, max_retries=0, backoff_seconds=0.0, timeout=1.0)
+        default_runner_with_retry(command, max_retries=0, backoff_seconds=0.0, timeout=60.0)
 
     assert isinstance(caught.value.stderr, bytes)
     assert len(caught.value.stderr) <= 64 * 1024

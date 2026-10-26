@@ -1,5 +1,11 @@
 # Weekly, grouped updates for every pinned ecosystem. Actions and the Docker
 # base images are pinned by SHA or digest; uv.lock pins Python packages.
+#
+# Python packages update uv.lock only: the ranges in pyproject.toml are
+# deliberate (pyarrow is capped to keep published Parquet bytes stable, ty is
+# pinned), so raising one is a reviewed change, not a weekly bump. The Docker
+# base image follows patch and digest updates only, because CI and the lock
+# target Python 3.12.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -13,11 +19,15 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     groups:
       docker:
         patterns: ["*"]
   - package-ecosystem: uv
     directory: /
+    versioning-strategy: lockfile-only
     schedule:
       interval: weekly
     groups:

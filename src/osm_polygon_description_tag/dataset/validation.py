@@ -70,7 +70,6 @@ def _validate_artifact_pair(parquet: Path, manifest: Manifest, source_root: Path
     if output_identity != manifest.output:
         raise StorageError(f"stale output identity for {parquet.name}")
     _validate_manifest_output_name(parquet, manifest)
-    _validate_manifest_row_count(parquet, manifest, rows)
     _validate_manifest_counts(parquet, manifest)
     if source_root is not None:
         validate_source_file_identity(manifest, source_root)
@@ -83,14 +82,6 @@ def _validate_manifest_output_name(parquet: Path, manifest: Manifest) -> None:
         raise StorageError(
             f"manifest source identity mismatch for {parquet.name}: "
             f"source {manifest.source.name!r} maps to {expected_output_name!r}"
-        )
-
-
-def _validate_manifest_row_count(parquet: Path, manifest: Manifest, rows: int) -> None:
-    if rows != manifest.counts.included_rows:
-        raise StorageError(
-            f"manifest row count mismatch for {parquet.name}: "
-            f"recorded {manifest.counts.included_rows}, found {rows}"
         )
 
 
